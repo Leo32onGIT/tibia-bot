@@ -131,7 +131,7 @@ dmypy.json
 .pyre/
 .metals/metals.h2.db
 .metals/metals.lock.db
-death-tracker/prod.env
-death-tracker/dev.ps1
+
+# Config files
 *.env
 *.ps1
