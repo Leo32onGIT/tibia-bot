@@ -2,6 +2,7 @@ package com.tibiabot
 
 import com.tibiabot.BotApp
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.EmbedBuilder
 import scala.jdk.CollectionConverters._
@@ -21,6 +22,42 @@ class BotListener extends ListenerAdapter {
       case "allies" =>
         handleAllies(event)
       case _ =>
+    }
+  }
+
+  override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
+    val embed = event.getInteraction().getMessage().getEmbeds()
+    val title = if (!embed.isEmpty) embed.get(0).getTitle() else ""
+    val button = event.getComponentId()
+    val guild = event.getGuild()
+    val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
+    val user = event.getUser()
+    if (roleType == "fullbless"){
+      val world = title.replace(":crossed_swords:", "").trim()
+      val roles = guild.getRolesByName(s"$world Fullbless", true)
+      val role = if (!roles.isEmpty) roles.get(0) else null
+      if (role != null){
+        if (button == "add"){
+          // get role add user to it
+        } else if (button == "remove"){
+          // remove role
+        }
+      } else {
+        // role doesn't exist
+      }
+    } else if (roleType == "nemesis") {
+      val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
+      val roles = guild.getRolesByName(s"$world Nemesis Boss", true)
+      val role = if (!roles.isEmpty) roles.get(0) else null
+      if (role != null){
+        if (button == "add"){
+          // get role add user to it
+        } else if (button == "remove"){
+          // remove role
+        }
+      } else {
+        // role doesn't exist
+      }
     }
   }
 

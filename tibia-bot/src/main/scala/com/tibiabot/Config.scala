@@ -19,6 +19,7 @@ object Config {
   // discord config
   val worldList: List[String] = mappings.getStringList("worlds").asScala.toList
   val webHookAvatar: String = discord.getString("avatar-url")
+  val aolThumbnail: String = discord.getString("fullbless-avatar-url")
 
   // emojis
   val nemesisEmoji: String = discord.getString("nemesis-emoji")
