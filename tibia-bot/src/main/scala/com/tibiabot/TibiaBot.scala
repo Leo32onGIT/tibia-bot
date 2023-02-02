@@ -402,13 +402,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
       if (embed._2 != "fullbless"){
         deathsChannel.sendMessageEmbeds(embed._1.build()).queue()
       } else if (embed._2 == "nemesis"){
-        deathsChannel.sendMessage("@here").setEmbeds(embed._1.build()).queue()
+        deathsChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
       } else if (embed._2 == "fullbless"){
         // send adjusted embed to fullbless channel
         val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
         val adjustedEmbed = embed._1.setDescription(adjustedMessage)
         if (embed._5 >= 400) { // only poke for 400+
-          deathsChannel.sendMessage("@here").setEmbeds(adjustedEmbed.build()).queue();
+          deathsChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
         }
       }
     }
