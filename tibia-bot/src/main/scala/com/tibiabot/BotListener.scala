@@ -26,12 +26,14 @@ class BotListener extends ListenerAdapter {
   }
 
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
+    event.deferReply(true).queue()
     val embed = event.getInteraction().getMessage().getEmbeds()
     val title = if (!embed.isEmpty) embed.get(0).getTitle() else ""
     val button = event.getComponentId()
     val guild = event.getGuild()
     val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
     val user = event.getUser()
+    var responseText = ":x: An issue occured trying to add/remove you from this role, please try again."
     if (roleType == "fullbless"){
       val world = title.replace(":crossed_swords:", "").trim()
       val roles = guild.getRolesByName(s"$world Fullbless", true)
@@ -39,11 +41,16 @@ class BotListener extends ListenerAdapter {
       if (role != null){
         if (button == "add"){
           // get role add user to it
+          guild.addRoleToMember(user, role).queue()
+          responseText = s":gear: You have been added to the <@&${role.getId()}> role."
         } else if (button == "remove"){
           // remove role
+          guild.removeRoleFromMember(user, role).queue()
+          responseText = s":gear: You have been removed from the <@&${role.getId()}> role."
         }
       } else {
         // role doesn't exist
+        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please contact a discord administrator."
       }
     } else if (roleType == "nemesis") {
       val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
@@ -52,13 +59,20 @@ class BotListener extends ListenerAdapter {
       if (role != null){
         if (button == "add"){
           // get role add user to it
+          guild.addRoleToMember(user, role).queue()
+          responseText = s":gear: You have been added to the <@&${role.getId()}> role."
         } else if (button == "remove"){
           // remove role
+          guild.removeRoleFromMember(user, role).queue()
+          responseText = s":gear: You have been removed from the <@&${role.getId()}> role."
         }
       } else {
         // role doesn't exist
+        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please contact a discord administrator."
       }
     }
+    val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+    event.getHook().sendMessageEmbeds(replyEmbed).queue()
   }
 
   private def handleSetup(event: SlashCommandInteractionEvent): Unit = {

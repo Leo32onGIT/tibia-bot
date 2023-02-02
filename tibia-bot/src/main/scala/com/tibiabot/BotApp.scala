@@ -935,8 +935,6 @@ object BotApp extends App with StrictLogging {
             |category VARCHAR(255) NOT NULL,
             |fullbless_role VARCHAR(255) NOT NULL,
             |nemesis_role VARCHAR(255) NOT NULL,
-            |fullbless_message VARCHAR(255) NOT NULL,
-            |nemesis_message VARCHAR(255) NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
 
@@ -1046,9 +1044,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessMsg: String, nemesisMsg: String) = {
+  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String) = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_message, nemesis_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_message = ?, nemesis_message = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1059,18 +1057,14 @@ object BotApp extends App with StrictLogging {
     statement.setString(7, category)
     statement.setString(8, fullblessRole)
     statement.setString(9, nemesisRole)
-    statement.setString(10, fullblessMsg)
-    statement.setString(11, nemesisMsg)
-    statement.setString(12, alliesChannel)
-    statement.setString(13, enemiesChannel)
-    statement.setString(14, neutralsChannels)
-    statement.setString(15, levelsChannel)
-    statement.setString(16, deathsChannel)
-    statement.setString(17, category)
-    statement.setString(18, fullblessRole)
-    statement.setString(19, nemesisRole)
-    statement.setString(20, fullblessMsg)
-    statement.setString(21, nemesisMsg)
+    statement.setString(10, alliesChannel)
+    statement.setString(11, enemiesChannel)
+    statement.setString(12, neutralsChannels)
+    statement.setString(13, levelsChannel)
+    statement.setString(14, deathsChannel)
+    statement.setString(15, category)
+    statement.setString(16, fullblessRole)
+    statement.setString(17, nemesisRole)
     val result = statement.executeUpdate()
 
     statement.close()
@@ -1112,8 +1106,6 @@ object BotApp extends App with StrictLogging {
           configMap += ("category" -> result.getString("category"))
           configMap += ("fullbless_role" -> result.getString("fullbless_role"))
           configMap += ("nemesis_role" -> result.getString("nemesis_role"))
-          configMap += ("fullbless_message" -> result.getString("fullbless_message"))
-          configMap += ("nemesis_message" -> result.getString("nemesis_message"))
       }
       statement.close()
       conn.close()
@@ -1173,11 +1165,11 @@ object BotApp extends App with StrictLogging {
 
       val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId()}>\n\nIf an enemy player dies fullbless and is over level 400.\nAdd or remove yourself from the role using the buttons below."
       val fullblessEmbed = new EmbedBuilder()
-      fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:")
+      fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
       fullblessEmbed.setThumbnail(Config.aolThumbnail)
       fullblessEmbed.setColor(3092790)
       fullblessEmbed.setDescription(fullblessEmbedText)
-      val fullblessMessage = fullblessChannelRaw.sendMessageEmbeds(fullblessEmbed.build())
+      fullblessChannelRaw.sendMessageEmbeds(fullblessEmbed.build())
         .setActionRow(
           Button.success(s"add", "Add Role"),
           Button.danger(s"remove", "Remove Role")
@@ -1188,14 +1180,18 @@ object BotApp extends App with StrictLogging {
       val nemesisRoleString = s"$world Nemesis Boss"
       val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
+      val worldCount = worldConfig(guild, "worlds")
+      val count = worldCount.length
+      val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
+      val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
       val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId()}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
       val nemesisEmbed = new EmbedBuilder()
-      nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}")
-      nemesisEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Zarabustor.gif")
+      nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+      nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
       nemesisEmbed.setColor(3092790)
       nemesisEmbed.setDescription(nemesisEmbedText)
-      val nemesisMessage = nemesisChannelRaw.sendMessageEmbeds(nemesisEmbed.build())
+      nemesisChannelRaw.sendMessageEmbeds(nemesisEmbed.build())
         .setActionRow(
           Button.success("add", "Add Role"),
           Button.danger("remove", "Remove Role")
@@ -1243,7 +1239,7 @@ object BotApp extends App with StrictLogging {
         val categoryId = newCategory.getId()
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessMessage.getId(), nemesisMessage.getId())
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId())
         startBot(guild, Some(world))
         s":gear: The channels for **${world}** have been configured successfully."
       } else {
@@ -1259,6 +1255,15 @@ object BotApp extends App with StrictLogging {
       .setColor(3092790)
       .setDescription(embedText)
       .build()
+  }
+
+  def getMessagesWithEmbedTitle(channel: TextChannel, title: String): List[Message] = {
+    val messages = channel.getIterableHistory().complete().asScala
+    messages.filter(message =>
+      message.getEmbeds.asScala.exists(embed =>
+        embed.getTitle.contains(title)
+      )
+    ).toList
   }
 
   def removeChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
@@ -1283,6 +1288,19 @@ object BotApp extends App with StrictLogging {
           .setColor(3092790)
           .setDescription(s":x: This command would delete this channel, run it somewhere else.")
           .build()
+        }
+
+        // delete the role assign message for this world
+        val adminChannels = discordRetrieveConfig(guild)
+        val fullblessChannel = guild.getTextChannelById(adminChannels("fullbless_channel"))
+        val nemesisChannel = guild.getTextChannelById(adminChannels("nemesis_channel"))
+        if (fullblessChannel != null){
+          val fullblessMessage = getMessagesWithEmbedTitle(fullblessChannel, world)
+          fullblessMessage.foreach(message => message.delete().queue())
+        }
+        if (nemesisChannel != null){
+          val nemesisMessage = getMessagesWithEmbedTitle(nemesisChannel, world)
+          nemesisMessage.foreach(message => message.delete().queue())
         }
 
         // cancel the stream
