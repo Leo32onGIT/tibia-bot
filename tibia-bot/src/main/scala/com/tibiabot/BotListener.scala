@@ -6,6 +6,7 @@ import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.EmbedBuilder
 import scala.jdk.CollectionConverters._
+import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 
 class BotListener extends ListenerAdapter {
 
@@ -23,6 +24,12 @@ class BotListener extends ListenerAdapter {
         handleAllies(event)
       case _ =>
     }
+  }
+
+  override def onGuildJoin(event: GuildJoinEvent): Unit = {
+    val guild = event.getGuild()
+    val commands = List(BotApp.setupCommand, BotApp.removeCommand, BotApp.huntedCommand, BotApp.alliesCommand)
+    guild.updateCommands().addCommands(commands.asJava).complete()
   }
 
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
