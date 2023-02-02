@@ -358,7 +358,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":robot: enemy automatically detected:")
                 adminEmbed.setDescription(s"$commandUser added **$playerString** to the hunted list.")
-                adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
+                adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                 adminEmbed.setColor(14397256) // orange for bot auto command
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
               }
