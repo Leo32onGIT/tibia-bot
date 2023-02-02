@@ -422,12 +422,13 @@ object BotApp extends App with StrictLogging {
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
               val charGuildName = if(!(charGuild.isEmpty)) charGuild.head.name else ""
+              val guildIcon = if (charGuildName != "" && arg == "allies") Config.allyGuild else if (charGuildName != "" && arg == "hunted") Config.enemyGuild else if (charGuildName != "" && arg == "hunted") Config.enemy else ""
               val charVocation = charResponse.characters.character.vocation
               val charWorld = charResponse.characters.character.world
               val charLink = charUrl(charName)
               val charEmoji = vocEmoji(charResponse)
               val voc = charVocation.toLowerCase.split(' ').last
-              vocationBuffers(voc) += ((charLevel.toInt, charWorld, s"$charEmoji ${charLevel.toInt.toString} — **[$charName]($charLink)** $reasonEmoji"))
+              vocationBuffers(voc) += ((charLevel.toInt, charWorld, s"$charEmoji ${charLevel.toInt.toString} — **[$charName]($charLink)** $guildIcon $reasonEmoji"))
             } else {
               vocationBuffers("none") += ((0, "Character does not exist", s":x: N/A — **$name**"))
             }
