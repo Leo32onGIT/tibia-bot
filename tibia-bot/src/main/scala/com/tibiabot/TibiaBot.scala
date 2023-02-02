@@ -26,7 +26,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import java.util.Collections
 
-class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChannel: TextChannel, neutralsChannel: TextChannel, levelsChannel: TextChannel, deathsChannel: TextChannel, adminChannel: TextChannel, world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChannel: TextChannel, neutralsChannel: TextChannel, levelsChannel: TextChannel, deathsChannel: TextChannel, adminChannel: TextChannel, world: String, fullblessRole: String, nemesisRole: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   case class CharKey(char: String, time: ZonedDateTime)
@@ -118,7 +118,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
         currentOnline.find(_.name == charName).foreach { onlinePlayer =>
           if (onlinePlayer.level > sheetLevel){
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
-            val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon} "
+            val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon}"
             if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
               val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
                 if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
