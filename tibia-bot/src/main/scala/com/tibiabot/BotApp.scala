@@ -1144,6 +1144,7 @@ object BotApp extends App with StrictLogging {
 
         botRole.forEach(role => {
           adminChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
+          adminChannel.upsertPermissionOverride(role).grant(Permission.VIEW_CHANNEL).complete()
           fullblessChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
           nemesisChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
         });
