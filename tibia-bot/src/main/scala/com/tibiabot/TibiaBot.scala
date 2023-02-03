@@ -491,7 +491,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
       }
     }
     val enemiesCheck = guild.getTextChannelById(enemiesChannel.getIdLong)
-    if (enemies != null){
+    if (enemiesCheck != null){
       if (enemiesChannel.getName() != s"enemies-$enemiesCount") {
         val channelManager = enemiesChannel.getManager
         channelManager.setName(s"enemies-$enemiesCount").queue()
