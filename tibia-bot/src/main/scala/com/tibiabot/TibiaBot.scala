@@ -416,8 +416,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
           // send adjusted embed to fullbless channel
           val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
           val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-          if (embed._5 >= 400) { // only poke for 400+
+          if (embed._5 >= 250) { // only poke for 250+
             deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
+          } else {
+            deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
           }
         }
       }
