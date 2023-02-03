@@ -156,8 +156,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       val currentOnlineList: List[(String, Int, String, String)] = currentOnline.map { onlinePlayer =>
         (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild)
       }.toList
-      // channel check
-      onlineList(currentOnlineList)
+      // did the online list api call fail?
+      if (currentOnlineList.size > 1){
+        onlineList(currentOnlineList)
+      }
     }
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
