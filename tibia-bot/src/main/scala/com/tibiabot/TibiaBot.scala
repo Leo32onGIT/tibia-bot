@@ -152,12 +152,12 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     }
     // update online list
     if (onlineListTimer >= 10) {
-      onlineListTimer = 0
       val currentOnlineList: List[(String, Int, String, String)] = currentOnline.map { onlinePlayer =>
         (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild)
       }.toList
       // did the online list api call fail?
       if (currentOnlineList.size > 1){
+        onlineListTimer = 0
         onlineList(currentOnlineList)
       }
     }
