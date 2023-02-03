@@ -1313,9 +1313,19 @@ object BotApp extends App with StrictLogging {
           case None =>
             logger.info(s"No stream found for guild '${guild.getName()} - ${guild.getId()}' and world '$world'.")
         }
+
         // delete the channels & category
-        channelIds.foreach(channelId => guild.getTextChannelById(channelId).delete().complete())
-        guild.getCategoryById(categoryId).delete().complete()
+        channelIds.foreach { channelId =>
+          val channel: TextChannel = guild.getTextChannelById(channelId)
+          if (channel != null) {
+            channel.delete().complete()
+          }
+        }
+
+        val category = guild.getCategoryById(categoryId)
+        if (category != null) {
+          category.delete().complete()
+        }
 
         // update the database
         worldRemoveConfig(guild, world)
