@@ -189,15 +189,15 @@ object BotApp extends App with StrictLogging {
       // get channels for this discord server
       if (worldChannels.nonEmpty && featuresChannelRetrieve.nonEmpty){
 
-        val alliesChannel = guild.getTextChannelById(worldChannels("allies_channel"))
-        val enemiesChannel = guild.getTextChannelById(worldChannels("enemies_channel"))
-        val neutralsChannel = guild.getTextChannelById(worldChannels("neutrals_channel"))
-        val levelsChannel = guild.getTextChannelById(worldChannels("levels_channel"))
-        val deathsChannel = guild.getTextChannelById(worldChannels("deaths_channel"))
+        val alliesChannel = worldChannels("allies_channel")
+        val enemiesChannel = worldChannels("enemies_channel")
+        val neutralsChannel = worldChannels("neutrals_channel")
+        val levelsChannel = worldChannels("levels_channel")
+        val deathsChannel = worldChannels("deaths_channel")
 
-        val logChannel = guild.getTextChannelById(featuresChannelRetrieve("admin_channel"))
-        val fullblessChannel = guild.getTextChannelById(featuresChannelRetrieve("fullbless_channel"))
-        val bossChannel = guild.getTextChannelById(featuresChannelRetrieve("nemesis_channel"))
+        val logChannel = featuresChannelRetrieve("admin_channel")
+        val fullblessChannel = featuresChannelRetrieve("fullbless_channel")
+        val bossChannel = featuresChannelRetrieve("nemesis_channel")
 
         val fullblessRoleId = worldChannels("fullbless_role")
         val nemesisRoleId = worldChannels("nemesis_role")
@@ -206,14 +206,11 @@ object BotApp extends App with StrictLogging {
 
         // run an instance of the tracker
         // ensure channels exist (haven't been deleted) before bothering to run the stream
-        if (alliesChannel != null && enemiesChannel != null && neutralsChannel != null && levelsChannel != null && deathsChannel != null && logChannel != null){
-          val deathTrackerStream = new DeathTrackerStream(guild, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, logChannel, formalName, fullblessRoleId, nemesisRoleId)
-          val key = (guild, formalName)
-          // run stream and put it in the deathTrackerStreams buffer so it can be cancelled at will
-          deathTrackerStreams += (key -> deathTrackerStream.stream.run())
-        } else {
-          logger.info(s"One or more of the bot channels have been deleted, stream is not running for '${guild.getName()} - ${guild.getId()}' - ${formalName}.")
-        }
+        val deathTrackerStream = new DeathTrackerStream(guild, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, logChannel, formalName, fullblessRoleId, nemesisRoleId)
+        val key = (guild, formalName)
+        // run stream and put it in the deathTrackerStreams buffer so it can be cancelled at will
+        deathTrackerStreams += (key -> deathTrackerStream.stream.run())
+
       } else {
         logger.info(s"There was a problem getting channel information for '${guild.getName()} - ${guild.getId()}' - ${formalName}.")
       }

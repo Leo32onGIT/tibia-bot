@@ -26,7 +26,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import java.util.Collections
 
-class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChannel: TextChannel, neutralsChannel: TextChannel, levelsChannel: TextChannel, deathsChannel: TextChannel, adminChannel: TextChannel, world: String, fullblessRole: String, nemesisRole: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: String, neutralsChannel: String, levelsChannel: String, deathsChannel: String, adminChannel: String, world: String, fullblessRole: String, nemesisRole: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   case class CharKey(char: String, time: ZonedDateTime)
@@ -119,17 +119,20 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
           if (onlinePlayer.level > sheetLevel){
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
             val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon}"
-            if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
-              val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
-                  recentLevels += newCharLevel
-                  createAndSendWebhookMessage(levelsChannel, webhookMessage, s"${world.capitalize}")
-                }
-            } else {
-              recentLevels += newCharLevel
-              //if (guildIcon != Config.noGuild && guildIcon != Config.otherGuild) { // i dont want to poke neutral levels on this server
-                createAndSendWebhookMessage(levelsChannel, webhookMessage, s"${world.capitalize}")
-              //}
+            val levelsTextChannel = guild.getTextChannelById(levelsChannel)
+            if (levelsTextChannel != null){
+              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
+                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
+                  if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
+                    recentLevels += newCharLevel
+                    createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                  }
+              } else {
+                recentLevels += newCharLevel
+                //if (guildIcon != Config.noGuild && guildIcon != Config.otherGuild) { // i dont want to poke neutral levels on this server
+                  createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                //}
+              }
             }
           }
         }
@@ -160,8 +163,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
   }.withAttributes(logAndResume)
 
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
-    val deathsCheck = guild.getTextChannelById(deathsChannel.getIdLong)
-    if (deathsCheck != null){
+    val deathsTextChannel = guild.getTextChannelById(deathsChannel)
+    if (deathsTextChannel != null){
       val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
         var notablePoke = ""
         val charName = charDeath.char.characters.character.name
@@ -350,8 +353,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
               }
               // process the new batch of players to add to hunted list
               if (huntedBuffer.nonEmpty){
-                val channelCheck = guild.getTextChannelById(adminChannel.getIdLong)
-                if (channelCheck != null){
+                val adminTextChannel = guild.getTextChannelById(adminChannel)
+                if (adminTextChannel != null){
                   huntedBuffer.foreach { player =>
                     val playerString = player.toLowerCase()
                     // add them to cached huntedPlayersData list
@@ -365,7 +368,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
                     adminEmbed.setDescription(s"$commandUser added **$playerString** to the hunted list.")
                     adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                     adminEmbed.setColor(14397256) // orange for bot auto command
-                    adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                   }
                 }
               }
@@ -406,15 +409,15 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
       embeds.foreach { embed =>
         // regular death
         if (embed._2 != "fullbless"){
-          deathsChannel.sendMessageEmbeds(embed._1.build()).queue()
+          deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
         } else if (embed._2 == "nemesis"){
-          deathsChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+          deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
         } else if (embed._2 == "fullbless"){
           // send adjusted embed to fullbless channel
           val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
           val adjustedEmbed = embed._1.setDescription(adjustedMessage)
           if (embed._5 >= 400) { // only poke for 400+
-            deathsChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
+            deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
           }
         }
       }
@@ -466,40 +469,40 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
 
     onlineListPurgeTimer += 1
     // run channel checks before updating the channels
-    val alliesCheck = guild.getTextChannelById(alliesChannel.getIdLong)
-    if (alliesCheck != null){
-      if (alliesChannel.getName() != s"allies-$alliesCount") {
-        val channelManager = alliesChannel.getManager
+    val alliesTextChannel = guild.getTextChannelById(alliesChannel)
+    if (alliesTextChannel != null){
+      if (alliesTextChannel.getName() != s"allies-$alliesCount") {
+        val channelManager = alliesTextChannel.getManager
         channelManager.setName(s"allies-$alliesCount").queue()
       }
       if (alliesList.nonEmpty){
-        updateMultiFields(alliesList, alliesChannel)
+        updateMultiFields(alliesList, alliesTextChannel)
       } else {
-        updateMultiFields(List("No allies are online right now."), alliesChannel)
+        updateMultiFields(List("No allies are online right now."), alliesTextChannel)
       }
     }
-    val neutralsCheck = guild.getTextChannelById(neutralsChannel.getIdLong)
-    if (neutralsCheck != null){
-      if (neutralsChannel.getName() != s"neutrals-$neutralsCount") {
-        val channelManager = neutralsChannel.getManager
+    val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+    if (neutralsTextChannel != null){
+      if (neutralsTextChannel.getName() != s"neutrals-$neutralsCount") {
+        val channelManager = neutralsTextChannel.getManager
         channelManager.setName(s"neutrals-$neutralsCount").queue()
       }
       if (neutralsList.nonEmpty){
-        updateMultiFields(neutralsList, neutralsChannel)
+        updateMultiFields(neutralsList, neutralsTextChannel)
       } else {
-        updateMultiFields(List("No neutrals are online right now."), neutralsChannel)
+        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel)
       }
     }
-    val enemiesCheck = guild.getTextChannelById(enemiesChannel.getIdLong)
-    if (enemiesCheck != null){
-      if (enemiesChannel.getName() != s"enemies-$enemiesCount") {
-        val channelManager = enemiesChannel.getManager
+    val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+    if (enemiesTextChannel != null){
+      if (enemiesTextChannel.getName() != s"enemies-$enemiesCount") {
+        val channelManager = enemiesTextChannel.getManager
         channelManager.setName(s"enemies-$enemiesCount").queue()
       }
       if (enemiesList.nonEmpty){
-        updateMultiFields(enemiesList, enemiesChannel)
+        updateMultiFields(enemiesList, enemiesTextChannel)
       } else {
-        updateMultiFields(List("No enemies are online right now."), enemiesChannel)
+        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel)
       }
     }
 
@@ -562,26 +565,23 @@ class DeathTrackerStream(guild: Guild, alliesChannel: TextChannel, enemiesChanne
 
   // send a webhook to discord (this is used as we can have hyperlinks in Text Messages)
   def createAndSendWebhookMessage(webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
-    val channelCheck = guild.getTextChannelById(webhookChannel.getIdLong)
-    if (channelCheck != null){
-      val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
-      var webhook: Webhook = null
-      if (getWebHook.isEmpty) {
-          val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
-          webhook = createWebhook.get()
-      } else {
-          webhook = getWebHook.get(0)
-      }
-      val webhookUrl = webhook.getUrl()
-      val client = WebhookClient.withUrl(webhookUrl)
-      val message = new WebhookMessageBuilder()
-        .setUsername(messageAuthor)
-        .setContent(messageContent)
-        .setAvatarUrl(Config.webHookAvatar)
-        .build()
-      client.send(message)
-      client.close()
+    val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
+    var webhook: Webhook = null
+    if (getWebHook.isEmpty) {
+        val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
+        webhook = createWebhook.get()
+    } else {
+        webhook = getWebHook.get(0)
     }
+    val webhookUrl = webhook.getUrl()
+    val client = WebhookClient.withUrl(webhookUrl)
+    val message = new WebhookMessageBuilder()
+      .setUsername(messageAuthor)
+      .setContent(messageContent)
+      .setAvatarUrl(Config.webHookAvatar)
+      .build()
+    client.send(message)
+    client.close()
   }
 
   // Remove players from the list who haven't logged in for a while. Remove old saved deaths.
