@@ -139,7 +139,9 @@ class BotListener extends ListenerAdapter {
           case "list" => {
             BotApp.listAlliesAndHunted(event, "hunted", (hunteds) => {
               val embedsJava = hunteds.asJava
-              event.getHook().sendMessageEmbeds(embedsJava).queue()
+              embedsJava.forEach { embed =>
+                event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+              }
             })
           }
           case "info" => {
@@ -197,7 +199,9 @@ class BotListener extends ListenerAdapter {
           case "list" => {
             BotApp.listAlliesAndHunted(event, "allies", (allies) => {
               val embedsJava = allies.asJava
-              event.getHook().sendMessageEmbeds(embedsJava).queue()
+              embedsJava.forEach { embed =>
+                event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+              }
             })
           }
           case "info" => {
