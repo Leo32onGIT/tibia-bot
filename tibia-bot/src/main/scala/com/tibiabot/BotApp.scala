@@ -364,7 +364,8 @@ object BotApp extends App with StrictLogging {
     val listGuilds: List[Guilds] = if (arg == "allies") alliedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else if (arg == "hunted") huntedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else List.empty
-    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Lit_Protectress_Lamp.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Dark_Mage_Statue.gif" else ""
+    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Golden_Newspaper.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Armageddon_Plans.gif" else ""
+    val guildThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
 
     // if guild list is not empty
     if (listGuilds.nonEmpty) {
@@ -374,6 +375,7 @@ object BotApp extends App with StrictLogging {
         g.name + (if (g.reason == "true") " :pencil:" else "")
       )
       var field = ""
+      var isFirstEmbed = true
       guildsAsList.foreach { v =>
         val currentField = field + "\n" + v
         if (currentField.length <= 4096) { // don't add field yet, there is still room
@@ -382,6 +384,10 @@ object BotApp extends App with StrictLogging {
           val interimEmbed = new EmbedBuilder()
           interimEmbed.setDescription(field)
           interimEmbed.setColor(embedColor)
+          if (isFirstEmbed) {
+            interimEmbed.setThumbnail(guildThumbnail)
+            isFirstEmbed = false
+          }
           embedBuffer += interimEmbed.build()
           field = v
         }
@@ -389,12 +395,17 @@ object BotApp extends App with StrictLogging {
       val finalEmbed = new EmbedBuilder()
       finalEmbed.setDescription(field)
       finalEmbed.setColor(embedColor)
+      if (isFirstEmbed) {
+        finalEmbed.setThumbnail(guildThumbnail)
+        isFirstEmbed = false
+      }
       embedBuffer += finalEmbed.build()
     } else { // guild list is empty
       val listIsEmpty = new EmbedBuilder()
       val listisEmptyMessage = guildHeader ++ s"\n*The guilds list is empty.*"
       listIsEmpty.setDescription(listisEmptyMessage)
       listIsEmpty.setColor(embedColor)
+      listIsEmpty.setThumbnail(guildThumbnail)
       embedBuffer += listIsEmpty.build()
     }
     // if player list is not empty
@@ -471,6 +482,7 @@ object BotApp extends App with StrictLogging {
 
           // build the embed
           var field = ""
+          var isFirstEmbed = true
           playersList.foreach { v =>
             val currentField = field + "\n" + v
             if (currentField.length <= 4096) { // don't add field yet, there is still room
@@ -479,7 +491,10 @@ object BotApp extends App with StrictLogging {
               val interimEmbed = new EmbedBuilder()
               interimEmbed.setDescription(field)
               interimEmbed.setColor(embedColor)
-              interimEmbed.setThumbnail(embedThumbnail)
+              if (isFirstEmbed) {
+                interimEmbed.setThumbnail(embedThumbnail)
+                isFirstEmbed = false
+              }
               embedBuffer += interimEmbed.build()
               field = v
             }
@@ -487,7 +502,10 @@ object BotApp extends App with StrictLogging {
           val finalEmbed = new EmbedBuilder()
           finalEmbed.setDescription(field)
           finalEmbed.setColor(embedColor)
-          finalEmbed.setThumbnail(embedThumbnail)
+          if (isFirstEmbed) {
+            finalEmbed.setThumbnail(embedThumbnail)
+            isFirstEmbed = false
+          }
           embedBuffer += finalEmbed.build()
           callback(embedBuffer.toList)
         }
