@@ -5,7 +5,7 @@ import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, RunnableGraph, Sink, Source, Keep}
 import akka.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, WorldResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, WorldResponse, OnlinePlayers}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.TextChannel
@@ -64,9 +64,16 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
   private lazy val getCharacterData = Flow[WorldResponse].mapAsync(1) { worldResponse =>
     val now = ZonedDateTime.now()
-    val online: List[String] = worldResponse.worlds.world.online_players.map(_.name)
+    val onlinePlayers: Option[List[OnlinePlayers]] = worldResponse.worlds.world.online_players
+    val online: List[String] = onlinePlayers match {
+      case Some(players) => players.map(_.name)
+      case None => List.empty[String]
+    }
     // getting online data
-    val onlineWithVocLvl = worldResponse.worlds.world.online_players.map { player => (player.name, player.level.toInt, player.vocation, "") }
+    val onlineWithVocLvl = worldResponse.worlds.world.online_players match {
+      case Some(players) => players.map { player => (player.name, player.level.toInt, player.vocation, "") }
+      case None => List.empty[(String, Int, String, String)]
+    }
     currentOnline.addAll(onlineWithVocLvl.map(i => CurrentOnline(i._1, i._2, i._3, i._4)))
 
     recentOnline.filterInPlace(i => !online.contains(i.char)) // Remove existing online chars from the list...
