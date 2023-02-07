@@ -522,9 +522,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     //get messages
     var messages = scala.collection.JavaConverters.seqAsJavaListConverter(channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor().getId().equals(BotApp.botUser)).toList).asJava
 
-    // clear the channel every 25 iterations
+    // clear the channel every 6 hours
     if (ZonedDateTime.now().isAfter(onlineListPurgeTimer.plusHours(6))) {
       channel.purgeMessages(messages)
+      onlineListPurgeTimer = ZonedDateTime.now()
       messages = List.empty.asJava
     }
 
