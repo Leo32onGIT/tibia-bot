@@ -16,12 +16,12 @@ case class World(
   pvp_type: String,
   premium_only: Boolean,
   transfer_type: String,
-  world_quest_titles: List[String],
+  world_quest_titles: Option[List[String]],
   battleye_protected: Boolean,
   battleye_date: String,
   game_world_type: String,
   tournament_world_type: String,
-  online_players: List[OnlinePlayers]
+  online_players: Option[List[OnlinePlayers]]
 )
 case class Worlds(
   world: World
