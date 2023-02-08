@@ -7,7 +7,7 @@ import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse}
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -18,12 +18,21 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
   private val characterUrl = "https://api.tibiadata.com/v3/character/"
+  private val guildUrl = "https://api.tibiadata.com/v3/guild/"
 
   def getWorld(world: String): Future[WorldResponse] = {
     for {
       response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$world"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[WorldResponse]
+    } yield unmarshalled
+  }
+
+  def getGuild(guild: String): Future[GuildResponse] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${guild.replaceAll(" ", "%20")}"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[GuildResponse]
     } yield unmarshalled
   }
 

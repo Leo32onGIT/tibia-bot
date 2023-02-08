@@ -48,6 +48,13 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val charactersFormat: RootJsonFormat[Characters] = jsonFormat3(Characters)
   implicit val characterResponseFormat: RootJsonFormat[CharacterResponse] = jsonFormat2(CharacterResponse)
 
+  implicit val invitesFormat: RootJsonFormat[Invites] = jsonFormat2(Invites)
+  implicit val membersFormat: RootJsonFormat[Members] = jsonFormat7(Members)
+  implicit val guildHallFormat: RootJsonFormat[GuildHalls] = jsonFormat3(GuildHalls)
+  implicit val guildDataFormat: RootJsonFormat[GuildData] = jsonFormat18(GuildData)
+  implicit val guildsFormat: RootJsonFormat[Guilds] = jsonFormat1(Guilds)
+  implicit val guildResponseFormat: RootJsonFormat[GuildResponse] = jsonFormat2(GuildResponse)
+
 }
 
 // This is needed because you can't just call json.convertTo[String] inside strFormat above because you get a stack overflow because it calls back on itself
