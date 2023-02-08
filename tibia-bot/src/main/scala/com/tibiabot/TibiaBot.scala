@@ -41,8 +41,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private val recentOnline = mutable.Set.empty[CharKey]
   private val currentOnline = mutable.Set.empty[CurrentOnline]
 
-  var onlineListTimer = 10
-  var onlineListPurgeTimer = 100
+  var onlineListTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+  var onlineListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
   private val tibiaDataClient = new TibiaDataClient()
 
@@ -85,7 +85,6 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
   private lazy val scanForDeaths = Flow[Set[CharacterResponse]].mapAsync(1) { characterResponses =>
     val now = ZonedDateTime.now()
-    onlineListTimer += 1
 
     // gather guild icons data for online player list
     val newDeaths = characterResponses.flatMap { char =>
@@ -157,14 +156,14 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       }
 
     }
-    // update online list
-    if (onlineListTimer >= 10) {
+    // update online list every 5 minutes
+    if (ZonedDateTime.now().isAfter(onlineListTimer.plusMinutes(5))) {
       val currentOnlineList: List[(String, Int, String, String)] = currentOnline.map { onlinePlayer =>
         (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild)
       }.toList
       // did the online list api call fail?
       if (currentOnlineList.size > 1){
-        onlineListTimer = 0
+        onlineListTimer = ZonedDateTime.now()
         onlineList(currentOnlineList)
       }
     }
@@ -478,7 +477,6 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     val neutralsCount = neutralsList.size
     val enemiesCount = enemiesList.size
 
-    onlineListPurgeTimer += 1
     // run channel checks before updating the channels
     val alliesTextChannel = guild.getTextChannelById(alliesChannel)
     if (alliesTextChannel != null){
@@ -516,20 +514,18 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         updateMultiFields(List("No enemies are online right now."), enemiesTextChannel)
       }
     }
-
-    if (onlineListPurgeTimer >= 100) {
-      onlineListPurgeTimer = 0
-    }
   }
 
   def updateMultiFields(values: List[String], channel: TextChannel): Unit = {
     var field = ""
     val embedColor = 3092790
-    var messages = channel.getHistory.retrievePast(100).complete()
+    //get messages
+    var messages = scala.collection.JavaConverters.seqAsJavaListConverter(channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor().getId().equals(BotApp.botUser)).toList).asJava
 
-    // clear the channel every 25 iterations
-    if (onlineListPurgeTimer >= 100) {
+    // clear the channel every 6 hours
+    if (ZonedDateTime.now().isAfter(onlineListPurgeTimer.plusHours(6))) {
       channel.purgeMessages(messages)
+      onlineListPurgeTimer = ZonedDateTime.now()
       messages = List.empty.asJava
     }
 
