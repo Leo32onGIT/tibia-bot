@@ -136,8 +136,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               } else {
                 recentLevels += newCharLevel
                 val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-                val fullblessLevel = worldData.headOption.map(_.showNeutrals).getOrElse("true")
-                if (fullblessLevel != "false") { // i dont want to poke neutral levels on this server
+                val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
+                if (showNeutralLevels == "true") { // i dont want to poke neutral levels on this server
                   createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                 }
               }
@@ -406,10 +406,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         // this is the actual embed description
         val embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
 
-        val showNeutrals = worldData.headOption.map(_.showNeutrals).getOrElse("true")
+        val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
         var embedCheck = true
         if (embedColor == 3092790 || embedColor == 14869218){
-          if(showNeutrals == "false"){
+          if(showNeutralDeaths == "false"){
             embedCheck = false
           }
         }
@@ -425,7 +425,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
       // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
-        if (embed._6){ // if showNeutrals == "true"
+        if (embed._6){ // if showNeutralDeaths == "true"
           if (embed._2 != "fullbless"){ // regular death
             deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
           } else if (embed._2 == "nemesis"){
