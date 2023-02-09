@@ -612,12 +612,14 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The guild **[${guildName}](${guildUrl(guildName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> added the guild **[${guildName}](${guildUrl(guildName)})** to the hunted list.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              if (adminChannel != null){
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the guild **[${guildName}](${guildUrl(guildName)})** to the hunted list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
 
               // add each player in the guild to the hunted list
               /***
@@ -656,12 +658,14 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The player **[${playerName}](${charUrl(playerName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> added the player **[${playerName}](${charUrl(playerName)})** to the hunted list.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              if (adminChannel != null){
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the player **[${playerName}](${charUrl(playerName)})** to the hunted list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -714,12 +718,14 @@ object BotApp extends App with StrictLogging {
               addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[${guildName}](${guildUrl(guildName)})** has been added to the allies list."
 
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> added the guild **[${guildName}](${guildUrl(guildName)})** to the allies list.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              if (adminChannel != null){
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the guild **[${guildName}](${guildUrl(guildName)})** to the allies list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
 
               // add each player in the guild to the hunted list
               /***
@@ -756,12 +762,14 @@ object BotApp extends App with StrictLogging {
               addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[${playerName}](${charUrl(playerName)})* has been added to the allies list."
 
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> added the player **${subOptionValueLower}** to the allies list.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              if (adminChannel != null){
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the player **${subOptionValueLower}** to the allies list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
             } else {
               embedText = s":x: The player **[${playerName}](${charUrl(playerName)})* already exists in the allies list."
               embedBuild.setDescription(embedText)
@@ -818,12 +826,14 @@ object BotApp extends App with StrictLogging {
           removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
 
           // send embed to admin channel
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> removed guild **${guildString}** from the hunted list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel != null){
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed guild **${guildString}** from the hunted list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
 
           embedText = s":gear: The guild **${guildString}** was removed from the hunted list."
           embedBuild.setDescription(embedText)
@@ -851,12 +861,14 @@ object BotApp extends App with StrictLogging {
           removeHuntedFromDatabase(guild, "player", subOptionValueLower)
 
           // send embed to admin channel
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> removed player **$playerString** from the hunted list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel != null){
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed player **$playerString** from the hunted list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
 
           embedText = s":gear: The player **${playerString}** was removed from the hunted list."
           embedBuild.setDescription(embedText)
@@ -907,12 +919,14 @@ object BotApp extends App with StrictLogging {
           removeAllyFromDatabase(guild, "guild", subOptionValueLower)
 
           // send embed to admin channel
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> removed **${guildString}** from the allies list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel != null){
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed **${guildString}** from the allies list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
 
           embedText = s":gear: The guild **${guildString}** was removed from the allies list."
           embedBuild.setDescription(embedText)
@@ -940,12 +954,14 @@ object BotApp extends App with StrictLogging {
           removeAllyFromDatabase(guild, "player", subOptionValueLower)
 
           // send embed to admin channel
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> removed **$playerString** from the allies list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel != null){
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed **$playerString** from the allies list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
 
           embedText = s":gear: The player **${playerString}** was removed from the allies list."
           embedBuild.setDescription(embedText)
