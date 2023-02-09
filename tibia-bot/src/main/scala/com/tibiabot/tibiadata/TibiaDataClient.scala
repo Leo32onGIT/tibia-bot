@@ -36,6 +36,16 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     } yield unmarshalled
   }
 
+  def getGuildWithInput(input: (String, String)): Future[(GuildResponse, String, String)] = {
+    val name = input._1
+    val reason = input._2
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${name.replaceAll(" ", "%20")}"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[GuildResponse]
+    } yield (unmarshalled, name, reason)
+  }
+
   def getCharacter(name: String): Future[CharacterResponse] = {
 
     // yeehaw

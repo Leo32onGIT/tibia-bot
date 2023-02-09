@@ -373,7 +373,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                     val commandUser = s"<@${BotApp.botUser}>"
                     val adminEmbed = new EmbedBuilder()
                     adminEmbed.setTitle(":robot: enemy automatically detected:")
-                    adminEmbed.setDescription(s"$commandUser added **$playerString** to the hunted list.")
+                    adminEmbed.setDescription(s"$commandUser added **[$player](${charUrl(player)})** to the hunted list.")
                     adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                     adminEmbed.setColor(14397256) // orange for bot auto command
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -520,7 +520,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     var field = ""
     val embedColor = 3092790
     //get messages
-    var messages = scala.collection.JavaConverters.seqAsJavaListConverter(channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor().getId().equals(BotApp.botUser)).toList).asJava
+    var messages = scala.collection.JavaConverters.seqAsJavaListConverter(channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor().getId().equals(BotApp.botUser)).toList.reverse).asJava
 
     // clear the channel every 6 hours
     if (ZonedDateTime.now().isAfter(onlineListPurgeTimer.plusHours(6))) {
@@ -529,7 +529,6 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       messages = List.empty.asJava
     }
 
-    Collections.reverse(messages)
     var currentMessage = 0
     values.foreach { v =>
       val currentField = field + "\n" + v

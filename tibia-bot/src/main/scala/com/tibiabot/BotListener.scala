@@ -105,12 +105,14 @@ class BotListener extends ListenerAdapter {
       case "player" => {
         subCommand match {
           case "add" => {
-            val embed = BotApp.addHunted(event, "player", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.addHunted(event, "player", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case "remove" => {
-            val embed = BotApp.removeHunted(event, "player", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.removeHunted(event, "player", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case _ => {
             val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for player group.").build()
@@ -121,12 +123,14 @@ class BotListener extends ListenerAdapter {
       case "guild" => {
         subCommand match {
           case "add" => {
-            val embed = BotApp.addHunted(event, "guild", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.addHunted(event, "guild", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case "remove" => {
-            val embed = BotApp.removeHunted(event, "guild", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.removeHunted(event, "guild", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case _ => {
             val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for guild group.").build()
@@ -137,11 +141,17 @@ class BotListener extends ListenerAdapter {
       case _ => {
         subCommand match {
           case "list" => {
-            BotApp.listAlliesAndHunted(event, "hunted", (hunteds) => {
+            BotApp.listAlliesAndHuntedGuilds(event, "hunted", (hunteds) => {
               val embedsJava = hunteds.asJava
               embedsJava.forEach { embed =>
                 event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
               }
+              BotApp.listAlliesAndHuntedPlayers(event, "hunted", (hunteds) => {
+                val embedsJava = hunteds.asJava
+                embedsJava.forEach { embed =>
+                  event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+                }
+              })
             })
           }
           case "info" => {
@@ -165,12 +175,14 @@ class BotListener extends ListenerAdapter {
       case "player" => {
         subCommand match {
           case "add" => {
-            val embed = BotApp.addAlly(event, "player", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.addAlly(event, "player", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case "remove" => {
-            val embed = BotApp.removeAlly(event, "player", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.removeAlly(event, "player", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case _ => {
             val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for player group.").build()
@@ -181,12 +193,14 @@ class BotListener extends ListenerAdapter {
       case "guild" => {
         subCommand match {
           case "add" => {
-            val embed = BotApp.addAlly(event, "guild", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.addAlly(event, "guild", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case "remove" => {
-            val embed = BotApp.removeAlly(event, "guild", nameOption, reasonOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
+            BotApp.removeAlly(event, "guild", nameOption, reasonOption, (embed) => {
+              event.getHook().sendMessageEmbeds(embed).queue()
+            })
           }
           case _ => {
             val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for guild group.").build()
@@ -197,11 +211,17 @@ class BotListener extends ListenerAdapter {
       case _ => {
         subCommand match {
           case "list" => {
-            BotApp.listAlliesAndHunted(event, "allies", (allies) => {
+            BotApp.listAlliesAndHuntedGuilds(event, "allies", (allies) => {
               val embedsJava = allies.asJava
               embedsJava.forEach { embed =>
                 event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
               }
+              BotApp.listAlliesAndHuntedPlayers(event, "allies", (allies) => {
+                val embedsJava = allies.asJava
+                embedsJava.forEach { embed =>
+                  event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+                }
+              })
             })
           }
           case "info" => {

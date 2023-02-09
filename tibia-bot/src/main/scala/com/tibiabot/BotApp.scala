@@ -350,67 +350,93 @@ object BotApp extends App with StrictLogging {
       .build()
   }
 
-  def listAlliesAndHunted(event: SlashCommandInteractionEvent, arg: String, callback: (List[MessageEmbed]) => Unit): Unit = {
-    // get command option
+  def listAlliesAndHuntedGuilds(event: SlashCommandInteractionEvent, arg: String, callback: (List[MessageEmbed]) => Unit): Unit = {
     val guild = event.getGuild()
     val tibiaDataClient = new TibiaDataClient()
-    var embedBuffer = ListBuffer[MessageEmbed]()
     val embedColor = 3092790
 
-    val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
     val guildHeader = if (arg == "allies") s"${Config.allyGuild} **Guilds** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemyGuild} **Guilds** ${Config.enemyGuild}" else ""
-    val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
-      else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
-      else List.empty
     val listGuilds: List[Guilds] = if (arg == "allies") alliedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else if (arg == "hunted") huntedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else List.empty
-    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Golden_Newspaper.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Armageddon_Plans.gif" else ""
     val guildThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
-
-    // if guild list is not empty
+    var guildBuffer = ListBuffer[MessageEmbed]()
     if (listGuilds.nonEmpty) {
-      val capitalizedGuilds = listGuilds.map(g => g.copy(name = g.name.split(" ").map(_.capitalize).mkString(" ")))
-      val guildUrls = capitalizedGuilds.map(g => g.copy(name = s"[${g.name}](${guildUrl(g.name)})"))
-      val guildsAsList: List[String] = List(guildHeader) ++ guildUrls.map(g =>
-        g.name + (if (g.reason == "true") " :pencil:" else "")
-      )
-      var field = ""
-      var isFirstEmbed = true
-      guildsAsList.foreach { v =>
-        val currentField = field + "\n" + v
-        if (currentField.length <= 4096) { // don't add field yet, there is still room
-          field = currentField
-        } else { // it's full, add the field
-          val interimEmbed = new EmbedBuilder()
-          interimEmbed.setDescription(field)
-          interimEmbed.setColor(embedColor)
+      // run api against guild
+      val guildListFlow = Source(listGuilds.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getGuildWithInput).toMat(Sink.seq)(Keep.right)
+      val futureResults: Future[Seq[(GuildResponse, String, String)]] = guildListFlow.run()
+      futureResults.onComplete {
+        case Success(output) => {
+          var guildApiBuffer = ListBuffer[String]()
+          output.foreach { case (guildResponse, name, reason) =>
+            val guildName = guildResponse.guilds.guild.name
+            val reasonEmoji = if (reason == "true") ":pencil:" else ""
+            if (guildName != ""){
+              val guildMembers = guildResponse.guilds.guild.members_total.toInt
+              val guildLine = s":busts_in_silhouette: $guildMembers — **[$guildName](${guildUrl(guildName)})** $reasonEmoji"
+              guildApiBuffer += guildLine
+            }
+            else {
+              guildApiBuffer += s"**$name** *(This guild doesn't exist)* $reasonEmoji"
+            }
+          }
+          val guildsAsList: List[String] = List(guildHeader) ++ guildApiBuffer
+          var field = ""
+          var isFirstEmbed = true
+          guildsAsList.foreach { v =>
+            val currentField = field + "\n" + v
+            if (currentField.length <= 4096) { // don't add field yet, there is still room
+              field = currentField
+            } else { // it's full, add the field
+              val interimEmbed = new EmbedBuilder()
+              interimEmbed.setDescription(field)
+              interimEmbed.setColor(embedColor)
+              if (isFirstEmbed) {
+                interimEmbed.setThumbnail(guildThumbnail)
+                isFirstEmbed = false
+              }
+              guildBuffer += interimEmbed.build()
+              field = v
+            }
+          }
+          val finalEmbed = new EmbedBuilder()
+          finalEmbed.setDescription(field)
+          finalEmbed.setColor(embedColor)
           if (isFirstEmbed) {
-            interimEmbed.setThumbnail(guildThumbnail)
+            finalEmbed.setThumbnail(guildThumbnail)
             isFirstEmbed = false
           }
-          embedBuffer += interimEmbed.build()
-          field = v
+          guildBuffer += finalEmbed.build()
+          callback(guildBuffer.toList)
         }
+        case Failure(e) => e.printStackTrace
       }
-      val finalEmbed = new EmbedBuilder()
-      finalEmbed.setDescription(field)
-      finalEmbed.setColor(embedColor)
-      if (isFirstEmbed) {
-        finalEmbed.setThumbnail(guildThumbnail)
-        isFirstEmbed = false
-      }
-      embedBuffer += finalEmbed.build()
+      //IN PROGRESS
     } else { // guild list is empty
       val listIsEmpty = new EmbedBuilder()
       val listisEmptyMessage = guildHeader ++ s"\n*The guilds list is empty.*"
       listIsEmpty.setDescription(listisEmptyMessage)
       listIsEmpty.setColor(embedColor)
       listIsEmpty.setThumbnail(guildThumbnail)
-      embedBuffer += listIsEmpty.build()
+      guildBuffer += listIsEmpty.build()
+      callback(guildBuffer.toList)
     }
-    // if player list is not empty
+  }
+
+  def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: (List[MessageEmbed]) => Unit): Unit = {
+    // get command option
+    val guild = event.getGuild()
+    val tibiaDataClient = new TibiaDataClient()
+    val embedColor = 3092790
+
+    val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
+    val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
+      else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
+      else List.empty
+    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Golden_Newspaper.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Armageddon_Plans.gif" else ""
+    var playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
+      // run api against players
       val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(CharacterResponse, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
@@ -496,7 +522,7 @@ object BotApp extends App with StrictLogging {
                 interimEmbed.setThumbnail(embedThumbnail)
                 isFirstEmbed = false
               }
-              embedBuffer += interimEmbed.build()
+              playerBuffer += interimEmbed.build()
               field = v
             }
           }
@@ -507,16 +533,10 @@ object BotApp extends App with StrictLogging {
             finalEmbed.setThumbnail(embedThumbnail)
             isFirstEmbed = false
           }
-          embedBuffer += finalEmbed.build()
-          callback(embedBuffer.toList)
+          playerBuffer += finalEmbed.build()
+          callback(playerBuffer.toList)
         }
-        case Failure(e) => { // api call failed
-          e.printStackTrace
-          val failureEmbed = new EmbedBuilder()
-          failureEmbed.setDescription(":x: The request to the TibiaData api has failed, please try this command again.")
-          failureEmbed.setColor(embedColor)
-          return callback(List(failureEmbed.build()))
-        }
+        case Failure(e) => e.printStackTrace
       }
     } else { // player list is empty
       val listIsEmpty = new EmbedBuilder()
@@ -524,8 +544,8 @@ object BotApp extends App with StrictLogging {
       listIsEmpty.setDescription(listisEmptyMessage)
       listIsEmpty.setThumbnail(embedThumbnail)
       listIsEmpty.setColor(embedColor)
-      embedBuffer += listIsEmpty.build()
-      return callback(embedBuffer.toList)
+      playerBuffer += listIsEmpty.build()
+      callback(playerBuffer.toList)
     }
   }
 
@@ -550,7 +570,7 @@ object BotApp extends App with StrictLogging {
       })
     sortedWorlds.flatMap {
       case (world, players) =>
-        s"\n**$world:**" :: players
+        s":globe_with_meridians: **$world**" :: players
     }
   }
 
@@ -560,13 +580,15 @@ object BotApp extends App with StrictLogging {
   def guildUrl(guild: String): String =
     s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guild.replaceAll(" ", "+")}"
 
-  def addHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String): MessageEmbed = {
+  def addHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: (MessageEmbed) => Unit): Unit = {
     // get command option
     val subOptionValueLower = subOptionValue.toLowerCase()
     val reason = if (subOptionReason == "none") "false" else "true"
     val commandUser = event.getUser().getId()
     val guild = event.getGuild()
     val tibiaDataClient = new TibiaDataClient()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
     // default embed content
     var embedText = ":x: An error occured while running the /hunted command"
     if (checkConfigDatabase(guild)){
@@ -598,6 +620,7 @@ object BotApp extends App with StrictLogging {
               adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
 
               // add each player in the guild to the hunted list
+              /***
               guildMembers.foreach { member =>
                 val guildPlayers = huntedPlayersData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
@@ -605,12 +628,18 @@ object BotApp extends App with StrictLogging {
                   addHuntedToDatabase(guild, "player", member.name, "false", "this players guild was added to the hunted list", commandUser)
                 }
               }
-
+              ***/
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             } else {
               embedText = s":x: The guild **[${guildName}](${guildUrl(guildName)})** already exists in the hunted list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             }
           } else {
             embedText = s":x: The guild **${subOptionValueLower}** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
           }
         }
       } else if (subCommand == "player"){ // command run with 'player'
@@ -633,79 +662,133 @@ object BotApp extends App with StrictLogging {
               adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
               adminEmbed.setColor(3092790)
               adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             } else {
               embedText = s":x: The player **[${playerName}](${charUrl(playerName)})** already exists in the hunted list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             }
           } else {
             embedText = s":x: The player **${subOptionValueLower}** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
           }
         }
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
+      embedBuild.setDescription(embedText)
+      callback(embedBuild.build())
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
   }
 
-  def addAlly(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String): MessageEmbed = {
+  def addAlly(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: (MessageEmbed) => Unit): Unit = {
     // same scrucutre as addHunted, use comments there for understanding
     val subOptionValueLower = subOptionValue.toLowerCase()
     val reason = if (subOptionReason == "none") "false" else "true"
     val guild = event.getGuild()
     val commandUser = event.getUser().getId()
+    val tibiaDataClient = new TibiaDataClient()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    // default embed content
     var embedText = ":x: An error occured while running the /allies command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId()
+      // get admin channel info from database
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (subCommand == "guild"){
-        if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
-          alliedGuildsData = alliedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedGuildsData.getOrElse(guildId, List())))
-          addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
-          embedText = s":gear: The guild **${subOptionValueLower}** has been added to the allies list."
+        // run api against guild
+        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map { guildResponse =>
+          val guildName = guildResponse.guilds.guild.name
+          val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
+          (guildName, guildMembers)
+        }.map { case (guildName, guildMembers) =>
+          if (guildName != ""){
+            if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
+              alliedGuildsData = alliedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedGuildsData.getOrElse(guildId, List())))
+              addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
+              embedText = s":gear: The guild **[${guildName}](${guildUrl(guildName)})** has been added to the allies list."
 
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> added the guild **${subOptionValueLower}** to the allies list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        } else {
-          embedText = s":x: The guild **${subOptionValueLower}** already exists in the allies list."
+              val adminEmbed = new EmbedBuilder()
+              adminEmbed.setTitle(s":gear: a command was run:")
+              adminEmbed.setDescription(s"<@$commandUser> added the guild **[${guildName}](${guildUrl(guildName)})** to the allies list.")
+              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+              adminEmbed.setColor(3092790)
+              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+              // add each player in the guild to the hunted list
+              /***
+              guildMembers.foreach { member =>
+                val guildPlayers = alliedPlayersData.getOrElse(guildId, List())
+                if (!guildPlayers.exists(_.name == member.name)) {
+                  alliedPlayersData = alliedPlayersData + (guildId -> (Players(member.name, "false", "this players guild was added to the hunted list", commandUser) :: guildPlayers))
+                  addAllyToDatabase(guild, "player", member.name, "false", "this players guild was added to the allies list", commandUser)
+                }
+              }
+              ***/
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+            } else {
+              embedText = s":x: The guild **[${guildName}](${guildUrl(guildName)})** already exists in the allies list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+            }
+          } else {
+            embedText = s":x: The guild **${subOptionValueLower}** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
+          }
         }
       } else if (subCommand == "player"){
-        if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
-          alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
-          addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
-          embedText = s":gear: The player **${subOptionValueLower}** has been added to the allies list."
+        // run api against player
+        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map { charResponse =>
+          charResponse.characters.character.name
+        }.map { playerName =>
+          if (playerName != ""){
+            if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
+              alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
+              addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
+              embedText = s":gear: The player **[${playerName}](${charUrl(playerName)})* has been added to the allies list."
 
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> added the player **${subOptionValueLower}** to the allies list.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        } else {
-          embedText = s":x: The player **${subOptionValueLower}** already exists in the allies list."
+              val adminEmbed = new EmbedBuilder()
+              adminEmbed.setTitle(s":gear: a command was run:")
+              adminEmbed.setDescription(s"<@$commandUser> added the player **${subOptionValueLower}** to the allies list.")
+              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+              adminEmbed.setColor(3092790)
+              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+            } else {
+              embedText = s":x: The player **[${playerName}](${charUrl(playerName)})* already exists in the allies list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+            }
+          } else {
+            embedText = s":x: The player **${subOptionValueLower}** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
+          }
         }
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
+      embedBuild.setDescription(embedText)
+      callback(embedBuild.build())
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
   }
 
-  def removeHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String): MessageEmbed = {
+  def removeHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: (MessageEmbed) => Unit): Unit = {
     // get command option
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild()
     val commandUser = event.getUser().getId()
+    val tibiaDataClient = new TibiaDataClient()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
     var embedText = ":x: An error occured while running the /removehunted command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId()
@@ -713,62 +796,88 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       // depending on if guild or player supplied
       if (subCommand == "guild"){
-        val huntedGuildsList = huntedGuildsData.getOrElse(guildId, List())
-        val updatedList = huntedGuildsList.find(_.name == subOptionValueLower) match {
-          case Some(_) => huntedGuildsList.filterNot(_.name == subOptionValueLower)
-          case None => return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: The guild **${subOptionValueLower}** is not on the hunted list.")
-            .build()
+        var guildString = subOptionValueLower
+        // run api against guild
+        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map { guildResponse =>
+          val guildName = guildResponse.guilds.guild.name
+          guildName
+        }.map { guildName =>
+          if (guildName != ""){
+            guildString = s"[${guildName}](${guildUrl(guildName)})"
+          }
+          val huntedGuildsList = huntedGuildsData.getOrElse(guildId, List())
+          val updatedList = huntedGuildsList.find(_.name == subOptionValueLower) match {
+            case Some(_) => huntedGuildsList.filterNot(_.name == subOptionValueLower)
+            case None =>
+              embedText = s":x: The guild **${guildString}** is not on the hunted list."
+              embedBuild.setDescription(embedText)
+              return callback(embedBuild.build())
+          }
+          huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
+          removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
+
+          // send embed to admin channel
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> removed guild **${guildString}** from the hunted list.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+          embedText = s":gear: The guild **${guildString}** was removed from the hunted list."
+          embedBuild.setDescription(embedText)
+          callback(embedBuild.build())
         }
-        huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
-        removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
-        embedText = s":gear: The guild **${subOptionValueLower}** was removed from the hunted list."
-
-        // send embed to admin channel
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":gear: a command was run:")
-        adminEmbed.setDescription(s"<@$commandUser> removed guild **${subOptionValueLower}** from the hunted list.")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-
       } else if (subCommand == "player"){
-        val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
-        val updatedList = huntedPlayersList.find(_.name == subOptionValueLower) match {
-          case Some(_) => huntedPlayersList.filterNot(_.name == subOptionValueLower)
-          case None => return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: The guild **${subOptionValueLower}** is not on the hunted list.")
-            .build()
+        var playerString = subOptionValueLower
+        // run api against player
+        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map { charResponse =>
+          charResponse.characters.character.name
+        }.map { playerName =>
+          if (playerName != ""){
+            playerString = s"[${playerName}](${charUrl(playerName)})"
+          }
+          val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
+          val updatedList = huntedPlayersList.find(_.name == subOptionValueLower) match {
+            case Some(_) => huntedPlayersList.filterNot(_.name == subOptionValueLower)
+            case None =>
+              embedText = s":x: The player **${playerString}** is not on the hunted list."
+              embedBuild.setDescription(embedText)
+              return callback(embedBuild.build())
+          }
+          huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
+          removeHuntedFromDatabase(guild, "player", subOptionValueLower)
+
+          // send embed to admin channel
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> removed player **$playerString** from the hunted list.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+          embedText = s":gear: The player **${playerString}** was removed from the hunted list."
+          embedBuild.setDescription(embedText)
+          callback(embedBuild.build())
         }
-        huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
-        removeHuntedFromDatabase(guild, "player", subOptionValueLower)
-        embedText = s":gear: The player **${subOptionValueLower}** was removed from the hunted list."
-
-        // send embed to admin channel
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":gear: a command was run:")
-        adminEmbed.setDescription(s"<@$commandUser> removed player **$subOptionValueLower** from the hunted list.")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
+      embedBuild.setDescription(embedText)
+      callback(embedBuild.build())
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
   }
 
-  def removeAlly(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String): MessageEmbed = {
+  def removeAlly(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: (MessageEmbed) => Unit): Unit = {
     // get command option
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild()
     val commandUser = event.getUser().getId()
+    val tibiaDataClient = new TibiaDataClient()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
     var embedText = ":x: An error occured while running the /removehunted command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId()
@@ -776,55 +885,78 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       // depending on if guild or player supplied
       if (subCommand == "guild"){
-        val alliedGuildsList = alliedGuildsData.getOrElse(guildId, List())
-        val updatedList = alliedGuildsList.find(_.name == subOptionValueLower) match {
-          case Some(_) => alliedGuildsList.filterNot(_.name == subOptionValueLower)
-          case None => return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: The guild **${subOptionValueLower}** is not on the allies list.")
-            .build()
+        var guildString = subOptionValueLower
+        // run api against guild
+        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map { guildResponse =>
+          val guildName = guildResponse.guilds.guild.name
+          guildName
+        }.map { guildName =>
+          if (guildName != ""){
+            guildString = s"[${guildName}](${guildUrl(guildName)})"
+          }
+          val alliedGuildsList = alliedGuildsData.getOrElse(guildId, List())
+          val updatedList = alliedGuildsList.find(_.name == subOptionValueLower) match {
+            case Some(_) => alliedGuildsList.filterNot(_.name == subOptionValueLower)
+            case None =>
+              embedText = s":x: The guild **${guildString}** is not on the allies list."
+              embedBuild.setDescription(embedText)
+              return callback(embedBuild.build())
+          }
+          alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
+          removeAllyFromDatabase(guild, "guild", subOptionValueLower)
+
+          // send embed to admin channel
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> removed **${guildString}** from the allies list.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+          embedText = s":gear: The guild **${guildString}** was removed from the allies list."
+          embedBuild.setDescription(embedText)
+          callback(embedBuild.build())
         }
-        alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
-        removeAllyFromDatabase(guild, "guild", subOptionValueLower)
-        embedText = s":gear: The guild **${subOptionValueLower}** was removed from the allies list."
-
-        // send embed to admin channel
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":gear: a command was run:")
-        adminEmbed.setDescription(s"<@$commandUser> removed **${subOptionValueLower}** from the allies list.")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-
       } else if (subCommand == "player"){
-        val alliedPlayersList = alliedPlayersData.getOrElse(guildId, List())
-        val updatedList = alliedPlayersList.find(_.name == subOptionValueLower) match {
-          case Some(_) => alliedPlayersList.filterNot(_.name == subOptionValueLower)
-          case None => return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: The guild **${subOptionValueLower}** is not on the allies list.")
-            .build()
+        var playerString = subOptionValueLower
+        // run api against player
+        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map { charResponse =>
+          charResponse.characters.character.name
+        }.map { playerName =>
+          if (playerName != ""){
+            playerString = s"[${playerName}](${charUrl(playerName)})"
+          }
+          val alliedPlayersList = alliedPlayersData.getOrElse(guildId, List())
+          val updatedList = alliedPlayersList.find(_.name == subOptionValueLower) match {
+            case Some(_) => alliedPlayersList.filterNot(_.name == subOptionValueLower)
+            case None =>
+              embedText = s":x: The player **${playerString}** is not on the allies list."
+              embedBuild.setDescription(embedText)
+              return callback(embedBuild.build())
+          }
+          alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
+          removeAllyFromDatabase(guild, "player", subOptionValueLower)
+
+          // send embed to admin channel
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> removed **$playerString** from the allies list.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+
+          embedText = s":gear: The player **${playerString}** was removed from the allies list."
+          embedBuild.setDescription(embedText)
+          callback(embedBuild.build())
         }
-        alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
-        removeAllyFromDatabase(guild, "player", subOptionValueLower)
-        embedText = s":gear: The player **${subOptionValueLower}** was removed from the allies list."
-
-        // send embed to admin channel
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":gear: a command was run:")
-        adminEmbed.setDescription(s"<@$commandUser> removed **$subOptionValueLower** from the allies list.")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
+      embedBuild.setDescription(embedText)
+      callback(embedBuild.build())
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
   }
 
   def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String) = {
