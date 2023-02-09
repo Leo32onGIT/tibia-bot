@@ -39,7 +39,7 @@ object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Worlds(name: String)
+  case class Worlds(name: String, fullblessLevel: Int, showNeutrals: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -200,6 +200,8 @@ object BotApp extends App with StrictLogging {
 
         val fullblessRoleId = worldChannels("fullbless_role")
         val nemesisRoleId = worldChannels("nemesis_role")
+        //val fullblessLevel = worldChannels("fullbless_level")
+        //val showNeutrals = worldChannels("show_neutrals")
         //val categories = guild.getCategories().asScala
         //val targetCategory = categories.find(_.getName == world).getOrElse(null)
 
@@ -1115,6 +1117,8 @@ object BotApp extends App with StrictLogging {
             |nemesis_role VARCHAR(255) NOT NULL,
             |fullbless_channel VARCHAR(255) NOT NULL,
             |nemesis_channel VARCHAR(255) NOT NULL,
+            |fullbless_level INT NOT NULL,
+            |show_neutrals VARCHAR(255) NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
 
@@ -1209,12 +1213,14 @@ object BotApp extends App with StrictLogging {
   def worldConfig(guild: Guild, query: String): List[Worlds] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name FROM $query")
+    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutrals FROM $query")
 
     var results = new ListBuffer[Worlds]()
     while (result.next()) {
       val name = Option(result.getString("name")).getOrElse("")
-      results += Worlds(name)
+      val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
+      val showNeutrals = Option(result.getString("show_neutrals")).getOrElse("true")
+      results += Worlds(name, fullblessLevel, showNeutrals)
     }
 
     statement.close()
@@ -1222,9 +1228,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String) = {
+  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutrals: String) = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutrals) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutrals = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1237,16 +1243,20 @@ object BotApp extends App with StrictLogging {
     statement.setString(9, nemesisRole)
     statement.setString(10, fullblessChannel)
     statement.setString(11, nemesisChannel)
-    statement.setString(12, alliesChannel)
-    statement.setString(13, enemiesChannel)
-    statement.setString(14, neutralsChannels)
-    statement.setString(15, levelsChannel)
-    statement.setString(16, deathsChannel)
-    statement.setString(17, category)
-    statement.setString(18, fullblessRole)
-    statement.setString(19, nemesisRole)
-    statement.setString(20, fullblessChannel)
-    statement.setString(21, nemesisChannel)
+    statement.setInt(12, fullblessLevel)
+    statement.setString(13, showNeutrals)
+    statement.setString(14, alliesChannel)
+    statement.setString(15, enemiesChannel)
+    statement.setString(16, neutralsChannels)
+    statement.setString(17, levelsChannel)
+    statement.setString(18, deathsChannel)
+    statement.setString(19, category)
+    statement.setString(20, fullblessRole)
+    statement.setString(21, nemesisRole)
+    statement.setString(22, fullblessChannel)
+    statement.setString(23, nemesisChannel)
+    statement.setInt(24, fullblessLevel)
+    statement.setString(25, showNeutrals)
     val result = statement.executeUpdate()
 
     statement.close()
@@ -1288,6 +1298,8 @@ object BotApp extends App with StrictLogging {
           configMap += ("nemesis_role" -> result.getString("nemesis_role"))
           configMap += ("fullbless_channel" -> result.getString("fullbless_channel"))
           configMap += ("nemesis_channel" -> result.getString("nemesis_channel"))
+          configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
+          configMap += ("show_neutrals" -> result.getString("show_neutrals"))
       }
       statement.close()
       conn.close()
@@ -1419,7 +1431,7 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId()
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true")
         startBot(guild, Some(world))
         s":gear: The channels for **${world}** have been configured successfully."
       } else {

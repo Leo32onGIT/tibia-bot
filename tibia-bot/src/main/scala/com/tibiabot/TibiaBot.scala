@@ -135,9 +135,11 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                   }
               } else {
                 recentLevels += newCharLevel
-                //if (guildIcon != Config.noGuild && guildIcon != Config.otherGuild) { // i dont want to poke neutral levels on this server
+                val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+                val fullblessLevel = worldData.headOption.map(_.showNeutrals).getOrElse("true")
+                if (fullblessLevel != "false") { // i dont want to poke neutral levels on this server
                   createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                //}
+                }
               }
             }
           }
@@ -173,6 +175,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
     val deathsTextChannel = guild.getTextChannelById(deathsChannel)
     if (deathsTextChannel != null){
+      val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
       val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
         var notablePoke = ""
         val charName = charDeath.char.characters.character.name
@@ -403,6 +406,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         // this is the actual embed description
         val embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
 
+        val showNeutrals = worldData.headOption.map(_.showNeutrals).getOrElse("true")
+        var embedCheck = true
+        if (embedColor == 3092790 || embedColor == 14869218){
+          if(showNeutrals == "false"){
+            embedCheck = false
+          }
+        }
         val embed = new EmbedBuilder()
         embed.setTitle(s"${vocEmoji(charDeath.char)} $charName ${vocEmoji(charDeath.char)}", charUrl(charName))
         embed.setDescription(embedText)
@@ -410,24 +420,25 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         embed.setColor(embedColor)
 
         // return embed + poke
-        (embed, notablePoke, charName, embedText, charDeath.death.level.toInt)
-
+        (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
       }
+      val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
       // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
-        // regular death
-        if (embed._2 != "fullbless"){
-          deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
-        } else if (embed._2 == "nemesis"){
-          deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
-        } else if (embed._2 == "fullbless"){
-          // send adjusted embed to fullbless channel
-          val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-          val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-          if (embed._5 >= 250) { // only poke for 250+
-            deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
-          } else {
-            deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
+        if (embed._6){ // if showNeutrals == "true"
+          if (embed._2 != "fullbless"){ // regular death
+            deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+          } else if (embed._2 == "nemesis"){
+            deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+          } else if (embed._2 == "fullbless"){
+            // send adjusted embed for fullblesses
+            val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+            val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+            if (embed._5 >= fullblessLevel) { // only poke for 250+
+              deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
+            } else {
+              deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
+            }
           }
         }
       }
