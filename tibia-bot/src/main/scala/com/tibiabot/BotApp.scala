@@ -792,12 +792,12 @@ object BotApp extends App with StrictLogging {
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
               addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
-              embedText = s":gear: The player **[${playerName}](${charUrl(playerName)})* has been added to the allies list."
+              embedText = s":gear: The player **[${playerName}](${charUrl(playerName)})** has been added to the allies list."
 
               if (adminChannel != null){
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player **${subOptionValueLower}** to the allies list.")
+                adminEmbed.setDescription(s"<@$commandUser> added the player **[${playerName}](${charUrl(playerName)})** to the allies list.")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -806,7 +806,7 @@ object BotApp extends App with StrictLogging {
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
             } else {
-              embedText = s":x: The player **[${playerName}](${charUrl(playerName)})* already exists in the allies list."
+              embedText = s":x: The player **[${playerName}](${charUrl(playerName)})** already exists in the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
             }
