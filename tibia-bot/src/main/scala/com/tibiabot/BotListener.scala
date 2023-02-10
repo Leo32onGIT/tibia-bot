@@ -22,6 +22,10 @@ class BotListener extends ListenerAdapter {
         handleHunted(event)
       case "allies" =>
         handleAllies(event)
+      case "neutrals" =>
+        handleNeutrals(event)
+      case "fullbless" =>
+        handleFullbless(event)
       case _ =>
     }
   }
@@ -232,4 +236,62 @@ class BotListener extends ListenerAdapter {
       }
     }
   }
+
+  private def handleNeutrals(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val subCommandGroup = event.getInteraction.getSubcommandGroup
+    val subCommand = event.getInteraction.getSubcommandName
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.get("world").getOrElse("")
+
+    subCommandGroup match {
+      case "deaths" => {
+        subCommand match {
+          case "show" => {
+            val embed = BotApp.deathsNeutrals(event, worldOption, "show")
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+          case "hide" => {
+            val embed = BotApp.deathsNeutrals(event, worldOption, "hide")
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+          case _ => {
+            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}'.").build()
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+        }
+      }
+      case "levels" => {
+        subCommand match {
+          case "show" => {
+            val embed = BotApp.levelsNeutrals(event, worldOption, "show")
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+          case "hide" => {
+            val embed = BotApp.levelsNeutrals(event, worldOption, "hide")
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+          case _ => {
+            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}'.").build()
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
+        }
+      }
+      case _ => {
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subCommandGroup '${subCommandGroup}'.").build()
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+    }
+  }
+
+  private def handleFullbless(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.get("world").getOrElse("")
+    val levelOption: Int = options.get("level").map(_.toInt).getOrElse(250)
+
+    val embed = BotApp.fullblessLevel(event, worldOption, levelOption)
+    event.getHook().sendMessageEmbeds(embed).queue()
+  }
+
 }

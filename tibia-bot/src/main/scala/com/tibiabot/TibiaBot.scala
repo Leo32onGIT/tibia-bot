@@ -58,7 +58,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
   private lazy val sourceTick = Source.tick(2.seconds, 20.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
-    logger.info(s"Running stream for '${guild.getName()} - ${guild.getId()}' - $world")
+    logger.info(s"Running stream for Guild: '${guild.getName()}' Id: '${guild.getId()}' World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
   }.withAttributes(logAndResume)
 
@@ -127,17 +127,23 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
             val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon}"
             val levelsTextChannel = guild.getTextChannelById(levelsChannel)
             if (levelsTextChannel != null){
-              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
-                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                  if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
-                    recentLevels += newCharLevel
-                    createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                  }
-              } else {
-                recentLevels += newCharLevel
-                //if (guildIcon != Config.noGuild && guildIcon != Config.otherGuild) { // i dont want to poke neutral levels on this server
+              // check show_neutrals_levels setting
+              val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+              val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
+              val showEnemiesAllies = List(Config.allyGuild, Config.enemy, Config.enemyGuild)
+              // don't post level if showNeutrals is set to false and its a neutral level
+              val levelsCheck = if (showNeutralLevels == "true") true else if (showNeutralLevels == "false" && showEnemiesAllies.contains(guildIcon)) true else false
+              if (levelsCheck) {
+                if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
+                  val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
+                    if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
+                      recentLevels += newCharLevel
+                      createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    }
+                } else {
+                  recentLevels += newCharLevel
                   createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                //}
+                }
               }
             }
           }
@@ -173,6 +179,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
     val deathsTextChannel = guild.getTextChannelById(deathsChannel)
     if (deathsTextChannel != null){
+      val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
       val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
         var notablePoke = ""
         val charName = charDeath.char.characters.character.name
@@ -403,6 +410,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         // this is the actual embed description
         val embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
 
+        val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
+        var embedCheck = true
+        if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237){
+          if(showNeutralDeaths == "false"){
+            embedCheck = false
+          }
+        }
         val embed = new EmbedBuilder()
         embed.setTitle(s"${vocEmoji(charDeath.char)} $charName ${vocEmoji(charDeath.char)}", charUrl(charName))
         embed.setDescription(embedText)
@@ -410,24 +424,25 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         embed.setColor(embedColor)
 
         // return embed + poke
-        (embed, notablePoke, charName, embedText, charDeath.death.level.toInt)
-
+        (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
       }
+      val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
       // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
-        // regular death
-        if (embed._2 != "fullbless"){
-          deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
-        } else if (embed._2 == "nemesis"){
-          deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
-        } else if (embed._2 == "fullbless"){
-          // send adjusted embed to fullbless channel
-          val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-          val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-          if (embed._5 >= 250) { // only poke for 250+
-            deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
-          } else {
-            deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
+        if (embed._6){ // if showNeutralDeaths == "true"
+          if (embed._2 != "fullbless"){ // regular death
+            deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+          } else if (embed._2 == "nemesis"){
+            deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+          } else if (embed._2 == "fullbless"){
+            // send adjusted embed for fullblesses
+            val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+            val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+            if (embed._5 >= fullblessLevel) { // only poke for 250+
+              deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue();
+            } else {
+              deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
+            }
           }
         }
       }
