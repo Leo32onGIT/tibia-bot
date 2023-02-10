@@ -58,7 +58,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
   private lazy val sourceTick = Source.tick(2.seconds, 20.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
-    logger.info(s"Running stream for '${guild.getName()} - ${guild.getId()}' - $world")
+    logger.info(s"Running stream for Guild: '${guild.getName()}' Id: '${guild.getId()}' World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
   }.withAttributes(logAndResume)
 
@@ -127,17 +127,21 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
             val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon}"
             val levelsTextChannel = guild.getTextChannelById(levelsChannel)
             if (levelsTextChannel != null){
-              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
-                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                  if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
-                    recentLevels += newCharLevel
-                    createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                  }
-              } else {
-                recentLevels += newCharLevel
-                val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-                val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
-                if (showNeutralLevels == "true") { // i dont want to poke neutral levels on this server
+              // check show_neutrals_levels setting
+              val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+              val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
+              val showEnemiesAllies = List(Config.allyGuild, Config.enemy, Config.enemyGuild)
+              // don't post level if showNeutrals is set to false and its a neutral level
+              val levelsCheck = if (showNeutralLevels == "true") true else if (showNeutralLevels == "false" && showEnemiesAllies.contains(guildIcon)) true else false
+              if (levelsCheck) {
+                if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
+                  val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
+                    if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
+                      recentLevels += newCharLevel
+                      createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    }
+                } else {
+                  recentLevels += newCharLevel
                   createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                 }
               }
@@ -408,7 +412,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
         val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
         var embedCheck = true
-        if (embedColor == 3092790 || embedColor == 14869218){
+        if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237){
           if(showNeutralDeaths == "false"){
             embedCheck = false
           }
