@@ -602,7 +602,7 @@ object BotApp extends App with StrictLogging {
       })
     sortedWorlds.flatMap {
       case (world, players) =>
-        s":globe_with_meridians: **$world**" :: players
+        s"> :globe_with_meridians: **$world**" :: players
     }
   }
 
