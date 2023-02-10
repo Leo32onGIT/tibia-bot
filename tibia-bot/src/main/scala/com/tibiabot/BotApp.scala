@@ -802,6 +802,9 @@ object BotApp extends App with StrictLogging {
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
               }
+
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             } else {
               embedText = s":x: The player **[${playerName}](${charUrl(playerName)})* already exists in the allies list."
               embedBuild.setDescription(embedText)
