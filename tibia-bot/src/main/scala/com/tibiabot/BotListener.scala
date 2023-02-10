@@ -32,7 +32,7 @@ class BotListener extends ListenerAdapter {
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild()
-    val commands = List(BotApp.setupCommand, BotApp.removeCommand, BotApp.huntedCommand, BotApp.alliesCommand)
+    val commands = List(BotApp.setupCommand, BotApp.removeCommand, BotApp.huntedCommand, BotApp.alliesCommand, BotApp.neutralsCommand, BotApp.fullblessCommand)
     guild.updateCommands().addCommands(commands.asJava).complete()
   }
 

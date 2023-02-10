@@ -9,6 +9,7 @@ import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse}
 import com.typesafe.scalalogging.StrictLogging
+import java.net.URLEncoder
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -29,8 +30,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   }
 
   def getGuild(guild: String): Future[GuildResponse] = {
+    val encodedName = URLEncoder.encode(guild, "UTF-8")
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${guild.replaceAll(" ", "%20")}"))
+      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[GuildResponse]
     } yield unmarshalled
@@ -39,8 +41,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   def getGuildWithInput(input: (String, String)): Future[(GuildResponse, String, String)] = {
     val name = input._1
     val reason = input._2
+    val encodedName = URLEncoder.encode(name, "UTF-8")
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${name.replaceAll(" ", "%20")}"))
+      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[GuildResponse]
     } yield (unmarshalled, name, reason)
@@ -59,8 +62,10 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       }
     }
 
+    val encodedName = URLEncoder.encode(obfsName, "UTF-8")
+
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${obfsName.replaceAll(" ", "%20")}"))
+      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse]
     } yield unmarshalled
@@ -69,8 +74,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   def getCharacterWithInput(input: (String, String)): Future[(CharacterResponse, String, String)] = {
     val name = input._1
     val reason = input._2
+    val encodedName = URLEncoder.encode(name, "UTF-8")
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${name.replaceAll(" ", "%20")}"))
+      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse]
     } yield (unmarshalled, name, reason)
