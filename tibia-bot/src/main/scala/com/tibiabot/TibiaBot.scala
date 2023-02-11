@@ -42,7 +42,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private val currentOnline = mutable.Set.empty[CurrentOnline]
 
   var onlineListTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
-  var onlineListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+  var alliesListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+  var enemiesListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+  var neutralsListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
   private val tibiaDataClient = new TibiaDataClient()
 
@@ -500,9 +502,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         channelManager.setName(s"allies-$alliesCount").queue()
       }
       if (alliesList.nonEmpty){
-        updateMultiFields(alliesList, alliesTextChannel)
+        updateMultiFields(alliesList, alliesTextChannel, "allies")
       } else {
-        updateMultiFields(List("No allies are online right now."), alliesTextChannel)
+        updateMultiFields(List("No allies are online right now."), alliesTextChannel, "allies")
       }
     }
     val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
@@ -512,9 +514,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         channelManager.setName(s"neutrals-$neutralsCount").queue()
       }
       if (neutralsList.nonEmpty){
-        updateMultiFields(neutralsList, neutralsTextChannel)
+        updateMultiFields(neutralsList, neutralsTextChannel, "neutrals")
       } else {
-        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel)
+        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel, "neutrals")
       }
     }
     val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
@@ -524,24 +526,38 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         channelManager.setName(s"enemies-$enemiesCount").queue()
       }
       if (enemiesList.nonEmpty){
-        updateMultiFields(enemiesList, enemiesTextChannel)
+        updateMultiFields(enemiesList, enemiesTextChannel, "enemies")
       } else {
-        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel)
+        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel, "enemies")
       }
     }
   }
 
-  def updateMultiFields(values: List[String], channel: TextChannel): Unit = {
+  def updateMultiFields(values: List[String], channel: TextChannel, purgeType: String): Unit = {
     var field = ""
     val embedColor = 3092790
     //get messages
     var messages = scala.collection.JavaConverters.seqAsJavaListConverter(channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor().getId().equals(BotApp.botUser)).toList.reverse).asJava
 
     // clear the channel every 6 hours
-    if (ZonedDateTime.now().isAfter(onlineListPurgeTimer.plusHours(6))) {
-      channel.purgeMessages(messages)
-      onlineListPurgeTimer = ZonedDateTime.now()
-      messages = List.empty.asJava
+    if (purgeType == "allies"){
+      if (ZonedDateTime.now().isAfter(alliesListPurgeTimer.plusHours(6))) {
+        channel.purgeMessages(messages)
+        alliesListPurgeTimer = ZonedDateTime.now()
+        messages = List.empty.asJava
+      }
+    } else if (purgeType == "enemies"){
+      if (ZonedDateTime.now().isAfter(enemiesListPurgeTimer.plusHours(6))) {
+        channel.purgeMessages(messages)
+        enemiesListPurgeTimer = ZonedDateTime.now()
+        messages = List.empty.asJava
+      }
+    } else if (purgeType == "neutrals"){
+      if (ZonedDateTime.now().isAfter(neutralsListPurgeTimer.plusHours(6))) {
+        channel.purgeMessages(messages)
+        neutralsListPurgeTimer = ZonedDateTime.now()
+        messages = List.empty.asJava
+      }
     }
 
     var currentMessage = 0
