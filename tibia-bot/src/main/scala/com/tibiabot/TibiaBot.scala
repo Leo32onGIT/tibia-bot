@@ -502,15 +502,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       // allow for custom channel names
       val channelName = alliesTextChannel.getName()
       val extractName = pattern.findFirstMatchIn(channelName)
-      val (name, count) =
-        if (extractName.isDefined) {
-          val m = extractName.get
-          (m.group(1), m.group(2))
-        } else ("allies", "0")
-      val countCheck = if (count == "") "0" else count
-      if (channelName != s"$name-$alliesCount") {
+      val customName = if (extractName.isDefined) {
+        val m = extractName.get
+        m.group(1)
+      } else "allies"
+      if (channelName != s"$customName-$alliesCount") {
         val channelManager = alliesTextChannel.getManager
-        channelManager.setName(s"$name-$alliesCount").queue()
+        channelManager.setName(s"$customName-$alliesCount").queue()
       }
       if (alliesList.nonEmpty){
         updateMultiFields(alliesList, alliesTextChannel, "allies")
@@ -523,14 +521,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       // allow for custom channel names
       val channelName = neutralsTextChannel.getName()
       val extractName = pattern.findFirstMatchIn(channelName)
-      val (name, count) =
-        if (extractName.isDefined) {
-          val m = extractName.get
-          (m.group(1), m.group(2))
-        } else ("neutrals", "0")
-      if (channelName != s"$name-$neutralsCount") {
+      val customName = if (extractName.isDefined) {
+        val m = extractName.get
+        m.group(1)
+      } else "neutrals"
+      if (channelName != s"$customName-$neutralsCount") {
         val channelManager = neutralsTextChannel.getManager
-        channelManager.setName(s"$name-$neutralsCount").queue()
+        channelManager.setName(s"$customName-$neutralsCount").queue()
       }
       if (neutralsList.nonEmpty){
         updateMultiFields(neutralsList, neutralsTextChannel, "neutrals")
@@ -543,14 +540,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       // allow for custom channel names
       val channelName = enemiesTextChannel.getName()
       val extractName = pattern.findFirstMatchIn(channelName)
-      val (name, count) =
-        if (extractName.isDefined) {
-          val m = extractName.get
-          (m.group(1), m.group(2))
-        } else ("enemies", "")
-      if (channelName != s"$name-$enemiesCount") {
+      val customName = if (extractName.isDefined) {
+        val m = extractName.get
+        m.group(1)
+      } else "allies"
+      if (channelName != s"$customName-$enemiesCount") {
         val channelManager = enemiesTextChannel.getManager
-        channelManager.setName(s"$name-$enemiesCount").queue()
+        channelManager.setName(s"$customName-$enemiesCount").queue()
       }
       if (enemiesList.nonEmpty){
         updateMultiFields(enemiesList, enemiesTextChannel, "enemies")
