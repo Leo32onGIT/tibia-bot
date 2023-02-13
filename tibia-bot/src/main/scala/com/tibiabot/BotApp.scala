@@ -680,8 +680,9 @@ object BotApp extends App with StrictLogging {
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
-          charResponse.characters.character.name
-        }.map { playerName =>
+          val character = charResponse.characters.character
+          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        }.map { case (playerName, world, vocation, level) =>
           if (playerName != ""){
             if (!huntedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add player to hunted list and database
@@ -693,7 +694,7 @@ object BotApp extends App with StrictLogging {
               if (adminChannel != null){
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player **[${playerName}](${charUrl(playerName)})** to the hunted list.")
+                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation $level — **[${playerName}](${charUrl(playerName)})**\nto the hunted list for **$world**.")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -786,8 +787,9 @@ object BotApp extends App with StrictLogging {
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
-          charResponse.characters.character.name
-        }.map { playerName =>
+          val character = charResponse.characters.character
+          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        }.map { case (playerName, world, vocation, level) =>
           if (playerName != ""){
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
@@ -797,7 +799,7 @@ object BotApp extends App with StrictLogging {
               if (adminChannel != null){
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player **[${playerName}](${charUrl(playerName)})** to the allies list.")
+                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation $level — **[${playerName}](${charUrl(playerName)})**\nto the allies list for **$world**.")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -879,8 +881,9 @@ object BotApp extends App with StrictLogging {
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
-          charResponse.characters.character.name
-        }.map { playerName =>
+          val character = charResponse.characters.character
+          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        }.map { case (playerName, world, vocation, level) =>
           if (playerName != ""){
             playerString = s"[${playerName}](${charUrl(playerName)})"
           }
@@ -899,7 +902,7 @@ object BotApp extends App with StrictLogging {
           if (adminChannel != null){
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed player **$playerString** from the hunted list.")
+            adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation $level — **$playerString**\nfrom the hunted list for **$world**.")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -972,8 +975,9 @@ object BotApp extends App with StrictLogging {
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
-          charResponse.characters.character.name
-        }.map { playerName =>
+          val character = charResponse.characters.character
+          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        }.map { case (playerName, world, vocation, level) =>
           if (playerName != ""){
             playerString = s"[${playerName}](${charUrl(playerName)})"
           }
@@ -992,7 +996,7 @@ object BotApp extends App with StrictLogging {
           if (adminChannel != null){
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed **$playerString** from the allies list.")
+            adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation $level — **$playerString**\nfrom the allies list for **$world**.")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()

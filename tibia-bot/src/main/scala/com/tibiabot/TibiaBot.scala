@@ -345,10 +345,13 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
           val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
           futureResults.onComplete {
             case Success(output) => {
-              var huntedBuffer = ListBuffer[String]()
+              var huntedBuffer = ListBuffer[(String, String, String, Int)]()
               output.foreach { charResponse =>
                 val killerName = charResponse.characters.character.name
                 val killerGuild = charResponse.characters.character.guild
+                val killerWorld = charResponse.characters.character.world
+                val killerVocation = vocEmoji(charResponse)
+                val killerLevel = charResponse.characters.character.level.toInt
                 val killerGuildName = if(!(killerGuild.isEmpty)) killerGuild.head.name else ""
                 var guildCheck = true
                 if (killerGuildName != ""){
@@ -361,9 +364,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                     // char is already on ally/hunted lis
                   } else {
                     // char is not on hunted list
-                    if (!huntedBuffer.contains(killerName)){
+                    if (!huntedBuffer.exists(_._1 == killerName)){
                       // add them to hunted list
-                      huntedBuffer += killerName
+                      huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
                     }
                   }
                 }
@@ -372,7 +375,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               if (huntedBuffer.nonEmpty){
                 val adminTextChannel = guild.getTextChannelById(adminChannel)
                 if (adminTextChannel != null){
-                  huntedBuffer.foreach { player =>
+                  huntedBuffer.foreach { case (player, world, vocation, level) =>
                     val playerString = player.toLowerCase()
                     // add them to cached huntedPlayersData list
                     BotApp.huntedPlayersData = BotApp.huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: BotApp.huntedPlayersData.getOrElse(guildId, List())))
@@ -382,7 +385,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                     val commandUser = s"<@${BotApp.botUser}>"
                     val adminEmbed = new EmbedBuilder()
                     adminEmbed.setTitle(":robot: enemy automatically detected:")
-                    adminEmbed.setDescription(s"$commandUser added **[$player](${charUrl(player)})** to the hunted list.")
+                    adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
                     adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                     adminEmbed.setColor(14397256) // orange for bot auto command
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
