@@ -30,7 +30,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   case class CharKey(char: String, time: ZonedDateTime)
-  case class CurrentOnline(name: String, level: Int, vocation: String, guild: String)
+  case class CurrentOnline(name: String, level: Int, vocation: String, guild: String, time: ZonedDateTime, duration: Long = 0L, flag: String)
   case class CharDeath(char: CharacterResponse, death: Deaths)
   case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
 
@@ -67,19 +67,30 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   private lazy val getCharacterData = Flow[WorldResponse].mapAsync(1) { worldResponse =>
     val now = ZonedDateTime.now()
     val onlinePlayers: Option[List[OnlinePlayers]] = worldResponse.worlds.world.online_players
-    val online: List[String] = onlinePlayers match {
-      case Some(players) => players.map(_.name)
-      case None => List.empty[String]
+    val online: List[OnlinePlayers] = onlinePlayers match {
+      case Some(players) => players
+      case None => List.empty[OnlinePlayers]
     }
-    // getting online data
-    val onlineWithVocLvl = worldResponse.worlds.world.online_players match {
-      case Some(players) => players.map { player => (player.name, player.level.toInt, player.vocation, "") }
-      case None => List.empty[(String, Int, String, String)]
-    }
-    currentOnline.addAll(onlineWithVocLvl.map(i => CurrentOnline(i._1, i._2, i._3, i._4)))
 
-    recentOnline.filterInPlace(i => !online.contains(i.char)) // Remove existing online chars from the list...
-    recentOnline.addAll(online.map(i => CharKey(i, now))) // ...and add them again, with an updated online time
+    // get online data with durations
+    val onlineWithVocLvlAndDuration = online.map { player =>
+      currentOnline.find(_.name == player.name) match {
+        case Some(existingPlayer) =>
+          val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
+          CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
+        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
+      }
+    }
+
+    // Add online data to sets
+    currentOnline.clear()
+    currentOnline.addAll(onlineWithVocLvlAndDuration)
+
+    // Remove existing online chars from the list...
+    recentOnline.filterInPlace { i =>
+      !online.exists(player => player.name == i.char)
+    }
+    recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
     val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
     Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
@@ -135,16 +146,28 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               val showEnemiesAllies = List(Config.allyGuild, Config.enemy, Config.enemyGuild)
               // don't post level if showNeutrals is set to false and its a neutral level
               val levelsCheck = if (showNeutralLevels == "true") true else if (showNeutralLevels == "false" && showEnemiesAllies.contains(guildIcon)) true else false
-              if (levelsCheck) {
-                if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
-                  val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                    if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
-                      recentLevels += newCharLevel
-                      createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                    }
-                } else {
+              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
+                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
+                if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
                   recentLevels += newCharLevel
+                  if (levelsCheck) {
+                    createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                  }
+                  // add flag to onlineList if player has leveled
+                  currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+                    currentOnline -= onlinePlayer
+                    currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
+                  }
+                }
+              } else {
+                recentLevels += newCharLevel
+                if (levelsCheck) {
                   createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                }
+                // add flag to onlineList if player has leveled
+                currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+                  currentOnline -= onlinePlayer
+                  currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
                 }
               }
             }
@@ -166,8 +189,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     }
     // update online list every 5 minutes
     if (ZonedDateTime.now().isAfter(onlineListTimer.plusMinutes(5))) {
-      val currentOnlineList: List[(String, Int, String, String)] = currentOnline.map { onlinePlayer =>
-        (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild)
+      val currentOnlineList: List[(String, Int, String, String, ZonedDateTime, Long, String)] = currentOnline.map { onlinePlayer =>
+        (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
       }.toList
       // did the online list api call fail?
       if (currentOnlineList.size > 1){
@@ -463,7 +486,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     Future.successful()
   }.withAttributes(logAndResume)
 
-  private def onlineList(onlineData: List[(String, Int, String, String)]) {
+  private def onlineList(onlineData: List[(String, Int, String, String, ZonedDateTime, Long, String)]) {
 
     val vocationBuffers = ListMap(
       "druid" -> ListBuffer[(String, String)](),
@@ -485,7 +508,18 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         case _ => ""
       }
       //vocationBuffers(voc) += ((s"${player._4}", s"${player._4} **[${player._1}](${charUrl(player._1)})** — Level ${player._2.toString} $vocEmoji"))
-      vocationBuffers(voc) += ((s"${player._4}", s"$vocEmoji ${player._2.toString} — **[${player._1}](${charUrl(player._1)})** ${player._4}"))
+      val durationInSec = player._6
+      val durationInMin = durationInSec / 60
+      val durationStr = if (durationInMin >= 60) {
+        val hours = durationInMin / 60
+        val mins = durationInMin % 60
+        s"${hours}hr ${mins}min"
+      } else {
+        s"${durationInMin}min"
+      }
+      //val durationString = if (player._4 == Config.allyGuild || player._4 == Config.enemyGuild || player._4 == Config.enemy) s"— `${durationStr}`" else ""
+      val durationString = s"| `${durationStr}`"
+      vocationBuffers(voc) += ((s"${player._4}", s"$vocEmoji ${player._2.toString} — **[${player._1}](${charUrl(player._1)})** ${player._4} ${durationString} ${player._7}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
@@ -662,7 +696,6 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < recentLevelExpiry
     }
-    currentOnline.clear()
   }
 
   private def vocEmoji(char: CharacterResponse): String = {
