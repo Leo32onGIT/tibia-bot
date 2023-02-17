@@ -458,9 +458,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
         if (embed._6){ // if showNeutralDeaths == "true"
-          if (embed._2 != "fullbless"){ // regular death
-            deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
-          } else if (embed._2 == "nemesis"){
+          if (embed._2 == "nemesis"){
             deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
           } else if (embed._2 == "fullbless"){
             // send adjusted embed for fullblesses
@@ -471,6 +469,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
             } else {
               deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
             }
+          } else {
+            deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
           }
         }
       }
