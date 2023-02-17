@@ -618,7 +618,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       val customName = if (extractName.isDefined) {
         val m = extractName.get
         m.group(1)
-      } else "allies"
+      } else "enemies"
       if (channelName != s"$customName-$enemiesCount") {
         val channelManager = enemiesTextChannel.getManager
         channelManager.setName(s"$customName-$enemiesCount").queue()

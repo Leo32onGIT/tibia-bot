@@ -62,6 +62,7 @@ object BotApp extends App with StrictLogging {
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = jda.getSelfUser().getId()
+  val botName = jda.getSelfUser().getName()
 
   // initialize core hunted/allied list
   var huntedPlayersData: Map[String, List[Players]] = Map.empty
@@ -73,7 +74,7 @@ object BotApp extends App with StrictLogging {
   var worlds: List[String] = Config.worldList
 
   // create the command to set up the bot
-  val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be trackedt")
+  val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be tracked")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to track")
     .setRequired(true))
@@ -120,18 +121,18 @@ object BotApp extends App with StrictLogging {
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         ),
-      new SubcommandData("levels", "Show or hide neutral levels")
+      new SubcommandData("levels", "Show or hide hunted levels")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted levels?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         ),
-      new SubcommandData("deaths", "Show or hide neutral deaths")
+      new SubcommandData("deaths", "Show or hide hunted deaths")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted deaths?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
@@ -166,18 +167,18 @@ object BotApp extends App with StrictLogging {
       new SubcommandData("info", "Show detailed info on a allies player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
       ),
-      new SubcommandData("levels", "Show or hide neutral levels")
+      new SubcommandData("levels", "Show or hide ally levels")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         ),
-      new SubcommandData("deaths", "Show or hide neutral deaths")
+      new SubcommandData("deaths", "Show or hide ally deaths")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
@@ -1405,6 +1406,24 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
+  def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String) = {
+    val conn = getConnection(guild)
+    // update category if exists
+    if (adminCategory != ""){
+      val statement = conn.prepareStatement("UPDATE discord_info SET admin_category = ?;")
+      statement.setString(1, adminCategory)
+      val result = statement.executeUpdate()
+      statement.close()
+    }
+    // update channel
+    val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
+    statement.setString(1, adminChannel)
+    val result = statement.executeUpdate()
+    
+    statement.close()
+    conn.close()
+  }
+
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] = {
       val conn = getConnection(guild)
       val statement = conn.prepareStatement("SELECT * FROM worlds WHERE name = ?;")
@@ -1460,26 +1479,54 @@ object BotApp extends App with StrictLogging {
       // assume initial run on this server and attempt to create core databases
       createConfigDatabase(guild)
 
+      val botRole = guild.getRolesByName(botName, true).get(0)
+      val fullblessRoleString = s"$world Fullbless"
+      val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
+      val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
+
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty){
         val adminCategory = guild.createCategory("Violent Bot Administration").complete()
+        adminCategory.upsertPermissionOverride(botRole)
+          .grant(Permission.VIEW_CHANNEL)
+          .grant(Permission.MESSAGE_SEND)
+          .complete()
+        adminCategory.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.VIEW_CHANNEL).queue()
         val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
         // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
-        val botRole = guild.getSelfMember().getRoles()
-
-        botRole.forEach(role => {
-          adminChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          adminChannel.upsertPermissionOverride(role).grant(Permission.VIEW_CHANNEL).complete()
-        });
+        adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+        adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         adminChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.VIEW_CHANNEL).queue()
         discordCreateConfig(guild, guild.getName(), guild.getOwner().getEffectiveName(), adminCategory.getId(), adminChannel.getId(), "none", ZonedDateTime.now())
+      } else {
+        val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
+        val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
+        if (adminChannelCheck == null){
+          // admin channel has been deleted
+          if (adminCategoryCheck == null){
+            // admin category has been deleted
+            val adminCategory = guild.createCategory("Violent Bot Administration").complete()
+            adminCategory.upsertPermissionOverride(botRole)
+              .grant(Permission.VIEW_CHANNEL)
+              .grant(Permission.MESSAGE_SEND)
+              .complete()
+            adminCategory.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.VIEW_CHANNEL).queue()
+            val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            adminChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.VIEW_CHANNEL).queue()
+            discordUpdateConfig(guild, adminCategory.getId(), adminChannel.getId())
+          } else {
+            // admin category still exists
+            val adminChannel = guild.createTextChannel("bot-activity", adminCategoryCheck).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            adminChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.VIEW_CHANNEL).queue()
+            discordUpdateConfig(guild, "", adminChannel.getId())
+          }
+        }
       }
-
-      // Fullbless role
-      val fullblessRoleString = s"$world Fullbless"
-      val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
-      val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
 
       // get all categories in the discord
       val categories = guild.getCategories().asScala
@@ -1488,7 +1535,11 @@ object BotApp extends App with StrictLogging {
       if (targetCategory == null){
         // create the category
         val newCategory = guild.createCategory(world).complete()
-
+        newCategory.upsertPermissionOverride(botRole)
+          .grant(Permission.VIEW_CHANNEL)
+          .grant(Permission.MESSAGE_SEND)
+          .complete()
+        newCategory.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
         val alliesChannel = guild.createTextChannel("allies", newCategory).complete()
         val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
@@ -1497,6 +1548,18 @@ object BotApp extends App with StrictLogging {
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
         val fullblessChannel = guild.createTextChannel("fullbless-notifications", newCategory).complete()
         val nemesisChannel = guild.createTextChannel("boss-notifications", newCategory).complete()
+
+        val publicRole = guild.getPublicRole()
+        val channelList = List(alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, fullblessChannel, nemesisChannel)
+        channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
+          channel.upsertPermissionOverride(botRole)
+            .grant(Permission.VIEW_CHANNEL)
+            .grant(Permission.MESSAGE_SEND)
+            .complete()
+          channel.upsertPermissionOverride(publicRole)
+            .deny(Permission.MESSAGE_SEND)
+            .complete()
+        }
 
         val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId()}>\n\nIf an enemy player dies fullbless and is over level 250.\nAdd or remove yourself from the role using the buttons below."
         val fullblessEmbed = new EmbedBuilder()
@@ -1532,27 +1595,6 @@ object BotApp extends App with StrictLogging {
             Button.danger("remove", "Remove Role")
           )
           .queue()
-
-        // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
-        val botRole = guild.getSelfMember().getRoles()
-
-        botRole.forEach(role => {
-          alliesChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          enemiesChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          neutralsChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          levelsChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          deathsChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          fullblessChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-          nemesisChannel.upsertPermissionOverride(role).grant(Permission.MESSAGE_SEND).complete()
-        });
-
-        alliesChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        enemiesChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        neutralsChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        levelsChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        deathsChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        fullblessChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
-        nemesisChannel.upsertPermissionOverride(guild.getPublicRole()).deny(Permission.MESSAGE_SEND).complete()
 
         val alliesId = alliesChannel.getId()
         val enemiesId = enemiesChannel.getId()
@@ -1605,7 +1647,7 @@ object BotApp extends App with StrictLogging {
     if (detectSetting != null){
       if (detectSetting == settingOption){
         // embed reply
-        embedBuild.setDescription(s":x: Automatic enemy detection is already set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":x: **Automatic enemy detection** is already set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -1625,13 +1667,13 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set automatic enemy detection to **$settingOption** for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
 
-        embedBuild.setDescription(s":gear: Automatic enemy detection is now set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: **Automatic enemy detection** is now set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
@@ -1699,7 +1741,7 @@ object BotApp extends App with StrictLogging {
     if (selectedSetting.isDefined){
       if (selectedSetting.get == settingType){
         // embed reply
-        embedBuild.setDescription(s":x: The $channelType channel is already set to **$setting $playerType** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":x: The **$channelType** channel is already set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -1733,13 +1775,13 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the $channelType channel to **$setting $playerType*** for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
           adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
 
-        embedBuild.setDescription(s":gear: The $channelType channel is now set to **$setting $playerType** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: The **$channelType** channel is now set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
@@ -1758,10 +1800,9 @@ object BotApp extends App with StrictLogging {
       case _ => ""
     }
     val tableName = s"$tablePrefix$channelType"
-    val statement = conn.prepareStatement("UPDATE worlds SET ? = ? WHERE name = ?;")
-    statement.setString(1, tableName)
-    statement.setString(2, setting)
-    statement.setString(3, worldFormal)
+    val statement = conn.prepareStatement(s"UPDATE worlds SET $tableName = ? WHERE name = ?;")
+    statement.setString(1, setting)
+    statement.setString(2, worldFormal)
     val result = statement.executeUpdate()
 
     statement.close()
