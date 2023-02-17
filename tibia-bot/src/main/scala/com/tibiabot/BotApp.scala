@@ -39,7 +39,7 @@ object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String)
+  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, detectHunteds: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -110,6 +110,17 @@ object BotApp extends App with StrictLogging {
       new SubcommandData("list", "List players & guilds in the hunted list"),
       new SubcommandData("info", "Show detailed info on a hunted player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true))
+    )
+    .addSubcommands(
+      new SubcommandData("autodetect", "Configure the auto-detection on or off")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
+            .addChoices(
+              new Choice("on", "on"),
+              new Choice("off", "off")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        )
     );
 
   // allies command
@@ -1173,6 +1184,7 @@ object BotApp extends App with StrictLogging {
             |fullbless_level INT NOT NULL,
             |show_neutral_levels VARCHAR(255) NOT NULL,
             |show_neutral_deaths VARCHAR(255) NOT NULL,
+            |detect_hunteds VARCHAR(255) NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
 
@@ -1267,7 +1279,7 @@ object BotApp extends App with StrictLogging {
   def worldConfig(guild: Guild, query: String): List[Worlds] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths FROM $query")
+    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,detect_hunteds FROM $query")
 
     var results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -1275,7 +1287,8 @@ object BotApp extends App with StrictLogging {
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
       val showNeutralLevels = Option(result.getString("show_neutral_levels")).getOrElse("true")
       val showNeutralDeaths = Option(result.getString("show_neutral_deaths")).getOrElse("true")
-      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths)
+      val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
+      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, detectHunteds)
     }
 
     statement.close()
@@ -1283,9 +1296,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String) = {
+  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, detectHunteds: String) = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, detect_hunteds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, detect_hunteds = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1301,19 +1314,21 @@ object BotApp extends App with StrictLogging {
     statement.setInt(12, fullblessLevel)
     statement.setString(13, showNeutralLevels)
     statement.setString(14, showNeutralDeaths)
-    statement.setString(15, alliesChannel)
-    statement.setString(16, enemiesChannel)
-    statement.setString(17, neutralsChannels)
-    statement.setString(18, levelsChannel)
-    statement.setString(19, deathsChannel)
-    statement.setString(20, category)
-    statement.setString(21, fullblessRole)
-    statement.setString(22, nemesisRole)
-    statement.setString(23, fullblessChannel)
-    statement.setString(24, nemesisChannel)
-    statement.setInt(25, fullblessLevel)
-    statement.setString(26, showNeutralLevels)
-    statement.setString(27, showNeutralDeaths)
+    statement.setString(15, detectHunteds)
+    statement.setString(16, alliesChannel)
+    statement.setString(17, enemiesChannel)
+    statement.setString(18, neutralsChannels)
+    statement.setString(19, levelsChannel)
+    statement.setString(20, deathsChannel)
+    statement.setString(21, category)
+    statement.setString(22, fullblessRole)
+    statement.setString(23, nemesisRole)
+    statement.setString(24, fullblessChannel)
+    statement.setString(25, nemesisChannel)
+    statement.setInt(26, fullblessLevel)
+    statement.setString(27, showNeutralLevels)
+    statement.setString(28, showNeutralDeaths)
+    statement.setString(29, detectHunteds)
     val result = statement.executeUpdate()
 
     statement.close()
@@ -1358,6 +1373,7 @@ object BotApp extends App with StrictLogging {
           configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
           configMap += ("show_neutral_levels" -> result.getString("show_neutral_levels"))
           configMap += ("show_neutral_deaths" -> result.getString("show_neutral_deaths"))
+          configMap += ("detect_hunteds" -> result.getString("detect_hunteds"))
       }
       statement.close()
       conn.close()
@@ -1489,7 +1505,7 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId()
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true")
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true", "on")
         startBot(guild, Some(world))
         s":gear: The channels for **${world}** have been configured successfully."
       } else {
@@ -1514,6 +1530,67 @@ object BotApp extends App with StrictLogging {
         embed.getTitle.contains(title)
       )
     ).toList
+  }
+
+  def detectHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.get("world").getOrElse("")
+    val settingOption: String = options.get("option").getOrElse("")
+    val worldFormal = worldOption.toLowerCase().capitalize.trim
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
+    val detectSetting = cache.headOption.map(_.detectHunteds).getOrElse(null)
+    if (detectSetting != null){
+      if (detectSetting == settingOption){
+        // embed reply
+        embedBuild.setDescription(s":x: Automatic enemy detection is already set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == worldOption.toLowerCase()) {
+            w.copy(detectHunteds = settingOption)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        detectHuntedsToDatabase(guild, worldFormal, settingOption)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set automatic enemy detection to **$settingOption** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: Automatic enemy detection is now set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  def detectHuntedsToDatabase(guild: Guild, world: String, detectSetting: String) = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement("UPDATE worlds SET detect_hunteds = ? WHERE name = ?;")
+    statement.setString(1, detectSetting)
+    statement.setString(2, worldFormal)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
   }
 
   def deathsNeutrals(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {

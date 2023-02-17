@@ -363,60 +363,65 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
             }
           }
 
-          // scan exiva list for enemies to be added to hunted
-          val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
-          val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
-          futureResults.onComplete {
-            case Success(output) => {
-              var huntedBuffer = ListBuffer[(String, String, String, Int)]()
-              output.foreach { charResponse =>
-                val killerName = charResponse.characters.character.name
-                val killerGuild = charResponse.characters.character.guild
-                val killerWorld = charResponse.characters.character.world
-                val killerVocation = vocEmoji(charResponse)
-                val killerLevel = charResponse.characters.character.level.toInt
-                val killerGuildName = if(!(killerGuild.isEmpty)) killerGuild.head.name else ""
-                var guildCheck = true
-                if (killerGuildName != ""){
-                  if (BotApp.alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase()) || BotApp.huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase())){
-                    guildCheck = false // player guild is already ally/hunted
+          // see if detectHunted is toggled on or off
+          val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
+          if (detectHunteds == "on"){
+            // scan exiva list for enemies to be added to hunted
+            val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+            val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
+            futureResults.onComplete {
+              case Success(output) => {
+                var huntedBuffer = ListBuffer[(String, String, String, Int)]()
+                output.foreach { charResponse =>
+                  val killerName = charResponse.characters.character.name
+                  val killerGuild = charResponse.characters.character.guild
+                  val killerWorld = charResponse.characters.character.world
+                  val killerVocation = vocEmoji(charResponse)
+                  val killerLevel = charResponse.characters.character.level.toInt
+                  val killerGuildName = if(!(killerGuild.isEmpty)) killerGuild.head.name else ""
+                  var guildCheck = true
+                  if (killerGuildName != ""){
+                    if (BotApp.alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase()) || BotApp.huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase())){
+                      guildCheck = false // player guild is already ally/hunted
+                    }
+                  }
+                  if (guildCheck == true){ // player is not in a guild or is in a guild that is not tracked
+                    if (BotApp.alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase()) || BotApp.huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase())){
+                      // char is already on ally/hunted lis
+                    } else {
+                      // char is not on hunted list
+                      if (!huntedBuffer.exists(_._1 == killerName)){
+                        // add them to hunted list
+                        huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+                      }
+                    }
                   }
                 }
-                if (guildCheck == true){ // player is not in a guild or is in a guild that is not tracked
-                  if (BotApp.alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase()) || BotApp.huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase())){
-                    // char is already on ally/hunted lis
-                  } else {
-                    // char is not on hunted list
-                    if (!huntedBuffer.exists(_._1 == killerName)){
-                      // add them to hunted list
-                      huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+
+                // process the new batch of players to add to hunted list
+                if (huntedBuffer.nonEmpty){
+                  val adminTextChannel = guild.getTextChannelById(adminChannel)
+                  if (adminTextChannel != null){
+                    huntedBuffer.foreach { case (player, world, vocation, level) =>
+                      val playerString = player.toLowerCase()
+                      // add them to cached huntedPlayersData list
+                      BotApp.huntedPlayersData = BotApp.huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: BotApp.huntedPlayersData.getOrElse(guildId, List())))
+                      // add them to the database
+                      BotApp.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
+                      // send embed to admin channel
+                      val commandUser = s"<@${BotApp.botUser}>"
+                      val adminEmbed = new EmbedBuilder()
+                      adminEmbed.setTitle(":robot: enemy automatically detected:")
+                      adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
+                      adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                      adminEmbed.setColor(14397256) // orange for bot auto command
+                      adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                     }
                   }
                 }
               }
-              // process the new batch of players to add to hunted list
-              if (huntedBuffer.nonEmpty){
-                val adminTextChannel = guild.getTextChannelById(adminChannel)
-                if (adminTextChannel != null){
-                  huntedBuffer.foreach { case (player, world, vocation, level) =>
-                    val playerString = player.toLowerCase()
-                    // add them to cached huntedPlayersData list
-                    BotApp.huntedPlayersData = BotApp.huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: BotApp.huntedPlayersData.getOrElse(guildId, List())))
-                    // add them to the database
-                    BotApp.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: enemy automatically detected:")
-                    adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
-                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                  }
-                }
-              }
+              case Failure(e) => e.printStackTrace
             }
-            case Failure(e) => e.printStackTrace
           }
         }
 

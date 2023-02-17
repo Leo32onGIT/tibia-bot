@@ -162,6 +162,10 @@ class BotListener extends ListenerAdapter {
             val embed = BotApp.infoHunted(event, "player", nameOption)
             event.getHook().sendMessageEmbeds(embed).queue()
           }
+          case "autodetect" => {
+            val embed = BotApp.detectHunted(event)
+            event.getHook().sendMessageEmbeds(embed).queue()
+          }
         }
       }
     }
