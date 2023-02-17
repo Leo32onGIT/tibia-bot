@@ -166,15 +166,6 @@ object BotApp extends App with StrictLogging {
       new SubcommandData("info", "Show detailed info on a allies player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
       ),
-      new SubcommandData("autodetect", "Configure the auto-detection on or off")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
-            .addChoices(
-              new Choice("on", "on"),
-              new Choice("off", "off")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
       new SubcommandData("levels", "Show or hide neutral levels")
         .addOptions(
           new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
