@@ -22,7 +22,7 @@ class BotListener extends ListenerAdapter {
         handleHunted(event)
       case "allies" =>
         handleAllies(event)
-      case "neutrals" =>
+      case "neutral" =>
         handleNeutrals(event)
       case "fullbless" =>
         handleFullbless(event)
@@ -99,190 +99,186 @@ class BotListener extends ListenerAdapter {
 
   private def handleHunted(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    val subCommandGroup = event.getInteraction.getSubcommandGroup
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val toggleOption: String = options.get("option").getOrElse("")
+    val worldOption: String = options.get("world").getOrElse("")
     val nameOption: String = options.get("name").getOrElse("")
     val reasonOption: String = options.get("reason").getOrElse("none")
 
-    subCommandGroup match {
+    subCommand match {
       case "player" => {
-        subCommand match {
-          case "add" => {
-            BotApp.addHunted(event, "player", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case "remove" => {
-            BotApp.removeHunted(event, "player", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for player group.").build()
+        if (toggleOption == "add"){
+          BotApp.addHunted(event, "player", nameOption, reasonOption, (embed) => {
             event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          })
+        } else if (toggleOption == "remove"){
+          BotApp.removeHunted(event, "player", nameOption, reasonOption, (embed) => {
+            event.getHook().sendMessageEmbeds(embed).queue()
+          })
         }
       }
       case "guild" => {
-        subCommand match {
-          case "add" => {
-            BotApp.addHunted(event, "guild", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case "remove" => {
-            BotApp.removeHunted(event, "guild", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for guild group.").build()
+        if (toggleOption == "add"){
+          BotApp.addHunted(event, "guild", nameOption, reasonOption, (embed) => {
             event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          })
+        } else if (toggleOption == "remove"){
+          BotApp.removeHunted(event, "guild", nameOption, reasonOption, (embed) => {
+            event.getHook().sendMessageEmbeds(embed).queue()
+          })
         }
       }
-      case _ => {
-        subCommand match {
-          case "list" => {
-            BotApp.listAlliesAndHuntedGuilds(event, "hunted", (hunteds) => {
-              val embedsJava = hunteds.asJava
-              embedsJava.forEach { embed =>
-                event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
-              }
-              BotApp.listAlliesAndHuntedPlayers(event, "hunted", (hunteds) => {
-                val embedsJava = hunteds.asJava
-                embedsJava.forEach { embed =>
-                  event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
-                }
-              })
-            })
+      case "list" => {
+        BotApp.listAlliesAndHuntedGuilds(event, "hunted", (hunteds) => {
+          val embedsJava = hunteds.asJava
+          embedsJava.forEach { embed =>
+            event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
           }
-          case "info" => {
-            val embed = BotApp.infoHunted(event, "player", nameOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
-          case "autodetect" => {
-            val embed = BotApp.detectHunted(event)
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          BotApp.listAlliesAndHuntedPlayers(event, "hunted", (hunteds) => {
+            val embedsJava = hunteds.asJava
+            embedsJava.forEach { embed =>
+              event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+            }
+          })
+        })
+      }
+      case "deaths" => {
+        if (toggleOption == "show"){
+          val embed = BotApp.deathsEnemies(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.deathsEnemies(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
         }
+      }
+      case "levels" => {
+        if (toggleOption == "show"){
+          val embed = BotApp.levelsEnemies(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.levelsEnemies(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        }
+      }
+      case "info" => {
+        val embed = BotApp.infoHunted(event, "player", nameOption)
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+      case "autodetect" => {
+        val embed = BotApp.detectHunted(event)
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+      case _ => {
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/hunted`.").build()
+        event.getHook().sendMessageEmbeds(embed).queue()
       }
     }
   }
 
   private def handleAllies(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    val subCommandGroup = event.getInteraction.getSubcommandGroup
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val toggleOption: String = options.get("option").getOrElse("")
     val nameOption: String = options.get("name").getOrElse("")
     val reasonOption: String = options.get("reason").getOrElse("none")
+    val worldOption: String = options.get("world").getOrElse("")
 
-    subCommandGroup match {
+    subCommand match {
       case "player" => {
-        subCommand match {
-          case "add" => {
-            BotApp.addAlly(event, "player", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case "remove" => {
-            BotApp.removeAlly(event, "player", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for player group.").build()
+        if (toggleOption == "add"){
+          BotApp.addAlly(event, "player", nameOption, reasonOption, (embed) => {
             event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          })
+        } else if (toggleOption == "remove") {
+          BotApp.removeAlly(event, "player", nameOption, reasonOption, (embed) => {
+            event.getHook().sendMessageEmbeds(embed).queue()
+          })
         }
       }
       case "guild" => {
-        subCommand match {
-          case "add" => {
-            BotApp.addAlly(event, "guild", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case "remove" => {
-            BotApp.removeAlly(event, "guild", nameOption, reasonOption, (embed) => {
-              event.getHook().sendMessageEmbeds(embed).queue()
-            })
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for guild group.").build()
+        if (toggleOption == "add"){
+          BotApp.addAlly(event, "guild", nameOption, reasonOption, (embed) => {
             event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          })
+        } else if (toggleOption == "remove") {
+          BotApp.removeAlly(event, "guild", nameOption, reasonOption, (embed) => {
+            event.getHook().sendMessageEmbeds(embed).queue()
+          })
         }
       }
-      case _ => {
-        subCommand match {
-          case "list" => {
-            BotApp.listAlliesAndHuntedGuilds(event, "allies", (allies) => {
-              val embedsJava = allies.asJava
-              embedsJava.forEach { embed =>
-                event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
-              }
-              BotApp.listAlliesAndHuntedPlayers(event, "allies", (allies) => {
-                val embedsJava = allies.asJava
-                embedsJava.forEach { embed =>
-                  event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
-                }
-              })
-            })
+      case "list" => {
+        BotApp.listAlliesAndHuntedGuilds(event, "allies", (allies) => {
+          val embedsJava = allies.asJava
+          embedsJava.forEach { embed =>
+            event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
           }
-          case "info" => {
-            val embed = BotApp.infoAllies(event, "player", nameOption)
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
+          BotApp.listAlliesAndHuntedPlayers(event, "allies", (allies) => {
+            val embedsJava = allies.asJava
+            embedsJava.forEach { embed =>
+              event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+            }
+          })
+        })
+      }
+      case "deaths" => {
+        if (toggleOption == "show"){
+          val embed = BotApp.deathsAllies(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.deathsAllies(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
         }
+      }
+      case "levels" => {
+        if (toggleOption == "show"){
+          val embed = BotApp.levelsAllies(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.levelsAllies(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        }
+      }
+      case "info" => {
+        val embed = BotApp.infoAllies(event, "player", nameOption)
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+      case _ => {
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/allies`.").build()
+        event.getHook().sendMessageEmbeds(embed).queue()
       }
     }
   }
 
   private def handleNeutrals(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    val subCommandGroup = event.getInteraction.getSubcommandGroup
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val toggleOption: String = options.get("option").getOrElse("")
     val worldOption: String = options.get("world").getOrElse("")
 
-    subCommandGroup match {
+    subCommand match {
       case "deaths" => {
-        subCommand match {
-          case "show" => {
-            val embed = BotApp.deathsNeutrals(event, worldOption, "show")
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
-          case "hide" => {
-            val embed = BotApp.deathsNeutrals(event, worldOption, "hide")
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}'.").build()
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
+        if (toggleOption == "show"){
+          val embed = BotApp.deathsNeutrals(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.deathsNeutrals(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
       case "levels" => {
-        subCommand match {
-          case "show" => {
-            val embed = BotApp.levelsNeutrals(event, worldOption, "show")
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
-          case "hide" => {
-            val embed = BotApp.levelsNeutrals(event, worldOption, "hide")
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
-          case _ => {
-            val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}'.").build()
-            event.getHook().sendMessageEmbeds(embed).queue()
-          }
+        if (toggleOption == "show"){
+          val embed = BotApp.levelsNeutrals(event, worldOption, "show")
+          event.getHook().sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "hide"){
+          val embed = BotApp.levelsNeutrals(event, worldOption, "hide")
+          event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
       case _ => {
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subCommandGroup '${subCommandGroup}'.").build()
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/neutral`.").build()
         event.getHook().sendMessageEmbeds(embed).queue()
       }
     }

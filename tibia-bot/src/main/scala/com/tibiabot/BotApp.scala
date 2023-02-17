@@ -39,7 +39,7 @@ object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, detectHunteds: String)
+  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -87,31 +87,30 @@ object BotApp extends App with StrictLogging {
   // hunted command
   val huntedCommand: SlashCommandData = Commands.slash("hunted", "Manage the hunted list")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommandGroups(
-      new SubcommandGroupData("guild", "Manage guilds in the hunted list")
-        .addSubcommands(
-          new SubcommandData("add", "Add a guild to the hunted list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The guild name you want to add to the hunted list").setRequired(true)),
-          new SubcommandData("remove", "Remove a guild from the hunted list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The guild you want to remove from the hunted list").setRequired(true))
-        ),
-      new SubcommandGroupData("player", "Manage players in the hunted list")
-        .addSubcommands(
-          new SubcommandData("add", "Add a player to the hunted list")
-            .addOptions(
-              new OptionData(OptionType.STRING, "name", "The player name you want to add to the hunted list").setRequired(true),
-              new OptionData(OptionType.STRING, "reason", "Optional 'reason' that can be viewed later on"),
-            ),
-          new SubcommandData("remove", "Remove a player from the hunted list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The player you want to remove from the hunted list").setRequired(true))
-        ),
-      )
     .addSubcommands(
+      new SubcommandData("guild", "Manage guilds in the hunted list")
+      .addOptions(
+        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
+          .addChoices(
+            new Choice("add", "add"),
+            new Choice("remove", "remove")
+          ),
+        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the hunted list").setRequired(true)
+        ),
+      new SubcommandData("player", "Manage players in the hunted list")
+      .addOptions(
+        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
+          .addChoices(
+            new Choice("add", "add"),
+            new Choice("remove", "remove")
+          ),
+        new OptionData(OptionType.STRING, "name", "The player name you want to add to the hunted list").setRequired(true),
+        new OptionData(OptionType.STRING, "reason", "You can add a reason when players are added to the hunted list")
+        ),
       new SubcommandData("list", "List players & guilds in the hunted list"),
       new SubcommandData("info", "Show detailed info on a hunted player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true))
-    )
-    .addSubcommands(
+        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
+      ),
       new SubcommandData("autodetect", "Configure the auto-detection on or off")
         .addOptions(
           new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
@@ -120,55 +119,104 @@ object BotApp extends App with StrictLogging {
               new Choice("off", "off")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("levels", "Show or hide neutral levels")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("deaths", "Show or hide neutral deaths")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         )
-    );
+      );
 
   // allies command
   val alliesCommand: SlashCommandData = Commands.slash("allies", "Manage the allies list")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommandGroups(
-      new SubcommandGroupData("guild", "Manage guilds in the allies list")
-        .addSubcommands(
-          new SubcommandData("add", "Add a guild to the allies list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The guild name you want to add to the allies list").setRequired(true)),
-          new SubcommandData("remove", "Remove a guild from the allies list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The guild you want to remove from the allies list").setRequired(true))
-        ),
-      new SubcommandGroupData("player", "Manage players in the allies list")
-        .addSubcommands(
-          new SubcommandData("add", "Add a player to the allies list")
-            .addOptions(
-              new OptionData(OptionType.STRING, "name", "The player name you want to add to the allies list").setRequired(true),
-              new OptionData(OptionType.STRING, "reason", "Optional 'reason' that can be viewed later on"),
-            ),
-          new SubcommandData("remove", "Remove a player from the allies list")
-            .addOptions(new OptionData(OptionType.STRING, "name", "The player you want to remove from the allies list").setRequired(true))
-        ),
-      )
     .addSubcommands(
+      new SubcommandData("guild", "Manage guilds in the allies list")
+      .addOptions(
+        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
+          .addChoices(
+            new Choice("add", "add"),
+            new Choice("remove", "remove")
+          ),
+        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the allies list").setRequired(true)
+        ),
+      new SubcommandData("player", "Manage players in the allies list")
+      .addOptions(
+        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
+          .addChoices(
+            new Choice("add", "add"),
+            new Choice("remove", "remove")
+          ),
+        new OptionData(OptionType.STRING, "name", "The player name you want to add to the allies list").setRequired(true)
+        ),
       new SubcommandData("list", "List players & guilds in the allies list"),
       new SubcommandData("info", "Show detailed info on a allies player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true))
-    );
+        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
+      ),
+      new SubcommandData("autodetect", "Configure the auto-detection on or off")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
+            .addChoices(
+              new Choice("on", "on"),
+              new Choice("off", "off")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("levels", "Show or hide neutral levels")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("deaths", "Show or hide neutral deaths")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        )
+      );
 
   // neutrals command
-  val neutralsCommand: SlashCommandData = Commands.slash("neutrals", "Show or hide neutral level or deaths entries")
+  val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Show or hide neutral level or deaths entries")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommandGroups(
-      new SubcommandGroupData("levels", "Show or hide neutral levels")
-        .addSubcommands(
-          new SubcommandData("show", "Show neutral entries")
-            .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)),
-          new SubcommandData("hide", "Hide neutral entries")
-            .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true))
+    .addSubcommands(
+      new SubcommandData("levels", "Show or hide neutral levels")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         ),
-      new SubcommandGroupData("deaths", "Show or hide neutral deaths")
-        .addSubcommands(
-          new SubcommandData("show", "Show neutral entries")
-            .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)),
-          new SubcommandData("hide", "Hide neutral entries")
-            .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true))
-        ),
+      new SubcommandData("deaths", "Show or hide neutral deaths")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        )
     );
 
   // fullbless command
@@ -1184,6 +1232,10 @@ object BotApp extends App with StrictLogging {
             |fullbless_level INT NOT NULL,
             |show_neutral_levels VARCHAR(255) NOT NULL,
             |show_neutral_deaths VARCHAR(255) NOT NULL,
+            |show_allies_levels VARCHAR(255) NOT NULL,
+            |show_allies_deaths VARCHAR(255) NOT NULL,
+            |show_enemies_levels VARCHAR(255) NOT NULL,
+            |show_enemies_deaths VARCHAR(255) NOT NULL,
             |detect_hunteds VARCHAR(255) NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
@@ -1279,7 +1331,7 @@ object BotApp extends App with StrictLogging {
   def worldConfig(guild: Guild, query: String): List[Worlds] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,detect_hunteds FROM $query")
+    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds FROM $query")
 
     var results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -1287,8 +1339,12 @@ object BotApp extends App with StrictLogging {
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
       val showNeutralLevels = Option(result.getString("show_neutral_levels")).getOrElse("true")
       val showNeutralDeaths = Option(result.getString("show_neutral_deaths")).getOrElse("true")
+      val showAlliesLevels = Option(result.getString("show_allies_levels")).getOrElse("true")
+      val showAlliesDeaths = Option(result.getString("show_allies_deaths")).getOrElse("true")
+      val showEnemiesLevels = Option(result.getString("show_enemies_levels")).getOrElse("true")
+      val showEnemiesDeaths = Option(result.getString("show_enemies_deaths")).getOrElse("true")
       val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
-      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, detectHunteds)
+      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds)
     }
 
     statement.close()
@@ -1296,9 +1352,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, detectHunteds: String) = {
+  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String) = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, detect_hunteds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, detect_hunteds = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1314,21 +1370,29 @@ object BotApp extends App with StrictLogging {
     statement.setInt(12, fullblessLevel)
     statement.setString(13, showNeutralLevels)
     statement.setString(14, showNeutralDeaths)
-    statement.setString(15, detectHunteds)
-    statement.setString(16, alliesChannel)
-    statement.setString(17, enemiesChannel)
-    statement.setString(18, neutralsChannels)
-    statement.setString(19, levelsChannel)
-    statement.setString(20, deathsChannel)
-    statement.setString(21, category)
-    statement.setString(22, fullblessRole)
-    statement.setString(23, nemesisRole)
-    statement.setString(24, fullblessChannel)
-    statement.setString(25, nemesisChannel)
-    statement.setInt(26, fullblessLevel)
-    statement.setString(27, showNeutralLevels)
-    statement.setString(28, showNeutralDeaths)
-    statement.setString(29, detectHunteds)
+    statement.setString(15, showAlliesLevels)
+    statement.setString(16, showAlliesDeaths)
+    statement.setString(17, showEnemiesLevels)
+    statement.setString(18, showEnemiesDeaths)
+    statement.setString(19, detectHunteds)
+    statement.setString(20, alliesChannel)
+    statement.setString(21, enemiesChannel)
+    statement.setString(22, neutralsChannels)
+    statement.setString(23, levelsChannel)
+    statement.setString(24, deathsChannel)
+    statement.setString(25, category)
+    statement.setString(26, fullblessRole)
+    statement.setString(27, nemesisRole)
+    statement.setString(28, fullblessChannel)
+    statement.setString(29, nemesisChannel)
+    statement.setInt(30, fullblessLevel)
+    statement.setString(31, showNeutralLevels)
+    statement.setString(32, showNeutralDeaths)
+    statement.setString(33, showAlliesLevels)
+    statement.setString(34, showAlliesDeaths)
+    statement.setString(35, showEnemiesLevels)
+    statement.setString(36, showEnemiesDeaths)
+    statement.setString(37, detectHunteds)
     val result = statement.executeUpdate()
 
     statement.close()
@@ -1373,6 +1437,10 @@ object BotApp extends App with StrictLogging {
           configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
           configMap += ("show_neutral_levels" -> result.getString("show_neutral_levels"))
           configMap += ("show_neutral_deaths" -> result.getString("show_neutral_deaths"))
+          configMap += ("show_allies_levels" -> result.getString("show_allies_levels"))
+          configMap += ("show_allies_deaths" -> result.getString("show_allies_deaths"))
+          configMap += ("show_enemies_levels" -> result.getString("show_enemies_levels"))
+          configMap += ("show_enemies_deaths" -> result.getString("show_enemies_deaths"))
           configMap += ("detect_hunteds" -> result.getString("detect_hunteds"))
       }
       statement.close()
@@ -1505,7 +1573,7 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId()
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true", "on")
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true", "true", "true", "true", "true", "on")
         startBot(guild, Some(world))
         s":gear: The channels for **${world}** have been configured successfully."
       } else {
@@ -1652,6 +1720,124 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
+  def deathsAllies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    val settingType = if (setting == "show") "true" else "false"
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val neutralSetting = cache.headOption.map(_.showAlliesDeaths).getOrElse(null)
+    if (neutralSetting != null){
+      if (neutralSetting == settingType){
+        // embed reply
+        embedBuild.setDescription(s":x: The deaths channel is already set to **$setting allies** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            w.copy(showAlliesDeaths = settingType)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        deathsAlliesToDatabase(guild, world, settingType)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set the deaths channel to **$setting allies** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The deaths channel is now set to **$setting allies** for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  def deathsAlliesToDatabase(guild: Guild, world: String, setting: String) = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement("UPDATE worlds SET show_allies_deaths = ? WHERE name = ?;")
+    statement.setString(1, setting)
+    statement.setString(2, worldFormal)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def deathsEnemies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    val settingType = if (setting == "show") "true" else "false"
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val neutralSetting = cache.headOption.map(_.showEnemiesDeaths).getOrElse(null)
+    if (neutralSetting != null){
+      if (neutralSetting == settingType){
+        // embed reply
+        embedBuild.setDescription(s":x: The deaths channel is already set to **$setting enemies** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            w.copy(showEnemiesDeaths = settingType)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        deathsEnemiesToDatabase(guild, world, settingType)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set the deaths channel to **$setting enemies** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The deaths channel is now set to **$setting enemies** for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  def deathsEnemiesToDatabase(guild: Guild, world: String, setting: String) = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement("UPDATE worlds SET show_enemies_deaths = ? WHERE name = ?;")
+    statement.setString(1, setting)
+    statement.setString(2, worldFormal)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
   def levelsNeutrals(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
     val worldFormal = world.toLowerCase().capitalize
     val guild = event.getGuild()
@@ -1703,6 +1889,124 @@ object BotApp extends App with StrictLogging {
     val worldFormal = world.toLowerCase().capitalize
     val conn = getConnection(guild)
     val statement = conn.prepareStatement("UPDATE worlds SET show_neutral_levels = ? WHERE name = ?;")
+    statement.setString(1, neutralSetting)
+    statement.setString(2, worldFormal)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def levelsAllies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    val settingType = if (setting == "show") "true" else "false"
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val neutralSetting = cache.headOption.map(_.showAlliesLevels).getOrElse(null)
+    if (neutralSetting != null){
+      if (neutralSetting == settingType){
+        // embed reply
+        embedBuild.setDescription(s":x: The levels channel is already set to **$setting allies** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            w.copy(showAlliesLevels = settingType)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        levelsAlliesToDatabase(guild, world, settingType)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set the levels channel to **$setting allies** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The levels channel is now set to **$setting allies** for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  def levelsAlliesToDatabase(guild: Guild, world: String, neutralSetting: String) = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement("UPDATE worlds SET show_allies_levels = ? WHERE name = ?;")
+    statement.setString(1, neutralSetting)
+    statement.setString(2, worldFormal)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def levelsEnemies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    val settingType = if (setting == "show") "true" else "false"
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val neutralSetting = cache.headOption.map(_.showEnemiesLevels).getOrElse(null)
+    if (neutralSetting != null){
+      if (neutralSetting == settingType){
+        // embed reply
+        embedBuild.setDescription(s":x: The levels channel is already set to **$setting enemies** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            w.copy(showEnemiesLevels = settingType)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        levelsEnemiesToDatabase(guild, world, settingType)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set the levels channel to **$setting enemies** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The levels channel is now set to **$setting enemies** for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  def levelsEnemiesToDatabase(guild: Guild, world: String, neutralSetting: String) = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement("UPDATE worlds SET show_enemies_levels = ? WHERE name = ?;")
     statement.setString(1, neutralSetting)
     statement.setString(2, worldFormal)
     val result = statement.executeUpdate()

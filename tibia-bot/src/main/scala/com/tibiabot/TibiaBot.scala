@@ -143,9 +143,22 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               // check show_neutrals_levels setting
               val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
               val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
-              val showEnemiesAllies = List(Config.allyGuild, Config.enemy, Config.enemyGuild)
+              val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
+              val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
+              val enemyIcons = List(Config.enemy, Config.enemyGuild)
+              val alliesIcons = List(Config.allyGuild)
+              val neutralIcons = List(Config.otherGuild, "")
               // don't post level if showNeutrals is set to false and its a neutral level
-              val levelsCheck = if (showNeutralLevels == "true") true else if (showNeutralLevels == "false" && showEnemiesAllies.contains(guildIcon)) true else false
+              val levelsCheck =
+                if (showNeutralLevels == "false" && neutralIcons.contains(guildIcon)) {
+                  false
+                } else if (showAlliesLevels == "false" && alliesIcons.contains(guildIcon)){
+                  false
+                } else if (showEnemiesLevels == "false" && enemyIcons.contains(guildIcon)){
+                  false
+                } else {
+                  true
+                }
               if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
                 val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
                 if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
@@ -454,9 +467,19 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         }
 
         val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
+        val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
+        val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
         var embedCheck = true
         if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237){
           if(showNeutralDeaths == "false"){
+            embedCheck = false
+          }
+        } else if (embedColor == 36941){
+          if(showEnemiesDeaths == "false"){
+            embedCheck = false
+          }
+        } else if (embedColor == 13773097){
+          if(showAlliesDeaths == "false"){
             embedCheck = false
           }
         }
