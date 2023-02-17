@@ -145,19 +145,19 @@ class BotListener extends ListenerAdapter {
       }
       case "deaths" => {
         if (toggleOption == "show"){
-          val embed = BotApp.deathsEnemies(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.deathsEnemies(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
       case "levels" => {
         if (toggleOption == "show"){
-          val embed = BotApp.levelsEnemies(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.levelsEnemies(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
@@ -224,19 +224,19 @@ class BotListener extends ListenerAdapter {
       }
       case "deaths" => {
         if (toggleOption == "show"){
-          val embed = BotApp.deathsAllies(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.deathsAllies(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
       case "levels" => {
         if (toggleOption == "show"){
-          val embed = BotApp.levelsAllies(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.levelsAllies(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
@@ -261,19 +261,19 @@ class BotListener extends ListenerAdapter {
     subCommand match {
       case "deaths" => {
         if (toggleOption == "show"){
-          val embed = BotApp.deathsNeutrals(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.deathsNeutrals(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "deaths")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }
       case "levels" => {
         if (toggleOption == "show"){
-          val embed = BotApp.levelsNeutrals(event, worldOption, "show")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
-          val embed = BotApp.levelsNeutrals(event, worldOption, "hide")
+          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "levels")
           event.getHook().sendMessageEmbeds(embed).queue()
         }
       }

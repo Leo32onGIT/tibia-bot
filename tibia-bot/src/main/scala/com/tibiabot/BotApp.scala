@@ -1652,31 +1652,80 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  def deathsNeutrals(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+  def deathsLevelsHideShow(event: SlashCommandInteractionEvent, world: String, setting: String, playerType: String, channelType: String): MessageEmbed = {
     val worldFormal = world.toLowerCase().capitalize
     val guild = event.getGuild()
     val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
     val settingType = if (setting == "show") "true" else "false"
+    val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
+    val thumbnailIcon = playerType match {
+      case "allies"   => "Angel_Statue"
+      case "neutrals" => "Guardian_Statue"
+      case "enemies"  => "Stone_Coffin"
+      case _          => ""
+    }
     val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showNeutralDeaths).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
+    val selectedSetting: Option[String] = playerType match {
+      case "allies" => {
+        if (channelType == "deaths"){
+          cache.headOption.map(_.showAlliesDeaths)
+        } else if (channelType == "levels"){
+          cache.headOption.map(_.showAlliesLevels)
+        } else {
+          None
+        }
+      }
+      case "neutrals" => {
+        if (channelType == "deaths"){
+          cache.headOption.map(_.showNeutralDeaths)
+        } else if (channelType == "levels"){
+          cache.headOption.map(_.showNeutralLevels)
+        } else {
+          None
+        }
+      }
+      case "enemies" => {
+        if (channelType == "deaths"){
+          cache.headOption.map(_.showEnemiesDeaths)
+        } else if (channelType == "levels"){
+          cache.headOption.map(_.showEnemiesLevels)
+        } else {
+          None
+        }
+      }
+      case _ => None
+    }
+    if (selectedSetting.isDefined){
+      if (selectedSetting.get == settingType){
         // embed reply
-        embedBuild.setDescription(s":x: The deaths channel is already set to **$setting neutrals** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":x: The $channelType channel is already set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
         val modifiedWorlds = worldsData(guild.getId()).map { w =>
           if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showNeutralDeaths = settingType)
+            playerType match {
+              case "allies" =>
+                if (channelType == "deaths") w.copy(showAlliesDeaths = settingType)
+                else if (channelType == "levels") w.copy(showAlliesLevels = settingType)
+                else w
+              case "neutrals" =>
+                if (channelType == "deaths") w.copy(showNeutralDeaths = settingType)
+                else if (channelType == "levels") w.copy(showNeutralLevels = settingType)
+                else w
+              case "enemies" =>
+                if (channelType == "deaths") w.copy(showEnemiesDeaths = settingType)
+                else if (channelType == "levels") w.copy(showEnemiesLevels = settingType)
+                else w
+              case _ => w
+            }
           } else {
             w
           }
         }
         worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        deathsNeutralsToDatabase(guild, world, settingType)
+        deathsLevelsHideShowToDatabase(guild, world, settingType, playerType, channelType)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
@@ -1684,13 +1733,13 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the deaths channel to **$setting neutrals** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Guardian_Statue.gif")
+          adminEmbed.setDescription(s"<@$commandUser> set the $channelType channel to **$setting $playerType*** for the world **$worldFormal**.")
+          adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
 
-        embedBuild.setDescription(s":gear: The deaths channel is now set to **$setting neutrals** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: The $channelType channel is now set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
@@ -1699,307 +1748,20 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def deathsNeutralsToDatabase(guild: Guild, world: String, neutralSetting: String) = {
+  def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String) = {
     val worldFormal = world.toLowerCase().capitalize
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_neutral_deaths = ? WHERE name = ?;")
-    statement.setString(1, neutralSetting)
-    statement.setString(2, worldFormal)
-    val result = statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  def deathsAllies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
-    val guild = event.getGuild()
-    val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
-    val settingType = if (setting == "show") "true" else "false"
-    embedBuild.setColor(3092790)
-    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showAlliesDeaths).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
-        // embed reply
-        embedBuild.setDescription(s":x: The deaths channel is already set to **$setting allies** for the world **$worldFormal**.")
-        embedBuild.build()
-      } else {
-        // set the setting here
-        val modifiedWorlds = worldsData(guild.getId()).map { w =>
-          if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showAlliesDeaths = settingType)
-          } else {
-            w
-          }
-        }
-        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        deathsAlliesToDatabase(guild, world, settingType)
-
-        val discordConfig = discordRetrieveConfig(guild)
-        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
-        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the deaths channel to **$setting allies** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        }
-
-        embedBuild.setDescription(s":gear: The deaths channel is now set to **$setting allies** for the world **$worldFormal**.")
-        embedBuild.build()
-      }
-    } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
-      embedBuild.build()
+    val tablePrefix = playerType match {
+      case "allies" => "show_allies_"
+      case "neutrals" => "show_neutral_"
+      case "enemies" => "show_enemies_"
+      case _ => ""
     }
-  }
-
-  def deathsAlliesToDatabase(guild: Guild, world: String, setting: String) = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_allies_deaths = ? WHERE name = ?;")
-    statement.setString(1, setting)
-    statement.setString(2, worldFormal)
-    val result = statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  def deathsEnemies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
-    val guild = event.getGuild()
-    val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
-    val settingType = if (setting == "show") "true" else "false"
-    embedBuild.setColor(3092790)
-    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showEnemiesDeaths).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
-        // embed reply
-        embedBuild.setDescription(s":x: The deaths channel is already set to **$setting enemies** for the world **$worldFormal**.")
-        embedBuild.build()
-      } else {
-        // set the setting here
-        val modifiedWorlds = worldsData(guild.getId()).map { w =>
-          if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showEnemiesDeaths = settingType)
-          } else {
-            w
-          }
-        }
-        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        deathsEnemiesToDatabase(guild, world, settingType)
-
-        val discordConfig = discordRetrieveConfig(guild)
-        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
-        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the deaths channel to **$setting enemies** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        }
-
-        embedBuild.setDescription(s":gear: The deaths channel is now set to **$setting enemies** for the world **$worldFormal**.")
-        embedBuild.build()
-      }
-    } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
-      embedBuild.build()
-    }
-  }
-
-  def deathsEnemiesToDatabase(guild: Guild, world: String, setting: String) = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_enemies_deaths = ? WHERE name = ?;")
-    statement.setString(1, setting)
-    statement.setString(2, worldFormal)
-    val result = statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  def levelsNeutrals(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
-    val guild = event.getGuild()
-    val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
-    val settingType = if (setting == "show") "true" else "false"
-    embedBuild.setColor(3092790)
-    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showNeutralLevels).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
-        // embed reply
-        embedBuild.setDescription(s":x: The levels channel is already set to **$setting neutrals** for the world **$worldFormal**.")
-        embedBuild.build()
-      } else {
-        // set the setting here
-        val modifiedWorlds = worldsData(guild.getId()).map { w =>
-          if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showNeutralLevels = settingType)
-          } else {
-            w
-          }
-        }
-        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        levelsNeutralsToDatabase(guild, world, settingType)
-
-        val discordConfig = discordRetrieveConfig(guild)
-        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
-        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the levels channel to **$setting neutrals** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Guardian_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        }
-
-        embedBuild.setDescription(s":gear: The levels channel is now set to **$setting neutrals** for the world **$worldFormal**.")
-        embedBuild.build()
-      }
-    } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
-      embedBuild.build()
-    }
-  }
-
-  def levelsNeutralsToDatabase(guild: Guild, world: String, neutralSetting: String) = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_neutral_levels = ? WHERE name = ?;")
-    statement.setString(1, neutralSetting)
-    statement.setString(2, worldFormal)
-    val result = statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  def levelsAllies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
-    val guild = event.getGuild()
-    val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
-    val settingType = if (setting == "show") "true" else "false"
-    embedBuild.setColor(3092790)
-    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showAlliesLevels).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
-        // embed reply
-        embedBuild.setDescription(s":x: The levels channel is already set to **$setting allies** for the world **$worldFormal**.")
-        embedBuild.build()
-      } else {
-        // set the setting here
-        val modifiedWorlds = worldsData(guild.getId()).map { w =>
-          if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showAlliesLevels = settingType)
-          } else {
-            w
-          }
-        }
-        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        levelsAlliesToDatabase(guild, world, settingType)
-
-        val discordConfig = discordRetrieveConfig(guild)
-        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
-        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the levels channel to **$setting allies** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        }
-
-        embedBuild.setDescription(s":gear: The levels channel is now set to **$setting allies** for the world **$worldFormal**.")
-        embedBuild.build()
-      }
-    } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
-      embedBuild.build()
-    }
-  }
-
-  def levelsAlliesToDatabase(guild: Guild, world: String, neutralSetting: String) = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_allies_levels = ? WHERE name = ?;")
-    statement.setString(1, neutralSetting)
-    statement.setString(2, worldFormal)
-    val result = statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  def levelsEnemies(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
-    val guild = event.getGuild()
-    val commandUser = event.getUser().getId()
-    val embedBuild = new EmbedBuilder()
-    val settingType = if (setting == "show") "true" else "false"
-    embedBuild.setColor(3092790)
-    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val neutralSetting = cache.headOption.map(_.showEnemiesLevels).getOrElse(null)
-    if (neutralSetting != null){
-      if (neutralSetting == settingType){
-        // embed reply
-        embedBuild.setDescription(s":x: The levels channel is already set to **$setting enemies** for the world **$worldFormal**.")
-        embedBuild.build()
-      } else {
-        // set the setting here
-        val modifiedWorlds = worldsData(guild.getId()).map { w =>
-          if (w.name.toLowerCase() == world.toLowerCase()) {
-            w.copy(showEnemiesLevels = settingType)
-          } else {
-            w
-          }
-        }
-        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        levelsEnemiesToDatabase(guild, world, settingType)
-
-        val discordConfig = discordRetrieveConfig(guild)
-        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
-        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the levels channel to **$setting enemies** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        }
-
-        embedBuild.setDescription(s":gear: The levels channel is now set to **$setting enemies** for the world **$worldFormal**.")
-        embedBuild.build()
-      }
-    } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
-      embedBuild.build()
-    }
-  }
-
-  def levelsEnemiesToDatabase(guild: Guild, world: String, neutralSetting: String) = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET show_enemies_levels = ? WHERE name = ?;")
-    statement.setString(1, neutralSetting)
-    statement.setString(2, worldFormal)
+    val tableName = s"$tablePrefix$channelType"
+    val statement = conn.prepareStatement("UPDATE worlds SET ? = ? WHERE name = ?;")
+    statement.setString(1, tableName)
+    statement.setString(2, setting)
+    statement.setString(3, worldFormal)
     val result = statement.executeUpdate()
 
     statement.close()
