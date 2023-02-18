@@ -34,6 +34,8 @@ import akka.stream.scaladsl.{Flow, Sink, Source, Keep}
 import scala.concurrent.Future
 import scala.collection.immutable.ListMap
 import java.awt.Color
+import akka.actor.Cancellable
+import scala.concurrent.duration._
 
 object BotApp extends App with StrictLogging {
 
@@ -233,6 +235,10 @@ object BotApp extends App with StrictLogging {
       }
   }
 
+  actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
+    updateDashboard()
+  }
+
   def startBot(guild: Guild, world: Option[String]) = {
 
     // build guild specific data map
@@ -296,6 +302,36 @@ object BotApp extends App with StrictLogging {
       } else {
         logger.info(s"There was a problem getting channel information for '${guild.getName()} - ${guild.getId()}' - ${formalName}.")
       }
+    }
+  }
+
+  def updateDashboard(): Unit = {
+    // Violent Bot Support discord
+    val dashboardGuild = jda.getGuildById(867319250708463628L)
+    val dashboardDiscords = dashboardGuild.getVoiceChannelById(1076431727838380032L)
+    val dashboardWorlds = dashboardGuild.getVoiceChannelById(1076432500294955098L)
+
+    logger.info(s"Updating Violent Bot dashboard on Guild: '${dashboardGuild.getName()}'")
+
+    // get total Discord count
+    val guildCount = jda.getGuilds().asScala.toList.size
+    // get total World count
+    val worldCount: Int = worldsData.values.map(_.size).sum
+    println(worldCount)
+    println(guildCount)
+
+    // edit the Discord count channel
+    val dashboardDiscordsName = dashboardDiscords.getName()
+    if (dashboardDiscordsName != s"Discords: $guildCount"){
+      val dashboardDiscordsManager = dashboardDiscords.getManager
+      dashboardDiscordsManager.setName(s"Discords: $guildCount").queue()
+    }
+
+    // edit the Worlds count channel
+    val dashboardWorldsName = dashboardWorlds.getName()
+    if (dashboardWorldsName != s"Worlds: $worldCount"){
+      val dashboardWorldsManager = dashboardWorlds.getManager
+      dashboardWorldsManager.setName(s"Worlds: $worldCount").queue()
     }
   }
 
@@ -1419,7 +1455,7 @@ object BotApp extends App with StrictLogging {
     val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
     statement.setString(1, adminChannel)
     val result = statement.executeUpdate()
-    
+
     statement.close()
     conn.close()
   }
