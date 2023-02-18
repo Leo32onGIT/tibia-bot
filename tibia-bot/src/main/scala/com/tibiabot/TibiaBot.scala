@@ -456,14 +456,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         // this is the actual embed description
         var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
 
-        // if the length is over 4096, start cutting exivas
+        // if the length is over 4085 - truncate leave 11 chars for debugging
         var embedLength = embedText.length
-        while (embedLength > 4096) {
-          val lastNewlineIndex = embedText.lastIndexOf("/n")
-          if (lastNewlineIndex >= 0) {
-            embedText = embedText.substring(0, lastNewlineIndex)
-          }
-          embedLength = embedText.length
+        if (embedLength > 4085) {
+          embedText = embedText.substring(0, 4085)
         }
 
         val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
