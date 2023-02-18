@@ -458,8 +458,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
         // if the length is over 4085 - truncate leave 11 chars for debugging
         var embedLength = embedText.length
-        if (embedLength > 4085) {
-          embedText = embedText.substring(0, 4085)
+        if (embedLength > 4060) {
+          embedText = embedText.substring(0, 4060) ++ "/n:scissors: `out of space`"
         }
 
         val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
