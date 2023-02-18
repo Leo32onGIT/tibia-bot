@@ -317,8 +317,6 @@ object BotApp extends App with StrictLogging {
     val guildCount = jda.getGuilds().asScala.toList.size
     // get total World count
     val worldCount: Int = worldsData.values.map(_.size).sum
-    println(worldCount)
-    println(guildCount)
 
     // edit the Discord count channel
     val dashboardDiscordsName = dashboardDiscords.getName()
