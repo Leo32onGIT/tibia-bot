@@ -311,7 +311,7 @@ object BotApp extends App with StrictLogging {
     val dashboardDiscords = dashboardGuild.getVoiceChannelById(1076431727838380032L)
     val dashboardWorlds = dashboardGuild.getVoiceChannelById(1076432500294955098L)
 
-    logger.info(s"Updating Violent Bot dashboard on Guild: '${dashboardGuild.getName()}'")
+    logger.info(s"Updating Violent Bot dashboard...")
 
     // get total Discord count
     val guildCount = jda.getGuilds().asScala.toList.size
