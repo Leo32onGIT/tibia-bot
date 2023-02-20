@@ -1972,6 +1972,13 @@ object BotApp extends App with StrictLogging {
           category.delete().complete()
         }
 
+        // remove from worldsData
+        val updatedWorldsData = worldsData.get(guild.getId())
+          .map(_.filterNot(_.name.toLowerCase() == world.toLowerCase()))
+          .map(worlds => worldsData + (guild.getId() -> worlds))
+          .getOrElse(worldsData)
+        worldsData = updatedWorldsData
+
         // update the database
         worldRemoveConfig(guild, world)
 
