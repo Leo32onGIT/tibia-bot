@@ -553,7 +553,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       }
       //val durationString = if (player._4 == Config.allyGuild || player._4 == Config.enemyGuild || player._4 == Config.enemy) s"— `${durationStr}`" else ""
       val durationString = s"| `${durationStr}`"
-      vocationBuffers(voc) += ((s"${player._4}", s"$vocEmoji ${player._2.toString} — **[${player._1}](${charUrl(player._1)})** ${player._4} ${durationString} ${player._7}"))
+      vocationBuffers(voc) += ((s"${player._4}", s"$vocEmoji **[${player._2.toString}](${charUrl(player._1)})** — **${player._1}** ${player._4} ${durationString} ${player._7}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
