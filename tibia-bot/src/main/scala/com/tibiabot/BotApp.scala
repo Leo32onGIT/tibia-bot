@@ -237,6 +237,9 @@ object BotApp extends App with StrictLogging {
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
     updateDashboard()
+    guilds.foreach{g =>
+      cleanHuntedList(g)
+    }
   }
 
   def startBot(guild: Guild, world: Option[String]) = {
@@ -301,6 +304,55 @@ object BotApp extends App with StrictLogging {
 
       } else {
         logger.info(s"There was a problem getting channel information for '${guild.getName()} - ${guild.getId()}' - ${formalName}.")
+      }
+    }
+  }
+
+  def cleanHuntedList(guild: Guild) {
+    val tibiaDataClient = new TibiaDataClient()
+    val listPlayers: List[Players] = huntedPlayersData.getOrElse(guild.getId(), List.empty[Players])
+    if (listPlayers.nonEmpty) {
+      // run api against players
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(2)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+      val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
+      futureResults.onComplete {
+        case Success(output) => {
+          output.foreach { case (charResponse, name, reason, reasonText) =>
+            if (charResponse.characters.character.name != ""){
+              val charName = charResponse.characters.character.name
+              val charLevel = charResponse.characters.character.level.toInt
+              val charGuild = charResponse.characters.character.guild
+              val charGuildName = if(!(charGuild.isEmpty)) charGuild.head.name else ""
+              val charVocation = charResponse.characters.character.vocation
+              val charWorld = charResponse.characters.character.world
+              val charLink = charUrl(charName)
+              val charEmoji = vocEmoji(charResponse)
+
+              val huntedGuildCheck = huntedGuildsData.getOrElse(guild.getId(), List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
+              if (huntedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+                val updatedList = listPlayers.find(_.name == name.toLowerCase()) match {
+                  case Some(_) => listPlayers.filterNot(_.name == name.toLowerCase())
+                  case None => listPlayers
+                }
+                huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
+                removeHuntedFromDatabase(guild, "player", name.toLowerCase())
+
+                if (adminChannel != null){
+                  val commandUser = s"<@${botUser}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":robot: hunted list cleanup:")
+                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined the enemy guild and will be tracked that way)*.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Broom.gif")
+                  adminEmbed.setColor(14397256) // orange for bot auto command
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
+              }
+            }
+          }
+        }
+        case Failure(e) => e.printStackTrace
       }
     }
   }
@@ -472,7 +524,7 @@ object BotApp extends App with StrictLogging {
     val tibiaDataClient = new TibiaDataClient()
     val embedColor = 3092790
 
-    val guildHeader = if (arg == "allies") s"${Config.allyGuild} **Guilds** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemyGuild} **Guilds** ${Config.enemyGuild}" else ""
+    val guildHeader = s"__**Guilds:**__"
     val listGuilds: List[Guilds] = if (arg == "allies") alliedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else if (arg == "hunted") huntedGuildsData.getOrElse(guild.getId(), List.empty[Guilds]).map(g => g)
       else List.empty
@@ -546,7 +598,8 @@ object BotApp extends App with StrictLogging {
     val tibiaDataClient = new TibiaDataClient()
     val embedColor = 3092790
 
-    val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
+    //val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
+    val playerHeader = s"__**Players:**__"
     val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
       else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId(), List.empty[Players]).map(g => g)
       else List.empty
@@ -554,8 +607,8 @@ object BotApp extends App with StrictLogging {
     var playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
       // run api against players
-      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
-      val futureResults: Future[Seq[(CharacterResponse, String, String)]] = listPlayersFlow.run()
+      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+      val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
         case Success(output) => {
           val vocationBuffers = ListMap(
@@ -565,7 +618,7 @@ object BotApp extends App with StrictLogging {
             "sorcerer" -> ListBuffer[(Int, String, String)](),
             "none" -> ListBuffer[(Int, String, String)]()
           )
-          output.foreach { case (charResponse, name, reason) =>
+          output.foreach { case (charResponse, name, reason, reasonText) =>
             if (charResponse.characters.character.name != ""){
               val reasonEmoji = if (reason == "true") ":pencil:" else ""
               val charName = charResponse.characters.character.name
@@ -687,7 +740,7 @@ object BotApp extends App with StrictLogging {
       })
     sortedWorlds.flatMap {
       case (world, players) =>
-        s"> :globe_with_meridians: **$world**" :: players
+        s":globe_with_meridians: **$world** :globe_with_meridians:" :: players
     }
   }
 

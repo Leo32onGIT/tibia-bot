@@ -71,15 +71,16 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     } yield unmarshalled
   }
 
-  def getCharacterWithInput(input: (String, String)): Future[(CharacterResponse, String, String)] = {
+  def getCharacterWithInput(input: (String, String, String)): Future[(CharacterResponse, String, String, String)] = {
     val name = input._1
     val reason = input._2
+    val reasonText = input._3
     val encodedName = URLEncoder.encode(name, "UTF-8")
     for {
       response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse]
-    } yield (unmarshalled, name, reason)
+    } yield (unmarshalled, name, reason, reasonText)
   }
 
   private def decodeResponse(response: HttpResponse): HttpResponse = {
