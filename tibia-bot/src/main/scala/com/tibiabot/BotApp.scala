@@ -356,7 +356,7 @@ object BotApp extends App with StrictLogging {
                   val commandUser = s"<@${botUser}>"
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(":robot: hunted list cleanup:")
-                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined an allied guild and will be tracked that way)*.")
+                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined an allied guild)*.")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Broom.gif")
                   adminEmbed.setColor(14397256) // orange for bot auto command
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
