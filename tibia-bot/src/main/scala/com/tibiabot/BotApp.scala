@@ -315,6 +315,7 @@ object BotApp extends App with StrictLogging {
       // run api against players
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      var listBuffer = ListBuffer[String]()
       val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(2)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
@@ -332,11 +333,7 @@ object BotApp extends App with StrictLogging {
 
               val huntedGuildCheck = huntedGuildsData.getOrElse(guild.getId(), List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
               if (huntedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
-                val updatedList = listPlayers.find(_.name == name.toLowerCase()) match {
-                  case Some(_) => listPlayers.filterNot(_.name == name.toLowerCase())
-                  case None => listPlayers
-                }
-                huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
+                listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
                 if (adminChannel != null){
@@ -351,6 +348,8 @@ object BotApp extends App with StrictLogging {
               }
             }
           }
+          val updatedList = listPlayers.filterNot(p => listBuffer.contains(p.name.toLowerCase))
+          huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
         }
         case Failure(e) => e.printStackTrace
       }
