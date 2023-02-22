@@ -340,7 +340,23 @@ object BotApp extends App with StrictLogging {
                   val commandUser = s"<@${botUser}>"
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(":robot: hunted list cleanup:")
-                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined the enemy guild and will be tracked that way)*.")
+                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Broom.gif")
+                  adminEmbed.setColor(14397256) // orange for bot auto command
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
+              }
+
+              val alliedGuildCheck = alliedGuildsData.getOrElse(guild.getId(), List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
+              if (alliedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+                listBuffer += name.toLowerCase
+                removeHuntedFromDatabase(guild, "player", name.toLowerCase())
+
+                if (adminChannel != null){
+                  val commandUser = s"<@${botUser}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":robot: hunted list cleanup:")
+                  adminEmbed.setDescription(s"$commandUser removed the player\n$charEmoji $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$charWorld**\n*(because they have joined an allied guild and will be tracked that way)*.")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Broom.gif")
                   adminEmbed.setColor(14397256) // orange for bot auto command
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
