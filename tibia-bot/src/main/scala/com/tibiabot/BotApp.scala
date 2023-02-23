@@ -36,6 +36,9 @@ import scala.collection.immutable.ListMap
 import java.awt.Color
 import akka.actor.Cancellable
 import scala.concurrent.duration._
+import ch.qos.logback.classic.{Level, LoggerContext}
+import ch.qos.logback.classic.Logger
+import org.slf4j.LoggerFactory
 
 object BotApp extends App with StrictLogging {
 
@@ -45,6 +48,11 @@ object BotApp extends App with StrictLogging {
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
+
+  // Set log for JDA to INFO to supress DEBUG events
+  LoggerFactory.getILoggerFactory.asInstanceOf[LoggerContext]
+   .getLogger("net.dv8tion.jda")
+   .setLevel(Level.INFO)
 
   // Let the games begin
   logger.info("Starting up")
