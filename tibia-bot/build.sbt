@@ -18,6 +18,7 @@ libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4"
 libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.10"
+libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
 libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-alpha.17"
 libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.9"
@@ -26,3 +27,5 @@ libraryDependencies += "org.postgresql" % "postgresql" % "42.2.14"
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.12"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.12" % Test
 libraryDependencies += "org.scalamock" %% "scalamock" % "5.1.0" % Test
+
+resolvers += "jitpack" at "https://jitpack.io"
