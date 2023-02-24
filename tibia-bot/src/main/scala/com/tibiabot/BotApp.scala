@@ -36,6 +36,7 @@ import scala.collection.immutable.ListMap
 import java.awt.Color
 import akka.actor.Cancellable
 import scala.concurrent.duration._
+import org.slf4j.MarkerFactory
 
 object BotApp extends App with StrictLogging {
 
@@ -45,6 +46,9 @@ object BotApp extends App with StrictLogging {
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
+
+  //supress rate limit error messages
+  logger.error(MarkerFactory.getMarker("DISCORD_RATE_LIMIT"), "Encountered 429, retrying after 3000 ms")
 
   // Let the games begin
   logger.info("Starting up")
