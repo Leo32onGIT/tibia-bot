@@ -8,7 +8,7 @@
        <!-- do not set your webhook here if you want to commit this file to your VCS, instead look below for an example on how to set it at runtime -->
        <webhookUri>https://discord.com/api/webhooks/1078328734945394788/PHFpBlX_jOvCVZGb49wT22uQxHOyOTXUUlNQkHdPCkt6L6autKe_fiAVpJqItzpPAhfC</webhookUri>
         <layout class="ch.qos.logback.classic.PatternLayout">
-            <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n```%ex{full}```</pattern>
+            <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex{full}){'^(?!$)', '```'}{'$', '```'}</pattern>
         </layout>
         <tts>false</tts>
     </appender>
