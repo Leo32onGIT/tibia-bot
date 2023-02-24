@@ -48,7 +48,7 @@ object BotApp extends App with StrictLogging {
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
 
   //supress rate limit error messages
-  logger.error(MarkerFactory.getMarker("DISCORD_RATE_LIMIT"), "Encountered 429, retrying after 3000 ms")
+  logger.error(MarkerFactory.getMarker("DISCORD_RATE_LIMIT"), "Encountered 429, retrying after")
 
   // Let the games begin
   logger.info("Starting up")
