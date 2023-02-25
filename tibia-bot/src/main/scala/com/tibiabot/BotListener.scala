@@ -26,6 +26,8 @@ class BotListener extends ListenerAdapter {
         handleNeutrals(event)
       case "fullbless" =>
         handleFullbless(event)
+      case "filter" =>
+        handleFilter(event)
       case _ =>
     }
   }
@@ -292,6 +294,29 @@ class BotListener extends ListenerAdapter {
 
     val embed = BotApp.fullblessLevel(event, worldOption, levelOption)
     event.getHook().sendMessageEmbeds(embed).queue()
+  }
+
+  private def handleFilter(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val subCommand = event.getInteraction.getSubcommandName
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.get("world").getOrElse("")
+    val levelOption: Int = options.get("level").map(_.toInt).getOrElse(8)
+
+    subCommand match {
+      case "levels" => {
+        val embed = BotApp.minLevel(event, worldOption, levelOption, "levels")
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+      case "deaths" => {
+        val embed = BotApp.minLevel(event, worldOption, levelOption, "deaths")
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+      case _ => {
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/filter`.").build()
+        event.getHook().sendMessageEmbeds(embed).queue()
+      }
+    }
   }
 
 }

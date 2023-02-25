@@ -145,6 +145,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
               val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
               val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
+              val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
               val enemyIcons = List(Config.enemy, Config.enemyGuild)
               val alliesIcons = List(Config.allyGuild)
               val neutralIcons = List(Config.otherGuild, "")
@@ -155,6 +156,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                 } else if (showAlliesLevels == "false" && alliesIcons.contains(guildIcon)){
                   false
                 } else if (showEnemiesLevels == "false" && enemyIcons.contains(guildIcon)){
+                  false
+                } else if (onlinePlayer.level < minimumLevel) {
                   false
                 } else {
                   true
@@ -489,6 +492,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
       }
       val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
+      val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
       // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
         if (embed._6){ // if showNeutralDeaths == "true"
@@ -504,7 +508,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
             }
           } else {
-            if (embed._5 >= 8) { // will make this configurable later
+            if (embed._5 >= minimumLevel) { // will make this configurable later
               deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
             }
           }

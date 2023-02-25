@@ -40,7 +40,7 @@ object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String)
+  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String, levelsMin: Int, deathsMin: Int)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -222,7 +222,27 @@ object BotApp extends App with StrictLogging {
         .setMaxValue(4000)
     );
 
-  val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand)
+  // minum levels/deaths command
+  val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
+    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+    .addSubcommands(
+      new SubcommandData("levels", "Hide events in the levels channel if the character is below a certain level")
+      .addOptions(
+        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the levels channel").setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(4000)
+      ),
+      new SubcommandData("deaths", "Hide events in the deaths channel if the character is below a certain level")
+      .addOptions(
+        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(4000)
+      )
+    );
+
+  val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand)
 
   // initialize the database
   guilds.foreach{g =>
@@ -1330,6 +1350,8 @@ object BotApp extends App with StrictLogging {
             |show_enemies_levels VARCHAR(255) NOT NULL,
             |show_enemies_deaths VARCHAR(255) NOT NULL,
             |detect_hunteds VARCHAR(255) NOT NULL,
+            |levels_min INT NOT NULL,
+            |deaths_min INT NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
 
@@ -1424,7 +1446,7 @@ object BotApp extends App with StrictLogging {
   def worldConfig(guild: Guild, query: String): List[Worlds] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds FROM $query")
+    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min FROM $query")
 
     var results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -1437,7 +1459,9 @@ object BotApp extends App with StrictLogging {
       val showEnemiesLevels = Option(result.getString("show_enemies_levels")).getOrElse("true")
       val showEnemiesDeaths = Option(result.getString("show_enemies_deaths")).getOrElse("true")
       val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
-      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds)
+      val levelsMin = Option(result.getInt("levels_min")).getOrElse(8)
+      val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
+      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin)
     }
 
     statement.close()
@@ -1445,9 +1469,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String) = {
+  def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String, levelsMin: Int, deathsMin: Int) = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1468,24 +1492,28 @@ object BotApp extends App with StrictLogging {
     statement.setString(17, showEnemiesLevels)
     statement.setString(18, showEnemiesDeaths)
     statement.setString(19, detectHunteds)
-    statement.setString(20, alliesChannel)
-    statement.setString(21, enemiesChannel)
-    statement.setString(22, neutralsChannels)
-    statement.setString(23, levelsChannel)
-    statement.setString(24, deathsChannel)
-    statement.setString(25, category)
-    statement.setString(26, fullblessRole)
-    statement.setString(27, nemesisRole)
-    statement.setString(28, fullblessChannel)
-    statement.setString(29, nemesisChannel)
-    statement.setInt(30, fullblessLevel)
-    statement.setString(31, showNeutralLevels)
-    statement.setString(32, showNeutralDeaths)
-    statement.setString(33, showAlliesLevels)
-    statement.setString(34, showAlliesDeaths)
-    statement.setString(35, showEnemiesLevels)
-    statement.setString(36, showEnemiesDeaths)
-    statement.setString(37, detectHunteds)
+    statement.setInt(20, levelsMin)
+    statement.setInt(21, deathsMin)
+    statement.setString(22, alliesChannel)
+    statement.setString(23, enemiesChannel)
+    statement.setString(24, neutralsChannels)
+    statement.setString(25, levelsChannel)
+    statement.setString(26, deathsChannel)
+    statement.setString(27, category)
+    statement.setString(28, fullblessRole)
+    statement.setString(29, nemesisRole)
+    statement.setString(30, fullblessChannel)
+    statement.setString(31, nemesisChannel)
+    statement.setInt(32, fullblessLevel)
+    statement.setString(33, showNeutralLevels)
+    statement.setString(34, showNeutralDeaths)
+    statement.setString(35, showAlliesLevels)
+    statement.setString(36, showAlliesDeaths)
+    statement.setString(37, showEnemiesLevels)
+    statement.setString(38, showEnemiesDeaths)
+    statement.setString(39, detectHunteds)
+    statement.setInt(40, levelsMin)
+    statement.setInt(41, deathsMin)
     val result = statement.executeUpdate()
 
     statement.close()
@@ -1553,6 +1581,8 @@ object BotApp extends App with StrictLogging {
           configMap += ("show_enemies_levels" -> result.getString("show_enemies_levels"))
           configMap += ("show_enemies_deaths" -> result.getString("show_enemies_deaths"))
           configMap += ("detect_hunteds" -> result.getString("detect_hunteds"))
+          configMap += ("levels_min" -> result.getInt("levels_min").toString)
+          configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
       }
       statement.close()
       conn.close()
@@ -1707,7 +1737,7 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId()
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true", "true", "true", "true", "true", "on")
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId(), nemesisRole.getId(), fullblessId, nemesisId, 250, "true", "true", "true", "true", "true", "true", "on", 8, 8)
         startBot(guild, Some(world))
         s":gear: The channels for **${world}** have been configured successfully."
       } else {
@@ -1979,9 +2009,72 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  def minLevel(event: SlashCommandInteractionEvent, world: String, level: Int, levelsOrDeaths: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild()
+    val commandUser = event.getUser().getId()
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val levelSetting = cache.headOption.map(_.levelsMin).getOrElse(0)
+    val deathSetting = cache.headOption.map(_.deathsMin).getOrElse(0)
+    val chosenSetting = if (levelsOrDeaths == "levels") levelSetting else deathSetting
+    if (chosenSetting != 0){
+      if (chosenSetting == level){
+        // embed reply
+        embedBuild.setDescription(s":x: The minimum level for the **$levelsOrDeaths channel** is already set to `$level` for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId()).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            if (levelsOrDeaths == "levels"){
+              w.copy(levelsMin = level)
+            } else { // deaths
+              w.copy(deathsMin = level)
+            }
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId() -> modifiedWorlds)
+        minLevelToDatabase(guild, world, level, levelsOrDeaths)
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
+        if (adminChannel != null){
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel** to `$level`\nfor the world **$worldFormal**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The minimum level for the **$levelsOrDeaths channel** is now set to `$level` for the world **$worldFormal**.")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
   def fullblessLevelToDatabase(guild: Guild, world: String, level: Int) = {
     val conn = getConnection(guild)
     val statement = conn.prepareStatement("UPDATE worlds SET fullbless_level = ? WHERE name = ?;")
+    statement.setInt(1, level)
+    statement.setString(2, world)
+    val result = statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def minLevelToDatabase(guild: Guild, world: String, level: Int, levelOrDeath: String) = {
+    val conn = getConnection(guild)
+    val columnName = if (levelOrDeath == "levels") "levels_min" else "deaths_min"
+    val statement = conn.prepareStatement(s"UPDATE worlds SET $columnName = ? WHERE name = ?;")
     statement.setInt(1, level)
     statement.setString(2, world)
     val result = statement.executeUpdate()
