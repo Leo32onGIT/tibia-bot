@@ -5,9 +5,9 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.JDABuilder
 import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.Message
-import net.dv8tion.jda.api.entities.TextChannel
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.JDA
-import net.dv8tion.jda.api.entities.Category
+import net.dv8tion.jda.api.entities.channel.concrete.Category
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
 import net.dv8tion.jda.api.interactions.commands.OptionType
@@ -36,8 +36,6 @@ import scala.collection.immutable.ListMap
 import java.awt.Color
 import akka.actor.Cancellable
 import scala.concurrent.duration._
-import org.slf4j.MarkerFactory
-
 object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
@@ -46,9 +44,6 @@ object BotApp extends App with StrictLogging {
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
-
-  //supress rate limit error messages
-  logger.error(MarkerFactory.getMarker("DISCORD_RATE_LIMIT"), "Encountered 429, retrying after")
 
   // Let the games begin
   logger.info("Starting up")

@@ -1,4 +1,5 @@
 <configuration>
+
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
@@ -8,7 +9,7 @@
     <!-- do not set your webhook here if you want to commit this file to your VCS, instead look below for an example on how to set it at runtime -->
     <webhookUri>https://discord.com/api/webhooks/1078328734945394788/PHFpBlX_jOvCVZGb49wT22uQxHOyOTXUUlNQkHdPCkt6L6autKe_fiAVpJqItzpPAhfC</webhookUri>
     <layout class="ch.qos.logback.classic.PatternLayout">
-      <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex{full}){'^(?!$)', '```'}{'$', '```'}</pattern>
+      <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex){'(?s).*\n(.*)', '```$0```'}%nopex</pattern>
     </layout>
     <tts>false</tts>
   </appender>
@@ -17,11 +18,6 @@
     <appender-ref ref="DISCORD" />
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>ERROR</level>
-    </filter>
-    <filter class="ch.qos.logback.classic.filter.MarkerFilter">
-      <marker>DISCORD_RATE_LIMIT</marker>
-      <onMatch>DENY</onMatch>
-      <onMismatch>ACCEPT</onMismatch>
     </filter>
   </appender>
 

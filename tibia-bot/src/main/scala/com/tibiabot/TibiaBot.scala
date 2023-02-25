@@ -8,9 +8,9 @@ import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, WorldResponse, OnlinePlayers}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
-import net.dv8tion.jda.api.entities.TextChannel
-import net.dv8tion.jda.api.entities.Channel
-import net.dv8tion.jda.api.entities.ChannelType
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.entities.channel.Channel
+import net.dv8tion.jda.api.entities.channel.ChannelType
 import net.dv8tion.jda.api.entities.Webhook
 import net.dv8tion.jda.api.entities.Guild
 import scala.collection.immutable.ListMap
