@@ -6,6 +6,11 @@
     </encoder>
   </appender>
   <appender name="DISCORD" class="com.github.napstr.logback.DiscordAppender">
+    <filter class="ch.qos.logback.classic.filter.StringMatchFilter">
+      <string>Encountered 429</string>
+      <onMatch>DENY</onMatch>
+      <onMismatch>NEUTRAL</onMismatch>
+    </filter>
     <!-- do not set your webhook here if you want to commit this file to your VCS, instead look below for an example on how to set it at runtime -->
     <webhookUri>https://discord.com/api/webhooks/1078328734945394788/PHFpBlX_jOvCVZGb49wT22uQxHOyOTXUUlNQkHdPCkt6L6autKe_fiAVpJqItzpPAhfC</webhookUri>
     <layout class="ch.qos.logback.classic.PatternLayout">
