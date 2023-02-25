@@ -135,7 +135,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       }
       if (!(recentlyDied)) {
         currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-          if (onlinePlayer.level > sheetLevel){
+          if (onlinePlayer.level > sheetLevel && onlinePlayer.level >= 8){ // dont show levels under lvl 8
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
             val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** ${guildIcon}"
             val levelsTextChannel = guild.getTextChannelById(levelsChannel)
@@ -504,7 +504,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
             }
           } else {
-            deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+            if (embed._5 >= 8) { // will make this configurable later
+              deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+            }
           }
         }
       }
