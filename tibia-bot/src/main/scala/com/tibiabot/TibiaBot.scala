@@ -22,7 +22,8 @@ import scala.collection.immutable.HashMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent._
+import scala.concurrent.{ExecutionContextExecutor, Future}
+import com.google.common.util.concurrent.RateLimiter
 import scala.jdk.CollectionConverters._
 import java.util.Collections
 
@@ -47,6 +48,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   var neutralsListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
   private val tibiaDataClient = new TibiaDataClient()
+  private val rateLimiter = RateLimiter.create(5.0)
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
@@ -703,28 +705,26 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
 
   // send a webhook to discord (this is used as we can have hyperlinks in Text Messages)
   def createAndSendWebhookMessage(webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
-    val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
-    var webhook: Webhook = null
-    if (getWebHook.isEmpty) {
-      val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
-      webhook = createWebhook.get()
-    } else {
-      webhook = getWebHook.get(0)
-    }
-    val webhookUrl = webhook.getUrl()
-    val client = WebhookClient.withUrl(webhookUrl)
-    val message = new WebhookMessageBuilder()
-      .setUsername(messageAuthor)
-      .setContent(messageContent)
-      .setAvatarUrl(Config.webHookAvatar)
-      .build()
+      // Acquire a permit from the rate limiter before sending the message
+      rateLimiter.acquire()
 
-    // Send messages at a rate of 10 per second
-    val messagesToSend = (1 to 10).map(_ => Future(client.send(message).toCompletableFuture()))
-
-    // Await all the message sends to complete
-    Await.result(Future.sequence(messagesToSend), 5.second)
-    client.close()
+      val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
+      var webhook: Webhook = null
+      if (getWebHook.isEmpty) {
+          val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
+          webhook = createWebhook.get()
+      } else {
+          webhook = getWebHook.get(0)
+      }
+      val webhookUrl = webhook.getUrl()
+      val client = WebhookClient.withUrl(webhookUrl)
+      val message = new WebhookMessageBuilder()
+        .setUsername(messageAuthor)
+        .setContent(messageContent)
+        .setAvatarUrl(Config.webHookAvatar)
+        .build()
+      client.send(message)
+      client.close()
   }
 
   // Remove players from the list who haven't logged in for a while. Remove old saved deaths.
