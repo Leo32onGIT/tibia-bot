@@ -706,25 +706,28 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
   // send a webhook to discord (this is used as we can have hyperlinks in Text Messages)
   def createAndSendWebhookMessage(webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
       // Acquire a permit from the rate limiter before sending the message
-      rateLimiter.acquire()
-
-      val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
-      var webhook: Webhook = null
-      if (getWebHook.isEmpty) {
-          val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
-          webhook = createWebhook.get()
+      val permitAcquired = rateLimiter.tryAcquire()
+      if (permitAcquired) {
+        val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
+        var webhook: Webhook = null
+        if (getWebHook.isEmpty) {
+            val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
+            webhook = createWebhook.get()
+        } else {
+            webhook = getWebHook.get(0)
+        }
+        val webhookUrl = webhook.getUrl()
+        val client = WebhookClient.withUrl(webhookUrl)
+        val message = new WebhookMessageBuilder()
+          .setUsername(messageAuthor)
+          .setContent(messageContent)
+          .setAvatarUrl(Config.webHookAvatar)
+          .build()
+        client.send(message)
+        client.close()
       } else {
-          webhook = getWebHook.get(0)
+        logger.info(s"Rate limit exceeded, following level message was not sent:\n$messageContent")
       }
-      val webhookUrl = webhook.getUrl()
-      val client = WebhookClient.withUrl(webhookUrl)
-      val message = new WebhookMessageBuilder()
-        .setUsername(messageAuthor)
-        .setContent(messageContent)
-        .setAvatarUrl(Config.webHookAvatar)
-        .build()
-      client.send(message)
-      client.close()
   }
 
   // Remove players from the list who haven't logged in for a while. Remove old saved deaths.
