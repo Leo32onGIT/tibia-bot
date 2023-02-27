@@ -22,7 +22,7 @@ import scala.collection.immutable.HashMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent._
 import scala.jdk.CollectionConverters._
 import java.util.Collections
 
@@ -706,10 +706,10 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     val getWebHook = webhookChannel.retrieveWebhooks().submit().get()
     var webhook: Webhook = null
     if (getWebHook.isEmpty) {
-        val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
-        webhook = createWebhook.get()
+      val createWebhook = webhookChannel.createWebhook(messageAuthor).submit()
+      webhook = createWebhook.get()
     } else {
-        webhook = getWebHook.get(0)
+      webhook = getWebHook.get(0)
     }
     val webhookUrl = webhook.getUrl()
     val client = WebhookClient.withUrl(webhookUrl)
@@ -718,7 +718,12 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       .setContent(messageContent)
       .setAvatarUrl(Config.webHookAvatar)
       .build()
-    client.send(message)
+
+    // Send messages at a rate of 10 per second
+    val messagesToSend = (1 to 10).map(_ => Future(client.send(message).toCompletableFuture()))
+
+    // Await all the message sends to complete
+    Await.result(Future.sequence(messagesToSend), 1.second)
     client.close()
   }
 
