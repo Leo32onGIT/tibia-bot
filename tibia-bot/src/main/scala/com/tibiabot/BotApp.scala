@@ -569,7 +569,7 @@ object BotApp extends App with StrictLogging {
     var guildBuffer = ListBuffer[MessageEmbed]()
     if (listGuilds.nonEmpty) {
       // run api against guild
-      val guildListFlow = Source(listGuilds.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getGuildWithInput).toMat(Sink.seq)(Keep.right)
+      val guildListFlow = Source(listGuilds.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getGuildWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(GuildResponse, String, String)]] = guildListFlow.run()
       futureResults.onComplete {
         case Success(output) => {
@@ -647,7 +647,7 @@ object BotApp extends App with StrictLogging {
     var playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
       // run api against players
-      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
         case Success(output) => {
