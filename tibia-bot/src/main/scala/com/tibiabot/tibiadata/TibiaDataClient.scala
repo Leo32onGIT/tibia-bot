@@ -106,8 +106,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
           }
         } else {
           response.discardEntityBytes()
-          val errorMsg = s"Request to $request failed with status ${response.status}"
-          Future.failed(new RuntimeException(errorMsg))
+          Future.failed(new RuntimeException(s"Failed to get character $name with status ${response.status}"))
         }
       }
   }
