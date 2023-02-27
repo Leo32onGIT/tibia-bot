@@ -385,8 +385,11 @@ object BotApp extends App with StrictLogging {
           }
           val updatedList = listPlayers.filterNot(p => listBuffer.contains(p.name.toLowerCase))
           huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
+          tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace
+        case Failure(e) => e.printStackTrace {
+          tibiaDataClient.system.terminate()
+        }
       }
     }
   }
@@ -611,8 +614,11 @@ object BotApp extends App with StrictLogging {
           }
           guildBuffer += finalEmbed.build()
           callback(guildBuffer.toList)
+          tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace
+        case Failure(e) => e.printStackTrace {
+          tibiaDataClient.system.terminate()
+        }
       }
       //IN PROGRESS
     } else { // guild list is empty
@@ -739,8 +745,11 @@ object BotApp extends App with StrictLogging {
           }
           playerBuffer += finalEmbed.build()
           callback(playerBuffer.toList)
+          tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace
+        case Failure(e) => e.printStackTrace {
+          tibiaDataClient.system.terminate()
+        }
       }
     } else { // player list is empty
       val listIsEmpty = new EmbedBuilder()
@@ -750,6 +759,7 @@ object BotApp extends App with StrictLogging {
       listIsEmpty.setColor(embedColor)
       playerBuffer += listIsEmpty.build()
       callback(playerBuffer.toList)
+      tibiaDataClient.system.terminate()
     }
   }
 
@@ -837,15 +847,18 @@ object BotApp extends App with StrictLogging {
               ***/
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             } else {
               embedText = s":x: The guild **[${guildName}](${guildUrl(guildName)})** already exists in the hunted list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             }
           } else {
             embedText = s":x: The guild **${subOptionValueLower}** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
+            tibiaDataClient.system.terminate()
           }
         }
       } else if (subCommand == "player"){ // command run with 'player'
@@ -874,15 +887,18 @@ object BotApp extends App with StrictLogging {
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             } else {
               embedText = s":x: The player **[${playerName}](${charUrl(playerName)})** already exists in the hunted list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             }
           } else {
             embedText = s":x: The player **${subOptionValueLower}** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
+            tibiaDataClient.system.terminate()
           }
         }
       }
@@ -890,6 +906,7 @@ object BotApp extends App with StrictLogging {
       embedText = s":x: You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
+      tibiaDataClient.system.terminate()
     }
   }
 
@@ -944,15 +961,18 @@ object BotApp extends App with StrictLogging {
               ***/
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             } else {
               embedText = s":x: The guild **[${guildName}](${guildUrl(guildName)})** already exists in the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             }
           } else {
             embedText = s":x: The guild **${subOptionValueLower}** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
+            tibiaDataClient.system.terminate()
           }
         }
       } else if (subCommand == "player"){
@@ -979,15 +999,18 @@ object BotApp extends App with StrictLogging {
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             } else {
               embedText = s":x: The player **[${playerName}](${charUrl(playerName)})** already exists in the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
+              tibiaDataClient.system.terminate()
             }
           } else {
             embedText = s":x: The player **${subOptionValueLower}** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
+            tibiaDataClient.system.terminate()
           }
         }
       }
@@ -995,6 +1018,7 @@ object BotApp extends App with StrictLogging {
       embedText = s":x: You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
+      tibiaDataClient.system.terminate()
     }
   }
 
@@ -1029,6 +1053,7 @@ object BotApp extends App with StrictLogging {
             case None =>
               embedText = s":x: The guild **${guildString}** is not on the hunted list."
               embedBuild.setDescription(embedText)
+              tibiaDataClient.system.terminate()
               return callback(embedBuild.build())
           }
           huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
@@ -1047,6 +1072,7 @@ object BotApp extends App with StrictLogging {
           embedText = s":gear: The guild **${guildString}** was removed from the hunted list."
           embedBuild.setDescription(embedText)
           callback(embedBuild.build())
+          tibiaDataClient.system.terminate()
         }
       } else if (subCommand == "player"){
         var playerString = subOptionValueLower
@@ -1065,6 +1091,7 @@ object BotApp extends App with StrictLogging {
             case None =>
               embedText = s":x: The player **${playerString}** is not on the hunted list."
               embedBuild.setDescription(embedText)
+              tibiaDataClient.system.terminate()
               return callback(embedBuild.build())
           }
           huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
@@ -1083,12 +1110,14 @@ object BotApp extends App with StrictLogging {
           embedText = s":gear: The player **${playerString}** was removed from the hunted list."
           embedBuild.setDescription(embedText)
           callback(embedBuild.build())
+          tibiaDataClient.system.terminate()
         }
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
+      tibiaDataClient.system.terminate()
     }
   }
 
@@ -1123,6 +1152,7 @@ object BotApp extends App with StrictLogging {
             case None =>
               embedText = s":x: The guild **${guildString}** is not on the allies list."
               embedBuild.setDescription(embedText)
+              tibiaDataClient.system.terminate()
               return callback(embedBuild.build())
           }
           alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
@@ -1141,6 +1171,7 @@ object BotApp extends App with StrictLogging {
           embedText = s":gear: The guild **${guildString}** was removed from the allies list."
           embedBuild.setDescription(embedText)
           callback(embedBuild.build())
+          tibiaDataClient.system.terminate()
         }
       } else if (subCommand == "player"){
         var playerString = subOptionValueLower
@@ -1159,6 +1190,7 @@ object BotApp extends App with StrictLogging {
             case None =>
               embedText = s":x: The player **${playerString}** is not on the allies list."
               embedBuild.setDescription(embedText)
+              tibiaDataClient.system.terminate()
               return callback(embedBuild.build())
           }
           alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
@@ -1177,12 +1209,14 @@ object BotApp extends App with StrictLogging {
           embedText = s":gear: The player **${playerString}** was removed from the allies list."
           embedBuild.setDescription(embedText)
           callback(embedBuild.build())
+          tibiaDataClient.system.terminate()
         }
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
+      tibiaDataClient.system.terminate()
     }
   }
 
