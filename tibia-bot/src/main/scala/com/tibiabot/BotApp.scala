@@ -387,7 +387,8 @@ object BotApp extends App with StrictLogging {
           huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
           tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace {
+        case Failure(e) => {
+          e.printStackTrace
           tibiaDataClient.system.terminate()
         }
       }
@@ -616,7 +617,8 @@ object BotApp extends App with StrictLogging {
           callback(guildBuffer.toList)
           tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace {
+        case Failure(e) => {
+          e.printStackTrace
           tibiaDataClient.system.terminate()
         }
       }
@@ -747,7 +749,8 @@ object BotApp extends App with StrictLogging {
           callback(playerBuffer.toList)
           tibiaDataClient.system.terminate()
         }
-        case Failure(e) => e.printStackTrace {
+        case Failure(e) => {
+          e.printStackTrace
           tibiaDataClient.system.terminate()
         }
       }
