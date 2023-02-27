@@ -10,6 +10,8 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse}
 import com.typesafe.scalalogging.StrictLogging
 import java.net.URLEncoder
+import scala.concurrent.duration._
+import akka.http.scaladsl.model.HttpEntity.Strict
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -22,36 +24,49 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   private val guildUrl = "https://api.tibiadata.com/v3/guild/"
 
   def getWorld(world: String): Future[WorldResponse] = {
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$world"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[WorldResponse]
-    } yield unmarshalled
+    val encodedName = URLEncoder.encode(world, "UTF-8")
+    Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$encodedName"))
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(response.entity).to[WorldResponse]
+        } else {
+          response.discardEntityBytes() // discard the entity if the response status is not success
+          Future.failed(new RuntimeException(s"Failed to get world $world with status ${response.status}"))
+        }
+      }
   }
 
   def getGuild(guild: String): Future[GuildResponse] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[GuildResponse]
-    } yield unmarshalled
+    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(response.entity).to[GuildResponse]
+        } else {
+          response.discardEntityBytes() // discard the entity if the response status is not success
+          Future.failed(new RuntimeException(s"Failed to get guild $guild with status ${response.status}"))
+        }
+      }
   }
 
   def getGuildWithInput(input: (String, String)): Future[(GuildResponse, String, String)] = {
     val name = input._1
     val reason = input._2
     val encodedName = URLEncoder.encode(name, "UTF-8")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[GuildResponse]
-    } yield (unmarshalled, name, reason)
+    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(response.entity).to[GuildResponse].map { guildResponse =>
+            (guildResponse, name, reason)
+          }
+        } else {
+          response.discardEntityBytes() // discard the entity if the response status is not success
+          Future.failed(new RuntimeException(s"Failed to get guild $name with status ${response.status}"))
+        }
+      }
   }
 
   def getCharacter(name: String): Future[CharacterResponse] = {
-
-    // yeehaw
     var obfsName = ""
     val rand = scala.util.Random
     name.toLowerCase.foreach { letter =>
@@ -64,11 +79,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
     val encodedName = URLEncoder.encode(obfsName, "UTF-8")
 
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[CharacterResponse]
-    } yield unmarshalled
+    Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(response.entity).to[CharacterResponse]
+        } else {
+          response.discardEntityBytes() // discard the entity if the response status is not success
+          Future.failed(new RuntimeException(s"Failed to get character $name with status ${response.status}"))
+        }
+      }
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(CharacterResponse, String, String, String)] = {
@@ -76,27 +95,21 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val reason = input._2
     val reasonText = input._3
     val encodedName = URLEncoder.encode(name, "UTF-8")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[CharacterResponse]
-    } yield (unmarshalled, name, reason, reasonText)
-  }
 
-  private def decodeResponse(response: HttpResponse): HttpResponse = {
-    val decoder = response.encoding match {
-      case HttpEncodings.gzip =>
-        Coders.Gzip
-      case HttpEncodings.deflate =>
-        Coders.Deflate
-      case HttpEncodings.identity =>
-        Coders.NoCoding
-      case other =>
-        logger.warn(s"Unknown encoding [$other], not decoding")
-        Coders.NoCoding
-    }
+    val request = HttpRequest(uri = s"$characterUrl${encodedName}")
 
-    decoder.decodeMessage(response)
+    Http().singleRequest(request)
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(response.entity).to[CharacterResponse].map { unmarshalled =>
+            (unmarshalled, name, reason, reasonText)
+          }
+        } else {
+          response.discardEntityBytes()
+          val errorMsg = s"Request to $request failed with status ${response.status}"
+          Future.failed(new RuntimeException(errorMsg))
+        }
+      }
   }
 
 }

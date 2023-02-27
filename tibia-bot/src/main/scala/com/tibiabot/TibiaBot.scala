@@ -493,9 +493,9 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
       }
       val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
       val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
-      // Send the embeds one at a time, otherwise some don't get sent if sending a lot at once
       embeds.foreach { embed =>
-        if (embed._6){ // if showNeutralDeaths == "true"
+        if (embed._6){ // embedCheck
+          // nemesis and enemy fullbless ignore the level filter
           if (embed._2 == "nemesis"){
             deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
           } else if (embed._2 == "fullbless"){
@@ -508,7 +508,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue();
             }
           } else {
-            if (embed._5 >= minimumLevel) { // will make this configurable later
+            // for regular deaths check if level > /filter deaths <level>
+            if (embed._5 >= minimumLevel) {
               deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
             }
           }
