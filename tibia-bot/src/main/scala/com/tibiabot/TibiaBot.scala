@@ -723,7 +723,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     val messagesToSend = (1 to 10).map(_ => Future(client.send(message).toCompletableFuture()))
 
     // Await all the message sends to complete
-    Await.result(Future.sequence(messagesToSend), 1.second)
+    Await.result(Future.sequence(messagesToSend), 5.second)
     client.close()
   }
 
