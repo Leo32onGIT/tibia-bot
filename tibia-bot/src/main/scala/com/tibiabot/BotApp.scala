@@ -387,10 +387,7 @@ object BotApp extends App with StrictLogging {
           huntedPlayersData = huntedPlayersData.updated(guild.getId(), updatedList)
 
         }
-        case Failure(e) => {
-          e.printStackTrace
-
-        }
+        case Failure(e) => // e.printStackTrace
       }
     }
   }
@@ -616,10 +613,7 @@ object BotApp extends App with StrictLogging {
           callback(guildBuffer.toList)
 
         }
-        case Failure(e) => {
-          e.printStackTrace
-
-        }
+        case Failure(e) => // e.printStackTrace
       }
       //IN PROGRESS
     } else { // guild list is empty
@@ -747,10 +741,7 @@ object BotApp extends App with StrictLogging {
           callback(playerBuffer.toList)
 
         }
-        case Failure(e) => {
-          e.printStackTrace
-
-        }
+        case Failure(e) => // e.printStackTrace
       }
     } else { // player list is empty
       val listIsEmpty = new EmbedBuilder()

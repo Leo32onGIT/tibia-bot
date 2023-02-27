@@ -436,7 +436,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                   }
                 }
               }
-              case Failure(e) => e.printStackTrace
+              case Failure(e) => // e.printStackTrace
             }
           }
         }
