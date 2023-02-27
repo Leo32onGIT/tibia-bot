@@ -133,6 +133,6 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     case other =>
       logger.warn(s"Unknown encoding [$other], not decoding")
       Coders.NoCoding
+    }
   }
-
 }
