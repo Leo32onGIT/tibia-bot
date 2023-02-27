@@ -2076,7 +2076,7 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel** to `$level`\nfor the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel** to `$level` for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
