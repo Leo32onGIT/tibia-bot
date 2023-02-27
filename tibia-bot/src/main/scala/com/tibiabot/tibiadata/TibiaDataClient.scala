@@ -28,7 +28,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
-          Unmarshal(decodeResponse(response).entity).to[WorldResponse]
+          decodeResponse(response).flatMap { decoded =>
+            Unmarshal(decoded).to[WorldResponse]
+          }
         } else {
           response.discardEntityBytes() // discard the entity if the response status is not success
           Future.failed(new RuntimeException(s"Failed to get world $world with status ${response.status}"))
@@ -41,7 +43,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
-          Unmarshal(decodeResponse(response).entity).to[GuildResponse]
+          decodeResponse(response).flatMap { decoded =>
+            Unmarshal(decoded).to[GuildResponse]
+          }
         } else {
           response.discardEntityBytes() // discard the entity if the response status is not success
           Future.failed(new RuntimeException(s"Failed to get guild $guild with status ${response.status}"))
@@ -56,8 +60,10 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
-          Unmarshal(decodeResponse(response).entity).to[GuildResponse].map { guildResponse =>
-            (guildResponse, name, reason)
+          decodeResponse(response).flatMap { decoded =>
+            Unmarshal(decoded).to[GuildResponse].map { guildResponse =>
+              (guildResponse, name, reason)
+            }
           }
         } else {
           response.discardEntityBytes() // discard the entity if the response status is not success
@@ -82,7 +88,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
-          Unmarshal(decodeResponse(response).entity).to[CharacterResponse]
+          decodeResponse(response).flatMap { decoded =>
+            Unmarshal(decoded).to[CharacterResponse]
+          }
         } else {
           response.discardEntityBytes() // discard the entity if the response status is not success
           Future.failed(new RuntimeException(s"Failed to get character $name with status ${response.status}"))
@@ -101,8 +109,10 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     Http().singleRequest(request)
       .flatMap { response =>
         if (response.status.isSuccess()) {
-          Unmarshal(decodeResponse(response).entity).to[CharacterResponse].map { unmarshalled =>
-            (unmarshalled, name, reason, reasonText)
+          decodeResponse(response).flatMap { decoded =>
+            Unmarshal(decoded).to[CharacterResponse].map { unmarshalled =>
+              (unmarshalled, name, reason, reasonText)
+            }
           }
         } else {
           response.discardEntityBytes()
@@ -124,5 +134,6 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       logger.warn(s"Unknown encoding [$other], not decoding")
       Coders.NoCoding
     }
+    decoder.decodeMessage(response).map(_.withEntity(response.entity))
   }
 }
