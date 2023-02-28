@@ -169,7 +169,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
                 if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
                   recentLevels += newCharLevel
                   if (levelsCheck) {
-                    createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    BotApp.sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                   }
                   // add flag to onlineList if player has leveled
                   currentOnline.find(_.name == charName).foreach { onlinePlayer =>
@@ -180,7 +181,8 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
               } else {
                 recentLevels += newCharLevel
                 if (levelsCheck) {
-                  createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                  //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                  BotApp.sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                 }
                 // add flag to onlineList if player has leveled
                 currentOnline.find(_.name == charName).foreach { onlinePlayer =>

@@ -36,6 +36,8 @@ import scala.collection.immutable.ListMap
 import java.awt.Color
 import akka.actor.Cancellable
 import scala.concurrent.duration._
+import com.tibiabot.discord.DiscordMessageSender
+
 object BotApp extends App with StrictLogging {
 
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
@@ -45,6 +47,7 @@ object BotApp extends App with StrictLogging {
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
   private val tibiaDataClient = new TibiaDataClient()
+  val sender = new DiscordMessageSender()
 
   // Let the games begin
   logger.info("Starting up")
@@ -1713,6 +1716,7 @@ object BotApp extends App with StrictLogging {
             .deny(Permission.MESSAGE_SEND)
             .complete()
         }
+        levelsChannel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
 
         val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId()}>\n\nIf an enemy player dies fullbless and is over level 250.\nAdd or remove yourself from the role using the buttons below."
         val fullblessEmbed = new EmbedBuilder()
