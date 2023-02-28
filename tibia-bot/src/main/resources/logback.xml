@@ -8,7 +8,7 @@
 
   <appender name="DISCORD" class="com.github.napstr.logback.DiscordAppender">
     <!-- do not set your webhook here if you want to commit this file to your VCS, instead look below for an example on how to set it at runtime -->
-    <webhookUri>https://discord.com/api/webhooks/1078328734945394788/PHFpBlX_jOvCVZGb49wT22uQxHOyOTXUUlNQkHdPCkt6L6autKe_fiAVpJqItzpPAhfC</webhookUri>
+    <webhookUri>https://discord.com/api/webhooks/1080177307286773780/usNx5IFhrWb_ybwxbATrR7gJ56n9odmvd3H0KErecBOdtSSDyS6CxDOv0KW5yBotUCHu</webhookUri>
     <layout class="ch.qos.logback.classic.PatternLayout">
       <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex){'(?s).*\n(.*)', '```$0```'}%nopex</pattern>
     </layout>
