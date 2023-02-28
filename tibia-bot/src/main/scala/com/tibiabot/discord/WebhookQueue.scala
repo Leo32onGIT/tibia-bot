@@ -87,13 +87,4 @@ class DiscordMessageSender() extends StrictLogging {
       }
     }
   }
-
-  // start the background thread to send messages
-  private val sendThread = new Thread(new Runnable() {
-    override def run(): Unit = {
-      sendMessages()
-    }
-  })
-  sendThread.setDaemon(true)
-  sendThread.start()
 }
