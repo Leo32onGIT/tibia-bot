@@ -24,7 +24,6 @@ libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.9"
 libraryDependencies += "org.postgresql" % "postgresql" % "42.2.14"
 libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
-libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.4"
 
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.12"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.12" % Test

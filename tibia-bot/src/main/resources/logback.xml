@@ -12,15 +12,6 @@
     <layout class="ch.qos.logback.classic.PatternLayout">
       <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex){'(?s).*\n(.*)', '```$0```'}%nopex</pattern>
     </layout>
-    <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
-      <evaluator class="ch.qos.logback.classic.boolex.JaninoEventEvaluator">
-        <expression>
-          return !logger.startsWith("c.m.discord.webhook.WebhookClient");
-        </expression>
-      </evaluator>
-      <OnMismatch>NEUTRAL</OnMismatch>
-      <OnMatch>DENY</OnMatch>
-    </filter>
     <tts>false</tts>
   </appender>
 
@@ -30,6 +21,10 @@
       <level>ERROR</level>
     </filter>
   </appender>
+
+  <logger name="club.minnced.discord.webhook.WebhookClient" level="ERROR" additivity="false">
+    <appender-ref ref="CONSOLE" />
+  </logger>
 
   <root>
     <level value="INFO" />
