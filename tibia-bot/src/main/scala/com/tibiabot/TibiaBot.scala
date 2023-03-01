@@ -461,10 +461,12 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         // this is the actual embed description
         var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
 
-        // if the length is over 4085 - truncate leave 11 chars for debugging
+        // if the length is over 4080 truncate it
         var embedLength = embedText.length
-        if (embedLength > 4060) {
-          embedText = embedText.substring(0, 4060) ++ "/n:scissors: `out of space`"
+        val limit = 4080
+        if (embedLength > limit) {
+          val newlineIndex = embedText.lastIndexOf('\n', limit)
+          embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
         }
 
         val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
@@ -518,11 +520,6 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
         }
       }
     }
-    /***
-    if (notablePoke != ""){
-      deathsChannel.sendMessage(notablePoke).queue();
-    }
-    ***/
 
     cleanUp()
 
