@@ -35,7 +35,7 @@ class DiscordMessageSender() extends StrictLogging {
     try {
         queue.put(messageDetails)
     } catch {
-      case ex: Exception => logger.error(s"Failed to add level message to queue for Guild:'${guild.getId()}' Channel:'${webhookChannel.getId()}' World:'${messageAuthor}':\nMessage: $messageContent", ex)
+      case ex: Exception => logger.error(s"Failed to add level message to queue for Guild: '${guild.getId()}' Channel: '${webhookChannel.getId()}' World: '${messageAuthor}':\nMessage: '$messageContent'", ex)
     }
   }
 
@@ -52,7 +52,7 @@ class DiscordMessageSender() extends StrictLogging {
             val currentRate = channelRateLimiters.getOrElseUpdate(messageDetails.webhookChannel, RateLimiter.create(1.0/3))
             if (currentRate.getRate != 1.0/3){
               channelRateLimiters.put(messageDetails.webhookChannel, RateLimiter.create(1.0/3))
-              logger.warn(s"Webhook rate limit for the levels channel on Guild:'${messageDetails.guild.getId()}' Channel:'${messageDetails.webhookChannel.getId()}'  World:'${messageDetails.messageAuthor}' has been temporarily restricted to 1 per 3 seconds")
+              logger.warn(s"Webhook rate limit for the levels channel on Guild: '${messageDetails.guild.getId()}' Channel: '${messageDetails.webhookChannel.getId()}'  World: '${messageDetails.messageAuthor}' has been temporarily restricted to 1 per 3 seconds")
             }
           } else {
             webhookRateLimits.put(messageDetails.webhookChannel, (count + 1, lastUpdated)) // increment count, but keep lastUpdated the same
@@ -82,7 +82,7 @@ class DiscordMessageSender() extends StrictLogging {
             val createWebhook = messageDetails.webhookChannel.createWebhook(messageDetails.messageAuthor).submit()
             webhook = createWebhook.get()
           } catch {
-            case ex: Exception => logger.warn(s"Failed to CREATE webhook for Guild:'${messageDetails.guild.getId()}' Channel:'${messageDetails.webhookChannel.getId()}'  World:'${messageDetails.messageAuthor}'", ex)
+            case ex: Exception => logger.warn(s"Failed to CREATE webhook for Guild: '${messageDetails.guild.getId()}' Channel: '${messageDetails.webhookChannel.getId()}'  World: '${messageDetails.messageAuthor}'", ex)
           }
         } else if (!getWebHook.isEmpty && webhookCheck){
           try {
@@ -91,7 +91,7 @@ class DiscordMessageSender() extends StrictLogging {
             case ex: Exception => logger.warn(s"Failed to GET webhook for Guild:'${messageDetails.guild.getId()}' Channel:'${messageDetails.webhookChannel.getId()}'  World:'${messageDetails.messageAuthor}'", ex)
           }
         } else {
-          logger.warn(s"Failed to RETRIEVE webhooks for Guild:'${messageDetails.guild.getId()}' Channel:'${messageDetails.webhookChannel.getId()}'  World:'${messageDetails.messageAuthor}'")
+          logger.warn(s"Failed to RETRIEVE webhooks for Guild: '${messageDetails.guild.getId()}' Channel: '${messageDetails.webhookChannel.getId()}'  World: '${messageDetails.messageAuthor}'")
         }
         if (webhook != null){
           val webhookUrl = webhook.getUrl()
@@ -103,7 +103,7 @@ class DiscordMessageSender() extends StrictLogging {
           try {
             WebhookClient.withUrl(webhookUrl).send(message)
           } catch {
-            case ex: Exception => logger.error(s"Failed to SEND webhook for Guild:'${messageDetails.guild.getId()}' Channel:'${messageDetails.webhookChannel.getId()}'  World:'${messageDetails.messageAuthor}'", ex)
+            case ex: Exception => logger.error(s"Failed to SEND webhook for Guild: '${messageDetails.guild.getId()}' Channel: '${messageDetails.webhookChannel.getId()}'  World: '${messageDetails.messageAuthor}'", ex)
           }
         }
       }
