@@ -571,7 +571,7 @@ class DeathTrackerStream(guild: Guild, alliesChannel: String, enemiesChannel: St
     val neutralsCount = neutralsList.size
     val enemiesCount = enemiesList.size
 
-    val pattern = "(.*)-(.*)$".r
+    val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
     val alliesTextChannel = guild.getTextChannelById(alliesChannel)
