@@ -1977,7 +1977,7 @@ object BotApp extends App with StrictLogging {
     if (levelSetting != null){
       if (levelSetting == level){
         // embed reply
-        embedBuild.setDescription(s":x: The level to poke for enemy fullblesses is already set to **$level** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":x: The level to poke for **enemy fullblesses**\nis already set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -1989,7 +1989,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        fullblessLevelToDatabase(guild, world, level)
+        fullblessLevelToDatabase(guild, worldFormal, level)
 
         // edit the fullblesschannel embeds
         val worldConfig = worldRetrieveConfig(guild, world)
@@ -2020,13 +2020,13 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for enemy fullblesses to **$level** for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
 
-        embedBuild.setDescription(s":gear: The level to poke for enemy fullblesses is now set to **$level** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: The level to poke for **enemy fullblesses**\nis now set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
@@ -2042,13 +2042,13 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     val cache = worldsData.getOrElse(guild.getId(), List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val levelSetting = cache.headOption.map(_.levelsMin).getOrElse(0)
-    val deathSetting = cache.headOption.map(_.deathsMin).getOrElse(0)
+    val levelSetting = cache.headOption.map(_.levelsMin).getOrElse(null)
+    val deathSetting = cache.headOption.map(_.deathsMin).getOrElse(null)
     val chosenSetting = if (levelsOrDeaths == "levels") levelSetting else deathSetting
-    if (chosenSetting != 0){
+    if (chosenSetting != null){
       if (chosenSetting == level){
         // embed reply
-        embedBuild.setDescription(s":x: The minimum level for the **$levelsOrDeaths channel** is already set to `$level` for the world **$worldFormal**.")
+        embedBuild.setDescription(s":x: The minimum level for the **$levelsOrDeaths channel**\nis already set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -2064,20 +2064,19 @@ object BotApp extends App with StrictLogging {
           }
         }
         worldsData = worldsData + (guild.getId() -> modifiedWorlds)
-        minLevelToDatabase(guild, world, level, levelsOrDeaths)
+        minLevelToDatabase(guild, worldFormal, level, levelsOrDeaths)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel** to `$level` for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
-
-        embedBuild.setDescription(s":gear: The minimum level for the **$levelsOrDeaths channel** is now set to `$level` for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: The minimum level for the **$levelsOrDeaths channel**\nis now set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
