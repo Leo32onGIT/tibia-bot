@@ -6,7 +6,6 @@
     </encoder>
   </appender>
 
-  <!--
   <appender name="DISCORD" class="com.github.napstr.logback.DiscordAppender">
     <webhookUri>https://discord.com/api/webhooks/1080177307286773780/usNx5IFhrWb_ybwxbATrR7gJ56n9odmvd3H0KErecBOdtSSDyS6CxDOv0KW5yBotUCHu</webhookUri>
     <layout class="ch.qos.logback.classic.PatternLayout">
@@ -21,14 +20,13 @@
       <level>ERROR</level>
     </filter>
   </appender>
--->
 
   <logger name="club.minnced.discord.webhook.WebhookClient" level="ERROR" additivity="false">
     <appender-ref ref="CONSOLE" />
   </logger>
 
   <root level="INFO">
-    <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
+    <appender-ref ref="ASYNC_DISCORD" />
     <appender-ref ref="CONSOLE" />
   </root>
 
