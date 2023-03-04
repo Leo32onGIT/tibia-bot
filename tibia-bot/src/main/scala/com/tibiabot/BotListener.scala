@@ -1,12 +1,13 @@
 package com.tibiabot
 
-import com.tibiabot.BotApp
+import com.tibiabot.BotApp.commands
+import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
-import net.dv8tion.jda.api.EmbedBuilder
+
 import scala.jdk.CollectionConverters._
-import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 
 class BotListener extends ListenerAdapter {
 
@@ -33,19 +34,18 @@ class BotListener extends ListenerAdapter {
   }
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
-    val guild = event.getGuild()
-    val commands = BotApp.commands
+    val guild = event.getGuild
     guild.updateCommands().addCommands(commands.asJava).complete()
   }
 
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    val embed = event.getInteraction().getMessage().getEmbeds()
-    val title = if (!embed.isEmpty) embed.get(0).getTitle() else ""
-    val button = event.getComponentId()
-    val guild = event.getGuild()
+    val embed = event.getInteraction.getMessage.getEmbeds
+    val title = if (!embed.isEmpty) embed.get(0).getTitle else ""
+    val button = event.getComponentId
+    val guild = event.getGuild
     val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
-    val user = event.getUser()
+    val user = event.getUser
     var responseText = ":x: An issue occured trying to add/remove you from this role, please try again."
     if (roleType == "fullbless"){
       val world = title.replace(":crossed_swords:", "").trim()
@@ -55,11 +55,11 @@ class BotListener extends ListenerAdapter {
         if (button == "add"){
           // get role add user to it
           guild.addRoleToMember(user, role).queue()
-          responseText = s":gear: You have been added to the <@&${role.getId()}> role."
+          responseText = s":gear: You have been added to the <@&${role.getId}> role."
         } else if (button == "remove"){
           // remove role
           guild.removeRoleFromMember(user, role).queue()
-          responseText = s":gear: You have been removed from the <@&${role.getId()}> role."
+          responseText = s":gear: You have been removed from the <@&${role.getId}> role."
         }
       } else {
         // role doesn't exist
@@ -73,11 +73,11 @@ class BotListener extends ListenerAdapter {
         if (button == "add"){
           // get role add user to it
           guild.addRoleToMember(user, role).queue()
-          responseText = s":gear: You have been added to the <@&${role.getId()}> role."
+          responseText = s":gear: You have been added to the <@&${role.getId}> role."
         } else if (button == "remove"){
           // remove role
           guild.removeRoleFromMember(user, role).queue()
-          responseText = s":gear: You have been removed from the <@&${role.getId()}> role."
+          responseText = s":gear: You have been removed from the <@&${role.getId}> role."
         }
       } else {
         // role doesn't exist
@@ -85,96 +85,88 @@ class BotListener extends ListenerAdapter {
       }
     }
     val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-    event.getHook().sendMessageEmbeds(replyEmbed).queue()
+    event.getHook.sendMessageEmbeds(replyEmbed).queue()
   }
 
   private def handleSetup(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val embed = BotApp.createChannels(event)
-    event.getHook().sendMessageEmbeds(embed).queue()
+    event.getHook.sendMessageEmbeds(embed).queue()
   }
   private def handleRemove(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val embed = BotApp.removeChannels(event)
-    event.getHook().sendMessageEmbeds(embed).queue()
+    event.getHook.sendMessageEmbeds(embed).queue()
   }
 
   private def handleHunted(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val toggleOption: String = options.get("option").getOrElse("")
-    val worldOption: String = options.get("world").getOrElse("")
-    val nameOption: String = options.get("name").getOrElse("")
-    val reasonOption: String = options.get("reason").getOrElse("none")
+    val toggleOption: String = options.getOrElse("option", "")
+    val worldOption: String = options.getOrElse("world", "")
+    val nameOption: String = options.getOrElse("name", "")
+    val reasonOption: String = options.getOrElse("reason", "none")
 
     subCommand match {
-      case "player" => {
+      case "player" =>
         if (toggleOption == "add"){
-          BotApp.addHunted(event, "player", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.addHunted(event, "player", nameOption, reasonOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         } else if (toggleOption == "remove"){
-          BotApp.removeHunted(event, "player", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.removeHunted(event, "player", nameOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         }
-      }
-      case "guild" => {
+      case "guild" =>
         if (toggleOption == "add"){
-          BotApp.addHunted(event, "guild", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.addHunted(event, "guild", nameOption, reasonOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         } else if (toggleOption == "remove"){
-          BotApp.removeHunted(event, "guild", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.removeHunted(event, "guild", nameOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         }
-      }
-      case "list" => {
-        BotApp.listAlliesAndHuntedGuilds(event, "hunted", (hunteds) => {
+      case "list" =>
+        BotApp.listAlliesAndHuntedGuilds(event, "hunted", hunteds => {
           val embedsJava = hunteds.asJava
           embedsJava.forEach { embed =>
-            event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
           }
-          BotApp.listAlliesAndHuntedPlayers(event, "hunted", (hunteds) => {
+          BotApp.listAlliesAndHuntedPlayers(event, "hunted", hunteds => {
             val embedsJava = hunteds.asJava
             embedsJava.forEach { embed =>
-              event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+              event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
             }
           })
         })
-      }
-      case "deaths" => {
+      case "deaths" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case "levels" => {
+      case "levels" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case "info" => {
+      case "info" =>
         val embed = BotApp.infoHunted(event, "player", nameOption)
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
-      case "autodetect" => {
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case "autodetect" =>
         val embed = BotApp.detectHunted(event)
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
-      case _ => {
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/hunted`.").build()
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/hunted`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 
@@ -182,74 +174,67 @@ class BotListener extends ListenerAdapter {
     event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val toggleOption: String = options.get("option").getOrElse("")
-    val nameOption: String = options.get("name").getOrElse("")
-    val reasonOption: String = options.get("reason").getOrElse("none")
-    val worldOption: String = options.get("world").getOrElse("")
+    val toggleOption: String = options.getOrElse("option", "")
+    val nameOption: String = options.getOrElse("name", "")
+    val reasonOption: String = options.getOrElse("reason", "none")
+    val worldOption: String = options.getOrElse("world", "")
 
     subCommand match {
-      case "player" => {
+      case "player" =>
         if (toggleOption == "add"){
-          BotApp.addAlly(event, "player", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         } else if (toggleOption == "remove") {
-          BotApp.removeAlly(event, "player", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.removeAlly(event, "player", nameOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         }
-      }
-      case "guild" => {
+      case "guild" =>
         if (toggleOption == "add"){
-          BotApp.addAlly(event, "guild", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         } else if (toggleOption == "remove") {
-          BotApp.removeAlly(event, "guild", nameOption, reasonOption, (embed) => {
-            event.getHook().sendMessageEmbeds(embed).queue()
+          BotApp.removeAlly(event, "guild", nameOption, embed => {
+            event.getHook.sendMessageEmbeds(embed).queue()
           })
         }
-      }
-      case "list" => {
-        BotApp.listAlliesAndHuntedGuilds(event, "allies", (allies) => {
+      case "list" =>
+        BotApp.listAlliesAndHuntedGuilds(event, "allies", allies => {
           val embedsJava = allies.asJava
           embedsJava.forEach { embed =>
-            event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
           }
-          BotApp.listAlliesAndHuntedPlayers(event, "allies", (allies) => {
+          BotApp.listAlliesAndHuntedPlayers(event, "allies", allies => {
             val embedsJava = allies.asJava
             embedsJava.forEach { embed =>
-              event.getHook().sendMessageEmbeds(embed).setEphemeral(true).queue()
+              event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
             }
           })
         })
-      }
-      case "deaths" => {
+      case "deaths" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case "levels" => {
+      case "levels" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case "info" => {
+      case "info" =>
         val embed = BotApp.infoAllies(event, "player", nameOption)
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
-      case _ => {
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/allies`.").build()
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/allies`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 
@@ -257,65 +242,59 @@ class BotListener extends ListenerAdapter {
     event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val toggleOption: String = options.get("option").getOrElse("")
-    val worldOption: String = options.get("world").getOrElse("")
+    val toggleOption: String = options.getOrElse("option", "")
+    val worldOption: String = options.getOrElse("world", "")
 
     subCommand match {
-      case "deaths" => {
+      case "deaths" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "deaths")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case "levels" => {
+      case "levels" =>
         if (toggleOption == "show"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "hide"){
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "levels")
-          event.getHook().sendMessageEmbeds(embed).queue()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
-      }
-      case _ => {
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/neutral`.").build()
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/neutral`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 
   private def handleFullbless(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val worldOption: String = options.get("world").getOrElse("")
+    val worldOption: String = options.getOrElse("world", "")
     val levelOption: Int = options.get("level").map(_.toInt).getOrElse(250)
 
     val embed = BotApp.fullblessLevel(event, worldOption, levelOption)
-    event.getHook().sendMessageEmbeds(embed).queue()
+    event.getHook.sendMessageEmbeds(embed).queue()
   }
 
   private def handleFilter(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val worldOption: String = options.get("world").getOrElse("")
+    val worldOption: String = options.getOrElse("world", "")
     val levelOption: Int = options.get("level").map(_.toInt).getOrElse(8)
 
     subCommand match {
-      case "levels" => {
+      case "levels" =>
         val embed = BotApp.minLevel(event, worldOption, levelOption, "levels")
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
-      case "deaths" => {
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case "deaths" =>
         val embed = BotApp.minLevel(event, worldOption, levelOption, "deaths")
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
-      case _ => {
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '${subCommand}' for `/filter`.").build()
-        event.getHook().sendMessageEmbeds(embed).queue()
-      }
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/filter`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 
