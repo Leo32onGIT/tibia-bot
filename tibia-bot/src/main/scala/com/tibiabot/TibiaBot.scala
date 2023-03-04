@@ -202,7 +202,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
 
     }
     // update online list every 5 minutes
-    if (ZonedDateTime.now().isAfter(onlineListTimer.plusMinutes(5))) {
+    if (ZonedDateTime.now().isAfter(onlineListTimer.plusMinutes(6))) {
       val currentOnlineList: List[(String, Int, String, String, ZonedDateTime, Long, String)] = currentOnline.map { onlinePlayer =>
         (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
       }.toList
