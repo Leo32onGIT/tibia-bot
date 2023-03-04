@@ -1,6 +1,7 @@
 package com.tibiabot.discord
 
 import club.minnced.discord.webhook.WebhookClient
+import club.minnced.discord.webhook.WebhookClientBuilder
 import club.minnced.discord.webhook.send.WebhookMessageBuilder
 import com.google.common.util.concurrent.RateLimiter
 import com.tibiabot.Config
@@ -94,11 +95,13 @@ class DiscordMessageSender() extends StrictLogging {
             .setUsername(messageDetails.messageAuthor)
             .setContent(messageDetails.messageContent)
             .setAvatarUrl(Config.webHookAvatar)
+          val client = new WebhookClientBuilder(webhookUrl).build()
           try {
-            WebhookClient.withUrl(webhookUrl).send(messageBuilder.build())
+            client.send(messageBuilder.build())
           } catch {
             case ex: Exception => logger.error(s"Failed to SEND webhook for Guild: '${messageDetails.guild.getId}' Channel: '${messageDetails.webhookChannel.getId}'  World: '${messageDetails.messageAuthor}'", ex)
           }
+          client.close()
         }
       }
     }

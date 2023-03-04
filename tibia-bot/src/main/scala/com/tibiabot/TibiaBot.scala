@@ -6,6 +6,7 @@ import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, huntedGuildsData, huntedPlayersData}
 import com.tibiabot.tibiadata.TibiaDataClient
+import com.tibiabot.BotApp.sender
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
@@ -164,7 +165,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
                   recentLevels += newCharLevel
                   if (levelsCheck) {
                     //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                    BotApp.sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                   }
                   // add flag to onlineList if player has leveled
                   currentOnline.find(_.name == charName).foreach { onlinePlayer =>
@@ -176,7 +177,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
                 recentLevels += newCharLevel
                 if (levelsCheck) {
                   //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                  BotApp.sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                  sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                 }
                 // add flag to onlineList if player has leveled
                 currentOnline.find(_.name == charName).foreach { onlinePlayer =>
