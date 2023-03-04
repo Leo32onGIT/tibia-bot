@@ -17,7 +17,7 @@ libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.7.0"
 libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.4.5"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.10"
 libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
 libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-beta.4"
 libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
@@ -30,5 +30,3 @@ libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
 libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
 
 resolvers += "jitpack" at "https://jitpack.io"
-
-scalacOptions += "-deprecation"
