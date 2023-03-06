@@ -67,6 +67,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   }
 
   def getCharacter(name: String): Future[CharacterResponse] = {
+    /***
     var obfsName = ""
     val rand = scala.util.Random
     name.toLowerCase.foreach { letter =>
@@ -76,8 +77,9 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
         obfsName += s"$letter"
       }
     }
+    ***/
 
-    val encodedName = URLEncoder.encode(obfsName, "UTF-8")
+    val encodedName = URLEncoder.encode(name, "UTF-8")
 
     Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       .flatMap { response =>
