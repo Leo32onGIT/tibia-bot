@@ -1514,7 +1514,7 @@ object BotApp extends App with StrictLogging {
 
   private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, created: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, flags, created) VALUES (?, ?, ?, ?, ?, ?);")
+    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, flags, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, flags = EXCLUDED.flags, created = EXCLUDED.created;")
     statement.setString(1, guildName)
     statement.setString(2, guildOwner)
     statement.setString(3, adminCategory)
