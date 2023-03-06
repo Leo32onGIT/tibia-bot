@@ -208,10 +208,10 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
       }.toList
       // did the online list api call fail?
-      if (currentOnlineList.size > 1){
+      //if (currentOnlineList.size > 1){
         onlineListTimer = ZonedDateTime.now()
         onlineList(currentOnlineList)
-      }
+      //}
     }
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
