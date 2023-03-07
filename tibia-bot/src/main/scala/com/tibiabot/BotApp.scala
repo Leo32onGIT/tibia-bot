@@ -354,12 +354,22 @@ object BotApp extends App with StrictLogging {
           val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
 
           // populate a new Discords list so i can only run 1 stream per world
-          worldsInfo.foreach{ w =>
-            val discords = Discords(
-              id = guildId,
-              adminChannel = adminChannelId
-            )
-            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+          worldsInfo.foreach { w =>
+            val worldName = w.name.toLowerCase.capitalize
+            if (!discordsData.contains(worldName)) { // check if Discords object is already added for this world name
+              val discords = Discords(
+                id = guildId,
+                adminChannel = adminChannelId
+              )
+              discordsData += (worldName -> List(discords))
+            } else {
+              val discordsList = discordsData(worldName)
+              val discords = Discords(
+                id = guildId,
+                adminChannel = adminChannelId
+              )
+              discordsData += (worldName -> (discords :: discordsList))
+            }
           }
         }
 
