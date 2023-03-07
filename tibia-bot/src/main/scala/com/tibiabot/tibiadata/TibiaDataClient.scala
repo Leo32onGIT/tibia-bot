@@ -2,7 +2,6 @@ package com.tibiabot
 package tibiadata
 
 import akka.actor.ActorSystem
-import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
@@ -20,16 +19,13 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   implicit private val system: ActorSystem = ActorSystem()
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
-  val poolSettings = ConnectionPoolSettings(system)
-    .withIdleTimeout(5.seconds)
-    .withMaxConnections(128)
 
   private val characterUrl = "https://api.tibiadata.com/v3/character/"
   private val guildUrl = "https://api.tibiadata.com/v3/guild/"
 
   def getWorld(world: String): Future[WorldResponse] = {
     val encodedName = URLEncoder.encode(world, "UTF-8")
-    Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$encodedName"), settings = poolSettings)
+    Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v3/world/$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[WorldResponse]
@@ -42,7 +38,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getGuild(guild: String): Future[GuildResponse] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8")
-    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"), settings = poolSettings)
+    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[GuildResponse]
@@ -57,7 +53,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val name = input._1
     val reason = input._2
     val encodedName = URLEncoder.encode(name, "UTF-8")
-    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"), settings = poolSettings)
+    Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[GuildResponse].map { guildResponse =>
@@ -86,7 +82,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
     val encodedName = URLEncoder.encode(name, "UTF-8")
 
-    Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"), settings = poolSettings)
+    Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[CharacterResponse]
@@ -105,7 +101,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
     val request = HttpRequest(uri = s"$characterUrl${encodedName}")
 
-    Http().singleRequest(request, settings = poolSettings)
+    Http().singleRequest(request)
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[CharacterResponse].map { unmarshalled =>
