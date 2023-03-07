@@ -266,14 +266,14 @@ object BotApp extends App with StrictLogging {
       g.updateCommands().addCommands(commands.asJava).complete()
   }
 
+  startBot(None, None)
+
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
   }
-
-  startBot(None, None)
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
