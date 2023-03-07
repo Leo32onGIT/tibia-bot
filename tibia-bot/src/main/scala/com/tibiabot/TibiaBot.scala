@@ -7,6 +7,10 @@ import akka.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, huntedGuildsData, huntedPlayersData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.BotApp.sender
+import com.tibiabot.BotApp.Discords
+import com.tibiabot.BotApp.Worlds
+import com.tibiabot.BotApp.worldsData
+import com.tibiabot.BotApp.discordsData
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
@@ -23,25 +27,28 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
 
 //noinspection FieldFromDelayedInit
-class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neutralsChannel: String, levelsChannel: String, deathsChannel: String, adminChannel: String, world: String, fullblessRole: String, nemesisRole: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
-  private case class CurrentOnline(name: String, level: Int, vocation: String, guild: String, time: ZonedDateTime, duration: Long = 0L, flag: String)
+  private case class GuildIcon(discordGuild: String, icon: String)
+  private case class CurrentOnline(name: String, level: Int, vocation: String, guildIcon: List[GuildIcon], time: ZonedDateTime, duration: Long = 0L, flag: String)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
+  private case class OnlinePlayer(name: String, level: Int, vocation: String, guildIcon: String, time: ZonedDateTime, duration: Long, flag: String)
 
-  val guildId: String = guild.getId
+  //val guildId: String = guild.getId
 
   private val recentDeaths = mutable.Set.empty[CharKey]
   private val recentLevels = mutable.Set.empty[CharLevel]
   private val recentOnline = mutable.Set.empty[CharKey]
-  private val currentOnline = mutable.Set.empty[CurrentOnline]
+  private var currentOnline = mutable.Set.empty[CurrentOnline]
 
-  private var onlineListTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
-  private var alliesListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
-  private var enemiesListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
-  private var neutralsListPurgeTimer = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+  private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
+  private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
+  private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
+  private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
+  // ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
   private val tibiaDataClient = new TibiaDataClient()
 
@@ -57,7 +64,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
   private lazy val sourceTick = Source.tick(2.seconds, 20.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
-    logger.info(s"Running stream for Guild: '${guild.getName}' Id: '${guild.getId}' World: '$world'")
+    logger.info(s"Running stream for World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
   }.withAttributes(logAndResume)
 
@@ -74,8 +81,8 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
       currentOnline.find(_.name == player.name) match {
         case Some(existingPlayer) =>
           val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
-          CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
-        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
+          CurrentOnline(player.name, player.level.toInt, player.vocation, List.empty[GuildIcon], now, existingPlayer.duration + duration, existingPlayer.flag)
+        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, List.empty[GuildIcon], now, 0L, "")
       }
     }
 
@@ -90,7 +97,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
     recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
     val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-    Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
+    Source(charsToCheck).mapAsyncUnordered(64)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
   }.withAttributes(logAndResume)
 
   private lazy val scanForDeaths = Flow[Set[CharacterResponse]].mapAsync(1) { characterResponses =>
@@ -100,21 +107,27 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
     val newDeaths = characterResponses.flatMap { char =>
       val charName = char.characters.character.name
       val guildName = char.characters.character.guild.map(_.name).getOrElse("")
-      val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
-      val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
-      val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-      val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-      val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
-        case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-        case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
-        case (_, _, _, true, _) => Config.allyGuild // allied-players
-        case (_, _, _, _, true) => Config.enemy // hunted-players
-        case ("", _, _, _, _) => "" //Config.noGuild // no guild (not ally or hunted)
-        case _ => Config.otherGuild // guild (not ally or hunted)
-      }
-      currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-        currentOnline -= onlinePlayer
-        currentOnline += onlinePlayer.copy(guild = guildIcon)
+      // update the guildIcon depending on the discord this would be posted to
+      discordsData.get(world).foreach { discordsList =>
+        discordsList.foreach { discords =>
+          val guildId = discords.id
+          val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+          val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+          val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+          val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+          val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
+            case (_, true, _, _, _) => Config.allyGuild // allied-guilds
+            case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
+            case (_, _, _, true, _) => Config.allyGuild // allied-players
+            case (_, _, _, _, true) => Config.enemy // hunted-players
+            case ("", _, _, _, _) => "" //Config.noGuild // no guild (not ally or hunted)
+            case _ => Config.otherGuild // guild (not ally or hunted)
+          }
+          currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+            val updatedPlayer = onlinePlayer.copy(guildIcon = onlinePlayer.guildIcon :+ GuildIcon(guildId, guildIcon))
+            currentOnline = (currentOnline - onlinePlayer) + updatedPlayer
+          }
+        }
       }
       // detecting new levels
       val deaths: List[Deaths] = char.characters.deaths.getOrElse(List.empty)
@@ -132,60 +145,64 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
       }
       if (!recentlyDied) {
         currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-          if (onlinePlayer.level > sheetLevel && onlinePlayer.level >= 8){ // dont show levels under lvl 8
+          if (onlinePlayer.level > sheetLevel){
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
-            val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
-            val levelsTextChannel = guild.getTextChannelById(levelsChannel)
-            if (levelsTextChannel != null){
-              // check show_neutrals_levels setting
-              val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-              val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
-              val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
-              val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
-              val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
-              val enemyIcons = List(Config.enemy, Config.enemyGuild)
-              val alliesIcons = List(Config.allyGuild)
-              val neutralIcons = List(Config.otherGuild, "")
-              // don't post level if showNeutrals is set to false and its a neutral level
-              val levelsCheck =
-                if (showNeutralLevels == "false" && neutralIcons.contains(guildIcon)) {
-                  false
-                } else if (showAlliesLevels == "false" && alliesIcons.contains(guildIcon)){
-                  false
-                } else if (showEnemiesLevels == "false" && enemyIcons.contains(guildIcon)){
-                  false
-                } else if (onlinePlayer.level < minimumLevel) {
-                  false
-                } else {
-                  true
-                }
-              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
-                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
-                  recentLevels += newCharLevel
-                  if (levelsCheck) {
-                    //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                    sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+            // post level to each discord
+            discordsData.get(world).foreach { discordsList =>
+              discordsList.foreach { discords =>
+                val guild = BotApp.jda.getGuildById(discords.id)
+                val guildId = discords.id
+                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+                val guildIcon = if (guildIconData != null) guildIconData.icon else ""
+                val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+                val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse(null)
+                val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
+                val levelsTextChannel = guild.getTextChannelById(levelsChannel)
+                if (levelsTextChannel != null){
+                  // check show_neutrals_levels setting
+                  val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
+                  val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
+                  val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
+                  val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
+                  val enemyIcons = List(Config.enemy, Config.enemyGuild)
+                  val alliesIcons = List(Config.allyGuild)
+                  val neutralIcons = List(Config.otherGuild, "")
+                  // don't post level if showNeutrals is set to false and its a neutral level
+                  val levelsCheck =
+                    if (showNeutralLevels == "false" && neutralIcons.contains(guildIcon)) {
+                      false
+                    } else if (showAlliesLevels == "false" && alliesIcons.contains(guildIcon)){
+                      false
+                    } else if (showEnemiesLevels == "false" && enemyIcons.contains(guildIcon)){
+                      false
+                    } else if (onlinePlayer.level < minimumLevel) {
+                      false
+                    } else {
+                      true
+                    }
+                  if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)){
+                    val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
+                    if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
+                      if (levelsCheck) {
+                        //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                        sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                      }
+                    }
+                  } else {
+                    if (levelsCheck) {
+                      //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                      sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                    }
                   }
-                  // add flag to onlineList if player has leveled
-                  currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-                    currentOnline -= onlinePlayer
-                    currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
-                  }
-                }
-              } else {
-                recentLevels += newCharLevel
-                if (levelsCheck) {
-                  //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                  sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                }
-                // add flag to onlineList if player has leveled
-                currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-                  currentOnline -= onlinePlayer
-                  currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
                 }
               }
+              // add flag to onlineList if player has leveled
+              currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+                currentOnline -= onlinePlayer
+                currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
+              }
             }
+            recentLevels += newCharLevel
           }
         }
       }
@@ -200,319 +217,343 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         }
         else None
       }
+    }
+    discordsData.get(world).foreach { discordsList =>
+      discordsList.foreach { discords =>
+        val guildId = discords.id
+        val adminChannel = discords.adminChannel
+        val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+        val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse(null)
+        val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse(null)
+        val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse(null)
+        // update online list every 5 minutes
+        val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
+          val currentOnlineList: List[OnlinePlayer] = currentOnline.map { onlinePlayer =>
+            val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+            val guildIcon = if (guildIconData != null) guildIconData.icon else ""
+            OnlinePlayer(onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, guildIcon, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
+          }.toList
+          // did the online list api call fail?
+          //if (currentOnlineList.size > 1){
+            onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
+            onlineList(currentOnlineList, guildId, adminChannel, alliesChannel, neutralsChannel, enemiesChannel)
+          //}
+        }
+      }
+    }
 
-    }
-    // update online list every 5 minutes
-    if (ZonedDateTime.now().isAfter(onlineListTimer.plusMinutes(6))) {
-      val currentOnlineList: List[(String, Int, String, String, ZonedDateTime, Long, String)] = currentOnline.map { onlinePlayer =>
-        (onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, onlinePlayer.guild, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
-      }.toList
-      // did the online list api call fail?
-      //if (currentOnlineList.size > 1){
-        onlineListTimer = ZonedDateTime.now()
-        onlineList(currentOnlineList)
-      //}
-    }
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
 
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
-    val deathsTextChannel = guild.getTextChannelById(deathsChannel)
-    if (deathsTextChannel != null){
-      val worldData = BotApp.worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-      val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
-        var notablePoke = ""
-        val charName = charDeath.char.characters.character.name
-        val killer = charDeath.death.killers.last.name
-        var context = "Died"
-        var embedColor = 3092790 // background default
-        var embedThumbnail = creatureImageUrl(killer)
-        var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
-        val killerBuffer = ListBuffer[String]()
-        val exivaBuffer = ListBuffer[String]()
-        var exivaList = ""
-        val killerList = charDeath.death.killers // get all killers
+    // post death to each discord
+    discordsData.get(world).foreach { discordsList =>
+      discordsList.foreach { discords =>
+        val guild = BotApp.jda.getGuildById(discords.id)
+        val guildId = discords.id
+        val adminChannel = discords.adminChannel
+        val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+        val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse(null)
+        val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse(null)
+        val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse(null)
+        val deathsTextChannel = guild.getTextChannelById(deathsChannel)
+        if (deathsTextChannel != null){
+          val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
+            var notablePoke = ""
+            val charName = charDeath.char.characters.character.name
+            val killer = charDeath.death.killers.last.name
+            var context = "Died"
+            var embedColor = 3092790 // background default
+            var embedThumbnail = creatureImageUrl(killer)
+            var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
+            val killerBuffer = ListBuffer[String]()
+            val exivaBuffer = ListBuffer[String]()
+            var exivaList = ""
+            val killerList = charDeath.death.killers // get all killers
 
-        // guild rank and name
-        val guildName = charDeath.char.characters.character.guild.map(_.name).getOrElse("")
-        val guildRank = charDeath.char.characters.character.guild.map(_.rank).getOrElse("")
-        //var guildText = ":x: **No Guild**\n"
-        var guildText = ""
+            // guild rank and name
+            val guildName = charDeath.char.characters.character.guild.map(_.name).getOrElse("")
+            val guildRank = charDeath.char.characters.character.guild.map(_.rank).getOrElse("")
+            //var guildText = ":x: **No Guild**\n"
+            var guildText = ""
 
-        // guild
-        // does player have guild?
-        var guildIcon = Config.otherGuild
-        if (guildName != "") {
-          // if untracked neutral guild show grey
-          if (embedColor == 3092790){
-            embedColor = 4540237
-          }
-          // is player an ally
-          val allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
-          if (allyGuilds){
-            embedColor = 13773097 // bright red
-            guildIcon = Config.allyGuild
-          }
-          // is player in hunted guild
-          val huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
-          if (huntedGuilds){
-            embedColor = 36941 // bright green
-            if (context == "Died") {
-              notablePoke = "fullbless" // PVE fullbless opportuniy (only poke for level 400+)
-            }
-          }
-          guildText = s"$guildIcon *$guildRank* of the [$guildName](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guildName.replace(" ", "%20")})\n"
-        }
-
-        // player
-        // ally player
-        val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-        if (allyPlayers){
-          embedColor = 13773097 // bright red
-        }
-        // hunted player
-        val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-        if (huntedPlayers){
-          embedColor = 36941 // bright green
-          if (context == "Died") {
-            notablePoke = "fullbless" // PVE fullbless opportuniy
-          }
-        }
-
-        // poke if killer is in notable-creatures config
-        val poke = Config.notableCreatures.contains(killer.toLowerCase())
-        if (poke) {
-          notablePoke = "nemesis"
-          embedColor = 11563775 // bright purple
-        }
-
-        if (killerList.nonEmpty) {
-          killerList.foreach { k =>
-            if (k.player) {
-              if (k.name != charName){ // ignore 'self' entries on deathlist
-                context = "Killed"
-                notablePoke = "" // reset poke as its not a fullbless
-                if (embedColor == 3092790 || embedColor == 4540237){
-                  embedColor = 14869218 // bone white
-                }
-                embedThumbnail = creatureImageUrl("Phantasmal_Ooze")
-                val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
-                if (isSummon.length > 1){
-                  if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
-                    val vowel = isSummon(0).take(1) match {
-                    case "a" => "an"
-                    case "e" => "an"
-                    case "i" => "an"
-                    case "o" => "an"
-                    case "u" => "an"
-                    case _ => "a"
-                    }
-                    killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}](${charUrl(isSummon(1))})**"
-                    if (guildIcon == Config.allyGuild) {
-                      exivaBuffer += isSummon(1)
-                    }
-                  } else {
-                    killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
-                    if (guildIcon == Config.allyGuild) {
-                      exivaBuffer += k.name
-                    }
-                  }
-                } else {
-                  killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // summon not detected
-                  if (guildIcon == Config.allyGuild) {
-                    exivaBuffer += k.name
-                  }
+            // guild
+            // does player have guild?
+            var guildIcon = Config.otherGuild
+            if (guildName != "") {
+              // if untracked neutral guild show grey
+              if (embedColor == 3092790){
+                embedColor = 4540237
+              }
+              // is player an ally
+              val allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+              if (allyGuilds){
+                embedColor = 13773097 // bright red
+                guildIcon = Config.allyGuild
+              }
+              // is player in hunted guild
+              val huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+              if (huntedGuilds){
+                embedColor = 36941 // bright green
+                if (context == "Died") {
+                  notablePoke = "fullbless" // PVE fullbless opportuniy (only poke for level 400+)
                 }
               }
-            } else {
-              // custom emojis for flavour
-              // map boss lists to their respesctive emojis
-              val creatureEmojis: Map[List[String], String] = Map(
-                Config.nemesisCreatures -> Config.nemesisEmoji,
-                Config.archfoeCreatures -> Config.archfoeEmoji,
-                Config.baneCreatures -> Config.baneEmoji,
-                Config.bossSummons -> Config.summonEmoji,
-                Config.cubeBosses -> Config.cubeEmoji,
-                Config.mkBosses -> Config.mkEmoji,
-                Config.svarGreenBosses -> Config.svarGreenEmoji,
-                Config.svarScrapperBosses -> Config.svarScrapperEmoji,
-                Config.svarWarlordBosses -> Config.svarWarlordEmoji,
-                Config.zelosBosses -> Config.zelosEmoji,
-                Config.libBosses -> Config.libEmoji,
-                Config.hodBosses -> Config.hodEmoji,
-                Config.feruBosses -> Config.feruEmoji,
-                Config.inqBosses -> Config.inqEmoji,
-                Config.kilmareshBosses -> Config.kilmareshEmoji
-              )
-              // assign the appropriate emoji
-              val bossIcon = creatureEmojis.find {
-                case (creatures, _) => creatures.contains(k.name.toLowerCase())
-              }.map(_._2).getOrElse("")
+              guildText = s"$guildIcon *$guildRank* of the [$guildName](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guildName.replace(" ", "%20")})\n"
+            }
 
-              // add "an" or "a" depending on first letter of creatures name
-              // ignore capitalized names (nouns) as they are bosses
-              // if player dies to a neutral source show 'died by energy' instead of 'died by an energy'
-              if (!k.name.exists(_.isUpper)){
-                val elements = List("death", "earth", "energy", "fire", "ice", "holy", "a trap", "agony", "life drain", "drowning")
-                vowelCheck = k.name.take(1) match {
-                  case _ if elements.contains(k.name) => ""
-                  case "a" => "an "
-                  case "e" => "an "
-                  case "i" => "an "
-                  case "o" => "an "
-                  case "u" => "an "
-                  case _ => "a "
-                }
+            // player
+            // ally player
+            val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+            if (allyPlayers){
+              embedColor = 13773097 // bright red
+            }
+            // hunted player
+            val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+            if (huntedPlayers){
+              embedColor = 36941 // bright green
+              if (context == "Died") {
+                notablePoke = "fullbless" // PVE fullbless opportuniy
               }
-              killerBuffer += s"$vowelCheck$bossIcon**${k.name}**"
             }
-          }
-        }
 
-        if (exivaBuffer.nonEmpty) {
-          exivaBuffer.zipWithIndex.foreach { case (exiva, i) =>
-            if (i == 0){
-              exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
-            } else {
-              exivaList += s"""\n${Config.indentEmoji} `exiva "$exiva"`""" // just use indent emoji for further player names
+            // poke if killer is in notable-creatures config
+            val poke = Config.notableCreatures.contains(killer.toLowerCase())
+            if (poke) {
+              notablePoke = "nemesis"
+              embedColor = 11563775 // bright purple
             }
-          }
 
-          // see if detectHunted is toggled on or off
-          val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
-          if (detectHunteds == "on"){
-            // scan exiva list for enemies to be added to hunted
-            val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
-            val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
-            futureResults.onComplete {
-              case Success(output) =>
-                val huntedBuffer = ListBuffer[(String, String, String, Int)]()
-                output.foreach { charResponse =>
-                  val killerName = charResponse.characters.character.name
-                  val killerGuild = charResponse.characters.character.guild
-                  val killerWorld = charResponse.characters.character.world
-                  val killerVocation = vocEmoji(charResponse)
-                  val killerLevel = charResponse.characters.character.level.toInt
-                  val killerGuildName = if(killerGuild.isDefined) killerGuild.head.name else ""
-                  var guildCheck = true
-                  if (killerGuildName != ""){
-                    if (alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase()) || huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase())){
-                      guildCheck = false // player guild is already ally/hunted
+            if (killerList.nonEmpty) {
+              killerList.foreach { k =>
+                if (k.player) {
+                  if (k.name != charName){ // ignore 'self' entries on deathlist
+                    context = "Killed"
+                    notablePoke = "" // reset poke as its not a fullbless
+                    if (embedColor == 3092790 || embedColor == 4540237){
+                      embedColor = 14869218 // bone white
                     }
-                  }
-                  if (guildCheck){ // player is not in a guild or is in a guild that is not tracked
-                    if (alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase()) || huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase())){
-                      // char is already on ally/hunted lis
+                    embedThumbnail = creatureImageUrl("Phantasmal_Ooze")
+                    val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
+                    if (isSummon.length > 1){
+                      if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
+                        val vowel = isSummon(0).take(1) match {
+                        case "a" => "an"
+                        case "e" => "an"
+                        case "i" => "an"
+                        case "o" => "an"
+                        case "u" => "an"
+                        case _ => "a"
+                        }
+                        killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}](${charUrl(isSummon(1))})**"
+                        if (guildIcon == Config.allyGuild) {
+                          exivaBuffer += isSummon(1)
+                        }
+                      } else {
+                        killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
+                        if (guildIcon == Config.allyGuild) {
+                          exivaBuffer += k.name
+                        }
+                      }
                     } else {
-                      // char is not on hunted list
-                      if (!huntedBuffer.exists(_._1 == killerName)){
-                        // add them to hunted list
-                        huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+                      killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // summon not detected
+                      if (guildIcon == Config.allyGuild) {
+                        exivaBuffer += k.name
                       }
                     }
                   }
-                }
+                } else {
+                  // custom emojis for flavour
+                  // map boss lists to their respesctive emojis
+                  val creatureEmojis: Map[List[String], String] = Map(
+                    Config.nemesisCreatures -> Config.nemesisEmoji,
+                    Config.archfoeCreatures -> Config.archfoeEmoji,
+                    Config.baneCreatures -> Config.baneEmoji,
+                    Config.bossSummons -> Config.summonEmoji,
+                    Config.cubeBosses -> Config.cubeEmoji,
+                    Config.mkBosses -> Config.mkEmoji,
+                    Config.svarGreenBosses -> Config.svarGreenEmoji,
+                    Config.svarScrapperBosses -> Config.svarScrapperEmoji,
+                    Config.svarWarlordBosses -> Config.svarWarlordEmoji,
+                    Config.zelosBosses -> Config.zelosEmoji,
+                    Config.libBosses -> Config.libEmoji,
+                    Config.hodBosses -> Config.hodEmoji,
+                    Config.feruBosses -> Config.feruEmoji,
+                    Config.inqBosses -> Config.inqEmoji,
+                    Config.kilmareshBosses -> Config.kilmareshEmoji
+                  )
+                  // assign the appropriate emoji
+                  val bossIcon = creatureEmojis.find {
+                    case (creatures, _) => creatures.contains(k.name.toLowerCase())
+                  }.map(_._2).getOrElse("")
 
-                // process the new batch of players to add to hunted list
-                if (huntedBuffer.nonEmpty){
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null){
-                    huntedBuffer.foreach { case (player, world, vocation, level) =>
-                      val playerString = player.toLowerCase()
-                      // add them to cached huntedPlayersData list
-                      huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
-                      // add them to the database
-                      BotApp.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
-                      // send embed to admin channel
-                      val commandUser = s"<@${BotApp.botUser}>"
-                      val adminEmbed = new EmbedBuilder()
-                      adminEmbed.setTitle(":robot: enemy automatically detected:")
-                      adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
-                      adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
-                      adminEmbed.setColor(14397256) // orange for bot auto command
-                      adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  // add "an" or "a" depending on first letter of creatures name
+                  // ignore capitalized names (nouns) as they are bosses
+                  // if player dies to a neutral source show 'died by energy' instead of 'died by an energy'
+                  if (!k.name.exists(_.isUpper)){
+                    val elements = List("death", "earth", "energy", "fire", "ice", "holy", "a trap", "agony", "life drain", "drowning")
+                    vowelCheck = k.name.take(1) match {
+                      case _ if elements.contains(k.name) => ""
+                      case "a" => "an "
+                      case "e" => "an "
+                      case "i" => "an "
+                      case "o" => "an "
+                      case "u" => "an "
+                      case _ => "a "
                     }
                   }
+                  killerBuffer += s"$vowelCheck$bossIcon**${k.name}**"
                 }
-              case Failure(_) => // e.printStackTrace
+              }
             }
-          }
-        }
 
-        // convert formatted killer list to one string
-        val killerInit = if (killerBuffer.nonEmpty) killerBuffer.view.init else None
-        var killerText =
-          //noinspection ScalaDeprecation
-          if (killerInit.iterator.nonEmpty) {
-            //noinspection ScalaDeprecation
-            killerInit.iterator.mkString(", ") + " and " + killerBuffer.last
-          } else killerBuffer.headOption.getOrElse("")
+            if (exivaBuffer.nonEmpty) {
+              exivaBuffer.zipWithIndex.foreach { case (exiva, i) =>
+                if (i == 0){
+                  exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
+                } else {
+                  exivaList += s"""\n${Config.indentEmoji} `exiva "$exiva"`""" // just use indent emoji for further player names
+                }
+              }
 
-        // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
-        if (killerText == ""){
-            embedThumbnail = creatureImageUrl("Red_Skull_(Item)")
-            killerText = s"""`suicide`"""
-        }
+              // see if detectHunted is toggled on or off
+              val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
+              if (detectHunteds == "on"){
+                // scan exiva list for enemies to be added to hunted
+                val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(32)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+                val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
+                futureResults.onComplete {
+                  case Success(output) =>
+                    val huntedBuffer = ListBuffer[(String, String, String, Int)]()
+                    output.foreach { charResponse =>
+                      val killerName = charResponse.characters.character.name
+                      val killerGuild = charResponse.characters.character.guild
+                      val killerWorld = charResponse.characters.character.world
+                      val killerVocation = vocEmoji(charResponse)
+                      val killerLevel = charResponse.characters.character.level.toInt
+                      val killerGuildName = if(killerGuild.isDefined) killerGuild.head.name else ""
+                      var guildCheck = true
+                      if (killerGuildName != ""){
+                        if (alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase()) || huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerGuildName.toLowerCase())){
+                          guildCheck = false // player guild is already ally/hunted
+                        }
+                      }
+                      if (guildCheck){ // player is not in a guild or is in a guild that is not tracked
+                        if (alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase()) || huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase())){
+                          // char is already on ally/hunted lis
+                        } else {
+                          // char is not on hunted list
+                          if (!huntedBuffer.exists(_._1 == killerName)){
+                            // add them to hunted list
+                            huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+                          }
+                        }
+                      }
+                    }
 
-        val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
-
-        // this is the actual embed description
-        var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
-
-        // if the length is over 4080 truncate it
-        val embedLength = embedText.length
-        val limit = 4080
-        if (embedLength > limit) {
-          val newlineIndex = embedText.lastIndexOf('\n', limit)
-          embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
-        }
-
-        val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
-        val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
-        val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
-        var embedCheck = true
-        if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237){
-          if(showNeutralDeaths == "false"){
-            embedCheck = false
-          }
-        } else if (embedColor == 36941){
-          if(showEnemiesDeaths == "false"){
-            embedCheck = false
-          }
-        } else if (embedColor == 13773097){
-          if(showAlliesDeaths == "false"){
-            embedCheck = false
-          }
-        }
-        val embed = new EmbedBuilder()
-        embed.setTitle(s"${vocEmoji(charDeath.char)} $charName ${vocEmoji(charDeath.char)}", charUrl(charName))
-        embed.setDescription(embedText)
-        embed.setThumbnail(embedThumbnail)
-        embed.setColor(embedColor)
-
-        // return embed + poke
-        (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
-      }
-      val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
-      val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
-      embeds.foreach { embed =>
-        if (embed._6){ // embedCheck
-          // nemesis and enemy fullbless ignore the level filter
-          if (embed._2 == "nemesis"){
-            deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
-          } else if (embed._2 == "fullbless"){
-            // send adjusted embed for fullblesses
-            val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-            val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-            if (embed._5 >= fullblessLevel) { // only poke for 250+
-              deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
-            } else {
-              deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
+                    // process the new batch of players to add to hunted list
+                    if (huntedBuffer.nonEmpty){
+                      val adminTextChannel = guild.getTextChannelById(adminChannel)
+                      if (adminTextChannel != null){
+                        huntedBuffer.foreach { case (player, world, vocation, level) =>
+                          val playerString = player.toLowerCase()
+                          // add them to cached huntedPlayersData list
+                          huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                          // add them to the database
+                          BotApp.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
+                          // send embed to admin channel
+                          val commandUser = s"<@${BotApp.botUser}>"
+                          val adminEmbed = new EmbedBuilder()
+                          adminEmbed.setTitle(":robot: enemy automatically detected:")
+                          adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
+                          adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                          adminEmbed.setColor(14397256) // orange for bot auto command
+                          adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                        }
+                      }
+                    }
+                  case Failure(_) => // e.printStackTrace
+                }
+              }
             }
-          } else {
-            // for regular deaths check if level > /filter deaths <level>
-            if (embed._5 >= minimumLevel) {
-              deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+
+            // convert formatted killer list to one string
+            val killerInit = if (killerBuffer.nonEmpty) killerBuffer.view.init else None
+            var killerText =
+              //noinspection ScalaDeprecation
+              if (killerInit.iterator.nonEmpty) {
+                //noinspection ScalaDeprecation
+                killerInit.iterator.mkString(", ") + " and " + killerBuffer.last
+              } else killerBuffer.headOption.getOrElse("")
+
+            // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
+            if (killerText == ""){
+                embedThumbnail = creatureImageUrl("Red_Skull_(Item)")
+                killerText = s"""`suicide`"""
+            }
+
+            val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+
+            // this is the actual embed description
+            var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
+
+            // if the length is over 4080 truncate it
+            val embedLength = embedText.length
+            val limit = 4080
+            if (embedLength > limit) {
+              val newlineIndex = embedText.lastIndexOf('\n', limit)
+              embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
+            }
+
+            val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
+            val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
+            val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
+            var embedCheck = true
+            if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237){
+              if(showNeutralDeaths == "false"){
+                embedCheck = false
+              }
+            } else if (embedColor == 36941){
+              if(showEnemiesDeaths == "false"){
+                embedCheck = false
+              }
+            } else if (embedColor == 13773097){
+              if(showAlliesDeaths == "false"){
+                embedCheck = false
+              }
+            }
+            val embed = new EmbedBuilder()
+            embed.setTitle(s"${vocEmoji(charDeath.char)} $charName ${vocEmoji(charDeath.char)}", charUrl(charName))
+            embed.setDescription(embedText)
+            embed.setThumbnail(embedThumbnail)
+            embed.setColor(embedColor)
+
+            // return embed + poke
+            (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
+          }
+          val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
+          val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
+          embeds.foreach { embed =>
+            if (embed._6){ // embedCheck
+              // nemesis and enemy fullbless ignore the level filter
+              if (embed._2 == "nemesis"){
+                deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+              } else if (embed._2 == "fullbless"){
+                // send adjusted embed for fullblesses
+                val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+                val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                if (embed._5 >= fullblessLevel) { // only poke for 250+
+                  deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
+                } else {
+                  deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
+                }
+              } else {
+                // for regular deaths check if level > /filter deaths <level>
+                if (embed._5 >= minimumLevel) {
+                  deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+                }
+              }
             }
           }
         }
@@ -524,7 +565,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
     Future.successful("end")
   }.withAttributes(logAndResume)
 
-  private def onlineList(onlineData: List[(String, Int, String, String, ZonedDateTime, Long, String)]): Unit = {
+  private def onlineList(onlineData: List[OnlinePlayer], guildId: String, adminChannel: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String): Unit = {
 
     val vocationBuffers = ListMap(
       "druid" -> ListBuffer[(String, String)](),
@@ -534,9 +575,9 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
       "none" -> ListBuffer[(String, String)]()
     )
 
-    val sortedList = onlineData.sortWith(_._2 > _._2)
+    val sortedList = onlineData.sortWith(_.level > _.level)
     sortedList.foreach { player =>
-      val voc = player._3.toLowerCase.split(' ').last
+      val voc = player.vocation.toLowerCase.split(' ').last
       val vocEmoji = voc match {
         case "knight" => ":shield:"
         case "druid" => ":snowflake:"
@@ -546,7 +587,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         case _ => ""
       }
       //vocationBuffers(voc) += ((s"${player._4}", s"${player._4} **[${player._1}](${charUrl(player._1)})** — Level ${player._2.toString} $vocEmoji"))
-      val durationInSec = player._6
+      val durationInSec = player.duration
       val durationInMin = durationInSec / 60
       val durationStr = if (durationInMin >= 60) {
         val hours = durationInMin / 60
@@ -557,7 +598,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
       }
       //val durationString = if (player._4 == Config.allyGuild || player._4 == Config.enemyGuild || player._4 == Config.enemy) s"— `${durationStr}`" else ""
       val durationString = s"| `$durationStr`"
-      vocationBuffers(voc) += ((s"${player._4}", s"$vocEmoji **[${player._2.toString}](${charUrl(player._1)})** — **${player._1}** ${player._4} $durationString ${player._7}"))
+      vocationBuffers(voc) += ((s"${player.guildIcon}", s"$vocEmoji **[${player.level.toString}](${charUrl(player.name)})** — **${player.name}** ${player.guildIcon} $durationString ${player.flag}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
@@ -572,6 +613,7 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
+    val guild = BotApp.jda.getGuildById(guildId)
     val alliesTextChannel = guild.getTextChannelById(alliesChannel)
     if (alliesTextChannel != null){
       // allow for custom channel names
@@ -586,9 +628,9 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         channelManager.setName(s"$customName-$alliesCount").queue()
       }
       if (alliesList.nonEmpty){
-        updateMultiFields(alliesList, alliesTextChannel, "allies")
+        updateMultiFields(alliesList, alliesTextChannel, "allies", guildId)
       } else {
-        updateMultiFields(List("No allies are online right now."), alliesTextChannel, "allies")
+        updateMultiFields(List("No allies are online right now."), alliesTextChannel, "allies", guildId)
       }
     }
     val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
@@ -605,9 +647,9 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         channelManager.setName(s"$customName-$neutralsCount").queue()
       }
       if (neutralsList.nonEmpty){
-        updateMultiFields(neutralsList, neutralsTextChannel, "neutrals")
+        updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId)
       } else {
-        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel, "neutrals")
+        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel, "neutrals", guildId)
       }
     }
     val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
@@ -624,36 +666,39 @@ class TibiaBot(guild: Guild, alliesChannel: String, enemiesChannel: String, neut
         channelManager.setName(s"$customName-$enemiesCount").queue()
       }
       if (enemiesList.nonEmpty){
-        updateMultiFields(enemiesList, enemiesTextChannel, "enemies")
+        updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId)
       } else {
-        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel, "enemies")
+        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel, "enemies", guildId)
       }
     }
   }
 
-  private def updateMultiFields(values: List[String], channel: TextChannel, purgeType: String): Unit = {
+  private def updateMultiFields(values: List[String], channel: TextChannel, purgeType: String, guildId: String): Unit = {
     var field = ""
     val embedColor = 3092790
     //get messages
     var messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(BotApp.botUser)).toList.reverse.asJava
 
     // clear the channel every 6 hours
+    val allyTimer = alliesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+    val neutralTimer = neutralsListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+    val enemyTimer = enemiesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
     if (purgeType == "allies"){
-      if (ZonedDateTime.now().isAfter(alliesListPurgeTimer.plusHours(6))) {
+      if (ZonedDateTime.now().isAfter(allyTimer.plusHours(6))) {
         channel.purgeMessages(messages)
-        alliesListPurgeTimer = ZonedDateTime.now()
-        messages = List.empty.asJava
-      }
-    } else if (purgeType == "enemies"){
-      if (ZonedDateTime.now().isAfter(enemiesListPurgeTimer.plusHours(6))) {
-        channel.purgeMessages(messages)
-        enemiesListPurgeTimer = ZonedDateTime.now()
+        alliesListPurgeTimer = alliesListPurgeTimer + (guildId -> ZonedDateTime.now())
         messages = List.empty.asJava
       }
     } else if (purgeType == "neutrals"){
-      if (ZonedDateTime.now().isAfter(neutralsListPurgeTimer.plusHours(6))) {
+      if (ZonedDateTime.now().isAfter(neutralTimer.plusHours(6))) {
         channel.purgeMessages(messages)
-        neutralsListPurgeTimer = ZonedDateTime.now()
+        neutralsListPurgeTimer = neutralsListPurgeTimer + (guildId -> ZonedDateTime.now())
+        messages = List.empty.asJava
+      }
+    } else if (purgeType == "enemies"){
+      if (ZonedDateTime.now().isAfter(enemyTimer.plusHours(6))) {
+        channel.purgeMessages(messages)
+        enemiesListPurgeTimer = enemiesListPurgeTimer + (guildId -> ZonedDateTime.now())
         messages = List.empty.asJava
       }
     }

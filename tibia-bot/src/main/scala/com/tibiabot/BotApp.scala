@@ -27,9 +27,33 @@ import scala.util.{Failure, Success}
 
 object BotApp extends App with StrictLogging {
 
+  case class Worlds(name: String,
+    alliesChannel: String,
+    enemiesChannel: String,
+    neutralsChannel: String,
+    levelsChannel: String,
+    deathsChannel: String,
+    category: String,
+    fullblessRole: String,
+    nemesisRole: String,
+    fullblessChannel: String,
+    nemesisChannel: String,
+    fullblessLevel: Int,
+    showNeutralLevels: String,
+    showNeutralDeaths: String,
+    showAlliesLevels: String,
+    showAlliesDeaths: String,
+    showEnemiesLevels: String,
+    showEnemiesDeaths: String,
+    detectHunteds: String,
+    levelsMin: Int,
+    deathsMin: Int
+  )
+
+  case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
+  case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Worlds(name: String, fullblessLevel: Int, showNeutralLevels: String, showNeutralDeaths: String, showAlliesLevels: String, showAlliesDeaths: String, showEnemiesLevels: String, showEnemiesDeaths: String, detectHunteds: String, levelsMin: Int, deathsMin: Int)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -39,7 +63,7 @@ object BotApp extends App with StrictLogging {
   // Let the games begin
   logger.info("Starting up")
 
-  private val jda = JDABuilder.createDefault(Config.token)
+  val jda = JDABuilder.createDefault(Config.token)
     .addEventListeners(new BotListener())
     .build()
 
@@ -50,7 +74,7 @@ object BotApp extends App with StrictLogging {
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
 
   // stream list
-   private var deathTrackerStreams = Map[(Guild, String), akka.actor.Cancellable]()
+  private var botStreams = Map[(String), Streams]()
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = jda.getSelfUser.getId
@@ -63,6 +87,7 @@ object BotApp extends App with StrictLogging {
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
+  var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
 
   // create the command to set up the bot
@@ -239,10 +264,6 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
       // update the commands
       g.updateCommands().addCommands(commands.asJava).complete()
-      // check if database exists for discord server and start bot if it does
-      if (checkConfigDatabase(g)){
-        startBot(g, None)
-      }
   }
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
@@ -252,70 +273,108 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def startBot(guild: Guild, world: Option[String]): Unit = {
+  startBot(None, None)
 
-    // build guild specific data map
-    val guildId = guild.getId
+  private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
-    // get hunted Players
-    val huntedPlayers = playerConfig(guild, "hunted_players")
-    huntedPlayersData += (guildId -> huntedPlayers)
+    if (guild.isDefined && world.isDefined){
 
-    // get allied Players
-    val alliedPlayers = playerConfig(guild, "allied_players")
-    alliedPlayersData += (guildId -> alliedPlayers)
+      val guildId = guild.get.getId
 
-    // get hunted guilds
-    val huntedGuilds = guildConfig(guild, "hunted_guilds")
-    huntedGuildsData += (guildId -> huntedGuilds)
+      // get hunted Players
+      val huntedPlayers = playerConfig(guild.get, "hunted_players")
+      huntedPlayersData += (guildId -> huntedPlayers)
 
-    // get allied guilds
-    val alliedGuilds = guildConfig(guild, "allied_guilds")
-    alliedGuildsData += (guildId -> alliedGuilds)
+      // get allied Players
+      val alliedPlayers = playerConfig(guild.get, "allied_players")
+      alliedPlayersData += (guildId -> alliedPlayers)
 
-    // get worlds
-    val worldsInfo = worldConfig(guild)
-    worldsData += (guildId -> worldsInfo)
+      // get hunted guilds
+      val huntedGuilds = guildConfig(guild.get, "hunted_guilds")
+      huntedGuildsData += (guildId -> huntedGuilds)
 
+      // get allied guilds
+      val alliedGuilds = guildConfig(guild.get, "allied_guilds")
+      alliedGuildsData += (guildId -> alliedGuilds)
+
+      // get worlds
+      val worldsInfo = worldConfig(guild.get)
+      worldsData += (guildId -> worldsInfo)
+
+      val adminChannels = discordRetrieveConfig(guild.get)
+      val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
+
+      worldsInfo.foreach{ w =>
+        if (w.name == world.get.toLowerCase.capitalize){
+          val discords = Discords(
+            id = guildId,
+            adminChannel = adminChannelId
+          )
+          discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+          if (botStreams.contains(world.get.toLowerCase.capitalize)) {
+            // If the stream already exists, update its usedBy list
+            val existingStream = botStreams(world.get.toLowerCase.capitalize)
+            val updatedUsedBy = existingStream.usedBy :+ discords
+            botStreams += (world.get.toLowerCase.capitalize -> existingStream.copy(usedBy = updatedUsedBy))
+          } else {
+            // If the stream doesn't exist, create a new one with an empty usedBy list
+            val botStream = new TibiaBot(world.get)
+            botStreams += (world.get.toLowerCase.capitalize -> Streams(botStream.stream.run(), List(discords)))
+          }
+        }
+      }
+    } else {
+      // build guild specific data map
+      guilds.foreach{g =>
+
+        val guildId = g.getId
+
+        // get hunted Players
+        val huntedPlayers = playerConfig(g, "hunted_players")
+        huntedPlayersData += (guildId -> huntedPlayers)
+
+        // get allied Players
+        val alliedPlayers = playerConfig(g, "allied_players")
+        alliedPlayersData += (guildId -> alliedPlayers)
+
+        // get hunted guilds
+        val huntedGuilds = guildConfig(g, "hunted_guilds")
+        huntedGuildsData += (guildId -> huntedGuilds)
+
+        // get allied guilds
+        val alliedGuilds = guildConfig(g, "allied_guilds")
+        alliedGuildsData += (guildId -> alliedGuilds)
+
+        // get worlds
+        val worldsInfo = worldConfig(g)
+        worldsData += (guildId -> worldsInfo)
+
+        val adminChannels = discordRetrieveConfig(g)
+        val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
+
+        // populate a new Discords list so i can only run 1 stream per world
+        worldsInfo.foreach{ w =>
+          val discords = Discords(
+            id = guildId,
+            adminChannel = adminChannelId
+          )
+          discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+        }
+      }
+
+      discordsData.foreach { case (worldName, discordsList) =>
+        val botStream = new TibiaBot(worldName)
+        botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
+      }
+    }
+
+    /***
     // check if world parameter has been passed, and convert to a list
     val guildWorlds = world match {
       case Some(worldName) => worldsData.getOrElse(guild.getId, List()).filter(w => w.name == worldName)
       case None => worldsData.getOrElse(guild.getId, List())
     }
-    guildWorlds.foreach { guildWorld =>
-      val formalName = guildWorld.name.toLowerCase().capitalize
-      val worldChannels = worldRetrieveConfig(guild, formalName)
-      val featuresChannelRetrieve = discordRetrieveConfig(guild)
-
-      // get channels for this discord server
-      if (worldChannels.nonEmpty && featuresChannelRetrieve.nonEmpty){
-
-        val alliesChannel = worldChannels("allies_channel")
-        val enemiesChannel = worldChannels("enemies_channel")
-        val neutralsChannel = worldChannels("neutrals_channel")
-        val levelsChannel = worldChannels("levels_channel")
-        val deathsChannel = worldChannels("deaths_channel")
-
-        val logChannel = featuresChannelRetrieve("admin_channel")
-
-        val fullblessRoleId = worldChannels("fullbless_role")
-        val nemesisRoleId = worldChannels("nemesis_role")
-        //val fullblessLevel = worldChannels("fullbless_level")
-        //val showNeutrals = worldChannels("show_neutrals")
-        //val categories = guild.getCategories().asScala
-        //val targetCategory = categories.find(_.getName == world).getOrElse(null)
-
-        // run an instance of the tracker
-        // ensure channels exist (haven't been deleted) before bothering to run the stream
-        val deathTrackerStream = new TibiaBot(guild, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, logChannel, formalName, fullblessRoleId, nemesisRoleId)
-        val key = (guild, formalName)
-        // run stream and put it in the deathTrackerStreams buffer so it can be cancelled at will
-        deathTrackerStreams += (key -> deathTrackerStream.stream.run())
-
-      } else {
-        logger.info(s"There was a problem getting channel information for '${guild.getName} - ${guild.getId}' - $formalName.")
-      }
-    }
+    ***/
   }
 
   private def cleanHuntedList(guild: Guild): Unit = {
@@ -1438,11 +1497,22 @@ object BotApp extends App with StrictLogging {
   private def worldConfig(guild: Guild): List[Worlds] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
       val name = Option(result.getString("name")).getOrElse("")
+      val alliesChannel = Option(result.getString("allies_channel")).getOrElse(null)
+      val enemiesChannel = Option(result.getString("enemies_channel")).getOrElse(null)
+      val neutralsChannel = Option(result.getString("neutrals_channel")).getOrElse(null)
+      val levelsChannel = Option(result.getString("levels_channel")).getOrElse(null)
+      val deathsChannel = Option(result.getString("deaths_channel")).getOrElse(null)
+      val category = Option(result.getString("category")).getOrElse(null)
+      val fullblessRole = Option(result.getString("fullbless_role")).getOrElse(null)
+      val nemesisRole = Option(result.getString("nemesis_role")).getOrElse(null)
+      val fullblessChannel = Option(result.getString("fullbless_channel")).getOrElse(null)
+      val nemesisChannel = Option(result.getString("nemesis_channel")).getOrElse(null)
+
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
       val showNeutralLevels = Option(result.getString("show_neutral_levels")).getOrElse("true")
       val showNeutralDeaths = Option(result.getString("show_neutral_deaths")).getOrElse("true")
@@ -1453,7 +1523,7 @@ object BotApp extends App with StrictLogging {
       val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
       val levelsMin = Option(result.getInt("levels_min")).getOrElse(8)
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
-      results += Worlds(name, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin)
+      results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin)
     }
 
     statement.close()
@@ -1731,7 +1801,7 @@ object BotApp extends App with StrictLogging {
 
         // update the database
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, fullblessId, nemesisId)
-        startBot(guild, Some(world))
+        startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
         // channels already exist
@@ -2089,12 +2159,21 @@ object BotApp extends App with StrictLogging {
           .build()
         }
 
-        // cancel the stream
-        val key = (guild, world.capitalize)
-        deathTrackerStreams.get(key) match {
-          case Some(stream) =>
-            stream.cancel()
-            deathTrackerStreams -= key
+
+        // remove the guild from the world stream
+        val getWorldStream = botStreams.get(world)
+        getWorldStream match {
+          case Some(streams) =>
+            // remove the guild from the usedBy list
+            val updatedUsedBy = streams.usedBy.filterNot(_.id == guild.getId)
+            // if there are no more guilds in the usedBy list
+            if (updatedUsedBy.isEmpty) {
+              streams.stream.cancel()
+              botStreams -= world
+            } else {
+              // update the botStreams map with the updated usedBy list
+              botStreams += (world -> streams.copy(usedBy = updatedUsedBy))
+            }
           case None =>
             logger.info(s"No stream found for guild '${guild.getName} - ${guild.getId}' and world '$world'.")
         }
@@ -2118,6 +2197,13 @@ object BotApp extends App with StrictLogging {
           .map(worlds => worldsData + (guild.getId -> worlds))
           .getOrElse(worldsData)
         worldsData = updatedWorldsData
+
+        // remove from discordsData
+        discordsData.get(world)
+          .foreach { discords =>
+            val updatedDiscords = discords.filterNot(_.id == guild.getId)
+            discordsData += (world -> updatedDiscords)
+          }
 
         // update the database
         worldRemoveConfig(guild, world)
