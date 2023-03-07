@@ -267,7 +267,7 @@ object BotApp extends App with StrictLogging {
   }
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    updateDashboard()
+    //updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
@@ -329,42 +329,44 @@ object BotApp extends App with StrictLogging {
 
         val guildId = g.getId
 
-        // get hunted Players
-        val huntedPlayers = playerConfig(g, "hunted_players")
-        huntedPlayersData += (guildId -> huntedPlayers)
+        if (checkConfigDatabase(g)){
+          // get hunted Players
+          val huntedPlayers = playerConfig(g, "hunted_players")
+          huntedPlayersData += (guildId -> huntedPlayers)
 
-        // get allied Players
-        val alliedPlayers = playerConfig(g, "allied_players")
-        alliedPlayersData += (guildId -> alliedPlayers)
+          // get allied Players
+          val alliedPlayers = playerConfig(g, "allied_players")
+          alliedPlayersData += (guildId -> alliedPlayers)
 
-        // get hunted guilds
-        val huntedGuilds = guildConfig(g, "hunted_guilds")
-        huntedGuildsData += (guildId -> huntedGuilds)
+          // get hunted guilds
+          val huntedGuilds = guildConfig(g, "hunted_guilds")
+          huntedGuildsData += (guildId -> huntedGuilds)
 
-        // get allied guilds
-        val alliedGuilds = guildConfig(g, "allied_guilds")
-        alliedGuildsData += (guildId -> alliedGuilds)
+          // get allied guilds
+          val alliedGuilds = guildConfig(g, "allied_guilds")
+          alliedGuildsData += (guildId -> alliedGuilds)
 
-        // get worlds
-        val worldsInfo = worldConfig(g)
-        worldsData += (guildId -> worldsInfo)
+          // get worlds
+          val worldsInfo = worldConfig(g)
+          worldsData += (guildId -> worldsInfo)
 
-        val adminChannels = discordRetrieveConfig(g)
-        val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
+          val adminChannels = discordRetrieveConfig(g)
+          val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
 
-        // populate a new Discords list so i can only run 1 stream per world
-        worldsInfo.foreach{ w =>
-          val discords = Discords(
-            id = guildId,
-            adminChannel = adminChannelId
-          )
-          discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+          // populate a new Discords list so i can only run 1 stream per world
+          worldsInfo.foreach{ w =>
+            val discords = Discords(
+              id = guildId,
+              adminChannel = adminChannelId
+            )
+            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+          }
         }
-      }
 
-      discordsData.foreach { case (worldName, discordsList) =>
-        val botStream = new TibiaBot(worldName)
-        botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
+        discordsData.foreach { case (worldName, discordsList) =>
+          val botStream = new TibiaBot(worldName)
+          botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
+        }
       }
     }
 
