@@ -312,16 +312,17 @@ object BotApp extends App with StrictLogging {
             adminChannel = adminChannelId
           )
           discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
-          if (botStreams.contains(world.get.toLowerCase.capitalize)) {
+          val botStream = if (botStreams.contains(world.get.toLowerCase.capitalize)) {
             // If the stream already exists, update its usedBy list
             val existingStream = botStreams(world.get.toLowerCase.capitalize)
             val updatedUsedBy = existingStream.usedBy :+ discords
             botStreams += (world.get.toLowerCase.capitalize -> existingStream.copy(usedBy = updatedUsedBy))
+            existingStream
           } else {
             // If the stream doesn't exist, create a new one with an empty usedBy list
-            val botStream = new TibiaBot(world.get)
-            botStreams += (world.get.toLowerCase.capitalize -> Streams(botStream.stream.run(), List(discords)))
+            new TibiaBot(world.get)
           }
+          botStreams += (world.get.toLowerCase.capitalize -> Streams(botStream.stream.run(), List(discords)))
         }
       }
     } else {
