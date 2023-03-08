@@ -443,28 +443,45 @@ object BotApp extends App with StrictLogging {
   private def updateDashboard(): Unit = {
     // Violent Bot Support discord
     val dashboardGuild = jda.getGuildById(867319250708463628L)
-    val dashboardDiscords = dashboardGuild.getVoiceChannelById(1076431727838380032L)
-    val dashboardWorlds = dashboardGuild.getVoiceChannelById(1076432500294955098L)
+    val dashboardDiscordsTotal = dashboardGuild.getVoiceChannelById(1076431727838380032L)
+    val dashboardDiscordsActive = dashboardGuild.getVoiceChannelById(1082844559937114112L)
+    val dashboardWorldSubscriptions = dashboardGuild.getVoiceChannelById(1076432500294955098L)
+    val dashboardWorldStreams = dashboardGuild.getVoiceChannelById(1082844790439288872L)
 
     logger.info(s"Updating Violent Bot dashboard...")
 
     // get total Discord count
     val guildCount = jda.getGuilds.asScala.toList.size
-    // get total World count
-    val worldCount: Int = worldsData.values.map(_.size).sum
+    val activeDiscordsCount: Int = worldsData.size
+    val worldStreamCount: Int = discordsData.size
+    val worldsTrackedCount: Int = worldsData.values.map(_.size).sum
 
     // edit the Discord count channel
-    val dashboardDiscordsName = dashboardDiscords.getName
-    if (dashboardDiscordsName != s"Discords: $guildCount"){
-      val dashboardDiscordsManager = dashboardDiscords.getManager
-      dashboardDiscordsManager.setName(s"Discords: $guildCount").queue()
+    val dashboardDiscordsTotalName = dashboardDiscordsTotal.getName
+    if (dashboardDiscordsTotalName != s"Discords (Total): $guildCount"){
+      val dashboardDiscordsTotalManager = dashboardDiscordsTotal.getManager
+      dashboardDiscordsTotalManager.setName(s"Discords (Total): $guildCount").queue()
+    }
+
+    // edit the Discord count channel
+    val dashboardDiscordsActiveName = dashboardDiscordsActive.getName
+    if (dashboardDiscordsActiveName != s"Discords (Active): $activeDiscordsCount"){
+      val dashboardDiscordsActiveManager = dashboardDiscordsActive.getManager
+      dashboardDiscordsActiveManager.setName(s"Discords (Active): $activeDiscordsCount").queue()
     }
 
     // edit the Worlds count channel
-    val dashboardWorldsName = dashboardWorlds.getName
-    if (dashboardWorldsName != s"Worlds: $worldCount"){
-      val dashboardWorldsManager = dashboardWorlds.getManager
-      dashboardWorldsManager.setName(s"Worlds: $worldCount").queue()
+    val dashboardWorldStreamsName = dashboardWorldStreams.getName
+    if (dashboardWorldStreamsName != s"World (Streams): $worldStreamCount"){
+      val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
+      dashboardWorldStreamsManager.setName(s"World (Streams): $worldStreamCount").queue()
+    }
+
+    // edit the Worlds count channel
+    val dashboardWorldSubscriptionsName = dashboardWorldSubscriptions.getName
+    if (dashboardWorldSubscriptionsName != s"World (Subscriptions): $worldsTrackedCount"){
+      val dashboardWorldSubscriptionsManager = dashboardWorldSubscriptions.getManager
+      dashboardWorldSubscriptionsManager.setName(s"World (Subscriptions): $worldsTrackedCount").queue()
     }
   }
 

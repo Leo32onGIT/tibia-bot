@@ -421,7 +421,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
               if (detectHunteds == "on"){
                 // scan exiva list for enemies to be added to hunted
-                val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(32)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+                val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(8)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
                 val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
                 futureResults.onComplete {
                   case Success(output) =>
