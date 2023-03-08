@@ -450,38 +450,37 @@ object BotApp extends App with StrictLogging {
 
     logger.info(s"Updating Violent Bot dashboard...")
 
-    // get total Discord count
     val guildCount = jda.getGuilds.asScala.toList.size
     val activeDiscordsCount: Int = worldsData.size
     val worldStreamCount: Int = discordsData.size
     val worldsTrackedCount: Int = worldsData.values.map(_.size).sum
 
-    // edit the Discord count channel
+    // total Discord count
     val dashboardDiscordsTotalName = dashboardDiscordsTotal.getName
     if (dashboardDiscordsTotalName != s"Discords (Total): $guildCount"){
       val dashboardDiscordsTotalManager = dashboardDiscordsTotal.getManager
       dashboardDiscordsTotalManager.setName(s"Discords (Total): $guildCount").queue()
     }
 
-    // edit the Discord count channel
+    // active Discord count
     val dashboardDiscordsActiveName = dashboardDiscordsActive.getName
     if (dashboardDiscordsActiveName != s"Discords (Active): $activeDiscordsCount"){
       val dashboardDiscordsActiveManager = dashboardDiscordsActive.getManager
       dashboardDiscordsActiveManager.setName(s"Discords (Active): $activeDiscordsCount").queue()
     }
 
-    // edit the Worlds count channel
-    val dashboardWorldStreamsName = dashboardWorldStreams.getName
-    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount"){
-      val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
-      dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount").queue()
-    }
-
-    // edit the Worlds count channel
+    // total worlds setup by users
     val dashboardWorldSubscriptionsName = dashboardWorldSubscriptions.getName
     if (dashboardWorldSubscriptionsName != s"Worlds Setup: $worldsTrackedCount"){
       val dashboardWorldSubscriptionsManager = dashboardWorldSubscriptions.getManager
       dashboardWorldSubscriptionsManager.setName(s"Worlds Setup: $worldsTrackedCount").queue()
+    }
+
+    // world streams running out of 'how many tibia worlds exist'
+    val dashboardWorldStreamsName = dashboardWorldStreams.getName
+    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount of ${worlds.size}"){
+      val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
+      dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount of ${worlds.size}").queue()
     }
   }
 
