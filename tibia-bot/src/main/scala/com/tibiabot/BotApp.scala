@@ -323,7 +323,7 @@ object BotApp extends App with StrictLogging {
             val bot = new TibiaBot(world.get)
             Streams(bot.stream.run(), List(discords))
           }
-          botStreams = botStreams + (world.get.toLowerCase.capitalize -> botStream)
+          botStreams = botStreams + (world.get -> botStream)
         }
       }
     } else {
