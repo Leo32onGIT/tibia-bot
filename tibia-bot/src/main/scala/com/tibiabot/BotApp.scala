@@ -322,7 +322,7 @@ object BotApp extends App with StrictLogging {
             // If the stream doesn't exist, create a new one with an empty usedBy list
             new TibiaBot(world.get)
           }
-          botStreams += (world.get -> Streams(botStream.stream.run(), List(discords)))
+          botStreams = botStreams + (world.get.toLowerCase.capitalize -> Streams(botStream.stream.run(), List(discords)))
         }
       }
     } else {
