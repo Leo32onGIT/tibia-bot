@@ -472,16 +472,16 @@ object BotApp extends App with StrictLogging {
 
     // edit the Worlds count channel
     val dashboardWorldStreamsName = dashboardWorldStreams.getName
-    if (dashboardWorldStreamsName != s"World (Streams): $worldStreamCount"){
+    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount"){
       val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
-      dashboardWorldStreamsManager.setName(s"World (Streams): $worldStreamCount").queue()
+      dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount").queue()
     }
 
     // edit the Worlds count channel
     val dashboardWorldSubscriptionsName = dashboardWorldSubscriptions.getName
-    if (dashboardWorldSubscriptionsName != s"World (Subscriptions): $worldsTrackedCount"){
+    if (dashboardWorldSubscriptionsName != s"Worlds Setup: $worldsTrackedCount"){
       val dashboardWorldSubscriptionsManager = dashboardWorldSubscriptions.getManager
-      dashboardWorldSubscriptionsManager.setName(s"World (Subscriptions): $worldsTrackedCount").queue()
+      dashboardWorldSubscriptionsManager.setName(s"Worlds Setup: $worldsTrackedCount").queue()
     }
   }
 
