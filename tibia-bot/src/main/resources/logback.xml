@@ -7,7 +7,7 @@
   </appender>
 
   <appender name="DISCORD" class="com.github.napstr.logback.DiscordAppender">
-    <webhookUri>https://discord.com/api/webhooks/1080177307286773780/usNx5IFhrWb_ybwxbATrR7gJ56n9odmvd3H0KErecBOdtSSDyS6CxDOv0KW5yBotUCHu</webhookUri>
+    <webhookUri>https://discord.com/api/webhooks/1083196190344085636/7txysNGBKPNB5slxHttNHVgTFij-zE2D541_k3OTAlUGpSVHO-7jQ5iz4pHB0ozY5nly</webhookUri>
     <layout class="ch.qos.logback.classic.PatternLayout">
       <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex){'(?s).*\n(.*)', '```$0```'}%nopex</pattern>
     </layout>
