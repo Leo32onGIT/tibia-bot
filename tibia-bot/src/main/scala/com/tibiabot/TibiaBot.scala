@@ -4,17 +4,11 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, huntedGuildsData, huntedPlayersData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.BotApp.sender
-import com.tibiabot.BotApp.Discords
-import com.tibiabot.BotApp.Worlds
-import com.tibiabot.BotApp.worldsData
-import com.tibiabot.BotApp.discordsData
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
-import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
 import java.time.ZonedDateTime
@@ -154,7 +148,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               discordsList.foreach { discords =>
                 val guild = BotApp.jda.getGuildById(discords.id)
                 val guildId = discords.id
-                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).orNull
                 val guildIcon = if (guildIconData != null) guildIconData.icon else ""
                 val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
@@ -224,23 +218,22 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val discordsList = discordsData(world)
       discordsList.foreach { discords =>
         val guildId = discords.id
-        val adminChannel = discords.adminChannel
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-        val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse(null)
-        val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse(null)
-        val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse(null)
+        val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
+        val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
+        val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
         if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
           val currentOnlineList: List[OnlinePlayer] = currentOnline.map { onlinePlayer =>
-            val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+            val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).orNull
             val guildIcon = if (guildIconData != null) guildIconData.icon else ""
             OnlinePlayer(onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, guildIcon, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
           }.toList
           // did the online list api call fail?
           //if (currentOnlineList.size > 1){
             onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
-            onlineList(currentOnlineList, guildId, adminChannel, alliesChannel, neutralsChannel, enemiesChannel)
+            onlineList(currentOnlineList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
           //}
         }
       }
@@ -569,7 +562,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     Future.successful("end")
   }.withAttributes(logAndResume)
 
-  private def onlineList(onlineData: List[OnlinePlayer], guildId: String, adminChannel: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String): Unit = {
+  private def onlineList(onlineData: List[OnlinePlayer], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String): Unit = {
 
     val vocationBuffers = ListMap(
       "druid" -> ListBuffer[(String, String)](),

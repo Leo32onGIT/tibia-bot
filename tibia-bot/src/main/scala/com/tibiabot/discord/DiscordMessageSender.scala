@@ -1,20 +1,20 @@
 package com.tibiabot.discord
 
-import club.minnced.discord.webhook.WebhookClient
 import club.minnced.discord.webhook.WebhookClientBuilder
 import club.minnced.discord.webhook.send.WebhookMessageBuilder
 import com.google.common.util.concurrent.RateLimiter
 import com.tibiabot.Config
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.entities.{Guild, Webhook}
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.entities.{Guild, Webhook}
 
 import java.util.concurrent._
-import scala.jdk.CollectionConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
+//noinspection UnstableApiUsage
 class DiscordMessageSender() extends StrictLogging {
 
   private case class MessageDetails(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String)
