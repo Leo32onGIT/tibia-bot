@@ -8,8 +8,8 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, Member
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
-import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
 import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
@@ -25,7 +25,6 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
-import java.lang.Thread
 
 object BotApp extends App with StrictLogging {
 
@@ -52,7 +51,7 @@ object BotApp extends App with StrictLogging {
     deathsMin: Int
   )
 
-  case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
+  private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
   case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
@@ -76,7 +75,7 @@ object BotApp extends App with StrictLogging {
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
 
   // stream list
-  private var botStreams = Map[(String), Streams]()
+  private var botStreams = Map[String, Streams]()
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = jda.getSelfUser.getId
@@ -240,7 +239,7 @@ object BotApp extends App with StrictLogging {
         .setMaxValue(4000)
     )
 
-  // minum levels/deaths command
+  // minimum levels/deaths command
   private val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -399,7 +398,7 @@ object BotApp extends App with StrictLogging {
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
-              val charGuildName = if(!charGuild.isEmpty) charGuild.head.name else ""
+              val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
               val charWorld = charResponse.characters.character.world
               val charEmoji = vocEmoji(charResponse)
 
@@ -492,7 +491,7 @@ object BotApp extends App with StrictLogging {
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild
     // default embed content
-    var embedText = ":x: An error occured while running the `info` command"
+    var embedText = ":x: An error occurred while running the `info` command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       if (subCommand == "guild"){ // command run with 'guild'
@@ -554,7 +553,7 @@ object BotApp extends App with StrictLogging {
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild
     // default embed content
-    var embedText = ":x: An error occured while running the `info` command"
+    var embedText = ":x: An error occurred while running the `info` command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       if (subCommand == "guild"){ // command run with 'guild'
@@ -713,7 +712,7 @@ object BotApp extends App with StrictLogging {
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
-              val charGuildName = if(!charGuild.isEmpty) charGuild.head.name else ""
+              val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
               val guildIcon = if (charGuildName != "" && arg == "allies") Config.allyGuild else if (charGuildName != "" && arg == "hunted") Config.enemyGuild else if (charGuildName == "" && arg == "hunted") Config.enemy else ""
               val charVocation = charResponse.characters.character.vocation
               val charWorld = charResponse.characters.character.world
@@ -731,7 +730,7 @@ object BotApp extends App with StrictLogging {
               voc -> buffer.groupBy(_._2)
           }
 
-          // druids grouped by world worted by level
+          // druids grouped by world sorted by level
           val druidsWorldLists = vocationWorldBuffers("druid").map {
             case (world, worldBuffer) =>
               world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
@@ -848,7 +847,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occured while running the /hunted command"
+    var embedText = ":x: An error occurred while running the /hunted command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       // get admin channel info from database
@@ -963,7 +962,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occured while running the /allies command"
+    var embedText = ":x: An error occurred while running the /allies command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       // get admin channel info from database
@@ -1072,7 +1071,7 @@ object BotApp extends App with StrictLogging {
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
-    var embedText = ":x: An error occured while running the /removehunted command"
+    var embedText = ":x: An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
@@ -1170,7 +1169,7 @@ object BotApp extends App with StrictLogging {
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
-    var embedText = ":x: An error occured while running the /removehunted command"
+    var embedText = ":x: An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)){
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
@@ -2118,7 +2117,7 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the minumum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
