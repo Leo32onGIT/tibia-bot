@@ -9,6 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
 import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
@@ -2152,6 +2153,73 @@ object BotApp extends App with StrictLogging {
 
     statement.close()
     conn.close()
+  }
+
+  def discordLeave(event: GuildLeaveEvent): Unit = {
+    val guildId = event.getGuild.getId
+
+    // Remove from worldsData if exists
+    if (worldsData.contains(guildId)) {
+      val updatedWorldsData = worldsData - guildId
+      worldsData = updatedWorldsData
+    }
+
+    // Remove from discordsData if exists
+    val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
+      if (discordsList.exists(_.id == guildId)) {
+        val updatedDiscords = discordsList.filterNot(_.id == guildId)
+        world -> updatedDiscords
+      } else {
+        world -> discordsList
+      }
+    }
+    // Only update discordsData if the guild existed in it
+    if (updatedDiscordsData != discordsData) {
+      discordsData = updatedDiscordsData
+    }
+
+    // Remove from botStreams if exists
+    val updatedBotStreams = botStreams.map { case (world, streams) =>
+      val updatedUsedBy = streams.usedBy.filterNot(_.id == guildId)
+      if (updatedUsedBy.isEmpty) {
+        streams.stream.cancel()
+        None // Return None to indicate that this entry should be removed from the map
+      } else if (streams.usedBy != updatedUsedBy) {
+        // Only update the streams if the usedBy list has changed
+        Some(world -> streams.copy(usedBy = updatedUsedBy)) // Return the updated entry wrapped in Some
+      } else {
+        Some(world -> streams) // Return the existing entry wrapped in Some
+      }
+    }.flatten.toMap // Convert the resulting Iterable[(String, Streams)] back into a Map
+
+    // Only update botStreams if any changes were made
+    if (updatedBotStreams != botStreams) {
+      botStreams = updatedBotStreams
+    }
+    removeConfigDatabase(guildId)
+  }
+
+  private def removeConfigDatabase(guildId: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = '_$guildId'")
+    val exist = result.next()
+
+    // if bot_configuration exists
+    if (exist) {
+      statement.executeUpdate(s"DROP DATABASE _$guildId;")
+      logger.info(s"Database '$guildId' removed successfully")
+      statement.close()
+      conn.close()
+    } else {
+      logger.info(s"Database '$guildId' was not removed as it doesn't exist")
+      statement.close()
+      conn.close()
+    }
   }
 
   def removeChannels(event: SlashCommandInteractionEvent): MessageEmbed = {

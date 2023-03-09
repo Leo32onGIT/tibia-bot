@@ -1,8 +1,5 @@
 ThisBuild / version := "1.1.0-SNAPSHOT"
 
-yourKitEnabled := true
-yourKitVersion := "2022.9"
-
 name := "tibia-bot"
 
 version := "0.9"
