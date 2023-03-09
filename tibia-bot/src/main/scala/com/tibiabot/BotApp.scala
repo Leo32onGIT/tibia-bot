@@ -304,7 +304,7 @@ object BotApp extends App with StrictLogging {
       worldsData += (guildId -> worldsInfo)
 
       val adminChannels = discordRetrieveConfig(guild.get)
-      val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
+      val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
       worldsInfo.foreach{ w =>
         if (w.name == world.get){
@@ -355,7 +355,7 @@ object BotApp extends App with StrictLogging {
           worldsData += (guildId -> worldsInfo)
 
           val adminChannels = discordRetrieveConfig(g)
-          val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else null
+          val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
           // populate a new Discords list so i can only run 1 stream per world
           worldsInfo.foreach{ w =>

@@ -108,7 +108,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val charName = char.characters.character.name
       val guildName = char.characters.character.guild.map(_.name).getOrElse("")
       // update the guildIcon depending on the discord this would be posted to
-      discordsData.get(world).foreach { discordsList =>
+      if (discordsData.contains(world)) {
+        val discordsList = discordsData(world)
         discordsList.foreach { discords =>
           val guildId = discords.id
           val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
@@ -148,14 +149,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           if (onlinePlayer.level > sheetLevel){
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
             // post level to each discord
-            discordsData.get(world).foreach { discordsList =>
+            if (discordsData.contains(world)) {
+              val discordsList = discordsData(world)
               discordsList.foreach { discords =>
                 val guild = BotApp.jda.getGuildById(discords.id)
                 val guildId = discords.id
                 val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
                 val guildIcon = if (guildIconData != null) guildIconData.icon else ""
                 val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-                val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse(null)
+                val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
                 val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
                 val levelsTextChannel = guild.getTextChannelById(levelsChannel)
                 if (levelsTextChannel != null){
@@ -196,11 +198,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   }
                 }
               }
-              // add flag to onlineList if player has leveled
-              currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-                currentOnline -= onlinePlayer
-                currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
-              }
+            }
+            // add flag to onlineList if player has leveled
+            currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+              currentOnline -= onlinePlayer
+              currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
             }
             recentLevels += newCharLevel
           }
@@ -218,7 +220,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         else None
       }
     }
-    discordsData.get(world).foreach { discordsList =>
+    if (discordsData.contains(world)) {
+      val discordsList = discordsData(world)
       discordsList.foreach { discords =>
         val guildId = discords.id
         val adminChannel = discords.adminChannel
@@ -248,15 +251,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
     // post death to each discord
-    discordsData.get(world).foreach { discordsList =>
+    if (discordsData.contains(world)) {
+      val discordsList = discordsData(world)
       discordsList.foreach { discords =>
         val guild = BotApp.jda.getGuildById(discords.id)
         val guildId = discords.id
         val adminChannel = discords.adminChannel
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-        val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse(null)
-        val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse(null)
-        val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse(null)
+        val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
+        val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
+        val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
         if (deathsTextChannel != null){
           val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
