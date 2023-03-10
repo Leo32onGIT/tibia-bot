@@ -1744,7 +1744,7 @@ object BotApp extends App with StrictLogging {
 
       // get all categories in the discord
       val categories = guild.getCategories.asScala
-      val targetCategory = categories.find(_.getName == world).orNull
+      val targetCategory = categories.find(_.getName == world).getOrElse(null)
       // it it doesn't create it
       if (targetCategory == null){
         // create the category
@@ -1849,7 +1849,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
-    val detectSetting = cache.headOption.map(_.detectHunteds).orNull
+    val detectSetting = cache.headOption.map(_.detectHunteds).getOrElse(null)
     if (detectSetting != null){
       if (detectSetting == settingOption){
         // embed reply
