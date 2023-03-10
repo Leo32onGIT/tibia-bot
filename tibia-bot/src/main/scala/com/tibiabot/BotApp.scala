@@ -1752,6 +1752,7 @@ object BotApp extends App with StrictLogging {
         newCategory.upsertPermissionOverride(botRole)
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
+          .grant(Permission.MESSAGE_MENTION_EVERYONE)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
@@ -1769,6 +1770,7 @@ object BotApp extends App with StrictLogging {
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
             .grant(Permission.MESSAGE_SEND)
+            .grant(Permission.MESSAGE_MENTION_EVERYONE)
             .complete()
           channel.upsertPermissionOverride(publicRole)
             .deny(Permission.MESSAGE_SEND)
