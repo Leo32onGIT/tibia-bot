@@ -270,7 +270,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None)
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
