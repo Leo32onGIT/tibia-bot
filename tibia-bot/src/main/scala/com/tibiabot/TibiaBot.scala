@@ -202,6 +202,30 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
         }
       }
+      if (discordsData.contains(world)) {
+        val discordsList = discordsData(world)
+        discordsList.foreach { discords =>
+          val guildId = discords.id
+          val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+          val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
+          val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
+          val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
+          // update online list every 5 minutes
+          val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
+            val currentOnlineList: List[OnlinePlayer] = currentOnline.map { onlinePlayer =>
+              val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).orNull
+              val guildIcon = if (guildIconData != null) guildIconData.icon else ""
+              OnlinePlayer(onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, guildIcon, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
+            }.toList
+            // did the online list api call fail?
+            //if (currentOnlineList.size > 1){
+              onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
+              onlineList(currentOnlineList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
+            //}
+          }
+        }
+      }
       // parsing death info
       deaths.flatMap { death =>
         val deathTime = ZonedDateTime.parse(death.time)
@@ -212,30 +236,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           Some(CharDeath(char, death))
         }
         else None
-      }
-    }
-    if (discordsData.contains(world)) {
-      val discordsList = discordsData(world)
-      discordsList.foreach { discords =>
-        val guildId = discords.id
-        val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-        val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
-        val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
-        val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
-        // update online list every 5 minutes
-        val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
-          val currentOnlineList: List[OnlinePlayer] = currentOnline.map { onlinePlayer =>
-            val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).orNull
-            val guildIcon = if (guildIconData != null) guildIconData.icon else ""
-            OnlinePlayer(onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, guildIcon, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
-          }.toList
-          // did the online list api call fail?
-          //if (currentOnlineList.size > 1){
-            onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
-            onlineList(currentOnlineList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
-          //}
-        }
       }
     }
 
