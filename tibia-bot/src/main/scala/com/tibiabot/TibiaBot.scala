@@ -148,8 +148,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               discordsList.foreach { discords =>
                 val guild = BotApp.jda.getGuildById(discords.id)
                 val guildId = discords.id
-                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse("")
-                val guildIcon = if (guildIconData != "") guildIconData.icon else ""
+                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+                val guildIcon = if (guildIconData != null) guildIconData.icon else ""
                 val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
                 val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
@@ -214,8 +214,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
           if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
             val currentOnlineList: List[OnlinePlayer] = currentOnline.map { onlinePlayer =>
-              val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse("")
-              val guildIcon = if (guildIconData != "") guildIconData.icon else ""
+              val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
+              val guildIcon = if (guildIconData != null) guildIconData.icon else ""
               OnlinePlayer(onlinePlayer.name, onlinePlayer.level, onlinePlayer.vocation, guildIcon, onlinePlayer.time, onlinePlayer.duration, onlinePlayer.flag)
             }.toList
             // did the online list api call fail?
