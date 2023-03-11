@@ -208,6 +208,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
                 recentLevels += newCharLevel
               }
+            } else {
+              recentLevels += newCharLevel
             }
           }
         }
