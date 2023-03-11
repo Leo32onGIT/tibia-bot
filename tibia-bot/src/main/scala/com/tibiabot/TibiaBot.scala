@@ -188,12 +188,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                         sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                       }
+                      recentLevels += newCharLevel
                     }
                   } else {
                     if (levelsCheck) {
                       //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                       sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                     }
+                    recentLevels += newCharLevel
                   }
                 }
               }
@@ -203,7 +205,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               currentOnline -= onlinePlayer
               currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
             }
-            recentLevels += newCharLevel
           }
         }
       }
