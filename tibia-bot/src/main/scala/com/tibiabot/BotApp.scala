@@ -1902,7 +1902,7 @@ object BotApp extends App with StrictLogging {
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-        val guildOwner = if (guild.getOwner.getEffectiveName == null) "Not Available" else guild.getOwner.getEffectiveName
+        val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
         discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, ZonedDateTime.now())
       } else {
         val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
