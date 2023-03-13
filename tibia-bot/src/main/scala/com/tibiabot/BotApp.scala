@@ -1416,6 +1416,24 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
+  private def addDeathsCache(messageId: String, world: String, name: String, description: String, time: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.prepareStatement("INSERT INTO deaths(message_id,world,name,description,time) VALUES (?, ?, ?, ?, ?);")
+    statement.setString(1, messageId)
+    statement.setString(2, world)
+    statement.setString(3, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(4, Utils.escapeLiteral(null, description, false).toString)
+    statement.setString(5, time)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
   private def getLevelsCache(world: String): List[LevelsCache] = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
