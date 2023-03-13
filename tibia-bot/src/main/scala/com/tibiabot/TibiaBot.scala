@@ -25,6 +25,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
+  private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
   private case class GuildIcon(discordGuild: String, icon: String)
   private case class CurrentOnline(name: String, level: Int, vocation: String, guildIcon: List[GuildIcon], time: ZonedDateTime, duration: Long = 0L, flag: String)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
@@ -35,6 +36,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val recentDeaths = mutable.Set.empty[CharKey]
   private val recentLevels = mutable.Set.empty[CharLevel]
   private val recentOnline = mutable.Set.empty[CharKey]
+  private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
 
   // initialize cached deaths/levels from database
@@ -93,8 +95,21 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
     recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
-    val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-    Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
+    // cache bypass for Seanera
+    if (world == "Seanera"){
+      // Remove existing online chars from the list...
+      recentOnlineBypass.filterInPlace { i =>
+        !online.exists(player => player.name == i.char)
+      }
+      recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
+      val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
+        (key.char, key.level.toInt)
+      }.toSet
+      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacterV2).runWith(Sink.collection).map(_.toSet)
+    } else {
+      val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
+    }
   }.withAttributes(logAndResume)
 
   private lazy val scanForDeaths = Flow[Set[CharacterResponse]].mapAsync(1) { characterResponses =>
@@ -759,6 +774,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private def cleanUp(): Unit = {
     val now = ZonedDateTime.now()
     recentOnline.filterInPlace { i =>
+      val diff = java.time.Duration.between(i.time, now).getSeconds
+      diff < onlineRecentDuration
+    }
+    recentOnlineBypass.filterInPlace { i =>
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < onlineRecentDuration
     }

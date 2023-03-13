@@ -12,6 +12,7 @@ import com.typesafe.scalalogging.StrictLogging
 import java.net.URLEncoder
 import scala.concurrent.duration._
 import akka.http.scaladsl.model.HttpEntity.Strict
+import scala.util.Random
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -83,6 +84,30 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val encodedName = URLEncoder.encode(name, "UTF-8")
 
     Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
+      .flatMap { response =>
+        if (response.status.isSuccess()) {
+          Unmarshal(decodeResponse(response).entity).to[CharacterResponse]
+        } else {
+          response.discardEntityBytes() // discard the entity if the response status is not success
+          Future.failed(new RuntimeException(s"Failed to get character $name with status ${response.status}"))
+        }
+      }
+  }
+
+  def getCharacterV2(input: (String, Int)): Future[CharacterResponse] = {
+    val name = input._1
+    val level = input._2
+    val encodedName = URLEncoder.encode(name, "UTF-8")
+    val bypassName = if (level >= 250) {
+      val random = new Random()
+      val numPluses = random.nextInt(4)
+      val nameWithPluses = encodedName + ("+" * numPluses)
+      nameWithPluses
+    } else {
+      encodedName
+    }
+
+    Http().singleRequest(HttpRequest(uri = s"$characterUrl${bypassName}"))
       .flatMap { response =>
         if (response.status.isSuccess()) {
           Unmarshal(decodeResponse(response).entity).to[CharacterResponse]
