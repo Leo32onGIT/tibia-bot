@@ -37,6 +37,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val recentOnline = mutable.Set.empty[CharKey]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
 
+  // initialize cached deaths/levels from database
+  BotApp.recentDeaths ++= getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, deathsCache.time))
+  BotApp.recentLevels ++= getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level, levelsCache.vocation, levelsCache.lastLogin, levelsCache.time))
+
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty

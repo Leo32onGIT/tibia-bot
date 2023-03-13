@@ -56,6 +56,8 @@ object BotApp extends App with StrictLogging {
   case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
+  case class DeathsCache(messageId: String, world: String, name: String, description: String, time: String)
+  case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -1370,8 +1372,11 @@ object BotApp extends App with StrictLogging {
       val createLevelsTable =
         s"""CREATE TABLE levels (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
            |name VARCHAR(255) NOT NULL,
            |level VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(255) NOT NULL,
+           |last_login VARCHAR(255) NOT NULL,
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
@@ -1382,10 +1387,58 @@ object BotApp extends App with StrictLogging {
       newStatement.close()
       newConn.close()
     } else {
-      logger.info(s"Database 'bot_cache' already exists")
       statement.close()
       conn.close()
     }
+  }
+
+  private def getDeathsCache(world: String): List[DeathsCache] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT message_id,world,name,description,time FROM deaths WHERE world = '$world';")
+
+    val results = new ListBuffer[DeathsCache]()
+    while (result.next()) {
+      val messageId = Option(result.getString("message_id")).getOrElse("")
+      val world = Option(result.getString("world")).getOrElse("")
+      val name = Option(result.getString("name")).getOrElse("")
+      val description = Option(result.getString("description")).getOrElse("")
+      val time = Option(result.getString("time")).getOrElse("")
+      results += DeathsCache(messageId, world, name, description, time)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
+
+  private def getLevelsCache(world: String): List[LevelsCache] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT world,name,level,time FROM levels WHERE world = '$world';")
+
+    val results = new ListBuffer[LevelsCache]()
+    while (result.next()) {
+      val world = Option(result.getString("world")).getOrElse("")
+      val name = Option(result.getString("name")).getOrElse("")
+      val level = Option(result.getString("level")).getOrElse("")
+      val vocation = Option(result.getString("vocation")).getOrElse("")
+      val lastLogin = Option(result.getString("last_login")).getOrElse("")
+      val time = Option(result.getString("time")).getOrElse("")
+      results += LevelsCache(world, name, level, vocation, lastLogin, time)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
   }
 
   private def createConfigDatabase(guild: Guild): Unit = {
