@@ -15,6 +15,7 @@ import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, Sl
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
+import org.postgresql.core.Utils
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -260,6 +261,9 @@ object BotApp extends App with StrictLogging {
     )
 
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand)
+
+  // create the deaths/levels cache db
+  createCacheDatabase()
 
   // initialize the database
   guilds.foreach{g =>
@@ -1264,9 +1268,9 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, name)
+    statement.setString(1, Utils.escapeLiteral(null, name, false).toString)
     statement.setString(2, reason)
-    statement.setString(3, reasonText)
+    statement.setString(3, Utils.escapeLiteral(null, reasonText, false).toString)
     statement.setString(4, addedBy)
     statement.executeUpdate()
 
@@ -1278,9 +1282,9 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, name)
+    statement.setString(1, Utils.escapeLiteral(null, name, false).toString)
     statement.setString(2, reason)
-    statement.setString(3, reasonText)
+    statement.setString(3, Utils.escapeLiteral(null, reasonText, false).toString)
     statement.setString(4, addedBy)
     statement.executeUpdate()
 
@@ -1329,6 +1333,58 @@ object BotApp extends App with StrictLogging {
       true
     } else {
       false
+    }
+  }
+
+  private def createCacheDatabase(): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
+    val exist = result.next()
+
+    // if bot_configuration doesn't exist
+    if (!exist) {
+      statement.executeUpdate(s"CREATE DATABASE bot_cache;")
+      logger.info(s"Database 'bot_cache' created successfully")
+      statement.close()
+      conn.close()
+
+      val newUrl = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+      val newConn = DriverManager.getConnection(newUrl, username, password)
+      val newStatement = newConn.createStatement()
+      // create the tables in bot_configuration
+      val createDeathsTable =
+        s"""CREATE TABLE deaths (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |message_id VARCHAR(255) NOT NULL,
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |description VARCHAR(4096) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      val createLevelsTable =
+        s"""CREATE TABLE levels (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |name VARCHAR(255) NOT NULL,
+           |level VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      newStatement.executeUpdate(createDeathsTable)
+      logger.info("Table 'deaths' created successfully")
+      newStatement.executeUpdate(createLevelsTable)
+      logger.info("Table 'levels' created successfully")
+      newStatement.close()
+      newConn.close()
+    } else {
+      logger.info(s"Database 'bot_cache' already exists")
+      statement.close()
+      conn.close()
     }
   }
 
@@ -1606,8 +1662,8 @@ object BotApp extends App with StrictLogging {
   private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, created: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
     val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, flags, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, flags = EXCLUDED.flags, created = EXCLUDED.created;")
-    statement.setString(1, guildName)
-    statement.setString(2, guildOwner)
+    statement.setString(1, Utils.escapeLiteral(null, guildName, false).toString)
+    statement.setString(2, Utils.escapeLiteral(null, guildOwner, false).toString)
     statement.setString(3, adminCategory)
     statement.setString(4, adminChannel)
     statement.setString(5, "none")
@@ -1712,7 +1768,7 @@ object BotApp extends App with StrictLogging {
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-        discordCreateConfig(guild, guild.getName.replaceAll("[^a-zA-Z0-9]", ""), guild.getOwner.getEffectiveName, adminCategory.getId, adminChannel.getId, ZonedDateTime.now())
+        discordCreateConfig(guild, guild.getName, guild.getOwner.getEffectiveName, adminCategory.getId, adminChannel.getId, ZonedDateTime.now())
       } else {
         val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
