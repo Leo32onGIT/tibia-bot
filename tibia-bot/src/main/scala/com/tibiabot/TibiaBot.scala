@@ -38,8 +38,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private var currentOnline = mutable.Set.empty[CurrentOnline]
 
   // initialize cached deaths/levels from database
-  BotApp.recentDeaths ++= getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, deathsCache.time))
-  BotApp.recentLevels ++= getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level, levelsCache.vocation, levelsCache.lastLogin, levelsCache.time))
+  recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
+  recentLevels ++= BotApp.getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time)))
 
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -211,9 +211,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
               if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))){
                 recentLevels += newCharLevel
+                BotApp.addLevelsCache(world, charName, onlinePlayer.level.toString, sheetVocation, sheetLastLogin.toString, now.toString)
               }
             } else {
               recentLevels += newCharLevel
+              BotApp.addLevelsCache(world, charName, onlinePlayer.level.toString, sheetVocation, sheetLastLogin.toString, now.toString)
             }
           }
         }
@@ -225,6 +227,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val charDeath = CharKey(char.characters.character.name, deathTime)
         if (deathAge < deathRecentDuration && !recentDeaths.contains(charDeath)) {
           recentDeaths.add(charDeath)
+          BotApp.addDeathsCache(world, char.characters.character.name, deathTime.toString)
           Some(CharDeath(char, death))
         }
         else None

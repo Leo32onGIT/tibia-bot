@@ -56,7 +56,7 @@ object BotApp extends App with StrictLogging {
   case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class DeathsCache(messageId: String, world: String, name: String, description: String, time: String)
+  case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
@@ -280,6 +280,8 @@ object BotApp extends App with StrictLogging {
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
+    removeDeathsCache(ZonedDateTime.now())
+    removeLevelsCache(ZonedDateTime.now())
   }
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
@@ -1362,10 +1364,8 @@ object BotApp extends App with StrictLogging {
       val createDeathsTable =
         s"""CREATE TABLE deaths (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |message_id VARCHAR(255) NOT NULL,
            |world VARCHAR(255) NOT NULL,
            |name VARCHAR(255) NOT NULL,
-           |description VARCHAR(4096) NOT NULL,
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
@@ -1392,23 +1392,21 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def getDeathsCache(world: String): List[DeathsCache] = {
+  def getDeathsCache(world: String): List[DeathsCache] = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
 
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT message_id,world,name,description,time FROM deaths WHERE world = '$world';")
+    val result = statement.executeQuery(s"SELECT world,name,time FROM deaths WHERE world = '$world';")
 
     val results = new ListBuffer[DeathsCache]()
     while (result.next()) {
-      val messageId = Option(result.getString("message_id")).getOrElse("")
       val world = Option(result.getString("world")).getOrElse("")
       val name = Option(result.getString("name")).getOrElse("")
-      val description = Option(result.getString("description")).getOrElse("")
       val time = Option(result.getString("time")).getOrElse("")
-      results += DeathsCache(messageId, world, name, description, time)
+      results += DeathsCache(world, name, time)
     }
 
     statement.close()
@@ -1416,32 +1414,54 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def addDeathsCache(messageId: String, world: String, name: String, description: String, time: String): Unit = {
+  def addDeathsCache(world: String, name: String, time: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
 
     val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.prepareStatement("INSERT INTO deaths(message_id,world,name,description,time) VALUES (?, ?, ?, ?, ?);")
-    statement.setString(1, messageId)
-    statement.setString(2, world)
-    statement.setString(3, Utils.escapeLiteral(null, name, false).toString)
-    statement.setString(4, Utils.escapeLiteral(null, description, false).toString)
-    statement.setString(5, time)
+    val statement = conn.prepareStatement("INSERT INTO deaths(world,name,time) VALUES (?, ?, ?);")
+    statement.setString(1, world)
+    statement.setString(2, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(3, time)
     statement.executeUpdate()
 
     statement.close()
     conn.close()
   }
 
-  private def getLevelsCache(world: String): List[LevelsCache] = {
+  private def removeDeathsCache(time: ZonedDateTime): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
 
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT world,name,level,time FROM levels WHERE world = '$world';")
+    val result = statement.executeQuery(s"SELECT id,time from deaths;")
+    val results = new ListBuffer[Long]()
+    while (result.next()) {
+      val id = Option(result.getLong("id")).getOrElse(0L)
+      val timeDb = Option(result.getString("time")).getOrElse("")
+      val timeToDate = ZonedDateTime.parse(timeDb)
+      if (time.isAfter(timeToDate.plusMinutes(30)) && id != 0L){
+        results += id
+      }
+    }
+    results.foreach { uid =>
+      statement.executeUpdate(s"DELETE from deaths where id = $uid;")
+    }
+    statement.close()
+    conn.close()
+  }
+
+  def getLevelsCache(world: String): List[LevelsCache] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT world,name,level,vocation,last_login,time FROM levels WHERE world = '$world';")
 
     val results = new ListBuffer[LevelsCache]()
     while (result.next()) {
@@ -1457,6 +1477,49 @@ object BotApp extends App with StrictLogging {
     statement.close()
     conn.close()
     results.toList
+  }
+
+  def addLevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.prepareStatement("INSERT INTO levels(world,name,level,vocation,last_login,time) VALUES (?, ?, ?, ?, ?, ?);")
+    statement.setString(1, world)
+    statement.setString(2, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(3, level)
+    statement.setString(4, vocation)
+    statement.setString(5, lastLogin)
+    statement.setString(6, time)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  private def removeLevelsCache(time: ZonedDateTime): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT id,time from levels;")
+    val results = new ListBuffer[Long]()
+    while (result.next()) {
+      val id = Option(result.getLong("id")).getOrElse(0L)
+      val timeDb = Option(result.getString("time")).getOrElse("")
+      val timeToDate = ZonedDateTime.parse(timeDb)
+      if (time.isAfter(timeToDate.plusHours(25)) && id != 0L){
+        results += id
+      }
+    }
+    results.foreach { uid =>
+      statement.executeUpdate(s"DELETE from levels where id = $uid;")
+    }
+    statement.close()
+    conn.close()
   }
 
   private def createConfigDatabase(guild: Guild): Unit = {
