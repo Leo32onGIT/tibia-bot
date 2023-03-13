@@ -15,7 +15,6 @@ import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, Sl
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
-import org.postgresql.core.Utils
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -1272,9 +1271,9 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(1, name)
     statement.setString(2, reason)
-    statement.setString(3, Utils.escapeLiteral(null, reasonText, false).toString)
+    statement.setString(3, reasonText)
     statement.setString(4, addedBy)
     statement.executeUpdate()
 
@@ -1286,9 +1285,9 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(1, name)
     statement.setString(2, reason)
-    statement.setString(3, Utils.escapeLiteral(null, reasonText, false).toString)
+    statement.setString(3, reasonText)
     statement.setString(4, addedBy)
     statement.executeUpdate()
 
@@ -1422,7 +1421,7 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.prepareStatement("INSERT INTO deaths(world,name,time) VALUES (?, ?, ?);")
     statement.setString(1, world)
-    statement.setString(2, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(2, name)
     statement.setString(3, time)
     statement.executeUpdate()
 
@@ -1487,7 +1486,7 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.prepareStatement("INSERT INTO levels(world,name,level,vocation,last_login,time) VALUES (?, ?, ?, ?, ?, ?);")
     statement.setString(1, world)
-    statement.setString(2, Utils.escapeLiteral(null, name, false).toString)
+    statement.setString(2, name)
     statement.setString(3, level)
     statement.setString(4, vocation)
     statement.setString(5, lastLogin)
@@ -1796,8 +1795,8 @@ object BotApp extends App with StrictLogging {
   private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, created: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
     val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, flags, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, flags = EXCLUDED.flags, created = EXCLUDED.created;")
-    statement.setString(1, Utils.escapeLiteral(null, guildName, false).toString)
-    statement.setString(2, Utils.escapeLiteral(null, guildOwner, false).toString)
+    statement.setString(1, guildName)
+    statement.setString(2, guildOwner)
     statement.setString(3, adminCategory)
     statement.setString(4, adminChannel)
     statement.setString(5, "none")
