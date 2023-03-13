@@ -1919,6 +1919,7 @@ object BotApp extends App with StrictLogging {
             val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId)
           } else {
@@ -1926,6 +1927,7 @@ object BotApp extends App with StrictLogging {
             val adminChannel = guild.createTextChannel("bot-activity", adminCategoryCheck).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             discordUpdateConfig(guild, "", adminChannel.getId)
           }
@@ -1943,6 +1945,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
           .grant(Permission.MESSAGE_MENTION_EVERYONE)
+          .grant(Permission.MESSAGE_EMBED_LINKS)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
@@ -1961,6 +1964,7 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.VIEW_CHANNEL)
             .grant(Permission.MESSAGE_SEND)
             .grant(Permission.MESSAGE_MENTION_EVERYONE)
+            .grant(Permission.MESSAGE_EMBED_LINKS)
             .complete()
           channel.upsertPermissionOverride(publicRole)
             .deny(Permission.MESSAGE_SEND)
