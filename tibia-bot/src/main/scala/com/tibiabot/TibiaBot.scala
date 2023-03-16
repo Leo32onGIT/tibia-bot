@@ -62,7 +62,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 20.seconds, ()) // im kinda cow-boying it here
+  private lazy val sourceTick = Source.tick(2.seconds, 30.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
