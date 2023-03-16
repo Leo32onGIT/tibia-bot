@@ -19,6 +19,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
+import java.time.OffsetDateTime
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
@@ -755,6 +756,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val finalEmbed = new EmbedBuilder()
     finalEmbed.setDescription(field)
     finalEmbed.setColor(embedColor)
+    finalEmbed.setFooter("Last updated")
+    val timestamp = OffsetDateTime.now()
+    finalEmbed.setTimestamp(timestamp)
     if (currentMessage < messages.size) {
       // edit the existing message
       messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).queue()
