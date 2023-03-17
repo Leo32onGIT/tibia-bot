@@ -579,7 +579,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               } else {
                 // for regular deaths check if level > /filter deaths <level>
                 if (embed._5 >= minimumLevel) {
-                  deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+                  deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
                 }
               }
             }
@@ -658,7 +658,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (alliesList.nonEmpty){
         updateMultiFields(alliesList, alliesTextChannel, "allies", guildId)
       } else {
-        updateMultiFields(List("No allies are online right now."), alliesTextChannel, "allies", guildId)
+        updateMultiFields(List("*No allies are online right now.*"), alliesTextChannel, "allies", guildId)
       }
     }
     val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
@@ -677,7 +677,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (neutralsList.nonEmpty){
         updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId)
       } else {
-        updateMultiFields(List("No neutrals are online right now."), neutralsTextChannel, "neutrals", guildId)
+        updateMultiFields(List("*No neutrals are online right now.*"), neutralsTextChannel, "neutrals", guildId)
       }
     }
     val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
@@ -696,7 +696,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (enemiesList.nonEmpty){
         updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId)
       } else {
-        updateMultiFields(List("No enemies are online right now."), enemiesTextChannel, "enemies", guildId)
+        updateMultiFields(List("*No enemies are online right now.*"), enemiesTextChannel, "enemies", guildId)
       }
     }
   }
@@ -747,7 +747,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         else {
           // there isn't an existing message to edit, so post a new one
-          channel.sendMessageEmbeds(interimEmbed.build()).queue()
+          channel.sendMessageEmbeds(interimEmbed.build()).setSuppressedNotifications(true).queue()
         }
         field = v
         currentMessage += 1
@@ -765,7 +765,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
     else {
       // there isn't an existing message to edit, so post a new one
-      channel.sendMessageEmbeds(finalEmbed.build()).queue()
+      channel.sendMessageEmbeds(finalEmbed.build()).setSuppressedNotifications(true).queue()
     }
     if (currentMessage < messages.size - 1) {
       // delete extra messages
