@@ -101,7 +101,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val encodedName = URLEncoder.encode(name, "UTF-8")
     val bypassName = if (level >= 350) {
       val random = new Random()
-      val numPluses = random.nextInt(5)
+      val numPluses = random.nextInt(6)
       val nameWithPluses = ("+" * numPluses) + encodedName
       val convertSome = nameWithPluses.map {
         case '+' if random.nextBoolean() => "%20"
