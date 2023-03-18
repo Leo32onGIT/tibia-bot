@@ -1914,7 +1914,6 @@ object BotApp extends App with StrictLogging {
             adminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
-              .grant(Permission.MANAGE_PERMISSIONS)
               .complete()
             adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
@@ -1947,7 +1946,6 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_SEND)
           .grant(Permission.MESSAGE_MENTION_EVERYONE)
           .grant(Permission.MESSAGE_EMBED_LINKS)
-          .grant(Permission.MANAGE_PERMISSIONS)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
