@@ -414,7 +414,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   // assign the appropriate emoji
                   val bossIcon = creatureEmojis.find {
                     case (creatures, _) => creatures.contains(k.name.toLowerCase())
-                  }.map(_._2).getOrElse("") + " "
+                  }.map(_._2 + " ").getOrElse("")
 
                   // add "an" or "a" depending on first letter of creatures name
                   // ignore capitalized names (nouns) as they are bosses
