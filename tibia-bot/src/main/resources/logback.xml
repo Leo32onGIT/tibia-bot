@@ -15,14 +15,10 @@
   </appender>
 
   <appender name="ASYNC_DISCORD" class="ch.qos.logback.classic.AsyncAppender">
+    <filter class="ch.qos.logback.classic.filter.DuplicateMessageFilter" />
     <appender-ref ref="DISCORD" />
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>ERROR</level>
-    </filter>
-    <filter class="ch.qos.logback.classic.filter.RegexFilter">
-    <regex>.*Failed to get world.*</regex>
-      <onMatch>DENY</onMatch>
-      <onMismatch>NEUTRAL</onMismatch>
     </filter>
   </appender>
 
