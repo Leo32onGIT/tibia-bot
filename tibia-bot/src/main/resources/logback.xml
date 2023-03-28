@@ -19,6 +19,11 @@
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>ERROR</level>
     </filter>
+    <filter class="ch.qos.logback.classic.filter.RegexFilter">
+    <regex>.*Failed to get world.*</regex>
+      <onMatch>DENY</onMatch>
+      <onMismatch>NEUTRAL</onMismatch>
+    </filter>
   </appender>
 
   <logger name="club.minnced.discord.webhook.WebhookClient" level="ERROR" additivity="false">
