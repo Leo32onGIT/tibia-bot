@@ -10,7 +10,7 @@
     <webhookUri>https://discord.com/api/webhooks/1091104948315492374/FiJZld-BlPeRCYVstp1AMP73MCOiq3-Li5E2fxawrq7WCnSqVLcRw59cClF-l3xHkcrZ</webhookUri>
     <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
       <evaluator class="ch.qos.logback.classic.boolex.JaninoEventEvaluator">
-        <expression>return (throwableProxy != null &amp;&amp; (throwableProxy.getCause().getMessage().contains("502 Bad Gateway") || throwableProxy.getCause().getMessage().contains("503 Service Unavailable")));</expression>
+        <expression>return (throwableProxy != null &amp;&amp; (throwableProxy.getThrowable().getLocalizedMessage().contains("502 Bad Gateway") || throwableProxy.getThrowable().getLocalizedMessage().contains("503 Service Unavailable")));</expression>
       </evaluator>
       <OnMismatch>NEUTRAL</OnMismatch>
       <OnMatch>DENY</OnMatch>
