@@ -1946,6 +1946,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_SEND)
           .grant(Permission.MESSAGE_MENTION_EVERYONE)
           .grant(Permission.MESSAGE_EMBED_LINKS)
+          .grant(Permission.MESSAGE_HISTORY)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
@@ -1965,6 +1966,7 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.MESSAGE_SEND)
             .grant(Permission.MESSAGE_MENTION_EVERYONE)
             .grant(Permission.MESSAGE_EMBED_LINKS)
+            .grant(Permission.MESSAGE_HISTORY)
             .complete()
           channel.upsertPermissionOverride(publicRole)
             .deny(Permission.MESSAGE_SEND)
