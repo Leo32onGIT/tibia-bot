@@ -277,7 +277,7 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
       // update the commands
-      if (g.getId == 867319250708463628L){
+      if (g.getIdLong == 867319250708463628L){
         lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminLeaveCommand)
         g.updateCommands().addCommands(adminCommands.asJava).complete()
       } else {
@@ -1960,6 +1960,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_MENTION_EVERYONE)
           .grant(Permission.MESSAGE_EMBED_LINKS)
           .grant(Permission.MESSAGE_HISTORY)
+          .grant(Permission.MANAGE_CHANNEL)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
@@ -1980,6 +1981,7 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.MESSAGE_MENTION_EVERYONE)
             .grant(Permission.MESSAGE_EMBED_LINKS)
             .grant(Permission.MESSAGE_HISTORY)
+            .grant(Permission.MANAGE_CHANNEL)
             .complete()
           channel.upsertPermissionOverride(publicRole)
             .deny(Permission.MESSAGE_SEND)
