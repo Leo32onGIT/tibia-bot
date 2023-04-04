@@ -2530,45 +2530,6 @@ object BotApp extends App with StrictLogging {
     val discordInfo = discordRetrieveConfig(guild)
     var embedMessage = ""
 
-    // Remove from worldsData if exists
-    if (worldsData.contains(guildId)) {
-      val updatedWorldsData = worldsData - guildId
-      worldsData = updatedWorldsData
-    }
-
-    // Remove from discordsData if exists
-    val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
-      if (discordsList.exists(_.id == guildId)) {
-        val updatedDiscords = discordsList.filterNot(_.id == guildId)
-        world -> updatedDiscords
-      } else {
-        world -> discordsList
-      }
-    }
-    // Only update discordsData if the guild existed in it
-    if (updatedDiscordsData != discordsData) {
-      discordsData = updatedDiscordsData
-    }
-
-    // Remove from botStreams if exists
-    val updatedBotStreams = botStreams.map { case (world, streams) =>
-      val updatedUsedBy = streams.usedBy.filterNot(_.id == guildId)
-      if (updatedUsedBy.isEmpty) {
-        streams.stream.cancel()
-        None // Return None to indicate that this entry should be removed from the map
-      } else if (streams.usedBy != updatedUsedBy) {
-        // Only update the streams if the usedBy list has changed
-        Some(world -> streams.copy(usedBy = updatedUsedBy)) // Return the updated entry wrapped in Some
-      } else {
-        Some(world -> streams) // Return the existing entry wrapped in Some
-      }
-    }.flatten.toMap // Convert the resulting Iterable[(String, Streams)] back into a Map
-
-    // Only update botStreams if any changes were made
-    if (updatedBotStreams != botStreams) {
-      botStreams = updatedBotStreams
-    }
-
     if (discordInfo.isEmpty) {
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner."
     } else {
@@ -2583,9 +2544,8 @@ object BotApp extends App with StrictLogging {
       }
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
     }
-    
+
     guild.leave().queue()
-    removeConfigDatabase(guildId)
     // embed reply
     new EmbedBuilder()
     .setColor(3092790)
