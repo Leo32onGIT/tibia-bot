@@ -30,6 +30,8 @@ class BotListener extends ListenerAdapter {
         handleFullbless(event)
       case "filter" =>
         handleFilter(event)
+      case "adminLeave" =>
+        handleAdminLeave(event)
       case _ =>
     }
   }
@@ -301,6 +303,16 @@ class BotListener extends ListenerAdapter {
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/filter`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
+  }
+
+  private def handleAdminLeave(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val guildOption: String = options.getOrElse("guildId", "")
+    val reasonOption: String = options.getOrElse("reason", "")
+
+    val embed = BotApp.adminLeave(event, guildOption, reason)
+    event.getHook.sendMessageEmbeds(embed).queue()
   }
 
 }

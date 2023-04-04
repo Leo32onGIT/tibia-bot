@@ -775,7 +775,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
     } catch {
       case e: Exception =>
-      logger.error(s"Failed to update online list for Guild: ${BotApp.jda.getGuildById(guildId)} with ID: $guildId because of an error: ${e.getMessage()}" )
+      logger.error(s"Failed to update online list for Guild: $guildId because of an error: ${e.getMessage()}" )
     }
   }
 

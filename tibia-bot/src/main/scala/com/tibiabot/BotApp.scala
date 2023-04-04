@@ -261,6 +261,14 @@ object BotApp extends App with StrictLogging {
       )
     )
 
+  // remove world command
+  private val adminLeaveCommand: SlashCommandData = Commands.slash("adminLeave", "Force the bot to leave the specified server")
+    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+    .addOptions(
+      new OptionData(OptionType.STRING, "guildId", "The guild ID you want the bot to leave").setRequired(true),
+      new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
+    )
+
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand)
 
   // create the deaths/levels cache db
@@ -269,7 +277,12 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
       // update the commands
-      g.updateCommands().addCommands(commands.asJava).complete()
+      if (g.getId == 867319250708463628L){
+        lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminLeaveCommand)
+        g.updateCommands().addCommands(adminCommands.asJava).complete()
+      } else {
+        g.updateCommands().addCommands(commands.asJava).complete()
+      }
   }
 
   startBot(None, None)
@@ -2505,6 +2518,36 @@ object BotApp extends App with StrictLogging {
     new EmbedBuilder()
     .setColor(3092790)
     .setDescription(embedText)
+    .build()
+  }
+
+  def adminLeave(event: SlashCommandInteractionEvent, guildId: String, reason: String): MessageEmbed = {
+    // get guild & world information from the slash interaction
+    val guildL: Long = java.lang.Long.parseLong(guildId)
+    val guild = jda.getGuildById(guildL)
+    val discordInfo = discordRetrieveConfig(guild)
+    var embedMessage = ""
+    if (discordInfo.isEmpty) {
+      guild.leave().queue()
+      embedMessage = s":gear: The bot has left the Guild: ${guild.getName()} without leaving a message for the owner."
+    } else {
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      if (adminChannel != null){
+        val adminEmbed = new EmbedBuilder()
+        adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+        adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
+        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
+        adminEmbed.setColor(3092790)
+        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+      }
+      guild.leave().queue()
+      embedMessage = s":gear: The bot has left the Guild: ${guild.getName()} and left message for the owner."
+    }
+
+    // embed reply
+    new EmbedBuilder()
+    .setColor(3092790)
+    .setDescription(embedMessage)
     .build()
   }
 //
