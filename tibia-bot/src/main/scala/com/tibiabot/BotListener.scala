@@ -30,7 +30,7 @@ class BotListener extends ListenerAdapter {
         handleFullbless(event)
       case "filter" =>
         handleFilter(event)
-      case "adminLeave" =>
+      case "adminleave" =>
         handleAdminLeave(event)
       case _ =>
     }

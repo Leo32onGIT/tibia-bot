@@ -262,7 +262,7 @@ object BotApp extends App with StrictLogging {
     )
 
   // remove world command
-  private val adminLeaveCommand: SlashCommandData = Commands.slash("adminLeave", "Force the bot to leave the specified server")
+  private val adminLeaveCommand: SlashCommandData = Commands.slash("adminleave", "Force the bot to leave the specified server")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(
       new OptionData(OptionType.STRING, "guildId", "The guild ID you want the bot to leave").setRequired(true),
