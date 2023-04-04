@@ -311,7 +311,7 @@ class BotListener extends ListenerAdapter {
     val guildOption: String = options.getOrElse("guildId", "")
     val reasonOption: String = options.getOrElse("reason", "")
 
-    val embed = BotApp.adminLeave(event, guildOption, reason)
+    val embed = BotApp.adminLeave(event, guildOption, reasonOption)
     event.getHook.sendMessageEmbeds(embed).queue()
   }
 
