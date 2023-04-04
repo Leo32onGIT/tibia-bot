@@ -308,7 +308,7 @@ class BotListener extends ListenerAdapter {
   private def handleAdminLeave(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val guildOption: String = options.getOrElse("guildId", "")
+    val guildOption: String = options.getOrElse("guildid", "")
     val reasonOption: String = options.getOrElse("reason", "")
 
     val embed = BotApp.adminLeave(event, guildOption, reasonOption)

@@ -265,7 +265,7 @@ object BotApp extends App with StrictLogging {
   private val adminLeaveCommand: SlashCommandData = Commands.slash("adminleave", "Force the bot to leave the specified server")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(
-      new OptionData(OptionType.STRING, "guildId", "The guild ID you want the bot to leave").setRequired(true),
+      new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
       new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
     )
 
