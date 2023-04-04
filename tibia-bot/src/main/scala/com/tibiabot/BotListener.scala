@@ -30,8 +30,8 @@ class BotListener extends ListenerAdapter {
         handleFullbless(event)
       case "filter" =>
         handleFilter(event)
-      case "adminleave" =>
-        handleAdminLeave(event)
+      case "admin" =>
+        handleAdmin(event)
       case _ =>
     }
   }
@@ -305,14 +305,25 @@ class BotListener extends ListenerAdapter {
     }
   }
 
-  private def handleAdminLeave(event: SlashCommandInteractionEvent): Unit = {
+  private def handleAdmin(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
+    val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val guildOption: String = options.getOrElse("guildid", "")
     val reasonOption: String = options.getOrElse("reason", "")
+    val messageOption: String = options.getOrElse("message", "")
 
-    val embed = BotApp.adminLeave(event, guildOption, reasonOption)
-    event.getHook.sendMessageEmbeds(embed).queue()
+    subCommand match {
+      case "leave" =>
+        val embed = BotApp.adminLeave(event, guildOption, reasonOption)
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case "message" =>
+        val embed = BotApp.adminMessage(event, guildOption, messageOption)
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/admin`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
+    }
   }
 
 }

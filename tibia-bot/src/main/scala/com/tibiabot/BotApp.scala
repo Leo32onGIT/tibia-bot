@@ -262,11 +262,19 @@ object BotApp extends App with StrictLogging {
     )
 
   // remove world command
-  private val adminLeaveCommand: SlashCommandData = Commands.slash("adminleave", "Force the bot to leave the specified server")
+  private val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(
-      new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
-      new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
+    .addSubcommands(
+      new SubcommandData("leave", "Force the bot to leave a specific discord")
+      .addOptions(
+        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
+        new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
+      ),
+      new SubcommandData("message", "Send a message to a specific discord")
+      .addOptions(
+        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
+        new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
+      )
     )
 
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand)
@@ -277,8 +285,8 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
       // update the commands
-      if (g.getIdLong == 867319250708463628L){
-        lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminLeaveCommand)
+      if (g.getIdLong == 867319250708463628L){ // Violent Bot Discord
+        lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminCommand)
         g.updateCommands().addCommands(adminCommands.asJava).complete()
       } else {
         g.updateCommands().addCommands(commands.asJava).complete()
@@ -2546,6 +2554,36 @@ object BotApp extends App with StrictLogging {
     }
 
     guild.leave().queue()
+    // embed reply
+    new EmbedBuilder()
+    .setColor(3092790)
+    .setDescription(embedMessage)
+    .build()
+  }
+
+  def adminMessage(event: SlashCommandInteractionEvent, guildId: String, message: String): MessageEmbed = {
+    // get guild & world information from the slash interaction
+    val guildL: Long = java.lang.Long.parseLong(guildId)
+    val guild = jda.getGuildById(guildL)
+    val discordInfo = discordRetrieveConfig(guild)
+    var embedMessage = ""
+
+    if (discordInfo.isEmpty) {
+      embedMessage = s":x: The Guild: **${guild.getName()}** doesn't have any worlds setup yet, so a message cannot be sent."
+    } else {
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      if (adminChannel != null){
+        val adminEmbed = new EmbedBuilder()
+        adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+        adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
+        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
+        adminEmbed.setColor(3092790)
+        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+      } else {
+        embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `bot-activity` channel, so a message cannot be sent."
+      }
+      embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
+    }
     // embed reply
     new EmbedBuilder()
     .setColor(3092790)
