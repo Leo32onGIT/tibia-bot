@@ -284,13 +284,13 @@ object BotApp extends App with StrictLogging {
 
   // initialize the database
   guilds.foreach{g =>
-      // update the commands
-      if (g.getIdLong == 867319250708463628L){ // Violent Bot Discord
-        lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminCommand)
-        g.updateCommands().addCommands(adminCommands.asJava).complete()
-      } else {
-        g.updateCommands().addCommands(commands.asJava).complete()
-      }
+    // update the commands
+    if (g.getIdLong == 867319250708463628L){ // Violent Bot Discord
+      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, adminCommand)
+      g.updateCommands().addCommands(adminCommands.asJava).complete()
+    } else {
+      g.updateCommands().addCommands(commands.asJava).complete()
+    }
   }
 
   startBot(None, None)
