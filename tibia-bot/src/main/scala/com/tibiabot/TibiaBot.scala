@@ -626,7 +626,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val durationString = s"| `$durationStr`"
       val guildIconData = player.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
       val guildIcon = if (guildIconData != null) guildIconData.icon else ""
-      vocationBuffers(voc) += ((guildIcon, s"$vocEmoji **[${player.level.toString}](${charUrl(player.name)})** — **${player.name}** $guildIcon $durationString ${player.flag}"))
+      vocationBuffers(voc) += ((guildIcon, s"$vocEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
