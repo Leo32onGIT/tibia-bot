@@ -22,7 +22,7 @@ class DiscordMessageEditor() extends StrictLogging {
   private val channelRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
 
   val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
-  scheduler.scheduleAtFixedRate(() => editMessages(), 0, 30, TimeUnit.SECONDS)
+  scheduler.scheduleAtFixedRate(() => editMessages(), 0, 60, TimeUnit.SECONDS)
 
   def editDeathMessage(guild: Guild, deathChannel: TextChannel, messageId: String, timeStamp: ZonedDateTime): Unit = {
     val messageDetails = EmbedDetails(guild, deathChannel, messageId, timeStamp)
