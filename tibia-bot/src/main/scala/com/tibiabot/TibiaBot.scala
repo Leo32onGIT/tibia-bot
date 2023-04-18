@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, editor, worldsData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -557,9 +557,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             embed.setThumbnail(embedThumbnail)
             embed.setColor(embedColor)
 
-            val editCheck = if (exivaBuffer.nonEmpty) true else false
             // return embed + poke
-            (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, editCheck, ZonedDateTime.parse(charDeath.death.time))
+            (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
           }
           val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
           val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
@@ -580,15 +579,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               } else {
                 // for regular deaths check if level > /filter deaths <level>
                 if (embed._5 >= minimumLevel) {
-                  if (embed._7){
-                    val deathTime = embed._8
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue(response => {
-                      val messageId = response.getId
-                      editor.editDeathMessage(guild, deathsTextChannel, messageId, deathTime)
-                    })
-                  } else {
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
-                  }
+                  deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
                 }
               }
             }
