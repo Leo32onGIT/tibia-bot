@@ -285,7 +285,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
         val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
         val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
-        val exivaList = worldData.headOption.map(_.exivaList).getOrElse("true")
+        val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
         if (deathsTextChannel != null){
           val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
@@ -377,14 +377,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         }
                         killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}](${charUrl(isSummon(1))})**"
                         if (guildIcon == Config.allyGuild) {
-                          if (exivaList == "true") {
+                          if (exivaListCheck == "true") {
                             exivaBuffer += isSummon(1)
                           }
                         }
                       } else {
                         killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
                         if (guildIcon == Config.allyGuild) {
-                          if (exivaList == "true") {
+                          if (exivaListCheck == "true") {
                             exivaBuffer += k.name
                           }
                         }
@@ -392,7 +392,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     } else {
                       killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // summon not detected
                       if (guildIcon == Config.allyGuild) {
-                        if (exivaList == "true") {
+                        if (exivaListCheck == "true") {
                           exivaBuffer += k.name
                         }
                       }
