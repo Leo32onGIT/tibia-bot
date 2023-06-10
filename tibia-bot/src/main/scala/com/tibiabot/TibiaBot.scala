@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, editor, worldsData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -106,10 +106,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
         (key.char, key.level.toInt)
       }.toSet
-      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacterV2).runWith(Sink.collection).map(_.toSet)
+      Source(charsToCheck).mapAsyncUnordered(8)(tibiaDataClient.getCharacterV2).runWith(Sink.collection).map(_.toSet)
     } else {
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
+      Source(charsToCheck).mapAsyncUnordered(8)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
     }
   }.withAttributes(logAndResume)
 
@@ -449,7 +449,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
               if (detectHunteds == "on"){
                 // scan exiva list for enemies to be added to hunted
-                val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(8)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+                val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
                 val futureResults: Future[Seq[CharacterResponse]] = exivaBufferFlow.run()
                 futureResults.onComplete {
                   case Success(output) =>
@@ -557,9 +557,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             embed.setThumbnail(embedThumbnail)
             embed.setColor(embedColor)
 
-            val editCheck = if (exivaBuffer.nonEmpty) true else false
             // return embed + poke
-            (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, editCheck, ZonedDateTime.parse(charDeath.death.time))
+            (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
           }
           val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
           val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
@@ -580,15 +579,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               } else {
                 // for regular deaths check if level > /filter deaths <level>
                 if (embed._5 >= minimumLevel) {
-                  if (embed._7){
-                    val deathTime = embed._8
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue(response => {
-                      val messageId = response.getId
-                      editor.editDeathMessage(guild, deathsTextChannel, messageId, deathTime)
-                    })
-                  } else {
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
-                  }
+                  deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
                 }
               }
             }
@@ -635,7 +626,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val durationString = s"| `$durationStr`"
       val guildIconData = player.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
       val guildIcon = if (guildIconData != null) guildIconData.icon else ""
-      vocationBuffers(voc) += ((guildIcon, s"$vocEmoji **[${player.level.toString}](${charUrl(player.name)})** — **${player.name}** $guildIcon $durationString ${player.flag}"))
+      vocationBuffers(voc) += ((guildIcon, s"$vocEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList

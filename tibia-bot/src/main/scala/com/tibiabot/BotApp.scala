@@ -3,7 +3,6 @@ package com.tibiabot
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.discord.DiscordMessageSender
-import com.tibiabot.discord.DiscordMessageEditor
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, Members}
 import com.typesafe.scalalogging.StrictLogging
@@ -63,7 +62,6 @@ object BotApp extends App with StrictLogging {
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
   private val tibiaDataClient = new TibiaDataClient()
   val sender = new DiscordMessageSender()
-  val editor = new DiscordMessageEditor()
 
   // Let the games begin
   logger.info("Starting up")
