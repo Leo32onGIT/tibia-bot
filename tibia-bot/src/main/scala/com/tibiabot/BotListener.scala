@@ -32,6 +32,8 @@ class BotListener extends ListenerAdapter {
         handleFilter(event)
       case "admin" =>
         handleAdmin(event)
+      case "exiva" =>
+        handleExiva(event)
       case _ =>
     }
   }
@@ -322,6 +324,20 @@ class BotListener extends ListenerAdapter {
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/admin`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+
+  private def handleExiva(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val subCommand = event.getInteraction.getSubcommandName
+
+    subCommand match {
+      case "deaths" =>
+        val embed = BotApp.detectHunted(event)
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/exiva`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
