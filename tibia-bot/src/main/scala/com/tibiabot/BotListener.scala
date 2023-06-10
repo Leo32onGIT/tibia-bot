@@ -334,7 +334,7 @@ class BotListener extends ListenerAdapter {
 
     subCommand match {
       case "deaths" =>
-        val embed = BotApp.detectHunted(event)
+        val embed = BotApp.exivaList(event)
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/exiva`.").build()

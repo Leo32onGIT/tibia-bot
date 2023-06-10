@@ -312,7 +312,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None)
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
@@ -1755,12 +1755,7 @@ object BotApp extends App with StrictLogging {
 
     // Add the column if it doesn't exist
     if (!columnExists) {
-      val success = statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'true'")
-      if (success) {
-        logger.info("adding new column 'exiva_list' worked")
-      } else {
-        logger.info("adding new column 'exiva_list' failed")
-      }
+      statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'true'")
     }
 
     val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list FROM worlds")
@@ -2289,13 +2284,13 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
+          adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Find_Person.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
 
-        embedBuild.setDescription(s":gear: **Automatic enemy detection** is now set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.setDescription(s":gear: **exiva list on deaths** is now set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
       }
     } else {
