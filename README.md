@@ -47,11 +47,12 @@ You will need to change this to point to your emojis and your discord roles.
 `docker volume create --name pgdata`
 6. Run the postgres docker image:    
 `docker run --rm -d -t --env-file prod.env --hostname sqlhost --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql/data postgres`
-7. Run the docker container you just created & parse the **prod.env** file:    
-`docker run --rm -d --env-file prod.env <image_id>`  
+7. Run the docker container you just created & parse the **prod.env** file:     
+`docker run --rm -d -t --env-file prod.env --link postgres:postgres --name tibia-bot <image_id>`
 
 ## Debugging
 
 1. If something isn't working correctly you should be able to see why very clearly in the logs.
 2. Use `docker ps` to find the \<container id\> for the running bot.
 3. Use `docker logs <container id>` to view the logs.
+4. Use `docker pull dpage/pgadmin4` and `docker run -t --name pgadmin -p 0.0.0.0:82:80 --link postgres:postgres -e 'PGADMIN_DEFAULT_EMAIL=XXXXXXX@gmail.com' -e 'PGADMIN_DEFAULT_PASSWORD=XXXXXXXX' -d dpage/pgadmin4` if you need to visualise the postgres dbs
