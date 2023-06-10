@@ -1755,7 +1755,7 @@ object BotApp extends App with StrictLogging {
 
     // Add the column if it doesn't exist
     if (!columnExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'true'")
+      statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'false'")
     }
 
     val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list FROM worlds")
@@ -1784,7 +1784,7 @@ object BotApp extends App with StrictLogging {
       val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
       val levelsMin = Option(result.getInt("levels_min")).getOrElse(8)
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
-      val exivaList = Option(result.getString("exiva_list")).getOrElse("true")
+      val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
       results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList)
     }
 
@@ -1818,7 +1818,7 @@ object BotApp extends App with StrictLogging {
     statement.setString(19, "on")
     statement.setInt(20, 8)
     statement.setInt(21, 8)
-    statement.setString(22, "true")
+    statement.setString(22, "false")
     statement.setString(23, alliesChannel)
     statement.setString(24, enemiesChannel)
     statement.setString(25, neutralsChannels)
@@ -1839,7 +1839,7 @@ object BotApp extends App with StrictLogging {
     statement.setString(40, "on")
     statement.setInt(41, 8)
     statement.setInt(42, 8)
-    statement.setString(43, "true")
+    statement.setString(43, "false")
     statement.executeUpdate()
 
     statement.close()
