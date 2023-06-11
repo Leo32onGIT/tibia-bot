@@ -294,7 +294,11 @@ object BotApp extends App with StrictLogging {
         )
     )
 
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand)
+    // exiva command
+    private val helpCommand: SlashCommandData = Commands.slash("help", "Resend the welcome message & basic getting started information")
+      .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+
+  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -303,7 +307,7 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L){ // Violent Bot Discord
-      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, adminCommand)
+      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -2528,7 +2532,7 @@ object BotApp extends App with StrictLogging {
         "**Commands & Features:**\n" +
         "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
         "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
-        "*If you have any issues or suggestions or would like to support my work, use links below or send <:tibiacoin:1117280875818778637> to* **Violent Beams** 👍\n\n" +
+        "*If you have any issues or suggestions or would like to support my work, use links below or send <:tibiacoin:1117280875818778637> to* **`Violent Beams`** 👍\n\n" +
         "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)"
       embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
       embedBuilder.setDescription(descripText)
