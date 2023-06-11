@@ -9,6 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
+import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
 import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
@@ -2519,20 +2520,22 @@ object BotApp extends App with StrictLogging {
 
   def discordJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
-    val publicChannel = guild.getDefaultChannel
-    val embedBuilder = new EmbedBuilder()
-    val descripText = s"[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)\n\n" +
-      "**How to use the bot:**\n" +
-      "Simply use `/setup <World Name>` to setup the bot.\n\n" +
-      "**Commands & Features:**\n" +
-      "All interactions with the bot are done through **slash commands**.\n" +
-      "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
-      "*If you have any issues or suggestions or would like to support my work, use the Discord and Patreon links above 👍*"
-    embedBuilder.setTitle("Violent Bot has joined the Server")
-    embedBuilder.setDescription(descripText)
-    embedBuilder.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Violent Bot.png")
-    embedBuilder.setColor(14397256) // orange for bot auto command
-    publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+    val publicChannel = guild.getTextChannelById(guild.getDefaultChannel.getId)
+    if (publicChannel != null){
+      val embedBuilder = new EmbedBuilder()
+      val descripText = s"**How to use the bot:**\n" +
+        "Simply use `/setup <World Name>` to setup the bot.\n\n" +
+        "**Commands & Features:**\n" +
+        "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
+        "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
+        "*If you have any issues or suggestions or would like to support my work, use links below or send <:tibiacoin:1117280875818778637> to* **Violent Beams** 👍\n\n" +
+        "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)"
+      embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
+      embedBuilder.setDescription(descripText)
+      embedBuilder.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Violent%20Bot.png")
+      embedBuilder.setColor(14397256) // orange for bot auto command
+      publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+    }
   }
 
   private def removeConfigDatabase(guildId: String): Unit = {
