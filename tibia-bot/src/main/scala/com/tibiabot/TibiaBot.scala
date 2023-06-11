@@ -120,6 +120,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val newDeaths = characterResponses.flatMap { char =>
       val charName = char.characters.character.name
       val guildName = char.characters.character.guild.map(_.name).getOrElse("")
+      val formerNamesList: List[String] = char.characters.character.former_names.map(_.toList).getOrElse(Nil)
       // update the guildIcon depending on the discord this would be posted to
       if (discordsData.contains(world)) {
         val discordsList = discordsData(world)
@@ -147,6 +148,65 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             )
             currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
           }
+
+          val guild = BotApp.jda.getGuildById(discords.id)
+          val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+          val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
+          val activityTextChannel = guild.getTextChannelById(activityChannel)
+          // activity channel (name change or guild change)
+          var nameChangeCheck = false
+          formerNamesList.foreach { formerName =>
+            if (activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == formerName.toLowerCase())){
+              nameChangeCheck = true
+            }
+          }
+          // check name
+          val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+          if (currentNameCheck == true) {
+            // char exists in cach
+            val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
+            val guildNameFromActivityData = matchingActivityOption.flatMap(_.guildName).getOrElse("")
+            if (guildName != guildNameFromActivityData){
+              // guild has changed
+              BotApp.updateActivityToDatabase(guild, charName, formerNames, guildName, ZonedDateTime.now(), charName)
+              if (activityTextChannel != null){
+                // send message to activity channel
+                val newGuild = if (guildName == "") "None" else guildName
+                val oldGuild = if (guildNameFromActivityData == "") "None" else guildNameFromActivityData
+                val activityEmbed = new EmbedBuilder()
+                activityEmbed.setDescription(s"**${charName}**'s guild changed from **${oldGuild}** to **${newGuild}**.")
+                activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+                activityEmbed.setColor(3092790)
+                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+              }
+            }
+          } else if (currentNameCheck == false && nameChangeCheck == false && huntedGuildCheck == true) {
+            // new enemy has joined the guild doesn't exist in cache
+            activityData = activityData + (guildId -> (BotApp.Activity(charName, formerNames, guildName, ZonedDateTime.now()) :: activityData.getOrElse(guildId, List())))
+            BotApp.addActivityToDatabase(guild, charName, formerNames, guildName, ZonedDateTime.now())
+            if (activityTextChannel != null){
+              // send message to activity channel
+            }
+          }
+          // check name change
+          if (nameChangeCheck == true){
+            // chars name has changed
+            var oldName = ""
+            val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
+              if (formerNamesList.contains(activity.name.toLowerCase())) {
+                activity.copy(name = charName, formerNames = formerNamesList)
+              } else {
+                activity
+              }
+              oldName = activity.name
+            }
+            activityData = activityData + (guildId -> updatedActivityData)
+            BotApp.updateActivityToDatabase(guild, oldName, formerNames, guildName, ZonedDateTime.now(), charName)
+            if (activityTextChannel != null){
+              // send message to activity channel
+            }
+          }
+
         }
       }
       // detecting new levels
@@ -255,18 +315,28 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       discordsList.foreach { discords =>
         val guildId = discords.id
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-        val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
-        val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
-        val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
         if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
           // did the online list api call fail?
+          val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
+          val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
+          val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
           //if (currentOnlineList.size > 1){
             onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
             onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
           //}
         }
+
+        /***
+        // V1.3
+        val activityTimer = activityListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+        if (ZonedDateTime.now().isAfter(activityTimer.plusMinutes(6))) {
+          val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
+          activityListTimer = activityListTimer + (guildId -> ZonedDateTime.now())
+          activityChecks(activityChecks.toList, guildId, activityChannel)
+        }
+        ***/
       }
     }
 
@@ -287,6 +357,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
         val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
+        /**
+        val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
+        val activityTextChannel = guild.getTextChannelById(activityChannel)
+        if (activityTextChannel != null){
+
+        }
+        **/
         if (deathsTextChannel != null){
           val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
             var notablePoke = ""

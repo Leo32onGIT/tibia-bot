@@ -5,7 +5,7 @@
       <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
     </encoder>
   </appender>
-
+  <!--
   <appender name="DISCORD" class="com.github.napstr.logback.DiscordAppender">
     <webhookUri>https://discord.com/api/webhooks/1091104948315492374/FiJZld-BlPeRCYVstp1AMP73MCOiq3-Li5E2fxawrq7WCnSqVLcRw59cClF-l3xHkcrZ</webhookUri>
     <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
@@ -27,13 +27,14 @@
       <level>ERROR</level>
     </filter>
   </appender>
+-->
 
   <logger name="club.minnced.discord.webhook.WebhookClient" level="ERROR" additivity="false">
     <appender-ref ref="CONSOLE" />
   </logger>
 
   <root level="INFO">
-    <appender-ref ref="ASYNC_DISCORD" />
+    <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
     <appender-ref ref="CONSOLE" />
   </root>
 

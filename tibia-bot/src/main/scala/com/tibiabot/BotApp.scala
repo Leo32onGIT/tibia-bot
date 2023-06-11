@@ -50,12 +50,14 @@ object BotApp extends App with StrictLogging {
     detectHunteds: String,
     levelsMin: Int,
     deathsMin: Int,
-    exivaList: String
+    exivaList: String,
+    activityChannel: String
   )
 
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
   case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
+  case class Activity(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
@@ -90,6 +92,7 @@ object BotApp extends App with StrictLogging {
   var alliedPlayersData: Map[String, List[Players]] = Map.empty
   var huntedGuildsData: Map[String, List[Guilds]] = Map.empty
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
+  var activityData: Map[String, List[Activity]] = Map.empty
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
@@ -317,7 +320,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None)
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    updateDashboard()
+    //updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
@@ -350,6 +353,10 @@ object BotApp extends App with StrictLogging {
       // get worlds
       val worldsInfo = worldConfig(guild.get)
       worldsData += (guildId -> worldsInfo)
+
+      // get tracked activity characters
+      val activityInfo = activityConfig(guild.get, "tracked_activity")
+      activityData += (guildId -> activityInfo)
 
       val adminChannels = discordRetrieveConfig(guild.get)
       val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
@@ -401,6 +408,10 @@ object BotApp extends App with StrictLogging {
           // get worlds
           val worldsInfo = worldConfig(g)
           worldsData += (guildId -> worldsInfo)
+
+          // get tracked activity characters
+          val activityInfo = activityConfig(guild.get, "tracked_activity")
+          activityData += (guildId -> activityInfo)
 
           val adminChannels = discordRetrieveConfig(g)
           val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
@@ -909,7 +920,7 @@ object BotApp extends App with StrictLogging {
           val guildName = guildResponse.guilds.guild.name
           val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
           (guildName, guildMembers)
-        }.map { case (guildName, _) =>
+        }.map { case (guildName, guildMembers) =>
           if (guildName != ""){
             if (!huntedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add guild to hunted list and database
@@ -927,16 +938,16 @@ object BotApp extends App with StrictLogging {
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
               }
 
-              // add each player in the guild to the hunted list
-              /***
+              // add each player in the guild to the activity list
               guildMembers.foreach { member =>
-                val guildPlayers = huntedPlayersData.getOrElse(guildId, List())
+                val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
-                  huntedPlayersData = huntedPlayersData + (guildId -> (Players(member.name, "false", "this players guild was added to the hunted list", commandUser) :: guildPlayers))
-                  addHuntedToDatabase(guild, "player", member.name, "false", "this players guild was added to the hunted list", commandUser)
+                  val updatedTime = ZonedDateTime.now()
+                  activityData = activityData + (guildId -> (Activity(member.name, "", guildName, updatedTime) :: guildPlayers))
+                  addActivityToDatabase(guild, member.name, "", guildName, updatedTime)
                 }
               }
-              ***/
+
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
@@ -1317,6 +1328,34 @@ object BotApp extends App with StrictLogging {
     statement.setString(2, reason)
     statement.setString(3, reasonText)
     statement.setString(4, addedBy)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit = {
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"INSERT INTO tracked_activity(name, former_names, guild_name, updated) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
+    statement.setString(1, name)
+    statement.setString(2, formerNames.mkString(","))
+    statement.setString(3, guildName)
+    statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def updateActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit = {
+    val conn = getConnection(guild)
+
+    val statement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE name = ?;")
+    statement.setString(1, newName)
+    statement.setString(2, formerNames.mkString(","))
+    statement.setString(3, guildName)
+    statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
+    statement.setString(5, name)
     statement.executeUpdate()
 
     statement.close()
@@ -1727,6 +1766,47 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
+  private def activityConfig(guild: Guild, query: String): List[Activity] = {
+    val conn = getConnection(guild)
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'tracked_activity'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createActivityTable =
+        s"""CREATE TABLE tracked_activity (
+           |name VARCHAR(255) NOT NULL,
+           |former_names VARCHAR(255) NOT NULL,
+           |guild_name VARCHAR(255) NOT NULL,
+           |updated TIMESTAMP NOT NULL,
+           |PRIMARY KEY (name)
+           |);""".stripMargin
+
+      statement.executeUpdate(createActivityTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT name,former_names,guild_name,updated FROM $query")
+
+    val results = new ListBuffer[Guilds]()
+    while (result.next()) {
+      val name = Option(result.getString("name")).getOrElse("")
+      val formerNames = Option(result.getString("former_names")).getOrElse("")
+      val guildName = Option(result.getString("guild_name")).getOrElse("")
+      val updatedTime = Option(result.getTimestamp("updated").toInstant).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+      val formerNamesList = formerNames.split(",").toList
+
+      results += Activity(name, formerNamesList, guildName, updatedTime)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
+
   private def discordRetrieveConfig(guild: Guild): Map[String, String] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
@@ -1751,8 +1831,6 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
 
-
-    // V1.2 IN PROGRESS
     // Check if the column already exists in the table
     val columnExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'exiva_list'")
     val columnExists = columnExistsQuery.next()
@@ -1763,7 +1841,18 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'false'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list FROM worlds")
+    // Check if the column already exists in the table
+    val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
+    val activityExists = activityExistsQuery.next()
+    activityExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!activityExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN activity_channel VARCHAR(255) DEFAULT '0'")
+    }
+
+
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -1790,7 +1879,8 @@ object BotApp extends App with StrictLogging {
       val levelsMin = Option(result.getInt("levels_min")).getOrElse(8)
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
       val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
-      results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList)
+      val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
+      results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel)
     }
 
     statement.close()
@@ -1798,9 +1888,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String): Unit = {
+  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -1824,27 +1914,29 @@ object BotApp extends App with StrictLogging {
     statement.setInt(20, 8)
     statement.setInt(21, 8)
     statement.setString(22, "false")
-    statement.setString(23, alliesChannel)
-    statement.setString(24, enemiesChannel)
-    statement.setString(25, neutralsChannels)
-    statement.setString(26, levelsChannel)
-    statement.setString(27, deathsChannel)
-    statement.setString(28, category)
-    statement.setString(29, fullblessRole)
-    statement.setString(30, nemesisRole)
-    statement.setString(31, fullblessChannel)
-    statement.setString(32, nemesisChannel)
-    statement.setInt(33, 250)
-    statement.setString(34, "true")
+    statement.setString(23, activityChannel)
+    statement.setString(24, alliesChannel)
+    statement.setString(25, enemiesChannel)
+    statement.setString(26, neutralsChannels)
+    statement.setString(27, levelsChannel)
+    statement.setString(28, deathsChannel)
+    statement.setString(29, category)
+    statement.setString(30, fullblessRole)
+    statement.setString(31, nemesisRole)
+    statement.setString(32, fullblessChannel)
+    statement.setString(33, nemesisChannel)
+    statement.setInt(34, 250)
     statement.setString(35, "true")
     statement.setString(36, "true")
     statement.setString(37, "true")
     statement.setString(38, "true")
     statement.setString(39, "true")
-    statement.setString(40, "on")
-    statement.setInt(41, 8)
+    statement.setString(40, "true")
+    statement.setString(41, "on")
     statement.setInt(42, 8)
-    statement.setString(43, "false")
+    statement.setInt(43, 8)
+    statement.setString(44, "false")
+    statement.setString(45, activityChannel)
     statement.executeUpdate()
 
     statement.close()
@@ -2016,11 +2108,12 @@ object BotApp extends App with StrictLogging {
         val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
         val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
+        val activityChannel = guild.createTextChannel("activity", newCategory).complete()
         val fullblessChannel = guild.createTextChannel("fullbless-notifications", newCategory).complete()
         val nemesisChannel = guild.createTextChannel("boss-notifications", newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, fullblessChannel, nemesisChannel)
+        val channelList = List(alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, activityChannel, fullblessChannel, nemesisChannel)
         channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
@@ -2079,9 +2172,10 @@ object BotApp extends App with StrictLogging {
         val categoryId = newCategory.getId
         val fullblessId = fullblessChannel.getId
         val nemesisId = nemesisChannel.getId
+        val activityId = activityChannel.getId
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, fullblessId, nemesisId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, fullblessId, nemesisId, activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
