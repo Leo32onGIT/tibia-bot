@@ -41,6 +41,7 @@ class BotListener extends ListenerAdapter {
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
     guild.updateCommands().addCommands(commands.asJava).complete()
+    BotApp.discordJoin(event)
   }
 
   override def onGuildLeave(event: GuildLeaveEvent): Unit = {

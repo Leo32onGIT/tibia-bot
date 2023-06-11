@@ -2517,6 +2517,24 @@ object BotApp extends App with StrictLogging {
     removeConfigDatabase(guildId)
   }
 
+  def discordJoin(event: GuildJoinEvent): Unit = {
+    val guild = event.getGuild
+    val publicChannel = guild.getDefaultChannel
+    val embedBuilder = new EmbedBuilder()
+    val descripText = s"[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)\n\n" +
+      "**How to use the bot:**\n" +
+      "Simply use `/setup <World Name>` to setup the bot.\n\n" +
+      "**Commands & Features:**\n" +
+      "All interactions with the bot are done through **slash commands**.\n" +
+      "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
+      "*If you have any issues or suggestions or would like to support my work, use the Discord and Patreon links above 👍*"
+    embedBuilder.setTitle("Violent Bot has joined the Server")
+    embedBuilder.setDescription(descripText)
+    embedBuilder.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Violent Bot.png")
+    embedBuilder.setColor(14397256) // orange for bot auto command
+    publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+  }
+
   private def removeConfigDatabase(guildId: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
     val username = "postgres"
