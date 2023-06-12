@@ -150,6 +150,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
           }
 
+
           // v1.3
           if (!blocker) {
             val guild = BotApp.jda.getGuildById(discords.id)
@@ -276,21 +277,19 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                 }
               }
-              /**
-              // Player
-              else if (allyPlayerCheck || huntedPlayerCheck) {
-                val guildType = if (huntedPlayerCheck) "hunted" else "allied"
-                val activityEmbed = new EmbedBuilder()
-                activityEmbed.setDescription(s"**${charName}** has joined the guild **${guildName}**.")
-                //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                activityEmbed.setColor(3092790)
-                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-              }
-              **/
             }
           }
-
           /**
+          // Player
+          else if (allyPlayerCheck || huntedPlayerCheck) {
+            val guildType = if (huntedPlayerCheck) "hunted" else "allied"
+            val activityEmbed = new EmbedBuilder()
+            activityEmbed.setDescription(s"**${charName}** has joined the guild **${guildName}**.")
+            //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+            activityEmbed.setColor(3092790)
+            activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+          }
+
           // Name has changed
           else if (currentNameCheck == false && nameChangeCheck == false && huntedGuildCheck == true) {
             // new enemy has joined the guild doesn't exist in cache
@@ -330,7 +329,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           }
           **/
-          // V1.3 end
         }
       }
       // detecting new levels
