@@ -55,7 +55,7 @@ object BotApp extends App with StrictLogging {
   )
 
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
-  case class Discords(id: String, adminChannel: String)
+  case class Discords(id: String, adminChannel: String, activityBlocker: Boolean)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Activity(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
@@ -320,7 +320,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None)
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     guilds.foreach{g =>
       cleanHuntedList(g)
     }
@@ -365,7 +365,8 @@ object BotApp extends App with StrictLogging {
         if (w.name == world.get){
           val discords = Discords(
             id = guildId,
-            adminChannel = adminChannelId
+            adminChannel = adminChannelId,
+            activityBlocker = false
           )
           discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
           val botStream = if (botStreams.contains(world.get)) {
@@ -420,7 +421,8 @@ object BotApp extends App with StrictLogging {
           worldsInfo.foreach{ w =>
             val discords = Discords(
               id = guildId,
-              adminChannel = adminChannelId
+              adminChannel = adminChannelId,
+              activityBlocker = false
             )
             discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
           }
@@ -898,6 +900,15 @@ object BotApp extends App with StrictLogging {
   def guildUrl(guild: String): String =
     s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guild.replaceAll(" ", "+")}"
 
+  def updateActivityBlocker(inputId: String, activityStatus: Boolean): Unit = {
+    discordsData = discordsData.view.mapValues(_.map {
+      case discord @ Discords(id, _, _) if id == inputId =>
+        discord.copy(activityBlocker = activityStatus)
+      case other => other
+    }).toMap
+  }
+
+
   def addHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: MessageEmbed => Unit): Unit = {
     // get command option
     val subOptionValueLower = subOptionValue.toLowerCase()
@@ -1035,7 +1046,7 @@ object BotApp extends App with StrictLogging {
           val guildName = guildResponse.guilds.guild.name
           val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
           (guildName, guildMembers)
-        }.map { case (guildName, _) =>
+        }.map { case (guildName, guildMembers) =>
           if (guildName != ""){
             if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               alliedGuildsData = alliedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedGuildsData.getOrElse(guildId, List())))
@@ -1061,6 +1072,17 @@ object BotApp extends App with StrictLogging {
                 }
               }
               ***/
+
+              // add each player in the guild to the activity list
+              guildMembers.foreach { member =>
+                val guildPlayers = activityData.getOrElse(guildId, List())
+                if (!guildPlayers.exists(_.name == member.name)) {
+                  val updatedTime = ZonedDateTime.now()
+                  activityData = activityData + (guildId -> (Activity(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
+                }
+              }
+
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
@@ -1160,6 +1182,9 @@ object BotApp extends App with StrictLogging {
           huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
           removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
 
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+          removeGuildActivityfromDatabase(guild, subOptionValueLower)
+
           // send embed to admin channel
           if (adminChannel != null){
             val adminEmbed = new EmbedBuilder()
@@ -1197,6 +1222,9 @@ object BotApp extends App with StrictLogging {
           }
           huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
           removeHuntedFromDatabase(guild, "player", subOptionValueLower)
+
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+          removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
           if (adminChannel != null){
@@ -1258,6 +1286,9 @@ object BotApp extends App with StrictLogging {
           alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
           removeAllyFromDatabase(guild, "guild", subOptionValueLower)
 
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+          removeGuildActivityfromDatabase(guild, subOptionValueLower)
+
           // send embed to admin channel
           if (adminChannel != null){
             val adminEmbed = new EmbedBuilder()
@@ -1295,6 +1326,9 @@ object BotApp extends App with StrictLogging {
           }
           alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
           removeAllyFromDatabase(guild, "player", subOptionValueLower)
+
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+          removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
           if (adminChannel != null){
@@ -1381,6 +1415,27 @@ object BotApp extends App with StrictLogging {
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
     val statement = conn.prepareStatement(s"DELETE FROM $table WHERE name = ?;")
     statement.setString(1, name)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  private def removeGuildActivityfromDatabase(guild: Guild, guildName: String): Unit = {
+    val conn = getConnection(guild)
+
+    val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(guild_name) = LOWER(?);")
+    statement.setString(1, guildName)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  private def removePlayerActivityfromDatabase(guild: Guild, playerName: String): Unit = {
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
+    statement.setString(1, playerName)
     statement.executeUpdate()
 
     statement.close()

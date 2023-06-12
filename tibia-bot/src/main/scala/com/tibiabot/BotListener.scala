@@ -120,6 +120,8 @@ class BotListener extends ListenerAdapter {
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
 
+    BotApp.updateActivityBlocker(event.getGuild.getId, true)
+
     subCommand match {
       case "player" =>
         if (toggleOption == "add"){
@@ -180,6 +182,8 @@ class BotListener extends ListenerAdapter {
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/hunted`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
+
+    BotApp.updateActivityBlocker(event.getGuild.getId, false)
   }
 
   private def handleAllies(event: SlashCommandInteractionEvent): Unit = {
@@ -190,6 +194,8 @@ class BotListener extends ListenerAdapter {
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
     val worldOption: String = options.getOrElse("world", "")
+
+    BotApp.updateActivityBlocker(event.getGuild.getId, true)
 
     subCommand match {
       case "player" =>
@@ -248,6 +254,8 @@ class BotListener extends ListenerAdapter {
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/allies`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
+
+    BotApp.updateActivityBlocker(event.getGuild.getId, false)
   }
 
   private def handleNeutrals(event: SlashCommandInteractionEvent): Unit = {
