@@ -2063,6 +2063,7 @@ object BotApp extends App with StrictLogging {
           configMap += ("levels_min" -> result.getInt("levels_min").toString)
           configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
           configMap += ("exiva_list" -> result.getString("exiva_list"))
+          configMap += ("activity_channel" -> result.getString("activity_channel"))
       }
       statement.close()
       conn.close()
@@ -2731,7 +2732,8 @@ object BotApp extends App with StrictLogging {
         val fullblessChannelId = worldConfig("fullbless_channel")
         val nemesisChannelId = worldConfig("nemesis_channel")
         val categoryId = worldConfig("category")
-        val channelIds = List(alliesChannelId, enemiesChannelId, neutralsChannelId, levelsChannelId, deathsChannelId, fullblessChannelId, nemesisChannelId)
+        val activityChannelId = worldConfig("activity_channel")
+        val channelIds = List(alliesChannelId, enemiesChannelId, neutralsChannelId, levelsChannelId, deathsChannelId, fullblessChannelId, nemesisChannelId, activityChannelId)
 
         // check if command is being run in one of the channels being deleted
         if (channelIds.contains(event.getChannel.getId)) {
