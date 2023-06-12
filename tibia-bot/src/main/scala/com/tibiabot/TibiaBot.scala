@@ -264,7 +264,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               activityData = activityData + (guildId -> updatedActivityData)
 
               // add to db
-              BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+              BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
 
               if (huntedGuildCheck || allyGuildCheck){
                 val guildType = if (huntedGuildCheck) "hunted" else "allied"
@@ -449,16 +449,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
           //}
         }
-
-        /***
-        // V1.3
-        val activityTimer = activityListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(activityTimer.plusMinutes(6))) {
-          val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
-          activityListTimer = activityListTimer + (guildId -> ZonedDateTime.now())
-          activityChecks(activityChecks.toList, guildId, activityChannel)
-        }
-        ***/
       }
     }
 
