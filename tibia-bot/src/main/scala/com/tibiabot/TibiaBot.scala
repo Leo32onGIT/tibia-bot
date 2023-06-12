@@ -209,7 +209,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     // send message to activity channel
                     if (activityTextChannel != null){
                       val activityEmbed = new EmbedBuilder()
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the ${guildType} guild **${guildUrl(guildNameFromActivityData)}**.")
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                       //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                       activityEmbed.setColor(colorType)
                       activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
@@ -220,7 +220,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     // send message to activity channel
                     if (activityTextChannel != null){
                       val activityEmbed = new EmbedBuilder()
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the ${guildType} guild **${guildUrl(guildNameFromActivityData)}** and joined the guild **${guildUrl(guildName)}**.")
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
                       //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                       activityEmbed.setColor(colorType)
                       activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
@@ -270,7 +270,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 val colorType = if (huntedGuildCheck) 13773097 else 36941
                 if (activityTextChannel != null){
                   val activityEmbed = new EmbedBuilder()
-                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the ${guildType} guild **${guildUrl(guildName)}**.")
+                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                   //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                   activityEmbed.setColor(colorType)
                   activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
