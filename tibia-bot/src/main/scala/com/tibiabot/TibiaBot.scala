@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData, activityData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -165,10 +165,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           if (currentNameCheck == true) {
             // char exists in cach
             val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
-            val guildNameFromActivityData = matchingActivityOption.flatMap(_.guildName).getOrElse("")
+            val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
             if (guildName != guildNameFromActivityData){
               // guild has changed
-              BotApp.updateActivityToDatabase(guild, charName, formerNames, guildName, ZonedDateTime.now(), charName)
+              val updatedActivityData = matchingActivityOption.map { activity =>
+                val updatedActivity = activity.copy(guild = guildName)
+                activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
+              }.getOrElse(activityData.getOrElse(guildId, List()))
+              
+              activityData = activityData + (guildId -> updatedActivityData)
+              BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
               if (activityTextChannel != null){
                 // send message to activity channel
                 val newGuild = if (guildName == "") "None" else guildName
@@ -182,10 +188,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           } else if (currentNameCheck == false && nameChangeCheck == false && huntedGuildCheck == true) {
             // new enemy has joined the guild doesn't exist in cache
-            activityData = activityData + (guildId -> (BotApp.Activity(charName, formerNames, guildName, ZonedDateTime.now()) :: activityData.getOrElse(guildId, List())))
-            BotApp.addActivityToDatabase(guild, charName, formerNames, guildName, ZonedDateTime.now())
+            activityData = activityData + (guildId -> (BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now()) :: activityData.getOrElse(guildId, List())))
+            BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
             if (activityTextChannel != null){
               // send message to activity channel
+              val activityEmbed = new EmbedBuilder()
+              activityEmbed.setDescription(s"**${charName}** joined the hunted guild **${guildName}**.")
+              activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+              activityEmbed.setColor(3092790)
+              activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
             }
           }
           // check name change
@@ -193,17 +204,23 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             // chars name has changed
             var oldName = ""
             val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
-              if (formerNamesList.contains(activity.name.toLowerCase())) {
+              val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
                 activity.copy(name = charName, formerNames = formerNamesList)
               } else {
                 activity
               }
-              oldName = activity.name
+              oldName = updatedActivity.name
+              updatedActivity
             }
             activityData = activityData + (guildId -> updatedActivityData)
-            BotApp.updateActivityToDatabase(guild, oldName, formerNames, guildName, ZonedDateTime.now(), charName)
+            BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
             if (activityTextChannel != null){
               // send message to activity channel
+              val activityEmbed = new EmbedBuilder()
+              activityEmbed.setDescription(s"**${oldName}** changed his name to **${charName}**.")
+              activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+              activityEmbed.setColor(3092790)
+              activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
             }
           }
 

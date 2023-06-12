@@ -19,7 +19,7 @@ import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
-import java.time.ZonedDateTime
+import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
@@ -410,7 +410,7 @@ object BotApp extends App with StrictLogging {
           worldsData += (guildId -> worldsInfo)
 
           // get tracked activity characters
-          val activityInfo = activityConfig(guild.get, "tracked_activity")
+          val activityInfo = activityConfig(g, "tracked_activity")
           activityData += (guildId -> activityInfo)
 
           val adminChannels = discordRetrieveConfig(g)
@@ -943,8 +943,8 @@ object BotApp extends App with StrictLogging {
                 val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
                   val updatedTime = ZonedDateTime.now()
-                  activityData = activityData + (guildId -> (Activity(member.name, "", guildName, updatedTime) :: guildPlayers))
-                  addActivityToDatabase(guild, member.name, "", guildName, updatedTime)
+                  activityData = activityData + (guildId -> (Activity(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
                 }
               }
 
@@ -1791,13 +1791,14 @@ object BotApp extends App with StrictLogging {
 
     val result = statement.executeQuery(s"SELECT name,former_names,guild_name,updated FROM $query")
 
-    val results = new ListBuffer[Guilds]()
+    val results = new ListBuffer[Activity]()
     while (result.next()) {
       val name = Option(result.getString("name")).getOrElse("")
       val formerNames = Option(result.getString("former_names")).getOrElse("")
       val guildName = Option(result.getString("guild_name")).getOrElse("")
-      val updatedTime = Option(result.getTimestamp("updated").toInstant).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
       val formerNamesList = formerNames.split(",").toList
+      val updatedTimeTemporal = Option(result.getTimestamp("updated").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
+      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
 
       results += Activity(name, formerNamesList, guildName, updatedTime)
     }
