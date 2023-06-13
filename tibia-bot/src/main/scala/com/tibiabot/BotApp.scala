@@ -2231,6 +2231,16 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId
         val activityId = activityChannel.getId
 
+        // post initial embed in activity channel
+        val activityTextChannel: TextChannel = guild.getTextChannelById(activityId)
+        if (activityTextChannel != null){
+          val activityEmbed = new EmbedBuilder()
+          activityEmbed.setDescription(s":warning: This channel is a *Work in Progress* and thus may double post or show false positives.\nIt will show events when a players **joins** or **leaves** a tracked guild.")
+          activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          activityEmbed.setColor(3092790)
+          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+        }
+
         // update the database
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, fullblessId, nemesisId, activityId)
         startBot(Some(guild), Some(world))
