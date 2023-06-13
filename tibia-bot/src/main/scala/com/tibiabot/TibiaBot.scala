@@ -184,74 +184,79 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             if (currentNameCheck || nameChangeCheck) {
               val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
               val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
-              // Guild has changed
-              if (guildName != guildNameFromActivityData){
-                val updatedActivityData = matchingActivityOption.map { activity =>
-                  val updatedActivity = activity.copy(guild = guildName)
-                  activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
-                }.getOrElse(activityData.getOrElse(guildId, List()))
+              val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
-                // Update in cache and db
-                activityData = activityData + (guildId -> updatedActivityData)
-                BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+              if (updatesTimeFromActivityData.plusMinutes(10).isBefore(ZonedDateTime.now())){
 
-                //val newGuild = if (guildName == "") "None" else guildName
-                val newGuildLess = if (guildName == "") true else false
-                val oldGuildLess = if (guildNameFromActivityData == "") true else false
-                val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
-                val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
+                // Guild has changed
+                if (guildName != guildNameFromActivityData){
 
-                if (wasInHuntedGuild || wasInAlliedGuild){
-                  val guildType = if (wasInHuntedGuild) "hunted" else "allied"
-                  val colorType = if (wasInHuntedGuild) 13773097 else 36941
+                  //val newGuild = if (guildName == "") "None" else guildName
+                  val newGuildLess = if (guildName == "") true else false
+                  val oldGuildLess = if (guildNameFromActivityData == "") true else false
+                  val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
+                  val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
 
-                  // Left guild
-                  if (newGuildLess){
-                    // send message to activity channel
-                    if (activityTextChannel != null){
-                      val activityEmbed = new EmbedBuilder()
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
-                      //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                      activityEmbed.setColor(colorType)
-                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                  if (wasInHuntedGuild || wasInAlliedGuild){
+                    val guildType = if (wasInHuntedGuild) "hunted" else "allied"
+                    val colorType = if (wasInHuntedGuild) 13773097 else 36941
+
+                    // Left guild
+                    if (newGuildLess){
+                      // send message to activity channel
+                      if (activityTextChannel != null){
+                        val activityEmbed = new EmbedBuilder()
+                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
+                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+                        activityEmbed.setColor(colorType)
+                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                      }
                     }
-                  }
-                  // joined guild
-                  else {
-                    // send message to activity channel
-                    if (activityTextChannel != null){
-                      val activityEmbed = new EmbedBuilder()
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
-                      //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                      activityEmbed.setColor(colorType)
-                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                    // joined guild
+                    else {
+                      // send message to activity channel
+                      if (activityTextChannel != null){
+                        val activityEmbed = new EmbedBuilder()
+                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
+                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+                        activityEmbed.setColor(colorType)
+                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                      }
                     }
-                  }
 
-                  // if he was in hunted guild add to hunted players list
-                  if (wasInHuntedGuild){
-                    val adminTextChannel = guild.getTextChannelById(adminChannel)
-                    if (adminTextChannel != null){
-                      val playerString = charName.toLowerCase()
+                    // if he was in hunted guild add to hunted players list
+                    if (wasInHuntedGuild){
+                      val adminTextChannel = guild.getTextChannelById(adminChannel)
+                      if (adminTextChannel != null){
+                        val playerString = charName.toLowerCase()
 
-                      // add them to cached huntedPlayersData list
-                      if (!(huntedPlayerCheck)){
-                        huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                        // add them to cached huntedPlayersData list
+                        if (!(huntedPlayerCheck)){
+                          huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
 
-                        // add them to the database
-                        BotApp.addHuntedToDatabase(guild, "player", playerString, "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
+                          // add them to the database
+                          BotApp.addHuntedToDatabase(guild, "player", playerString, "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
 
-                        // send embed to admin channel
-                        val commandUser = s"<@${BotApp.botUser}>"
-                        val adminEmbed = new EmbedBuilder()
-                        adminEmbed.setTitle(":robot: enemy automatically detected:")
-                        adminEmbed.setDescription(s"$commandUser added the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
-                        adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
-                        adminEmbed.setColor(14397256) // orange for bot auto command
-                        adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                          // send embed to admin channel
+                          val commandUser = s"<@${BotApp.botUser}>"
+                          val adminEmbed = new EmbedBuilder()
+                          adminEmbed.setTitle(":robot: enemy automatically detected:")
+                          adminEmbed.setDescription(s"$commandUser added the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
+                          adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                          adminEmbed.setColor(14397256) // orange for bot auto command
+                          adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                        }
                       }
                     }
                   }
+                  val updatedActivityData = matchingActivityOption.map { activity =>
+                    val updatedActivity = activity.copy(guild = guildName)
+                    activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
+                  }.getOrElse(activityData.getOrElse(guildId, List()))
+
+                  // Update in cache and db
+                  activityData = activityData + (guildId -> updatedActivityData)
+                  BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                 }
               }
             }
