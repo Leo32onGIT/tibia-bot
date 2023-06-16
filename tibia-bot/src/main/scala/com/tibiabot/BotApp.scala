@@ -2105,7 +2105,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_SEND)
           .complete()
         adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-        val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
+        val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
         // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
@@ -2125,7 +2125,7 @@ object BotApp extends App with StrictLogging {
               .grant(Permission.MESSAGE_SEND)
               .complete()
             adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            val adminChannel = guild.createTextChannel("bot-activity", adminCategory).complete()
+            val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -2133,7 +2133,7 @@ object BotApp extends App with StrictLogging {
             discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId)
           } else {
             // admin category still exists
-            val adminChannel = guild.createTextChannel("bot-activity", adminCategoryCheck).complete()
+            val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -2235,7 +2235,7 @@ object BotApp extends App with StrictLogging {
         val activityTextChannel: TextChannel = guild.getTextChannelById(activityId)
         if (activityTextChannel != null){
           val activityEmbed = new EmbedBuilder()
-          activityEmbed.setDescription(s":warning: This channel is a *Work in Progress* and thus may double post or show false positives.\nIt will show events when a players **joins** or **leaves** a tracked guild.")
+          activityEmbed.setDescription(s":warning: This channel is a *Work in Progress*.\nIt may double post or show false positives.\n\nIt will show events when a players **joins** or **leaves** a tracked guild.")
           activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
           activityEmbed.setColor(3092790)
           activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
@@ -2865,7 +2865,7 @@ object BotApp extends App with StrictLogging {
         adminEmbed.setColor(3092790)
         adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
       } else {
-        embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `bot-activity` channel, so a message cannot be sent."
+        embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
       }
       embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
     }
