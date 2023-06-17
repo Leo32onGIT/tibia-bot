@@ -223,7 +223,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                       }
                       // remove from hunted list if in allied guild
-                      if (alliedGuildCheck){
+                      if (allyGuildCheck){
                         huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
 
                         // add them to the database
@@ -244,7 +244,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     }
 
                     // if he was in hunted guild add to hunted players list
-                    if (wasInHuntedGuild && !alliedGuildCheck){
+                    if (wasInHuntedGuild && !allyGuildCheck){
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null){
 
@@ -313,8 +313,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 }
               }
 
-              val guildType = if (huntedGuildCheck) "hunted" else if (alliedGuildCheck) "allied" else "neutral"
-              val colorType = if (huntedGuildCheck) 13773097 else if (alliedGuildCheck) 36941 else 14397256
+              val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
+              val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
               if (activityTextChannel != null){
                 val activityEmbed = new EmbedBuilder()
                 activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
