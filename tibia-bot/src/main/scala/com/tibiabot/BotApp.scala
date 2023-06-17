@@ -1370,7 +1370,17 @@ object BotApp extends App with StrictLogging {
 
   def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"INSERT INTO tracked_activity(name, former_names, guild_name, updated) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
+    val statement = conn.prepareStatement(
+      s"""
+         |INSERT INTO tracked_activity(name, former_names, guild_name, updated)
+         |VALUES (?,?,?,?)
+         |ON CONFLICT (name)
+         |DO UPDATE SET
+         |  former_names = excluded.former_names,
+         |  guild_name = excluded.guild_name,
+         |  updated = excluded.updated;
+         |""".stripMargin
+    )
     statement.setString(1, name)
     statement.setString(2, formerNames.mkString(","))
     statement.setString(3, guildName)
