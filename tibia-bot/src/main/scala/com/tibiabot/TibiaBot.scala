@@ -290,7 +290,29 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               // add to db
               BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
 
-              //if (huntedGuildCheck || allyGuildCheck){
+              if (huntedGuildCheck){
+                if (huntedPlayerCheck){
+                  // remove from hunted 'Player' cache
+                  huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
+
+                  // remove them from hunted 'player' in the db because they are now in hunted 'guild' and will be tracked that way
+                  BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+
+                  // send message to admin channel
+                  val adminTextChannel = guild.getTextChannelById(adminChannel)
+                  if (adminTextChannel != null){
+                    // send embed to admin channel
+                    val commandUser = s"<@${BotApp.botUser}>"
+                    val adminEmbed = new EmbedBuilder()
+                    adminEmbed.setTitle(":robot: hunted list cleanup:")
+                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                    adminEmbed.setColor(14397256) // orange for bot auto command
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  }
+                }
+              }
+
               val guildType = if (huntedGuildCheck) "hunted" else if (alliedGuildCheck) "allied" else "neutral"
               val colorType = if (huntedGuildCheck) 13773097 else if (alliedGuildCheck) 36941 else 14397256
               if (activityTextChannel != null){
