@@ -269,7 +269,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   }
 
                   val updatedActivityData = matchingActivityOption.map { activity =>
-                    val updatedActivity = activity.copy(guild = guildName)
+                    val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
                     activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
                   }.getOrElse(activityData.getOrElse(guildId, List()))
 
