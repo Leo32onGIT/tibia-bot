@@ -186,7 +186,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
               val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
-              if (updatesTimeFromActivityData.plusMinutes(10).isBefore(ZonedDateTime.now())){
+              if (updatesTimeFromActivityData.plusMinutes(6).isBefore(ZonedDateTime.now())){
 
                 // Guild has changed
                 if (guildName != guildNameFromActivityData){
