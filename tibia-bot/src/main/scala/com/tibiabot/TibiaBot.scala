@@ -235,7 +235,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: enemy joined an allied guild:")
-                          adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
+                          adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
                           adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -259,7 +259,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: enemy automatically detected:")
-                          adminEmbed.setDescription(s"$commandUser added the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
+                          adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
                           adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -305,7 +305,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     val commandUser = s"<@${BotApp.botUser}>"
                     val adminEmbed = new EmbedBuilder()
                     adminEmbed.setTitle(":robot: hunted list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation $charLevel — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                     adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                     adminEmbed.setColor(14397256) // orange for bot auto command
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -736,7 +736,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: enemy automatically detected:")
-                          adminEmbed.setDescription(s"$commandUser added the player\n$vocation $level — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
+                          adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
                           adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
                           adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
