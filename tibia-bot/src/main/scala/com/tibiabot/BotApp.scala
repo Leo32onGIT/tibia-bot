@@ -326,7 +326,7 @@ object BotApp extends App with StrictLogging {
         cleanHuntedList(g)
       }
       catch {
-        case _: Throwable => logger.ingo(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
+        case _: Throwable => logger.info(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
       }
     }
     removeDeathsCache(ZonedDateTime.now())
