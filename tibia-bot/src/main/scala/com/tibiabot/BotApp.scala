@@ -322,7 +322,12 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
     updateDashboard()
     guilds.foreach{g =>
-      cleanHuntedList(g)
+      try {
+        cleanHuntedList(g)
+      }
+      catch {
+        case _: Throwable => logger.ingo(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
+      }
     }
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
