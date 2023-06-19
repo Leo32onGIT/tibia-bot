@@ -460,7 +460,7 @@ object BotApp extends App with StrictLogging {
       val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
         case Success(output) =>
-          output.foreach { case (charResponse, name, reason, reasonText) =>
+          output.foreach { case (charResponse, name, reason, _) =>
             if (charResponse.characters.character.name != ""){
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
@@ -470,7 +470,7 @@ object BotApp extends App with StrictLogging {
               val charEmoji = vocEmoji(charResponse)
 
               val huntedGuildCheck = huntedGuildsData.getOrElse(guild.getId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
-              if (huntedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+              if (huntedGuildCheck && reason == "false") {
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
@@ -486,7 +486,7 @@ object BotApp extends App with StrictLogging {
               }
 
               val alliedGuildCheck = alliedGuildsData.getOrElse(guild.getId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
-              if (alliedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+              if (alliedGuildCheck && reason == "false") { // only remove players that were added by the bot, use the reason to check this
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
