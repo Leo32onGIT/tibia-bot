@@ -1423,17 +1423,29 @@ object BotApp extends App with StrictLogging {
       conn.close()
     }
   }
-  
+
   def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
     val conn = getConnection(guild)
     val table = if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players"
     val statement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, newName)
     statement.setString(2, oldName)
-    statement.executeUpdate()
 
-    statement.close()
-    conn.close()
+    try {
+      statement.executeUpdate()
+    } catch {
+      case e: PSQLException if e.getMessage.contains("duplicate key value") =>
+        val deleteStatement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
+        deleteStatement.setString(1, newName)
+        deleteStatement.executeUpdate()
+        deleteStatement.close()
+
+        // Retry the update
+        statement.executeUpdate()
+    } finally {
+      statement.close()
+      conn.close()
+    }
   }
 
   private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit = {
