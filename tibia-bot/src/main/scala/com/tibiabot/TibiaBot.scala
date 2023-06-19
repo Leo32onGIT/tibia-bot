@@ -196,19 +196,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val oldGuildLess = if (guildNameFromActivityData == "") true else false
                   val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
                   val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
-                  val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
-                  val colorType = if (wasInHuntedGuild) 36941 else 14397256 // green if hunted leaves, yellow for everything else
-
-                  // Update in cache and db
-                  val updatedActivityData = matchingActivityOption.map { activity =>
-                    val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
-                    activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
-                  }.getOrElse(activityData.getOrElse(guildId, List()))
-
-                  activityData = activityData + (guildId -> updatedActivityData)
-                  BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
 
                   if (wasInHuntedGuild || wasInAlliedGuild){
+                    val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
+                    val colorType = if (wasInHuntedGuild) 36941 else 14397256 // green if hunted leaves, yellow for everything else
 
                     // Left guild
                     if (newGuildLess){
@@ -275,33 +266,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         }
                       }
                     }
-                    // remove allied from activityData tracking as they have left the guild
-                    if (wasInAlliedGuild){
-                      activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
-                      BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
-                    }
-                  } else {
-                    // not in hunted or allied guild but 'hunted' and moving around in neutral guilds
-                    if (oldGuildLess){
-                      // send message to activity channel
-                      if (activityTextChannel != null){
-                        val activityEmbed = new EmbedBuilder()
-                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has joined the guild **[${guildName}](${guildUrl(guildName)})**.")
-                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                        activityEmbed.setColor(colorType)
-                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-                      }
-                    } else {
-                      // send message to activity channel
-                      if (activityTextChannel != null){
-                        val activityEmbed = new EmbedBuilder()
-                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
-                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                        activityEmbed.setColor(colorType)
-                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-                      }
-                    }
                   }
+
+                  val updatedActivityData = matchingActivityOption.map { activity =>
+                    val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
+                    activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
+                  }.getOrElse(activityData.getOrElse(guildId, List()))
+
+                  // Update in cache and db
+                  activityData = activityData + (guildId -> updatedActivityData)
+                  BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                 }
               }
             }
@@ -315,9 +289,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
               // add to db
               BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
-
-              val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
-              val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
 
               if (huntedGuildCheck){
                 if (huntedPlayerCheck){
@@ -339,81 +310,19 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     adminEmbed.setColor(14397256) // orange for bot auto command
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                   }
-                } else if (allyPlayerCheck){
-                  // remove from hunted 'Player' cache
-                  alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
-
-                  // remove them from allied 'player' in the db because they are now in hunted 'guild' and will be tracked that way
-                  BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
-
-                  // send message to admin channel
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null){
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: allied list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
-                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                  }
-                }
-                if (activityTextChannel != null){
-                  val activityEmbed = new EmbedBuilder()
-                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                  //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                  activityEmbed.setColor(colorType)
-                  activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-                }
-              } else if (allyGuildCheck){
-                if (huntedPlayerCheck){
-                  // remove from hunted 'Player' cache
-                  huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
-
-                  // remove them from hunted 'player' in the db because they are now in hunted 'guild' and will be tracked that way
-                  BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-
-                  // send message to admin channel
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null){
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: hunted list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild)*.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
-                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                  }
-                } else if (allyPlayerCheck){
-                  // remove from hunted 'Player' cache
-                  alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
-
-                  // remove them from allied 'player' in the db because they are now in hunted 'guild' and will be tracked that way
-                  BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
-
-                  // send message to admin channel
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null){
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: allied list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
-                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                  }
-                }
-                if (activityTextChannel != null){
-                  val activityEmbed = new EmbedBuilder()
-                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                  //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                  activityEmbed.setColor(colorType)
-                  activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                 }
               }
+
+              val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
+              val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
+              if (activityTextChannel != null){
+                val activityEmbed = new EmbedBuilder()
+                activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
+                //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+                activityEmbed.setColor(colorType)
+                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+              }
+              //}
             }
           }
           /**
