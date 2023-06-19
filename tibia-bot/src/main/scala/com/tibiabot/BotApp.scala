@@ -1447,7 +1447,7 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  private def removePlayerActivityfromDatabase(guild: Guild, playerName: String): Unit = {
+  def removePlayerActivityfromDatabase(guild: Guild, playerName: String): Unit = {
     val conn = getConnection(guild)
     val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, playerName)
@@ -1457,7 +1457,7 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  private def removeAllyFromDatabase(guild: Guild, option: String, name: String): Unit = {
+  def removeAllyFromDatabase(guild: Guild, option: String, name: String): Unit = {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
     val statement = conn.prepareStatement(s"DELETE FROM $table WHERE name = ?;")
