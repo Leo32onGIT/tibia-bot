@@ -276,7 +276,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       }
                     }
                     // remove allied from activityData tracking as they have left the guild
-                    if (wasInAlliedGuild){
+                    if (wasInAlliedGuild && !huntedGuildCheck){
                       activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
                       BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
                     }
