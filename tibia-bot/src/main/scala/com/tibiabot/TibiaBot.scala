@@ -199,8 +199,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
                   if (wasInHuntedGuild || wasInAlliedGuild){
                     val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
-                    val colorType = if (wasInHuntedGuild) 36941 else 14397256 // green if hunted leaves, yellow for everything else
-
                     // Left guild
                     if (newGuildLess){
                       // send message to activity channel
@@ -208,12 +206,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         val activityEmbed = new EmbedBuilder()
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                         //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                        activityEmbed.setColor(colorType)
+                        activityEmbed.setColor(14397256)
                         activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                       }
                     }
                     // joined guild
                     else {
+                      val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
                       // send message to activity channel
                       if (activityTextChannel != null){
                         val activityEmbed = new EmbedBuilder()
