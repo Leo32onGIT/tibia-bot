@@ -1423,10 +1423,11 @@ object BotApp extends App with StrictLogging {
       conn.close()
     }
   }
+  
   def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
     val conn = getConnection(guild)
-    val table = (if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players").toString
-    val statement = conn.prepareStatement(s"UPDATE $table SET LOWER(name) = LOWER(?) WHERE LOWER(name) = LOWER(?);")
+    val table = if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players"
+    val statement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, newName)
     statement.setString(2, oldName)
     statement.executeUpdate()
