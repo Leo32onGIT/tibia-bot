@@ -16,6 +16,7 @@ import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, Sl
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
+import org.postgresql.util.PSQLException
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -1399,18 +1400,29 @@ object BotApp extends App with StrictLogging {
   def updateActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit = {
     val conn = getConnection(guild)
 
-    val statement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE name = ?;")
+    val statement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, newName)
     statement.setString(2, formerNames.mkString(","))
     statement.setString(3, guildName)
     statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
     statement.setString(5, name)
-    statement.executeUpdate()
 
-    statement.close()
-    conn.close()
+    try {
+      statement.executeUpdate()
+    } catch {
+      case e: PSQLException if e.getMessage.contains("duplicate key value") =>
+        val deleteStatement = conn.prepareStatement("DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
+        deleteStatement.setString(1, newName)
+        deleteStatement.executeUpdate()
+        deleteStatement.close()
+
+        // Retry the update
+        statement.executeUpdate()
+    } finally {
+      statement.close()
+      conn.close()
+    }
   }
-
   def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
     val conn = getConnection(guild)
     val table = (if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players").toString
