@@ -150,8 +150,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
           }
 
-
-          // v1.3
+          // Activity channel
           if (!blocker) {
             val guild = BotApp.jda.getGuildById(discords.id)
             val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
@@ -172,7 +171,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             // Check charName
             val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
 
-            // Guild check and existing hunted/allied check
+            // Did they just join one the tracked guilds?
             var joinGuild = false
             if (!currentNameCheck && !nameChangeCheck){
               if (allyGuildCheck || huntedGuildCheck){
@@ -180,54 +179,45 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
             }
 
-            // Character exists in tracking_activity
-            if (currentNameCheck || nameChangeCheck) {
+            // Player is already tracked
+            if (currentNameCheck) {
               val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
               val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
               val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
               if (updatesTimeFromActivityData.plusMinutes(6).isBefore(ZonedDateTime.now())){
-
                 // Guild has changed
                 if (guildName != guildNameFromActivityData){
-
                   //val newGuild = if (guildName == "") "None" else guildName
                   val newGuildLess = if (guildName == "") true else false
                   val oldGuildLess = if (guildNameFromActivityData == "") true else false
                   val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
                   val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
-
+                  // Left a tracked guild
                   if (wasInHuntedGuild || wasInAlliedGuild){
                     val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
-                    // Left guild
+                    // No guild now
                     if (newGuildLess){
                       // send message to activity channel
                       if (activityTextChannel != null){
                         val activityEmbed = new EmbedBuilder()
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
-                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                         activityEmbed.setColor(14397256)
                         activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                       }
-                    }
-                    // joined guild
-                    else {
-                      val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
+                    } else { // Left a tracked guild, but joined a new one in the same turn
+                      val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
                       // send message to activity channel
                       if (activityTextChannel != null){
                         val activityEmbed = new EmbedBuilder()
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
-                        //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                         activityEmbed.setColor(colorType)
                         activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                       }
                       // remove from hunted list if in allied guild
                       if (allyGuildCheck){
                         huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
-
-                        // add them to the database
                         BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-
                         val adminTextChannel = guild.getTextChannelById(adminChannel)
                         if (adminTextChannel != null){
                           // send embed to admin channel
@@ -246,14 +236,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     if (wasInHuntedGuild && !allyGuildCheck){
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null){
-
                         // add them to cached huntedPlayersData list
                         if (!(huntedPlayerCheck)){
                           huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
-
-                          // add them to the database
                           BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
-
                           // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
@@ -281,26 +267,18 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                 }
               }
-            }
-            // Character doesn't exist in tracking_activity but should be
-            else if (joinGuild) {
-
-              // add to cache
+            } else if (joinGuild) { // Character doesn't exist in tracking_activity but should be
+              // add to cache and db
               val newActivity = BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now())
               val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
               activityData = activityData + (guildId -> updatedActivityData)
-
-              // add to db
               BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
-
+              // joined a hunted guild
               if (huntedGuildCheck){
-                if (huntedPlayerCheck){
-                  // remove from hunted 'Player' cache
+                if (huntedPlayerCheck){ // was he originally in hunted 'player' list?
+                  // remove from hunted 'Player' cache and db
                   huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-
-                  // remove them from hunted 'player' in the db because they are now in hunted 'guild' and will be tracked that way
                   BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-
                   // send message to admin channel
                   val adminTextChannel = guild.getTextChannelById(adminChannel)
                   if (adminTextChannel != null){
@@ -314,14 +292,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                   }
                 }
-              } else if (allyGuildCheck){
+              } else if (allyGuildCheck){ // joined an allied guild
                 if (allyPlayerCheck){
-                  // remove from allied 'Player' cache
+                  // remove from allied 'Player' cache and db
                   alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-
-                  // remove them from allied 'player' in the db because they are now in hunted 'guild' and will be tracked that way
                   BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
-
                   // send message to admin channel
                   val adminTextChannel = guild.getTextChannelById(adminChannel)
                   if (adminTextChannel != null){
@@ -336,70 +311,70 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   }
                 }
               }
-
               val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
               val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
               if (guildType != "neutral"){ // ignore neutral guild changes, only show hunted/allied rejoins
                 if (activityTextChannel != null){
                   val activityEmbed = new EmbedBuilder()
                   activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                  //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
                   activityEmbed.setColor(colorType)
                   activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                 }
               }
             }
-          }
-          /**
-          // Player
-          else if (allyPlayerCheck || huntedPlayerCheck) {
-            val guildType = if (huntedPlayerCheck) "hunted" else "allied"
-            val activityEmbed = new EmbedBuilder()
-            activityEmbed.setDescription(s"**${charName}** has joined the guild **${guildName}**.")
-            //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-            activityEmbed.setColor(3092790)
-            activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-          }
-
-          // Name has changed
-          else if (currentNameCheck == false && nameChangeCheck == false && huntedGuildCheck == true) {
-            // new enemy has joined the guild doesn't exist in cache
-            activityData = activityData + (guildId -> (BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now()) :: activityData.getOrElse(guildId, List())))
-            BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
-            if (activityTextChannel != null){
-              // send message to activity channel
-              val activityEmbed = new EmbedBuilder()
-              activityEmbed.setDescription(s"**${charName}** joined the hunted guild **${guildName}**.")
-              activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-              activityEmbed.setColor(3092790)
-              activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-            }
-          }
-          // check name change
-          if (nameChangeCheck == true){
-            // chars name has changed
-            var oldName = ""
-            val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
-              val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
-                activity.copy(name = charName, formerNames = formerNamesList)
-              } else {
-                activity
+            // Player has changed their name
+            if (nameChangeCheck){
+              var oldName = ""
+              val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
+              // update activity cache
+              val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
+                val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
+                  activity.copy(name = charName, formerNames = formerNamesList)
+                } else {
+                  activity
+                }
+                oldName = updatedActivity.name
+                updatedActivity
               }
-              oldName = updatedActivity.name
-              updatedActivity
-            }
-            activityData = activityData + (guildId -> updatedActivityData)
-            BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-            if (activityTextChannel != null){
-              // send message to activity channel
-              val activityEmbed = new EmbedBuilder()
-              activityEmbed.setDescription(s"**${oldName}** changed his name to **${charName}**.")
-              activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-              activityEmbed.setColor(3092790)
-              activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+              activityData = activityData + (guildId -> updatedActivityData)
+              BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+              // if player is in hunted or allied 'players' list, update information there too
+              if (huntedPlayerCheck){
+                // change name in hunted players cache and db
+                if (oldName != ""){
+                  BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
+                  val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
+                    if (player.name.toLowerCase == oldName.toLowerCase) {
+                      player.copy(name = charName.toLowerCase)
+                    } else {
+                      player
+                    }
+                  }
+                  huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
+                }
+              } else if (allyPlayerCheck){
+                // change name in allied players cache and db
+                if (oldName != ""){
+                  BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName.toLowerCase(), charName.toLowerCase())
+                  val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
+                    if (player.name.toLowerCase == oldName.toLowerCase) {
+                      player.copy(name = charName.toLowerCase)
+                    } else {
+                      player
+                    }
+                  }
+                  alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
+                }
+              }
+              if (activityTextChannel != null){
+                // send message to activity channel
+                val activityEmbed = new EmbedBuilder()
+                activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                activityEmbed.setColor(playerType)
+                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+              }
             }
           }
-          **/
         }
       }
       // detecting new levels

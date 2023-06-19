@@ -470,7 +470,7 @@ object BotApp extends App with StrictLogging {
               val charEmoji = vocEmoji(charResponse)
 
               val huntedGuildCheck = huntedGuildsData.getOrElse(guild.getId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
-              if (huntedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+              if (huntedGuildCheck && reason == "false") { // only remove players that were added by the bot, use the reason to check this
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
@@ -486,7 +486,7 @@ object BotApp extends App with StrictLogging {
               }
 
               val alliedGuildCheck = alliedGuildsData.getOrElse(guild.getId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
-              if (alliedGuildCheck && reason == "false" && reasonText == "killed an allied player") { // only remove players that were added by the bot, use the reason to check this
+              if (alliedGuildCheck && reason == "false") { // only remove players that were added by the bot, use the reason to check this
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
@@ -1405,6 +1405,18 @@ object BotApp extends App with StrictLogging {
     statement.setString(3, guildName)
     statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
     statement.setString(5, name)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
+    val conn = getConnection(guild)
+    val table = (if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players").toString
+    val statement = conn.prepareStatement(s"UPDATE $table SET LOWER(name) = LOWER(?) WHERE LOWER(name) = LOWER(?);")
+    statement.setString(1, newName)
+    statement.setString(2, oldName)
     statement.executeUpdate()
 
     statement.close()
