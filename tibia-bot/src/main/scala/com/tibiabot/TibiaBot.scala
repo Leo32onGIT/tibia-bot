@@ -173,10 +173,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
 
             // Guild check and existing hunted/allied check
-            var needsCheck = false
+            var joinGuild = false
             if (!currentNameCheck && !nameChangeCheck){
-              if (allyGuildCheck || huntedGuildCheck || allyPlayerCheck || huntedPlayerCheck){
-                needsCheck = true
+              if (allyGuildCheck || huntedGuildCheck){
+                joinGuild = true
               }
             }
 
@@ -265,6 +265,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                         }
                       }
+                    } else if (wasInAlliedGuild && !huntedGuildCheck){
+                      // remove from activity
+                      activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
+                      BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
                     }
                   }
 
@@ -280,7 +284,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
             }
             // Character doesn't exist in tracking_activity but should be
-            else if (needsCheck) {
+            else if (joinGuild) {
 
               // add to cache
               val newActivity = BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now())
@@ -293,7 +297,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               if (huntedGuildCheck){
                 if (huntedPlayerCheck){
                   // remove from hunted 'Player' cache
-                  huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
+                  huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
 
                   // remove them from hunted 'player' in the db because they are now in hunted 'guild' and will be tracked that way
                   BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
@@ -306,6 +310,27 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     val adminEmbed = new EmbedBuilder()
                     adminEmbed.setTitle(":robot: hunted list cleanup:")
                     adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                    adminEmbed.setColor(14397256) // orange for bot auto command
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  }
+                }
+              } else if (allyGuildCheck){
+                if (allyPlayerCheck){
+                  // remove from allied 'Player' cache
+                  alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+
+                  // remove them from allied 'player' in the db because they are now in hunted 'guild' and will be tracked that way
+                  BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
+
+                  // send message to admin channel
+                  val adminTextChannel = guild.getTextChannelById(adminChannel)
+                  if (adminTextChannel != null){
+                    // send embed to admin channel
+                    val commandUser = s"<@${BotApp.botUser}>"
+                    val adminEmbed = new EmbedBuilder()
+                    adminEmbed.setTitle(":robot: allied list cleanup:")
+                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                     adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                     adminEmbed.setColor(14397256) // orange for bot auto command
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
