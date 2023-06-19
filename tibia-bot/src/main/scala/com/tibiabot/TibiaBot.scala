@@ -315,14 +315,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
               val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
               val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
-              if (activityTextChannel != null){
-                val activityEmbed = new EmbedBuilder()
-                activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-                activityEmbed.setColor(colorType)
-                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+              if (guildType != "neutral"){ // ignore neutral guild changes, only show hunted/allied rejoins
+                if (activityTextChannel != null){
+                  val activityEmbed = new EmbedBuilder()
+                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
+                  //activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+                  activityEmbed.setColor(colorType)
+                  activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                }
               }
-              //}
             }
           }
           /**
