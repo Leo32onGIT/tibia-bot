@@ -323,7 +323,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
             }
 
-            /**
             // Player has changed their name
             if (nameChangeCheck){
               var oldName = ""
@@ -331,19 +330,20 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               // update activity cache
               val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
                 val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
+                  oldName = activity.name
                   activity.copy(name = charName, formerNames = formerNamesList)
                 } else {
                   activity
                 }
-                oldName = updatedActivity.name
                 updatedActivity
               }
               activityData = activityData + (guildId -> updatedActivityData)
               BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-              // if player is in hunted or allied 'players' list, update information there too
-              if (huntedPlayerCheck){
+
+              if (oldName != ""){
+                // if player is in hunted or allied 'players' list, update information there too
+                if (huntedPlayerCheck){
                 // change name in hunted players cache and db
-                if (oldName != ""){
                   BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
                   val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
                     if (player.name.toLowerCase == oldName.toLowerCase) {
@@ -353,10 +353,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     }
                   }
                   huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
-                }
-              } else if (allyPlayerCheck){
-                // change name in allied players cache and db
-                if (oldName != ""){
+                } else if (allyPlayerCheck){
+                  // change name in allied players cache and db
                   BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName.toLowerCase(), charName.toLowerCase())
                   val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
                     if (player.name.toLowerCase == oldName.toLowerCase) {
@@ -367,16 +365,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   }
                   alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
                 }
-              }
-              if (activityTextChannel != null){
-                // send message to activity channel
-                val activityEmbed = new EmbedBuilder()
-                activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
-                activityEmbed.setColor(playerType)
-                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                if (activityTextChannel != null){
+                  // send message to activity channel
+                  val activityEmbed = new EmbedBuilder()
+                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                  activityEmbed.setColor(playerType)
+                  activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                }
               }
             }
-            **/
+            // end name change check
           }
         }
       }

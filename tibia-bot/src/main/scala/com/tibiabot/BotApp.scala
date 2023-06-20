@@ -1399,7 +1399,6 @@ object BotApp extends App with StrictLogging {
 
   def updateActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit = {
     val conn = getConnection(guild)
-
     val statement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, newName)
     statement.setString(2, formerNames.mkString(","))
@@ -1417,7 +1416,14 @@ object BotApp extends App with StrictLogging {
         deleteStatement.close()
 
         // Retry the update
-        statement.executeUpdate()
+        val retryStatement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
+        retryStatement.setString(1, newName)
+        retryStatement.setString(2, formerNames.mkString(","))
+        retryStatement.setString(3, guildName)
+        retryStatement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
+        retryStatement.setString(5, name)
+        retryStatement.executeUpdate()
+        retryStatement.close()
     } finally {
       statement.close()
       conn.close()
@@ -1427,6 +1433,7 @@ object BotApp extends App with StrictLogging {
   def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
     val conn = getConnection(guild)
     val table = if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players"
+
     val statement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, newName)
     statement.setString(2, oldName)
@@ -1435,13 +1442,18 @@ object BotApp extends App with StrictLogging {
       statement.executeUpdate()
     } catch {
       case e: PSQLException if e.getMessage.contains("duplicate key value") =>
+        // Handle duplicate key error
         val deleteStatement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
         deleteStatement.setString(1, newName)
         deleteStatement.executeUpdate()
         deleteStatement.close()
 
-        // Retry the update
-        statement.executeUpdate()
+        // Retry the update within the same transaction
+        val retryStatement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
+        retryStatement.setString(1, newName)
+        retryStatement.setString(2, oldName)
+        retryStatement.executeUpdate()
+        retryStatement.close()
     } finally {
       statement.close()
       conn.close()
