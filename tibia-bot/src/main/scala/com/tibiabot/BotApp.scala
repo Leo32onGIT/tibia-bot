@@ -328,7 +328,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None)
 
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     guilds.foreach{g =>
       try {
         cleanHuntedList(g)
@@ -2952,12 +2952,12 @@ object BotApp extends App with StrictLogging {
         if (adminChannel != null){
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\nYou may need to re-arrange their position within your discord server.")
+          adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
           adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Hammer.gif")
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         }
-        embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to re-arrange their position within your discord server.")
+        embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       } else {
         embedBuild.setDescription(s":x: No action was taken as all channels for **$worldFormal** still exist.")
       }
