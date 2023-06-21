@@ -326,51 +326,57 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             // Player has changed their name
             if (nameChangeCheck){
               var oldName = ""
+              var timeDelay: Option[ZonedDateTime] = None
               val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
               // update activity cache
               val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
                 val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
                   oldName = activity.name
-                  activity.copy(name = charName, formerNames = formerNamesList)
+                  timeDelay = Some(activity.updatedTime)
+                  activity.copy(name = charName, formerNames = formerNamesList, updatedTime = ZonedDateTime.now())
                 } else {
                   activity
                 }
                 updatedActivity
               }
-              activityData = activityData + (guildId -> updatedActivityData)
-              BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+              if (oldName != "" && timeDelay.isDefined){
+                val delayEndTime = timeDelay.map(_.plusMinutes(6))
+                if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))){
+                  // update name in cache and db
+                  activityData = activityData + (guildId -> updatedActivityData)
+                  BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
 
-              if (oldName != ""){
-                // if player is in hunted or allied 'players' list, update information there too
-                if (huntedPlayerCheck){
-                // change name in hunted players cache and db
-                  BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
-                  val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                    if (player.name.toLowerCase == oldName.toLowerCase) {
-                      player.copy(name = charName.toLowerCase)
-                    } else {
-                      player
+                  // if player is in hunted or allied 'players' list, update information there too
+                  if (huntedPlayerCheck){
+                  // change name in hunted players cache and db
+                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
+                    val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
+                      if (player.name.toLowerCase == oldName.toLowerCase) {
+                        player.copy(name = charName.toLowerCase)
+                      } else {
+                        player
+                      }
                     }
-                  }
-                  huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
-                } else if (allyPlayerCheck){
-                  // change name in allied players cache and db
-                  BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName.toLowerCase(), charName.toLowerCase())
-                  val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                    if (player.name.toLowerCase == oldName.toLowerCase) {
-                      player.copy(name = charName.toLowerCase)
-                    } else {
-                      player
+                    huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
+                  } else if (allyPlayerCheck){
+                    // change name in allied players cache and db
+                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName.toLowerCase(), charName.toLowerCase())
+                    val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
+                      if (player.name.toLowerCase == oldName.toLowerCase) {
+                        player.copy(name = charName.toLowerCase)
+                      } else {
+                        player
+                      }
                     }
+                    alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
                   }
-                  alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
-                }
-                if (activityTextChannel != null){
-                  // send message to activity channel
-                  val activityEmbed = new EmbedBuilder()
-                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
-                  activityEmbed.setColor(playerType)
-                  activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                  if (activityTextChannel != null){
+                    // send message to activity channel
+                    val activityEmbed = new EmbedBuilder()
+                    activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                    activityEmbed.setColor(playerType)
+                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                  }
                 }
               }
             }

@@ -36,6 +36,8 @@ class BotListener extends ListenerAdapter {
         handleExiva(event)
       case "help" =>
         handleHelp(event)
+      case "repair" =>
+        handleRepair(event)
       case _ =>
     }
   }
@@ -61,8 +63,8 @@ class BotListener extends ListenerAdapter {
     var responseText = ":x: An issue occured trying to add/remove you from this role, please try again."
     if (roleType == "fullbless"){
       val world = title.replace(":crossed_swords:", "").trim()
-      val roles = guild.getRolesByName(s"$world Fullbless", true)
-      val role = if (!roles.isEmpty) roles.get(0) else null
+      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+      val role = guild.getRoleById(worldConfigData("fullbless_role"))
       if (role != null){
         if (button == "add"){
           // get role add user to it
@@ -75,12 +77,12 @@ class BotListener extends ListenerAdapter {
         }
       } else {
         // role doesn't exist
-        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please contact a discord administrator."
+        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
       }
     } else if (roleType == "nemesis") {
       val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
-      val roles = guild.getRolesByName(s"$world Nemesis Boss", true)
-      val role = if (!roles.isEmpty) roles.get(0) else null
+      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+      val role = guild.getRoleById(worldConfigData("nemesis_role"))
       if (role != null){
         if (button == "add"){
           // get role add user to it
@@ -93,7 +95,7 @@ class BotListener extends ListenerAdapter {
         }
       } else {
         // role doesn't exist
-        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please contact a discord administrator."
+        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
       }
     }
     val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
@@ -369,4 +371,14 @@ class BotListener extends ListenerAdapter {
     embedBuilder.setColor(14397256) // orange for bot auto command
     event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
   }
+
+  private def handleRepair(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.getOrElse("world", "")
+
+    val embed = BotApp.repairChannel(event, worldOption)
+    event.getHook.sendMessageEmbeds(embed).queue()
+  }
+
 }
