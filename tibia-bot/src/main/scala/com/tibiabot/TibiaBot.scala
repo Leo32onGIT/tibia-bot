@@ -125,8 +125,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (discordsData.contains(world)) {
         val discordsList = discordsData(world)
         discordsList.foreach { discords =>
-          val blocker = discords.activityBlocker
           val guildId = discords.id
+          val blocker = BotApp.activityCommandBlocker.getOrElse(guildId, false)
           val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
           val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
           val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())

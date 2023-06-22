@@ -56,7 +56,7 @@ object BotApp extends App with StrictLogging {
   )
 
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
-  case class Discords(id: String, adminChannel: String, activityBlocker: Boolean)
+  case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
   case class Activity(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
@@ -94,6 +94,7 @@ object BotApp extends App with StrictLogging {
   var huntedGuildsData: Map[String, List[Guilds]] = Map.empty
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
   var activityData: Map[String, List[Activity]] = Map.empty
+  var activityCommandBlocker: Map[String, Boolean] = Map.empty
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
@@ -331,7 +332,9 @@ object BotApp extends App with StrictLogging {
     updateDashboard()
     guilds.foreach{g =>
       try {
-        cleanHuntedList(g)
+        if (!activityCommandBlocker.getOrElse(g.getId, false)){
+          cleanHuntedList(g)
+        }
       }
       catch {
         case _: Throwable => logger.info(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
@@ -371,6 +374,9 @@ object BotApp extends App with StrictLogging {
       val activityInfo = activityConfig(guild.get, "tracked_activity")
       activityData += (guildId -> activityInfo)
 
+      // set default activityCommandBlocker state
+      activityCommandBlocker += (guildId -> false)
+
       val adminChannels = discordRetrieveConfig(guild.get)
       val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
@@ -378,8 +384,7 @@ object BotApp extends App with StrictLogging {
         if (w.name == world.get){
           val discords = Discords(
             id = guildId,
-            adminChannel = adminChannelId,
-            activityBlocker = false
+            adminChannel = adminChannelId
           )
           discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
           val botStream = if (botStreams.contains(world.get)) {
@@ -427,6 +432,9 @@ object BotApp extends App with StrictLogging {
           val activityInfo = activityConfig(g, "tracked_activity")
           activityData += (guildId -> activityInfo)
 
+          // set default activityCommandBlocker state
+          activityCommandBlocker += (guildId -> false)
+
           val adminChannels = discordRetrieveConfig(g)
           val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
@@ -434,8 +442,7 @@ object BotApp extends App with StrictLogging {
           worldsInfo.foreach{ w =>
             val discords = Discords(
               id = guildId,
-              adminChannel = adminChannelId,
-              activityBlocker = false
+              adminChannel = adminChannelId
             )
             discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
           }
@@ -913,17 +920,9 @@ object BotApp extends App with StrictLogging {
   def guildUrl(guild: String): String =
     s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guild.replaceAll(" ", "+")}"
 
-  def updateActivityBlocker(inputId: String, activityStatus: Boolean): Unit = {
-    discordsData = discordsData.view.mapValues(_.map {
-      case discord @ Discords(id, _, _) if id == inputId =>
-        discord.copy(activityBlocker = activityStatus)
-      case other => other
-    }).toMap
-  }
-
   def updateAdminChannel(inputId: String, channelId: String): Unit = {
     discordsData = discordsData.view.mapValues(_.map {
-      case discord @ Discords(id, _, _) if id == inputId =>
+      case discord @ Discords(id, _) if id == inputId =>
         discord.copy(adminChannel = channelId)
       case other => other
     }).toMap
