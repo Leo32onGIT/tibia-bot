@@ -3164,6 +3164,27 @@ object BotApp extends App with StrictLogging {
           .build()
         }
 
+        val fullblessRoleId = worldConfigData("fullbless_role")
+        val nemesisRoleId = worldConfigData("nemesis_role")
+
+        val fullblessRole = guild.getRoleById(nemesisRoleId)
+        val nemesisRole = guild.getRoleById(fullblessRoleId)
+
+        if (fullblessRole != null){
+          try {
+            fullblessRole.delete().queue()
+          } catch {
+            case _: Throwable => logger.info(s"Failed to delete Role ID: '${fullblessRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
+        }
+
+        if (nemesisRole != null){
+          try {
+            nemesisRole.delete().queue()
+          } catch {
+            case _: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
+        }
 
         // remove the guild from the world stream
         val getWorldStream = botStreams.get(world)
