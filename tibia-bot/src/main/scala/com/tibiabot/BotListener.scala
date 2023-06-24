@@ -202,29 +202,33 @@ class BotListener extends ListenerAdapter {
         if (toggleOption == "add"){
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
         } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeAlly(event, "player", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
         }
       case "guild" =>
         if (toggleOption == "add"){
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
         } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeAlly(event, "guild", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
         }
       case "list" =>
         BotApp.listAlliesAndHuntedGuilds(event, "allies", allies => {
