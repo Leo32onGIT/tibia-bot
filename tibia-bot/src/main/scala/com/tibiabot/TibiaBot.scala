@@ -257,6 +257,52 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     }
                   }
 
+                  if (huntedPlayerCheck && oldGuildLess){
+                    val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
+                    val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
+                    // joined a hunted guild
+                    if (huntedGuildCheck){
+                      // remove from hunted 'Player' cache and db
+                      huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                      BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                      // send message to admin channel
+                      val adminTextChannel = guild.getTextChannelById(adminChannel)
+                      if (adminTextChannel != null){
+                        // send embed to admin channel
+                        val commandUser = s"<@${BotApp.botUser}>"
+                        val adminEmbed = new EmbedBuilder()
+                        adminEmbed.setTitle(":robot: hunted list cleanup:")
+                        adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                        adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                        adminEmbed.setColor(14397256) // orange for bot auto command
+                        adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                      }
+                    } else if (allyGuildCheck){
+                      // remove from hunted 'Player' cache and db
+                      huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                      BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                      // send message to admin channel
+                      val adminTextChannel = guild.getTextChannelById(adminChannel)
+                      if (adminTextChannel != null){
+                        // send embed to admin channel
+                        val commandUser = s"<@${BotApp.botUser}>"
+                        val adminEmbed = new EmbedBuilder()
+                        adminEmbed.setTitle(":robot: hunted list cleanup:")
+                        adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
+                        adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                        adminEmbed.setColor(14397256) // orange for bot auto command
+                        adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                      }
+                    }
+                    // send message to activity channel
+                    if (activityTextChannel != null){
+                      val activityEmbed = new EmbedBuilder()
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
+                      activityEmbed.setColor(colorType)
+                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                    }
+                  }
+
                   val updatedActivityData = matchingActivityOption.map { activity =>
                     val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
                     activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
