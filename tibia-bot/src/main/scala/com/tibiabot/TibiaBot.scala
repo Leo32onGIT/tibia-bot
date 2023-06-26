@@ -106,10 +106,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
         (key.char, key.level.toInt)
       }.toSet
-      Source(charsToCheck).mapAsyncUnordered(8)(tibiaDataClient.getCharacterV2).runWith(Sink.collection).map(_.toSet)
+      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacterV2).runWith(Sink.collection).map(_.toSet)
     } else {
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-      Source(charsToCheck).mapAsyncUnordered(8)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
+      Source(charsToCheck).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).runWith(Sink.collection).map(_.toSet)
     }
   }.withAttributes(logAndResume)
 
