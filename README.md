@@ -1,9 +1,14 @@
 # Discord Bot for Tibia
+
+Production:
+- [Website](https://violentbot.xyz)
+- [Discord App Directory](https://discord.com/application-directory/1067774715407642624)
    
 Current features include:    
 - Online List
 - Levels List
 - Deaths List
+- Activity List (guild & name changes)
 - Poke if enemy dies fullbless
 - Poke if anyone dies to a rare nemesis boss
 
