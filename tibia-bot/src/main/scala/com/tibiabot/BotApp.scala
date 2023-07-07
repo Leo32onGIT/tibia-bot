@@ -1964,6 +1964,7 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
 
+    /*** these tables & columns exist in all databases now
     // Check if the column already exists in the table
     val columnExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'exiva_list'")
     val columnExists = columnExistsQuery.next()
@@ -1983,6 +1984,7 @@ object BotApp extends App with StrictLogging {
     if (!activityExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN activity_channel VARCHAR(255) DEFAULT '0'")
     }
+    ***/
 
 
     val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel FROM worlds")
