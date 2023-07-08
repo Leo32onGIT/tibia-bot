@@ -3262,12 +3262,16 @@ object BotApp extends App with StrictLogging {
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null){
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
-        adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        try {
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+          adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        } catch {
+          case _: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+        }
       }
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
     }
@@ -3292,12 +3296,16 @@ object BotApp extends App with StrictLogging {
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null){
-        val adminEmbed = new EmbedBuilder()
-        adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
-        adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
-        adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
-        adminEmbed.setColor(3092790)
-        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        try {
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+          adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        } catch {
+          case _: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+        }
       } else {
         embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
       }
