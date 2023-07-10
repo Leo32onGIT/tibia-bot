@@ -108,24 +108,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }.toSet
       Source(charsToCheck)
         .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
-        .recover {
-          case ex =>
-            // Handle the failure and return a default or empty value
-            logger.warn(s"Failed to get a character on '$world': ${ex.getMessage}")
-            Set.empty[(String, Int)]
-        }
         .runWith(Sink.collection)
         .map(_.toSet)
     } else {
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
       Source(charsToCheck)
         .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
-        .recover {
-          case ex =>
-            // Handle the failure and return a default or empty value
-            logger.warn(s"Failed to get a character on '$world': ${ex.getMessage}")
-            Set.empty[String]
-        }
         .runWith(Sink.collection)
         .map(_.toSet)
     }
