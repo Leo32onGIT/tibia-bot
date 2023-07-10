@@ -337,10 +337,11 @@ object BotApp extends App with StrictLogging {
   }
 
   // run hunted list cleanup every day at ss+0.5
-  private val currentTime = ZonedDateTime.now(ZoneOffset.UTC)
-  private val targetTime = currentTime.`with`(LocalTime.of(8, 30, 0))
-  private val initialDelay = Duration.between(currentTime, targetTime).toSeconds.seconds
+  private val currentTime = Instant.now
+  private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
+  private val initialDelay = Duration.between(currentTime, targetTime).getSeconds.seconds
   private val interval = 24.hours
+  
   actorSystem.scheduler.schedule(initialDelay, interval) {
     guilds.foreach{g =>
       try {
