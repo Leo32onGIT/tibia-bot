@@ -326,10 +326,22 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  // Start all world streams
   startBot(None, None)
 
+  // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
     updateDashboard()
+    removeDeathsCache(ZonedDateTime.now())
+    removeLevelsCache(ZonedDateTime.now())
+  }
+
+  // run hunted list cleanup every day at ss+1
+  private val currentTime = ZonedDateTime.now(ZoneOffset.UTC)
+  private val targetTime = currentTime.`with`(LocalTime.of(9, 0, 0)) // ss+1
+  private val initialDelay = Duration.between(currentTime, targetTime).toSeconds.seconds
+  private val interval = 24.hours
+  actorSystem.scheduler.schedule(initialDelay, interval) {
     guilds.foreach{g =>
       try {
         if (!activityCommandBlocker.getOrElse(g.getId, false)){
@@ -340,8 +352,6 @@ object BotApp extends App with StrictLogging {
         case _: Throwable => logger.info(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
       }
     }
-    removeDeathsCache(ZonedDateTime.now())
-    removeLevelsCache(ZonedDateTime.now())
   }
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
