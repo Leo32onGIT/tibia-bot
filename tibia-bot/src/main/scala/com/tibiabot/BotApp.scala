@@ -336,9 +336,9 @@ object BotApp extends App with StrictLogging {
     removeLevelsCache(ZonedDateTime.now())
   }
 
-  // run hunted list cleanup every day at ss+1
+  // run hunted list cleanup every day at ss+0.5
   private val currentTime = ZonedDateTime.now(ZoneOffset.UTC)
-  private val targetTime = currentTime.`with`(LocalTime.of(9, 0, 0)) // ss+1
+  private val targetTime = currentTime.`with`(LocalTime.of(8, 30, 0))
   private val initialDelay = Duration.between(currentTime, targetTime).toSeconds.seconds
   private val interval = 24.hours
   actorSystem.scheduler.schedule(initialDelay, interval) {
