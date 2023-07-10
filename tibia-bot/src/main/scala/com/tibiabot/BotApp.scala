@@ -3110,7 +3110,12 @@ object BotApp extends App with StrictLogging {
       embedBuilder.setDescription(descripText)
       embedBuilder.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Violent%20Bot.png")
       embedBuilder.setColor(14397256) // orange for bot auto command
-      publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+      try {
+        publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+      } catch {
+        case ex: Exception => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+        case _ => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+      }
     }
   }
 
