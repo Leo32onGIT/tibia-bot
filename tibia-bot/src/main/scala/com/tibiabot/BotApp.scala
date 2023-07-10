@@ -27,6 +27,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
+import java.time.{LocalTime, ZoneId, LocalDateTime, LocalTime}
 
 object BotApp extends App with StrictLogging {
 
@@ -341,7 +342,7 @@ object BotApp extends App with StrictLogging {
   private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
   private val initialDelay = Duration.between(currentTime, targetTime).getSeconds.seconds
   private val interval = 24.hours
-  
+
   actorSystem.scheduler.schedule(initialDelay, interval) {
     guilds.foreach{g =>
       try {
