@@ -3114,7 +3114,7 @@ object BotApp extends App with StrictLogging {
         publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
       } catch {
         case ex: Exception => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-        case _ => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+        case _: Throwable => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
       }
     }
   }
