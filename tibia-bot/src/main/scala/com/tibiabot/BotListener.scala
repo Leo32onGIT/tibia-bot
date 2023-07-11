@@ -82,7 +82,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                 adminEmbed.setColor(3092790) // orange for bot auto command
                 try {
@@ -108,7 +108,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                 adminEmbed.setColor(3092790) // orange for bot auto command
                 try {
@@ -144,7 +144,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                 adminEmbed.setColor(3092790) // orange for bot auto command
                 try {
@@ -170,7 +170,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                 adminEmbed.setColor(3092790) // orange for bot auto command
                 try {
