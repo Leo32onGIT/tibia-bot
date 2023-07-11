@@ -1952,7 +1952,7 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def discordRetrieveConfig(guild: Guild): Map[String, String] = {
+  def discordRetrieveConfig(guild: Guild): Map[String, String] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
     val result = statement.executeQuery(s"SELECT * FROM discord_info")
