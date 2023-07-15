@@ -16,7 +16,7 @@
       <OnMatch>DENY</OnMatch>
     </filter>
     <layout class="ch.qos.logback.classic.PatternLayout">
-      <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n%replace(%ex){'(?s).*\n(.*)', '```$0```'}%nopex</pattern>
+      <pattern>`%d{HH:mm:ss} [%thread] [%-5level] %logger{36} - %msg`%n```%ex{full}```</pattern>
     </layout>
     <tts>false</tts>
   </appender>
