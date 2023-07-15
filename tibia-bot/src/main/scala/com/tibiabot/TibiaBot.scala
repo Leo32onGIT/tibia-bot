@@ -169,8 +169,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             // Check formerNames
             var nameChangeCheck = false
             formerNamesList.foreach { formerName =>
-              if (activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == formerName.toLowerCase())){
-                nameChangeCheck = true
+              if (charName != ""){
+                if (activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == formerName.toLowerCase())){
+                  nameChangeCheck = true
+                }
               }
             }
 
