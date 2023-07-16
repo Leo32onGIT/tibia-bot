@@ -62,12 +62,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
     val user = event.getUser
     var responseText = ":x: An issue occured trying to add/remove you from this role, please try again."
-    if (roleType == "fullbless"){
+    if (roleType == "fullbless") {
       val world = title.replace(":crossed_swords:", "").trim()
       val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
       val role = guild.getRoleById(worldConfigData("fullbless_role"))
-      if (role != null){
-        if (button == "add"){
+      if (role != null) {
+        if (button == "add") {
           // get role add user to it
           try {
             guild.addRoleToMember(user, role).queue()
@@ -78,7 +78,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               val discordInfo = BotApp.discordRetrieveConfig(guild)
               val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
               val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null){
+              if (adminTextChannel != null) {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
@@ -93,7 +93,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 }
               }
           }
-        } else if (button == "remove"){
+        } else if (button == "remove") {
           // remove role
           try {
             guild.removeRoleFromMember(user, role).queue()
@@ -104,7 +104,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               val discordInfo = BotApp.discordRetrieveConfig(guild)
               val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
               val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null){
+              if (adminTextChannel != null) {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
@@ -128,8 +128,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
       val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
       val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
       val role = guild.getRoleById(worldConfigData("nemesis_role"))
-      if (role != null){
-        if (button == "add"){
+      if (role != null) {
+        if (button == "add") {
           // get role add user to it
           try {
             guild.addRoleToMember(user, role).queue()
@@ -140,7 +140,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               val discordInfo = BotApp.discordRetrieveConfig(guild)
               val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
               val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null){
+              if (adminTextChannel != null) {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
@@ -155,7 +155,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 }
               }
           }
-        } else if (button == "remove"){
+        } else if (button == "remove") {
           // remove role
           try {
             guild.removeRoleFromMember(user, role).queue()
@@ -166,7 +166,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               val discordInfo = BotApp.discordRetrieveConfig(guild)
               val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
               val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null){
+              if (adminTextChannel != null) {
                 val commandPlayer = s"<@${user.getId}>"
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(":x: a player interaction has failed:")
@@ -213,24 +213,24 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
     subCommand match {
       case "player" =>
-        if (toggleOption == "add"){
+        if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addHunted(event, "player", nameOption, reasonOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue()
           })
-        } else if (toggleOption == "remove"){
+        } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeHunted(event, "player", nameOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue()
           })
         }
       case "guild" =>
-        if (toggleOption == "add"){
+        if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addHunted(event, "guild", nameOption, reasonOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue()
           })
-        } else if (toggleOption == "remove"){
+        } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeHunted(event, "guild", nameOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue()
@@ -250,18 +250,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
           })
         })
       case "deaths" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "levels" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
         }
@@ -288,7 +288,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
     subCommand match {
       case "player" =>
-        if (toggleOption == "add"){
+        if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue(_ => {
@@ -304,7 +304,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           })
         }
       case "guild" =>
-        if (toggleOption == "add"){
+        if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
             event.getHook.sendMessageEmbeds(embed).queue(_ => {
@@ -333,18 +333,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
           })
         })
       case "deaths" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "levels" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
         }
@@ -367,18 +367,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
     subCommand match {
       case "deaths" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "deaths")
           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "levels" =>
-        if (toggleOption == "show"){
+        if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide"){
+        } else if (toggleOption == "hide") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "levels")
           event.getHook.sendMessageEmbeds(embed).queue()
         }

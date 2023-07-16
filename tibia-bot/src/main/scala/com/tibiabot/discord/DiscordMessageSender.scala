@@ -46,7 +46,7 @@ class DiscordMessageSender() extends StrictLogging {
           if (count >= 20) {
             // if more than 40 messages have been sent in the last minute, set the rate limiter to 1 per 3 seconds
             val currentRate = channelRateLimiters.getOrElseUpdate(messageDetails.webhookChannel, RateLimiter.create(1.0/3))
-            if (currentRate.getRate != 1.0/3){
+            if (currentRate.getRate != 1.0/3) {
               channelRateLimiters.put(messageDetails.webhookChannel, RateLimiter.create(1.0/3))
               logger.warn(s"Webhook rate limit for the levels channel on Guild: '${messageDetails.guild.getId}' Channel: '${messageDetails.webhookChannel.getId}'  World: '${messageDetails.messageAuthor}' has been temporarily restricted to 1 per 3 seconds")
             }
@@ -55,7 +55,7 @@ class DiscordMessageSender() extends StrictLogging {
           }
         } else {
           val currentRate = channelRateLimiters.getOrElseUpdate(messageDetails.webhookChannel, RateLimiter.create(1))
-          if (currentRate.getRate != 1){
+          if (currentRate.getRate != 1) {
             channelRateLimiters.put(messageDetails.webhookChannel, RateLimiter.create(1))
           }
           webhookRateLimits.put(messageDetails.webhookChannel, (1, System.currentTimeMillis())) // reset count and lastUpdated
@@ -80,7 +80,7 @@ class DiscordMessageSender() extends StrictLogging {
           } catch {
             case ex: Exception => logger.warn(s"Failed to CREATE webhook for Guild: '${messageDetails.guild.getId}' Channel: '${messageDetails.webhookChannel.getId}'  World: '${messageDetails.messageAuthor}'", ex)
           }
-        } else if (!getWebHook.isEmpty && webhookCheck){
+        } else if (!getWebHook.isEmpty && webhookCheck) {
           try {
             webhook = getWebHook.get(0)
           } catch {
@@ -89,7 +89,7 @@ class DiscordMessageSender() extends StrictLogging {
         } else {
           logger.warn(s"Failed to RETRIEVE webhooks for Guild: '${messageDetails.guild.getId}' Channel: '${messageDetails.webhookChannel.getId}'  World: '${messageDetails.messageAuthor}'")
         }
-        if (webhook != null){
+        if (webhook != null) {
           val webhookUrl = webhook.getUrl
           val messageBuilder = new WebhookMessageBuilder()
             .setUsername(messageDetails.messageAuthor)

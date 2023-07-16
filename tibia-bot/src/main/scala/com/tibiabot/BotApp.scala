@@ -319,7 +319,7 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
     // update the commands
-    if (g.getIdLong == 867319250708463628L){ // Violent Bot Discord
+    if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
       lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
@@ -346,7 +346,7 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.schedule(initialDelay, interval) {
     guilds.foreach{g =>
       try {
-        if (!activityCommandBlocker.getOrElse(g.getId, false)){
+        if (!activityCommandBlocker.getOrElse(g.getId, false)) {
           cleanHuntedList(g)
         }
       }
@@ -358,7 +358,7 @@ object BotApp extends App with StrictLogging {
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
-    if (guild.isDefined && world.isDefined){
+    if (guild.isDefined && world.isDefined) {
 
       val guildId = guild.get.getId
 
@@ -393,7 +393,7 @@ object BotApp extends App with StrictLogging {
       val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
       worldsInfo.foreach{ w =>
-        if (w.name == world.get){
+        if (w.name == world.get) {
           val discords = Discords(
             id = guildId,
             adminChannel = adminChannelId
@@ -419,7 +419,7 @@ object BotApp extends App with StrictLogging {
 
         val guildId = g.getId
 
-        if (checkConfigDatabase(g)){
+        if (checkConfigDatabase(g)) {
           // get hunted Players
           val huntedPlayers = playerConfig(g, "hunted_players")
           huntedPlayersData += (guildId -> huntedPlayers)
@@ -488,7 +488,7 @@ object BotApp extends App with StrictLogging {
       futureResults.onComplete {
         case Success(output) =>
           output.foreach { case (charResponse, name, reason, reasonText) =>
-            if (charResponse.characters.character.name != ""){
+            if (charResponse.characters.character.name != "") {
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
@@ -501,7 +501,7 @@ object BotApp extends App with StrictLogging {
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
-                if (adminChannel != null){
+                if (adminChannel != null) {
                   val commandUser = s"<@$botUser>"
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(":robot: hunted list cleanup:")
@@ -517,7 +517,7 @@ object BotApp extends App with StrictLogging {
                 listBuffer += name.toLowerCase
                 removeHuntedFromDatabase(guild, "player", name.toLowerCase())
 
-                if (adminChannel != null){
+                if (adminChannel != null) {
                   val commandUser = s"<@$botUser>"
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(":robot: hunted list cleanup:")
@@ -553,28 +553,28 @@ object BotApp extends App with StrictLogging {
 
     // total Discord count
     val dashboardDiscordsTotalName = dashboardDiscordsTotal.getName
-    if (dashboardDiscordsTotalName != s"Discords (Total): $guildCount"){
+    if (dashboardDiscordsTotalName != s"Discords (Total): $guildCount") {
       val dashboardDiscordsTotalManager = dashboardDiscordsTotal.getManager
       dashboardDiscordsTotalManager.setName(s"Discords (Total): $guildCount").queue()
     }
 
     // active Discord count
     val dashboardDiscordsActiveName = dashboardDiscordsActive.getName
-    if (dashboardDiscordsActiveName != s"Discords (Active): $activeDiscordsCount"){
+    if (dashboardDiscordsActiveName != s"Discords (Active): $activeDiscordsCount") {
       val dashboardDiscordsActiveManager = dashboardDiscordsActive.getManager
       dashboardDiscordsActiveManager.setName(s"Discords (Active): $activeDiscordsCount").queue()
     }
 
     // total worlds setup by users
     val dashboardWorldSubscriptionsName = dashboardWorldSubscriptions.getName
-    if (dashboardWorldSubscriptionsName != s"Worlds Setup: $worldsTrackedCount"){
+    if (dashboardWorldSubscriptionsName != s"Worlds Setup: $worldsTrackedCount") {
       val dashboardWorldSubscriptionsManager = dashboardWorldSubscriptions.getManager
       dashboardWorldSubscriptionsManager.setName(s"Worlds Setup: $worldsTrackedCount").queue()
     }
 
     // world streams running out of 'how many tibia worlds exist'
     val dashboardWorldStreamsName = dashboardWorldStreams.getName
-    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount of ${worlds.size}"){
+    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount of ${worlds.size}") {
       val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
       dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount of ${worlds.size}").queue()
     }
@@ -586,9 +586,9 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     // default embed content
     var embedText = ":x: An error occurred while running the `info` command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
-      if (subCommand == "guild"){ // command run with 'guild'
+      if (subCommand == "guild") { // command run with 'guild'
         val huntedGuilds = huntedGuildsData.getOrElse(guildId, List.empty[Guilds])
         huntedGuilds.find(_.name == subOptionValueLower).map {
           case gData =>
@@ -610,7 +610,7 @@ object BotApp extends App with StrictLogging {
         }.getOrElse {
           embedText = s":gear: The guild **$subOptionValueLower** is not on the hunted list."
         }
-      } else if (subCommand == "player"){ // command run with 'player'
+      } else if (subCommand == "player") { // command run with 'player'
         val huntedPlayers = huntedPlayersData.getOrElse(guildId, List.empty[Players])
         huntedPlayers.find(_.name == subOptionValueLower).map {
           case pData =>
@@ -648,9 +648,9 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     // default embed content
     var embedText = ":x: An error occurred while running the `info` command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
-      if (subCommand == "guild"){ // command run with 'guild'
+      if (subCommand == "guild") { // command run with 'guild'
         val alliedGuilds = alliedGuildsData.getOrElse(guildId, List.empty[Guilds])
         alliedGuilds.find(_.name == subOptionValueLower).map {
           case gData =>
@@ -672,7 +672,7 @@ object BotApp extends App with StrictLogging {
         }.getOrElse {
           embedText = s":gear: The guild **$subOptionValueLower** is not on the allied list."
         }
-      } else if (subCommand == "player"){ // command run with 'player'
+      } else if (subCommand == "player") { // command run with 'player'
         val alliedPlayers = alliedPlayersData.getOrElse(guildId, List.empty[Players])
         alliedPlayers.find(_.name == subOptionValueLower).map {
           case pData =>
@@ -724,7 +724,7 @@ object BotApp extends App with StrictLogging {
           output.foreach { case (guildResponse, name, reason) =>
             val guildName = guildResponse.guilds.guild.name
             val reasonEmoji = if (reason == "true") ":pencil:" else ""
-            if (guildName != ""){
+            if (guildName != "") {
               val guildMembers = guildResponse.guilds.guild.members_total.toInt
               val guildLine = s":busts_in_silhouette: **$guildMembers** — **[$guildName](${guildUrl(guildName)})** $reasonEmoji"
               guildApiBuffer += guildLine
@@ -801,7 +801,7 @@ object BotApp extends App with StrictLogging {
             "none" -> ListBuffer[(Int, String, String)]()
           )
           output.foreach { case (charResponse, name, reason, _) =>
-            if (charResponse.characters.character.name != ""){
+            if (charResponse.characters.character.name != "") {
               val reasonEmoji = if (reason == "true") ":pencil:" else ""
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
@@ -950,12 +950,12 @@ object BotApp extends App with StrictLogging {
     embedBuild.setColor(3092790)
     // default embed content
     var embedText = ":x: An error occurred while running the /hunted command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (subCommand == "guild"){ // command run with 'guild'
+      if (subCommand == "guild") { // command run with 'guild'
         // run api against guild
         val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
         guildCheck.map { guildResponse =>
@@ -963,7 +963,7 @@ object BotApp extends App with StrictLogging {
           val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
           (guildName, guildMembers)
         }.map { case (guildName, guildMembers) =>
-          if (guildName != ""){
+          if (guildName != "") {
             if (!huntedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add guild to hunted list and database
               huntedGuildsData = huntedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: huntedGuildsData.getOrElse(guildId, List())))
@@ -971,7 +971,7 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              if (adminChannel != null){
+              if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
                 adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.")
@@ -1006,14 +1006,14 @@ object BotApp extends App with StrictLogging {
 
           }
         }
-      } else if (subCommand == "player"){ // command run with 'player'
+      } else if (subCommand == "player") { // command run with 'player'
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
           val character = charResponse.characters.character
           (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
         }.map { case (playerName, world, vocation, level) =>
-          if (playerName != ""){
+          if (playerName != "") {
             if (!huntedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add player to hunted list and database
               huntedPlayersData = huntedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: huntedPlayersData.getOrElse(guildId, List())))
@@ -1021,7 +1021,7 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              if (adminChannel != null){
+              if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
                 adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.")
@@ -1065,12 +1065,12 @@ object BotApp extends App with StrictLogging {
     embedBuild.setColor(3092790)
     // default embed content
     var embedText = ":x: An error occurred while running the /allies command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (subCommand == "guild"){
+      if (subCommand == "guild") {
         // run api against guild
         val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
         guildCheck.map { guildResponse =>
@@ -1078,13 +1078,13 @@ object BotApp extends App with StrictLogging {
           val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
           (guildName, guildMembers)
         }.map { case (guildName, guildMembers) =>
-          if (guildName != ""){
+          if (guildName != "") {
             if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               alliedGuildsData = alliedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedGuildsData.getOrElse(guildId, List())))
               addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the allies list."
 
-              if (adminChannel != null){
+              if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
                 adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.")
@@ -1130,20 +1130,20 @@ object BotApp extends App with StrictLogging {
 
           }
         }
-      } else if (subCommand == "player"){
+      } else if (subCommand == "player") {
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
         playerCheck.map { charResponse =>
           val character = charResponse.characters.character
           (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
         }.map { case (playerName, world, vocation, level) =>
-          if (playerName != ""){
+          if (playerName != "") {
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
               addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the allies list."
 
-              if (adminChannel != null){
+              if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
                 adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.")
@@ -1185,12 +1185,12 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     var embedText = ":x: An error occurred while running the /removehunted command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       // depending on if guild or player supplied
-      if (subCommand == "guild"){
+      if (subCommand == "guild") {
         var guildString = subOptionValueLower
         // run api against guild
         val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
@@ -1198,7 +1198,7 @@ object BotApp extends App with StrictLogging {
           val guildName = guildResponse.guilds.guild.name
           guildName
         }.map { guildName =>
-          if (guildName != ""){
+          if (guildName != "") {
             guildString = s"[$guildName](${guildUrl(guildName)})"
           }
           val huntedGuildsList = huntedGuildsData.getOrElse(guildId, List())
@@ -1217,7 +1217,7 @@ object BotApp extends App with StrictLogging {
           removeGuildActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
-          if (adminChannel != null){
+          if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
@@ -1231,7 +1231,7 @@ object BotApp extends App with StrictLogging {
           callback(embedBuild.build())
 
         }
-      } else if (subCommand == "player"){
+      } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
@@ -1239,7 +1239,7 @@ object BotApp extends App with StrictLogging {
           val character = charResponse.characters.character
           (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
         }.map { case (playerName, world, vocation, level) =>
-          if (playerName != ""){
+          if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
           val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
@@ -1258,7 +1258,7 @@ object BotApp extends App with StrictLogging {
           removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
-          if (adminChannel != null){
+          if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
@@ -1289,12 +1289,12 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     var embedText = ":x: An error occurred while running the /removehunted command"
-    if (checkConfigDatabase(guild)){
+    if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       // depending on if guild or player supplied
-      if (subCommand == "guild"){
+      if (subCommand == "guild") {
         var guildString = subOptionValueLower
         // run api against guild
         val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
@@ -1302,7 +1302,7 @@ object BotApp extends App with StrictLogging {
           val guildName = guildResponse.guilds.guild.name
           guildName
         }.map { guildName =>
-          if (guildName != ""){
+          if (guildName != "") {
             guildString = s"[$guildName](${guildUrl(guildName)})"
           }
           val alliedGuildsList = alliedGuildsData.getOrElse(guildId, List())
@@ -1321,7 +1321,7 @@ object BotApp extends App with StrictLogging {
           removeGuildActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
-          if (adminChannel != null){
+          if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
@@ -1335,7 +1335,7 @@ object BotApp extends App with StrictLogging {
           callback(embedBuild.build())
 
         }
-      } else if (subCommand == "player"){
+      } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
         val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
@@ -1343,7 +1343,7 @@ object BotApp extends App with StrictLogging {
           val character = charResponse.characters.character
           (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
         }.map { case (playerName, world, vocation, level) =>
-          if (playerName != ""){
+          if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
           val alliedPlayersList = alliedPlayersData.getOrElse(guildId, List())
@@ -1362,7 +1362,7 @@ object BotApp extends App with StrictLogging {
           removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
           // send embed to admin channel
-          if (adminChannel != null){
+          if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
@@ -1667,7 +1667,7 @@ object BotApp extends App with StrictLogging {
       val id = Option(result.getLong("id")).getOrElse(0L)
       val timeDb = Option(result.getString("time")).getOrElse("")
       val timeToDate = ZonedDateTime.parse(timeDb)
-      if (time.isAfter(timeToDate.plusMinutes(30)) && id != 0L){
+      if (time.isAfter(timeToDate.plusMinutes(30)) && id != 0L) {
         results += id
       }
     }
@@ -1735,7 +1735,7 @@ object BotApp extends App with StrictLogging {
       val id = Option(result.getLong("id")).getOrElse(0L)
       val timeDb = Option(result.getString("time")).getOrElse("")
       val timeToDate = ZonedDateTime.parse(timeDb)
-      if (time.isAfter(timeToDate.plusHours(25)) && id != 0L){
+      if (time.isAfter(timeToDate.plusHours(25)) && id != 0L) {
         results += id
       }
     }
@@ -2106,7 +2106,7 @@ object BotApp extends App with StrictLogging {
   private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String): Unit = {
     val conn = getConnection(guild)
     // update category if exists
-    if (adminCategory != ""){
+    if (adminCategory != "") {
       val statement = conn.prepareStatement("UPDATE discord_info SET admin_category = ?;")
       statement.setString(1, adminCategory)
       statement.executeUpdate()
@@ -2187,7 +2187,7 @@ object BotApp extends App with StrictLogging {
 
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
-      if (discordConfig.isEmpty){
+      if (discordConfig.isEmpty) {
         val adminCategory = guild.createCategory("Violent Bot Administration").complete()
         adminCategory.upsertPermissionOverride(botRole)
           .grant(Permission.VIEW_CHANNEL)
@@ -2204,9 +2204,9 @@ object BotApp extends App with StrictLogging {
       } else {
         val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
-        if (adminChannelCheck == null){
+        if (adminChannelCheck == null) {
           // admin channel has been deleted
-          if (adminCategoryCheck == null){
+          if (adminCategoryCheck == null) {
             // admin category has been deleted
             val adminCategory = guild.createCategory("Violent Bot Administration").complete()
             adminCategory.upsertPermissionOverride(botRole)
@@ -2235,7 +2235,7 @@ object BotApp extends App with StrictLogging {
       // check is world has already been setup
       val worldConfigData = worldRetrieveConfig(guild, world)
       // it it doesn't create it
-      if (worldConfigData.isEmpty){
+      if (worldConfigData.isEmpty) {
         // create the category
         val newCategory = guild.createCategory(world).complete()
         newCategory.upsertPermissionOverride(botRole)
@@ -2322,7 +2322,7 @@ object BotApp extends App with StrictLogging {
 
         // post initial embed in activity channel
         val activityTextChannel: TextChannel = guild.getTextChannelById(activityId)
-        if (activityTextChannel != null){
+        if (activityTextChannel != null) {
           val activityEmbed = new EmbedBuilder()
           activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
           activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
@@ -2360,8 +2360,8 @@ object BotApp extends App with StrictLogging {
     embedBuild.setColor(3092790)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
     val detectSetting = cache.headOption.map(_.detectHunteds).getOrElse(null)
-    if (detectSetting != null){
-      if (detectSetting == settingOption){
+    if (detectSetting != null) {
+      if (detectSetting == settingOption) {
         // embed reply
         embedBuild.setDescription(s":x: **Automatic enemy detection** is already set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
@@ -2380,7 +2380,7 @@ object BotApp extends App with StrictLogging {
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
@@ -2426,33 +2426,33 @@ object BotApp extends App with StrictLogging {
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
     val selectedSetting: Option[String] = playerType match {
       case "allies" =>
-        if (channelType == "deaths"){
+        if (channelType == "deaths") {
           cache.headOption.map(_.showAlliesDeaths)
-        } else if (channelType == "levels"){
+        } else if (channelType == "levels") {
           cache.headOption.map(_.showAlliesLevels)
         } else {
           None
         }
       case "neutrals" =>
-        if (channelType == "deaths"){
+        if (channelType == "deaths") {
           cache.headOption.map(_.showNeutralDeaths)
-        } else if (channelType == "levels"){
+        } else if (channelType == "levels") {
           cache.headOption.map(_.showNeutralLevels)
         } else {
           None
         }
       case "enemies" =>
-        if (channelType == "deaths"){
+        if (channelType == "deaths") {
           cache.headOption.map(_.showEnemiesDeaths)
-        } else if (channelType == "levels"){
+        } else if (channelType == "levels") {
           cache.headOption.map(_.showEnemiesLevels)
         } else {
           None
         }
       case _ => None
     }
-    if (selectedSetting.isDefined){
-      if (selectedSetting.get == settingType){
+    if (selectedSetting.isDefined) {
+      if (selectedSetting.get == settingType) {
         // embed reply
         embedBuild.setDescription(s":x: The **$channelType** channel is already set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
@@ -2485,7 +2485,7 @@ object BotApp extends App with StrictLogging {
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
@@ -2515,8 +2515,8 @@ object BotApp extends App with StrictLogging {
     embedBuild.setColor(3092790)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
     val detectSetting = cache.headOption.map(_.exivaList).getOrElse(null)
-    if (detectSetting != null){
-      if (detectSetting == settingType){
+    if (detectSetting != null) {
+      if (detectSetting == settingType) {
         // embed reply
         embedBuild.setDescription(s":x: The **exiva list on deaths** is already set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
@@ -2535,7 +2535,7 @@ object BotApp extends App with StrictLogging {
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
@@ -2592,8 +2592,8 @@ object BotApp extends App with StrictLogging {
     embedBuild.setColor(3092790)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
     val levelSetting = cache.headOption.map(_.fullblessLevel).getOrElse(null)
-    if (levelSetting != null){
-      if (levelSetting == level){
+    if (levelSetting != null) {
+      if (levelSetting == level) {
         // embed reply
         embedBuild.setDescription(s":x: The level to poke for **enemy fullblesses**\nis already set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
@@ -2613,7 +2613,7 @@ object BotApp extends App with StrictLogging {
         val worldConfigData = worldRetrieveConfig(guild, world)
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
-        if (worldConfigData.nonEmpty){
+        if (worldConfigData.nonEmpty) {
           val fullblessChannelId = worldConfigData("fullbless_channel")
           val channel: TextChannel = guild.getTextChannelById(fullblessChannelId)
           if (channel != null) {
@@ -2635,7 +2635,7 @@ object BotApp extends App with StrictLogging {
             }
           }
         }
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
@@ -2666,7 +2666,7 @@ object BotApp extends App with StrictLogging {
         else None
       case None => None
     }
-    if (cache.isDefined){
+    if (cache.isDefined) {
       // get the bots main roles
       val botRole = guild.getRolesByName(botName, true).get(0)
       val publicRole = guild.getPublicRole
@@ -2699,8 +2699,8 @@ object BotApp extends App with StrictLogging {
       val nemesisChannel = guild.getTextChannelById(nemesisChannelInfo.getOrElse("0"))
 
       // check if any of the world channels need to be recreated
-      if (alliesChannel == null || enemiesChannel == null || neutralsChannel == null || levelsChannel == null || deathsChannel == null || activityChannel == null || fullblessChannel == null || nemesisChannel == null || adminChannel == null){
-        if (category == null){ // category has been deleted:
+      if (alliesChannel == null || enemiesChannel == null || neutralsChannel == null || levelsChannel == null || deathsChannel == null || activityChannel == null || fullblessChannel == null || nemesisChannel == null || adminChannel == null) {
+        if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
           newCategory.upsertPermissionOverride(botRole)
@@ -2731,7 +2731,7 @@ object BotApp extends App with StrictLogging {
         }
         val channelList = ListBuffer[(TextChannel, Boolean)]()
         // create the channels underneath the new/existing category
-        if (alliesChannel == null){
+        if (alliesChannel == null) {
           val recreateAlliesChannel = guild.createTextChannel("allies", category).complete()
           channelList += ((recreateAlliesChannel, false))
           worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
@@ -2748,7 +2748,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (enemiesChannel == null){
+        if (enemiesChannel == null) {
           val recreateEnemiesChannel = guild.createTextChannel("enemies", category).complete()
           channelList += ((recreateEnemiesChannel, false))
           worldRepairConfig(guild, worldFormal, "enemies_channel", recreateEnemiesChannel.getId)
@@ -2765,7 +2765,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (neutralsChannel == null){
+        if (neutralsChannel == null) {
           val recreateNeutralsChannel = guild.createTextChannel("neutrals", category).complete()
           channelList += ((recreateNeutralsChannel, false))
           worldRepairConfig(guild, worldFormal, "neutrals_channel", recreateNeutralsChannel.getId)
@@ -2782,7 +2782,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (levelsChannel == null){
+        if (levelsChannel == null) {
           val recreateLevelsChannel = guild.createTextChannel("levels", category).complete()
           channelList += ((recreateLevelsChannel, true))
           worldRepairConfig(guild, worldFormal, "levels_channel", recreateLevelsChannel.getId)
@@ -2799,7 +2799,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (deathsChannel == null){
+        if (deathsChannel == null) {
           val recreateDeathsChannel = guild.createTextChannel("deaths", category).complete()
           channelList += ((recreateDeathsChannel, false))
           worldRepairConfig(guild, worldFormal, "deaths_channel", recreateDeathsChannel.getId)
@@ -2816,7 +2816,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (activityChannel == null){
+        if (activityChannel == null) {
           val recreateActivityChannel = guild.createTextChannel("activity", category).complete()
           channelList += ((recreateActivityChannel, false))
           worldRepairConfig(guild, worldFormal, "activity_channel", recreateActivityChannel.getId)
@@ -2833,7 +2833,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
           // post initial embed in activity channel
-          if (recreateActivityChannel != null){
+          if (recreateActivityChannel != null) {
             val activityEmbed = new EmbedBuilder()
             activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
             activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
@@ -2841,7 +2841,7 @@ object BotApp extends App with StrictLogging {
             recreateActivityChannel.sendMessageEmbeds(activityEmbed.build()).queue()
           }
         }
-        if (fullblessChannel == null){
+        if (fullblessChannel == null) {
           val recreateFullblessChannel = guild.createTextChannel("fullbless-notifications", category).complete()
           channelList += ((recreateFullblessChannel, false))
           worldRepairConfig(guild, worldFormal, "fullbless_channel", recreateFullblessChannel.getId)
@@ -2878,7 +2878,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (nemesisChannel == null){
+        if (nemesisChannel == null) {
           val recreateNemesisChannel = guild.createTextChannel("boss-notifications", category).complete()
           channelList += ((recreateNemesisChannel, false))
           worldRepairConfig(guild, worldFormal, "nemesis_channel", recreateNemesisChannel.getId)
@@ -2933,14 +2933,14 @@ object BotApp extends App with StrictLogging {
             channel.upsertPermissionOverride(publicRole)
               .deny(Permission.MESSAGE_SEND)
               .complete()
-            if (webhooks){
+            if (webhooks) {
               channel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
             }
           }
         }
         // recreate admin channel and/or category
-        if (adminChannel == null){
-          if (adminCategory == null){
+        if (adminChannel == null) {
+          if (adminCategory == null) {
             val newAdminCategory = guild.createCategory("Violent Bot Administration").complete()
             newAdminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
@@ -2960,7 +2960,7 @@ object BotApp extends App with StrictLogging {
           discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId)
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
@@ -2999,8 +2999,8 @@ object BotApp extends App with StrictLogging {
     val levelSetting = cache.headOption.map(_.levelsMin).getOrElse(null)
     val deathSetting = cache.headOption.map(_.deathsMin).getOrElse(null)
     val chosenSetting = if (levelsOrDeaths == "levels") levelSetting else deathSetting
-    if (chosenSetting != null){
-      if (chosenSetting == level){
+    if (chosenSetting != null) {
+      if (chosenSetting == level) {
         // embed reply
         embedBuild.setDescription(s":x: The minimum level for the **$levelsOrDeaths channel**\nis already set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
@@ -3008,7 +3008,7 @@ object BotApp extends App with StrictLogging {
         // set the setting here
         val modifiedWorlds = worldsData(guild.getId).map { w =>
           if (w.name.toLowerCase() == world.toLowerCase()) {
-            if (levelsOrDeaths == "levels"){
+            if (levelsOrDeaths == "levels") {
               w.copy(levelsMin = level)
             } else { // deaths
               w.copy(deathsMin = level)
@@ -3022,7 +3022,7 @@ object BotApp extends App with StrictLogging {
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
-        if (adminChannel != null){
+        if (adminChannel != null) {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":gear: a command was run:")
           adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
@@ -3109,7 +3109,7 @@ object BotApp extends App with StrictLogging {
   def discordJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
     val publicChannel = guild.getTextChannelById(guild.getDefaultChannel.getId)
-    if (publicChannel != null){
+    if (publicChannel != null) {
       val embedBuilder = new EmbedBuilder()
       val descripText = s"**How to use the bot:**\n" +
         "Simply use `/setup <World Name>` to setup the bot.\n\n" +
@@ -3160,7 +3160,7 @@ object BotApp extends App with StrictLogging {
     val embedText = if (worlds.contains(world)) {
       val guild = event.getGuild
       val worldConfigData = worldRetrieveConfig(guild, world)
-      if (worldConfigData.nonEmpty){
+      if (worldConfigData.nonEmpty) {
         // get channel ids
         val alliesChannelId = worldConfigData("allies_channel")
         val enemiesChannelId = worldConfigData("enemies_channel")
@@ -3187,7 +3187,7 @@ object BotApp extends App with StrictLogging {
         val fullblessRole = guild.getRoleById(nemesisRoleId)
         val nemesisRole = guild.getRoleById(fullblessRoleId)
 
-        if (fullblessRole != null){
+        if (fullblessRole != null) {
           try {
             fullblessRole.delete().queue()
           } catch {
@@ -3195,7 +3195,7 @@ object BotApp extends App with StrictLogging {
           }
         }
 
-        if (nemesisRole != null){
+        if (nemesisRole != null) {
           try {
             nemesisRole.delete().queue()
           } catch {
@@ -3276,7 +3276,7 @@ object BotApp extends App with StrictLogging {
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner."
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (adminChannel != null){
+      if (adminChannel != null) {
         try {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
@@ -3310,7 +3310,7 @@ object BotApp extends App with StrictLogging {
       embedMessage = s":x: The Guild: **${guild.getName()}** doesn't have any worlds setup yet, so a message cannot be sent."
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (adminChannel != null){
+      if (adminChannel != null) {
         try {
           val adminEmbed = new EmbedBuilder()
           adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
