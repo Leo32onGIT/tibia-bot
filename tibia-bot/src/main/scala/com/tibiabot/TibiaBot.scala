@@ -226,8 +226,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   if (activityTextChannel != null) {
                     // send message to activity channel
                     val activityEmbed = new EmbedBuilder()
-                    activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                    activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their **name** to **[$charName](${charUrl(charName)})**.")
                     activityEmbed.setColor(playerType)
+                    activityEmbed.setThumbnail(creatureImageUrl("Name_Change"))
                     try {
                       activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                     } catch {
