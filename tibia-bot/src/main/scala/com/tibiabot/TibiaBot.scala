@@ -183,7 +183,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
               // update activity cache
               val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
-                val updatedActivity = if (formerNamesList.contains(activity.name.toLowerCase())) {
+                val updatedActivity = if (formerNamesList.exists(_.toLowerCase == activity.name.toLowerCase)) {
                   oldName = activity.name
                   timeDelay = Some(activity.updatedTime)
                   activity.copy(name = charName, formerNames = formerNamesList, updatedTime = ZonedDateTime.now())
