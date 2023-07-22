@@ -332,7 +332,7 @@ object BotApp extends App with StrictLogging {
 
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
   }
