@@ -275,7 +275,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         val activityEmbed = new EmbedBuilder()
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                         activityEmbed.setColor(14397256)
-                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleave.png")
+                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleaveyellow.png")
                         try {
                           activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
                         } catch {
