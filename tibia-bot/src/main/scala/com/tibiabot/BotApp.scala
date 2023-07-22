@@ -328,7 +328,7 @@ object BotApp extends App with StrictLogging {
   }
 
   // Start all world streams
-  startBot(None, None)
+  startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
@@ -775,6 +775,7 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+//1.5
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
     val guild = event.getGuild
@@ -785,7 +786,7 @@ object BotApp extends App with StrictLogging {
     val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else List.empty
-    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Golden_Newspaper.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Armageddon_Plans.gif" else ""
+    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
     val playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
       // run api against players
