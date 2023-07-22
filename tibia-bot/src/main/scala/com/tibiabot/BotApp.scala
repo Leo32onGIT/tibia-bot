@@ -3177,7 +3177,7 @@ object BotApp extends App with StrictLogging {
         if (channelIds.contains(event.getChannel.getId)) {
           return new EmbedBuilder()
           .setColor(3092790)
-          .setDescription(s":x: This command would delete this channel, run it somewhere else.")
+          .setDescription(s":x: That command would delete this channel, run it somewhere else.")
           .build()
         }
 
