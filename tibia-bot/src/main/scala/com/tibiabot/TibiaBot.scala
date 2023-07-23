@@ -134,7 +134,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val cacheFormerWorlds: List[String] = char.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
       BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.characters.character.level.toInt.toString, char.characters.character.vocation, char.characters.character.last_login.getOrElse("2022-01-01T01:00:00Z"), ZonedDateTime.now())
       **/
-      
+
       // update the guildIcon depending on the discord this would be posted to
       if (discordsData.contains(world)) {
         val discordsList = discordsData(world)
@@ -238,7 +238,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     activityEmbed.setColor(playerType)
                     activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/namechange.png")
                     try {
-                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                     } catch {
                       case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                       case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -287,7 +287,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityEmbed.setColor(14397256)
                         activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleave.png")
                         try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                         } catch {
                           case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                           case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -307,7 +307,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityEmbed.setColor(colorType)
                         activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                         try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                         } catch {
                           case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                           case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -425,7 +425,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       activityEmbed.setColor(colorType)
                       activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                       try {
-                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                       } catch {
                         case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                         case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -511,7 +511,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   activityEmbed.setColor(colorType)
                   activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                   try {
-                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                   } catch {
                     case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                     case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
