@@ -335,7 +335,7 @@ object BotApp extends App with StrictLogging {
 
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(60.seconds, 60.minutes) {
-    //updateDashboard()
+    updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
@@ -890,12 +890,9 @@ object BotApp extends App with StrictLogging {
 
     val conn = DriverManager.getConnection(url, username, password)
 
-    // Calculate the date and time 24 hours ago from the current date and time
-    val twentyFourHoursAgo = Timestamp.from(ZonedDateTime.now().minus(24, ChronoUnit.HOURS).toInstant)
-
     // Modify the DELETE statement to include a WHERE clause with the condition for time
     val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
-    deleteStatement.setTimestamp(1, twentyFourHoursAgo)
+    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(24, ChronoUnit.HOURS).toInstant))
     deleteStatement.executeUpdate()
 
     deleteStatement.close()
@@ -929,15 +926,18 @@ object BotApp extends App with StrictLogging {
         concatenatedListCache = concatenatedListCache ++ listCacheForWorld
       }
 
-      val concatenatedCacheNames: Set[String] = concatenatedListCache.map(_.name).toSet
       // Filter the listPlayers to get only those players that are not in the concatenatedListCache or whose updateTime is older than 24 hours
       val playersToUpdate: List[Players] = listPlayers.filterNot { player =>
         concatenatedListCache.find(_.name.toLowerCase == player.name.toLowerCase).exists { cache =>
           cache.updatedTime.isAfter(ZonedDateTime.now().minus(24, ChronoUnit.HOURS))
         }
       }
-      //val listPlayersFlow = Source(listCache.map(cache => (cache.name, cache.reason, cache.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
-
+      // Get the names of players in listPlayers
+      val playerNamesSet: Set[String] = listPlayers.map(_.name.toLowerCase).toSet
+      // Filter the concatenatedListCache to only include players that exist in listPlayers and meet the condition for update time
+      val filteredConcatenatedListCache: List[ListCache] = concatenatedListCache.filter { player =>
+        playerNamesSet.contains(player.name.toLowerCase) && player.updatedTime.isAfter(ZonedDateTime.now().minus(24, ChronoUnit.HOURS))
+      }
       // run api against players
       val listPlayersFlow = Source(playersToUpdate.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
@@ -951,7 +951,7 @@ object BotApp extends App with StrictLogging {
             "none" -> ListBuffer[(Int, String, String)]()
           )
           // Add concatenatedCacheNames to the respective vocationBuffers based on their vocations
-          for (player <- concatenatedListCache) {
+          for (player <- filteredConcatenatedListCache) {
             val pName = player.name
             val pWorld = player.world
             val pLvl = player.level // You might want to set an appropriate level here for characters in the cache
@@ -982,8 +982,9 @@ object BotApp extends App with StrictLogging {
               val charWorld = charResponse.characters.character.world
               val charLink = charUrl(charName)
               val charEmoji = vocEmoji(charResponse)
+              val pNameFormal = name.split(" ").map(_.capitalize).mkString(" ")
               val voc = charVocation.toLowerCase.split(' ').last
-              vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$charName]($charLink)** $guildIcon $reasonEmoji"))
+              vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon $reasonEmoji"))
               //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
               val formerNamesList = charResponse.characters.character.former_names.map(_.toList).getOrElse(Nil)
               val formerWorldsList = charResponse.characters.character.former_worlds.map(_.toList).getOrElse(Nil)

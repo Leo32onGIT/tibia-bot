@@ -126,15 +126,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val newDeaths = characterResponses.flatMap { char =>
       val charName = char.characters.character.name
       val guildName = char.characters.character.guild.map(_.name).getOrElse("")
+
       val formerNamesList: List[String] = char.characters.character.former_names.map(_.toList).getOrElse(Nil)
-      // update the list db cache
+
+      /**
       val cacheWorld = char.characters.character.world
       val cacheFormerWorlds: List[String] = char.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
-
-      // test caching
-      // // addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
       BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.characters.character.level.toInt.toString, char.characters.character.vocation, char.characters.character.last_login.getOrElse("2022-01-01T01:00:00Z"), ZonedDateTime.now())
-
+      **/
+      
       // update the guildIcon depending on the discord this would be posted to
       if (discordsData.contains(world)) {
         val discordsList = discordsData(world)
@@ -1106,6 +1106,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     try {
       var messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(BotApp.botUser)).toList.reverse.asJava
 
+      // val enemyTimer = enemiesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+      // if (ZonedDateTime.now().isAfter(neutralTimer.plusHours(6))) {
       // clear the channel every 6 hours
       val allyTimer = alliesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
       val neutralTimer = neutralsListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
