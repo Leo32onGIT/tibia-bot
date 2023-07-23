@@ -28,6 +28,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
 import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
+import java.time.temporal.ChronoUnit
 
 object BotApp extends App with StrictLogging {
 
@@ -63,6 +64,7 @@ object BotApp extends App with StrictLogging {
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
+  case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -328,13 +330,15 @@ object BotApp extends App with StrictLogging {
   }
 
   // Start all world streams
-  startBot(None, None)
+  startBot(None, None) // guild: Option[Guild], world: Option[String]
+  //clearListCache()
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(0.seconds, 60.minutes) {
-    updateDashboard()
+  actorSystem.scheduler.schedule(60.seconds, 60.minutes) {
+    //updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
+    cleanHuntedList()
   }
 
   // run hunted list cleanup every day at 6:30 PM AEST
@@ -342,19 +346,6 @@ object BotApp extends App with StrictLogging {
   private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
-
-  actorSystem.scheduler.schedule(initialDelay, interval) {
-    guilds.foreach{g =>
-      try {
-        if (!activityCommandBlocker.getOrElse(g.getId, false)) {
-          cleanHuntedList(g)
-        }
-      }
-      catch {
-        case _: Throwable => logger.info(s"Cleaning the hunted list failed for Guild ID: '${g.getId}' Guild Name: '${g.getName}'")
-      }
-    }
-  }
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
@@ -476,6 +467,7 @@ object BotApp extends App with StrictLogging {
     ***/
   }
 
+  /**
   private def cleanHuntedList(guild: Guild): Unit = {
     val listPlayers: List[Players] = huntedPlayersData.getOrElse(guild.getId, List.empty[Players])
     if (listPlayers.nonEmpty) {
@@ -535,6 +527,7 @@ object BotApp extends App with StrictLogging {
       }
     }
   }
+  **/
 
   private def updateDashboard(): Unit = {
     // Violent Bot Support discord
@@ -775,6 +768,140 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  private def getListTable(world: String): List[ListCache] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'list'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE list (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |former_worlds VARCHAR(255),
+           |name VARCHAR(255) NOT NULL,
+           |former_names VARCHAR(255),
+           |level VARCHAR(255) NOT NULL,
+           |guild_name VARCHAR(255),
+           |vocation VARCHAR(255) NOT NULL,
+           |last_login VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT name,former_names,world,former_worlds,guild_name,level,vocation,last_login,time FROM list WHERE world = '$world';")
+
+    val results = new ListBuffer[ListCache]()
+    while (result.next()) {
+
+      val guildName = Option(result.getString("guild_name")).getOrElse("")
+      val name = Option(result.getString("name")).getOrElse("")
+      val formerNames = Option(result.getString("former_names")).getOrElse("")
+      val formerNamesList = formerNames.split(",").toList
+      val world = Option(result.getString("world")).getOrElse("")
+      val formerWorlds = Option(result.getString("former_worlds")).getOrElse("")
+      val formerWorldsList = formerWorlds.split(",").toList
+      val level = Option(result.getString("level")).getOrElse("")
+      val vocation = Option(result.getString("vocation")).getOrElse("")
+      val lastLogin = Option(result.getString("last_login")).getOrElse("")
+      val updatedTimeTemporal = Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
+      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
+
+      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
+      results += ListCache(name, formerNamesList, world, formerWorldsList, guildName, level, vocation, lastLogin, updatedTime)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
+
+
+  def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val selectStatement = conn.prepareStatement("SELECT name FROM list WHERE LOWER(name) = LOWER(?);")
+    selectStatement.setString(1, name)
+    val resultSet = selectStatement.executeQuery()
+
+    if (resultSet.next()) {
+      // Update existing row
+      val updateStatement = conn.prepareStatement(
+        s"""
+           |UPDATE list
+           |SET former_names = ?, world = ?, former_worlds = ?, guild_name = ?, level = ?, vocation = ?, last_login = ?, time = ?
+           |WHERE LOWER(name) = LOWER(?);
+           |""".stripMargin
+      )
+      updateStatement.setString(1, formerNames.mkString(","))
+      updateStatement.setString(2, world.capitalize)
+      updateStatement.setString(3, formerWorlds.mkString(","))
+      updateStatement.setString(4, guild)
+      updateStatement.setString(5, level)
+      updateStatement.setString(6, vocation)
+      updateStatement.setString(7, lastLogin)
+      updateStatement.setTimestamp(8, Timestamp.from(updatedTime.toInstant))
+      updateStatement.setString(9, name)
+      updateStatement.executeUpdate()
+      updateStatement.close()
+    } else {
+      // Insert new row
+      val insertStatement = conn.prepareStatement(
+        s"""
+           |INSERT INTO list(name, former_names, world, former_worlds, guild_name, level, vocation, last_login, time)
+           |VALUES (?,?,?,?,?,?,?,?,?);
+           |""".stripMargin
+      )
+      insertStatement.setString(1, name)
+      insertStatement.setString(2, formerNames.mkString(","))
+      insertStatement.setString(3, world.capitalize)
+      insertStatement.setString(4, formerWorlds.mkString(","))
+      insertStatement.setString(5, guild)
+      insertStatement.setString(6, level)
+      insertStatement.setString(7, vocation)
+      insertStatement.setString(8, lastLogin)
+      insertStatement.setTimestamp(9, Timestamp.from(updatedTime.toInstant))
+      insertStatement.executeUpdate()
+      insertStatement.close()
+    }
+
+    selectStatement.close()
+    conn.close()
+  }
+
+  private def cleanHuntedList(): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+
+    // Calculate the date and time 24 hours ago from the current date and time
+    val twentyFourHoursAgo = Timestamp.from(ZonedDateTime.now().minus(24, ChronoUnit.HOURS).toInstant)
+
+    // Modify the DELETE statement to include a WHERE clause with the condition for time
+    val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
+    deleteStatement.setTimestamp(1, twentyFourHoursAgo)
+    deleteStatement.executeUpdate()
+
+    deleteStatement.close()
+    conn.close()
+  }
+
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
     val guild = event.getGuild
@@ -785,11 +912,34 @@ object BotApp extends App with StrictLogging {
     val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else List.empty
-    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Golden_Newspaper.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Armageddon_Plans.gif" else ""
+    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
     val playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
+
+      // Players(name: String, reason: String, reasonText: String, addedBy: String)
+      // WIP
+      // getListTable(world: String)
+      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login, String, updatedTime: ZonedDateTime)
+      //val listPlayersFlow = Source(listCache.map(cache => (cache.name, cache.reason, cache.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+      /// Get the list of all worlds
+      val allWorlds: List[Worlds] = worldConfig(guild)
+      var concatenatedListCache: List[ListCache] = List.empty[ListCache]
+      for (world <- allWorlds) {
+        val listCacheForWorld: List[ListCache] = getListTable(world.name)
+        concatenatedListCache = concatenatedListCache ++ listCacheForWorld
+      }
+
+      val concatenatedCacheNames: Set[String] = concatenatedListCache.map(_.name).toSet
+      // Filter the listPlayers to get only those players that are not in the concatenatedListCache or whose updateTime is older than 24 hours
+      val playersToUpdate: List[Players] = listPlayers.filterNot { player =>
+        concatenatedListCache.find(_.name.toLowerCase == player.name.toLowerCase).exists { cache =>
+          cache.updatedTime.isAfter(ZonedDateTime.now().minus(24, ChronoUnit.HOURS))
+        }
+      }
+      //val listPlayersFlow = Source(listCache.map(cache => (cache.name, cache.reason, cache.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+
       // run api against players
-      val listPlayersFlow = Source(listPlayers.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
+      val listPlayersFlow = Source(playersToUpdate.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
         case Success(output) =>
@@ -800,6 +950,26 @@ object BotApp extends App with StrictLogging {
             "sorcerer" -> ListBuffer[(Int, String, String)](),
             "none" -> ListBuffer[(Int, String, String)]()
           )
+          // Add concatenatedCacheNames to the respective vocationBuffers based on their vocations
+          for (player <- concatenatedListCache) {
+            val pName = player.name
+            val pWorld = player.world
+            val pLvl = player.level // You might want to set an appropriate level here for characters in the cache
+            val pVoc = player.vocation.toLowerCase.split(' ').last
+            val pEmoji = pVoc match {
+              case "knight" => ":shield:"
+              case "druid" => ":snowflake:"
+              case "sorcerer" => ":fire:"
+              case "paladin" => ":bow_and_arrow:"
+              case "none" => ":hatching_chick:"
+              case _ => ""
+            }
+            val pGuild = player.guild
+            val pIcon = if (pGuild != "" && arg == "allies") Config.allyGuild else if (pGuild != "" && arg == "hunted") Config.enemyGuild else if (pGuild == "" && arg == "hunted") Config.enemy else ""
+            if (pVoc != "") {
+              vocationBuffers(pVoc) += ((pLvl.toInt, pWorld, s"$pEmoji **$pLvl** — **[${pName}](${charUrl(pName)})** $pIcon"))
+            }
+          }
           output.foreach { case (charResponse, name, reason, _) =>
             if (charResponse.characters.character.name != "") {
               val reasonEmoji = if (reason == "true") ":pencil:" else ""
@@ -814,6 +984,11 @@ object BotApp extends App with StrictLogging {
               val charEmoji = vocEmoji(charResponse)
               val voc = charVocation.toLowerCase.split(' ').last
               vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$charName]($charLink)** $guildIcon $reasonEmoji"))
+              //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
+              val formerNamesList = charResponse.characters.character.former_names.map(_.toList).getOrElse(Nil)
+              val formerWorldsList = charResponse.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
+              val charLastLogin = charResponse.characters.character.last_login.getOrElse("2022-01-01T01:00:00Z")
+              addListToCache(charName, formerNamesList, charWorld, formerWorldsList, charGuildName, charLevel.toString, charVocation, charLastLogin, ZonedDateTime.now())
             } else {
               vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
             }
@@ -856,6 +1031,8 @@ object BotApp extends App with StrictLogging {
               case (map, (k, v)) => map + (k -> (v ++ map.getOrElse(k, List())))
             }
           }
+
+
           // output a List[String] for the embed
           val playersList = List(playerHeader) ++ createWorldList(allPlayers)
 
