@@ -45,6 +45,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   recentLevels ++= BotApp.getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time)))
 
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
+  private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -129,11 +130,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
       val formerNamesList: List[String] = char.characters.character.former_names.map(_.toList).getOrElse(Nil)
 
-      /**
-      val cacheWorld = char.characters.character.world
-      val cacheFormerWorlds: List[String] = char.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
-      BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.characters.character.level.toInt.toString, char.characters.character.vocation, char.characters.character.last_login.getOrElse("2022-01-01T01:00:00Z"), ZonedDateTime.now())
-      **/
+      // Caching attempt
+      val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+      if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
+        val cacheWorld = char.characters.character.world
+        val cacheFormerWorlds: List[String] = char.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
+        BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.characters.character.level.toInt.toString, char.characters.character.vocation, char.characters.character.last_login.getOrElse(""), ZonedDateTime.now())
+        cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
+      }
 
       // update the guildIcon depending on the discord this would be posted to
       if (discordsData.contains(world)) {

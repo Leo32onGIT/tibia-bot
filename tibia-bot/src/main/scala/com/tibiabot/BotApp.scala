@@ -26,6 +26,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
+import java.time.format._
 import scala.util.{Failure, Success}
 import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
 import java.time.temporal.ChronoUnit
@@ -892,12 +893,22 @@ object BotApp extends App with StrictLogging {
 
     // Modify the DELETE statement to include a WHERE clause with the condition for time
     val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
-    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(24, ChronoUnit.HOURS).toInstant))
+    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(7, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
 
     deleteStatement.close()
     conn.close()
   }
+
+  def dateStringToEpochSeconds(dateString: String): String = {
+    if (dateString == "") {
+      s"| `No login time`"
+    } else {
+     val formatter = DateTimeFormatter.ISO_INSTANT
+     val instant = Instant.from(formatter.parse(dateString))
+     s"| <t:${instant.getEpochSecond().toString}:R>"
+   }
+ }
 
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
@@ -913,11 +924,6 @@ object BotApp extends App with StrictLogging {
     val playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
 
-      // Players(name: String, reason: String, reasonText: String, addedBy: String)
-      // WIP
-      // getListTable(world: String)
-      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login, String, updatedTime: ZonedDateTime)
-      //val listPlayersFlow = Source(listCache.map(cache => (cache.name, cache.reason, cache.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
       /// Get the list of all worlds
       val allWorlds: List[Worlds] = worldConfig(guild)
       var concatenatedListCache: List[ListCache] = List.empty[ListCache]
@@ -965,14 +971,17 @@ object BotApp extends App with StrictLogging {
               case _ => ""
             }
             val pGuild = player.guild
+            val pLoginRelative = dateStringToEpochSeconds(player.last_login) // "2022-01-01T01:00:00Z"
             val pIcon = if (pGuild != "" && arg == "allies") Config.allyGuild else if (pGuild != "" && arg == "hunted") Config.enemyGuild else if (pGuild == "" && arg == "hunted") Config.enemy else ""
             if (pVoc != "") {
-              vocationBuffers(pVoc) += ((pLvl.toInt, pWorld, s"$pEmoji **$pLvl** — **[${pName}](${charUrl(pName)})** $pIcon"))
+              // only show players on worlds that you have setup
+              if (allWorlds.exists(_.name.toLowerCase == pWorld.toLowerCase)) {
+                vocationBuffers(pVoc) += ((pLvl.toInt, pWorld, s"$pEmoji **$pLvl** — **[${pName}](${charUrl(pName)})** $pIcon $pLoginRelative"))
+              }
             }
           }
-          output.foreach { case (charResponse, name, reason, _) =>
+          output.foreach { case (charResponse, name, _, _) =>
             if (charResponse.characters.character.name != "") {
-              val reasonEmoji = if (reason == "true") ":pencil:" else ""
               val charName = charResponse.characters.character.name
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
@@ -984,11 +993,15 @@ object BotApp extends App with StrictLogging {
               val charEmoji = vocEmoji(charResponse)
               val pNameFormal = name.split(" ").map(_.capitalize).mkString(" ")
               val voc = charVocation.toLowerCase.split(' ').last
-              vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon $reasonEmoji"))
+              val lastLoginTime = charResponse.characters.character.last_login.getOrElse("")
+              // only show players on worlds that you have setup
+              if (allWorlds.exists(_.name.toLowerCase == charWorld.toLowerCase)) {
+                vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon ${dateStringToEpochSeconds(lastLoginTime)}"))
+              }
               //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
               val formerNamesList = charResponse.characters.character.former_names.map(_.toList).getOrElse(Nil)
               val formerWorldsList = charResponse.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
-              val charLastLogin = charResponse.characters.character.last_login.getOrElse("2022-01-01T01:00:00Z")
+              val charLastLogin = charResponse.characters.character.last_login.getOrElse("")
               addListToCache(charName, formerNamesList, charWorld, formerWorldsList, charGuildName, charLevel.toString, charVocation, charLastLogin, ZonedDateTime.now())
             } else {
               vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
