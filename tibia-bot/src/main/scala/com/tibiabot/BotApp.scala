@@ -901,13 +901,17 @@ object BotApp extends App with StrictLogging {
   }
 
   def dateStringToEpochSeconds(dateString: String): String = {
-    if (dateString == "") {
-      s"| `No login time`"
-    } else {
+    if (dateString != "") {
      val formatter = DateTimeFormatter.ISO_INSTANT
      val instant = Instant.from(formatter.parse(dateString))
-     s"| <t:${instant.getEpochSecond().toString}:R>"
-   }
+     val now = Instant.now()
+
+      if (Math.abs(instant.until(now, ChronoUnit.HOURS)) <= 12) {
+        s"<:daily:1133349016814485584> <t:${instant.getEpochSecond().toString}:R>"
+      } else {
+          ""
+      }
+    } else ""
  }
 
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
