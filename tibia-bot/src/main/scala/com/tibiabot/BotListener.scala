@@ -1,6 +1,7 @@
 package com.tibiabot
 
 import com.tibiabot.BotApp.commands
+import com.tibiabot.BotApp.SatchelStamp
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
@@ -8,6 +9,9 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.interactions.components.buttons._
+import java.time.ZonedDateTime
+import net.dv8tion.jda.api.interactions.components.ActionRow
 
 import scala.jdk.CollectionConverters._
 
@@ -39,6 +43,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         handleHelp(event)
       case "repair" =>
         handleRepair(event)
+      case "galthen" =>
+        handleGalthen(event)
       case _ =>
     }
   }
@@ -54,141 +60,165 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val embed = event.getInteraction.getMessage.getEmbeds
     val title = if (!embed.isEmpty) embed.get(0).getTitle else ""
     val button = event.getComponentId
     val guild = event.getGuild
-    val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
     val user = event.getUser
-    var responseText = ":x: An issue occured trying to add/remove you from this role, please try again."
-    if (roleType == "fullbless") {
-      val world = title.replace(":crossed_swords:", "").trim()
-      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-      val role = guild.getRoleById(worldConfigData("fullbless_role"))
-      if (role != null) {
-        if (button == "add") {
-          // get role add user to it
-          try {
-            guild.addRoleToMember(user, role).queue()
-            responseText = s":gear: You have been added to the <@&${role.getId}> role."
-          } catch {
-            case _: Throwable =>
-              responseText = s":x: Failed to add you to the <@&${role.getId}> role."
-              val discordInfo = BotApp.discordRetrieveConfig(guild)
-              val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
-              val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null) {
-                val commandPlayer = s"<@${user.getId}>"
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
-                adminEmbed.setColor(3092790) // orange for bot auto command
-                try {
-                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                } catch {
-                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                  case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+    var responseText = ":x: An unknown error occured, please try again."
+
+    if (button == "galthenSet") {
+      event.deferEdit().queue();
+      val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
+      BotApp.addGalthen(user.getId, ZonedDateTime.now())
+      responseText = s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${user.getId()}> <t:$when:R>."
+      event.getHook().editOriginalComponents(ActionRow.of(
+        Button.secondary("galthenSet", "Reset").asDisabled,
+        Button.danger("galthenRemove", "Clear")
+      )).queue();
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).build()
+      event.getHook().editOriginalEmbeds(newEmbed).queue();
+    } else if (button == "galthenRemove") {
+      event.deferEdit().queue();
+      BotApp.delGalthen(user.getId)
+      responseText = s"<:satchel:1030348072577945651> **Galthen Satchel** cooldown tracker for <@${user.getId()}> has been `Cleared`."
+      event.getHook().editOriginalComponents(ActionRow.of(
+        Button.secondary("galthenSet", "Reset"),
+        Button.danger("galthenRemove", "Clear").asDisabled
+      )).queue();
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
+      event.getHook().editOriginalEmbeds(newEmbed).queue();
+    } else {
+      event.deferReply(true).queue()
+      val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
+      if (roleType == "fullbless") {
+        val world = title.replace(":crossed_swords:", "").trim()
+        val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+        val role = guild.getRoleById(worldConfigData("fullbless_role"))
+        if (role != null) {
+          if (button == "add") {
+            // get role add user to it
+            try {
+              guild.addRoleToMember(user, role).queue()
+              responseText = s":gear: You have been added to the <@&${role.getId}> role."
+            } catch {
+              case _: Throwable =>
+                responseText = s":x: Failed to add you to the <@&${role.getId}> role."
+                val discordInfo = BotApp.discordRetrieveConfig(guild)
+                val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
+                val adminTextChannel = guild.getTextChannelById(adminChannelId)
+                if (adminTextChannel != null) {
+                  val commandPlayer = s"<@${user.getId}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setColor(3092790) // orange for bot auto command
+                  try {
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  } catch {
+                    case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                    case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+                  }
                 }
-              }
-          }
-        } else if (button == "remove") {
-          // remove role
-          try {
-            guild.removeRoleFromMember(user, role).queue()
-            responseText = s":gear: You have been removed from the <@&${role.getId}> role."
-          } catch {
-            case _: Throwable =>
-              responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
-              val discordInfo = BotApp.discordRetrieveConfig(guild)
-              val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
-              val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null) {
-                val commandPlayer = s"<@${user.getId}>"
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
-                adminEmbed.setColor(3092790) // orange for bot auto command
-                try {
-                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                } catch {
-                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                  case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+            }
+          } else if (button == "remove") {
+            // remove role
+            try {
+              guild.removeRoleFromMember(user, role).queue()
+              responseText = s":gear: You have been removed from the <@&${role.getId}> role."
+            } catch {
+              case _: Throwable =>
+                responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
+                val discordInfo = BotApp.discordRetrieveConfig(guild)
+                val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
+                val adminTextChannel = guild.getTextChannelById(adminChannelId)
+                if (adminTextChannel != null) {
+                  val commandPlayer = s"<@${user.getId}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setColor(3092790) // orange for bot auto command
+                  try {
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  } catch {
+                    case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                    case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+                  }
                 }
-              }
+            }
           }
+        } else {
+          // role doesn't exist
+          responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
-      } else {
-        // role doesn't exist
-        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
-      }
-    } else if (roleType == "nemesis") {
-      val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
-      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-      val role = guild.getRoleById(worldConfigData("nemesis_role"))
-      if (role != null) {
-        if (button == "add") {
-          // get role add user to it
-          try {
-            guild.addRoleToMember(user, role).queue()
-            responseText = s":gear: You have been added to the <@&${role.getId}> role."
-          } catch {
-            case _: Throwable =>
-              responseText = s":x: Failed to add you to the <@&${role.getId}> role."
-              val discordInfo = BotApp.discordRetrieveConfig(guild)
-              val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
-              val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null) {
-                val commandPlayer = s"<@${user.getId}>"
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
-                adminEmbed.setColor(3092790) // orange for bot auto command
-                try {
-                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                } catch {
-                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                  case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+      } else if (roleType == "nemesis") {
+        val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
+        val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+        val role = guild.getRoleById(worldConfigData("nemesis_role"))
+        if (role != null) {
+          if (button == "add") {
+            // get role add user to it
+            try {
+              guild.addRoleToMember(user, role).queue()
+              responseText = s":gear: You have been added to the <@&${role.getId}> role."
+            } catch {
+              case _: Throwable =>
+                responseText = s":x: Failed to add you to the <@&${role.getId}> role."
+                val discordInfo = BotApp.discordRetrieveConfig(guild)
+                val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
+                val adminTextChannel = guild.getTextChannelById(adminChannelId)
+                if (adminTextChannel != null) {
+                  val commandPlayer = s"<@${user.getId}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setColor(3092790) // orange for bot auto command
+                  try {
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  } catch {
+                    case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                    case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+                  }
                 }
-              }
-          }
-        } else if (button == "remove") {
-          // remove role
-          try {
-            guild.removeRoleFromMember(user, role).queue()
-            responseText = s":gear: You have been removed from the <@&${role.getId}> role."
-          } catch {
-            case _: Throwable =>
-              responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
-              val discordInfo = BotApp.discordRetrieveConfig(guild)
-              val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
-              val adminTextChannel = guild.getTextChannelById(adminChannelId)
-              if (adminTextChannel != null) {
-                val commandPlayer = s"<@${user.getId}>"
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(":x: a player interaction has failed:")
-                adminEmbed.setDescription(s"Failed to remove user $commandPlayer from the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
-                adminEmbed.setColor(3092790) // orange for bot auto command
-                try {
-                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                } catch {
-                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                  case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+            }
+          } else if (button == "remove") {
+            // remove role
+            try {
+              guild.removeRoleFromMember(user, role).queue()
+              responseText = s":gear: You have been removed from the <@&${role.getId}> role."
+            } catch {
+              case _: Throwable =>
+                responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
+                val discordInfo = BotApp.discordRetrieveConfig(guild)
+                val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
+                val adminTextChannel = guild.getTextChannelById(adminChannelId)
+                if (adminTextChannel != null) {
+                  val commandPlayer = s"<@${user.getId}>"
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setDescription(s"Failed to remove user $commandPlayer from the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setColor(3092790) // orange for bot auto command
+                  try {
+                    adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                  } catch {
+                    case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                    case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+                  }
                 }
-              }
+            }
           }
+        } else {
+          // role doesn't exist
+          responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
-      } else {
-        // role doesn't exist
-        responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
       }
+      val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+      event.getHook.sendMessageEmbeds(replyEmbed).queue()
     }
-    val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-    event.getHook.sendMessageEmbeds(replyEmbed).queue()
   }
 
   private def handleSetup(event: SlashCommandInteractionEvent): Unit = {
@@ -200,6 +230,30 @@ class BotListener extends ListenerAdapter with StrictLogging {
     event.deferReply(true).queue()
     val embed = BotApp.removeChannels(event)
     event.getHook.sendMessageEmbeds(embed).queue()
+  }
+
+  private def handleGalthen(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val satchelTime = BotApp.getGalthenTable(event.getUser.getId)
+    val embed = new EmbedBuilder()
+    val firstSatchel = satchelTime.headOption
+    firstSatchel match {
+      case Some(satchel) =>
+        val when = satchel.when.plusDays(30).toEpochSecond.toString()
+        embed.setColor(9855533)
+        embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${event.getUser.getId}> <t:$when:R>.")
+        event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+          Button.secondary("galthenSet", "Reset").asDisabled,
+          Button.danger("galthenRemove", "Clear")
+        ).queue()
+      case None =>
+        embed.setColor(178877)
+        embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${event.getUser.getId}>!\nmark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+        event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+          Button.success("galthenSet", "Collected"),
+          Button.danger("galthenRemove", "Clear").asDisabled
+        ).queue()
+    }
   }
 
   private def handleHunted(event: SlashCommandInteractionEvent): Unit = {

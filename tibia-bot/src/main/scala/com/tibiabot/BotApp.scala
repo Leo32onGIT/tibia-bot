@@ -66,6 +66,7 @@ object BotApp extends App with StrictLogging {
   case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
+  case class SatchelStamp(user: String, when: ZonedDateTime)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -314,7 +315,13 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "world", "What world are you trying to recreate channels for?").setRequired(true),
       )
 
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand)
+  // set galthen satchel reminder
+  private val galthenCommand: SlashCommandData = Commands.slash("galthen", "Use this to set a galthen satchel cooldown timer")
+    .addSubcommands(
+      new SubcommandData("satchel", "Use this to set a galthen satchel cooldown timer")
+    )
+
+  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, galthenCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -323,7 +330,7 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
-      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand)
+      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, galthenCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -340,6 +347,7 @@ object BotApp extends App with StrictLogging {
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
+    cleanGalthenList()
   }
 
   // run hunted list cleanup every day at 6:30 PM AEST
@@ -828,6 +836,105 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
+  // V1.6 Galthen Satchel Command
+  def getGalthenTable(userId: String): List[SatchelStamp] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'satchel'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE satchel (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |userid VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+
+    val result = statement.executeQuery(s"SELECT time FROM satchel WHERE userid = '$userId';")
+
+    val results = new ListBuffer[SatchelStamp]()
+    while (result.next()) {
+
+      val updatedTimeTemporal = Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
+      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
+
+      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
+      results += SatchelStamp(userId, updatedTime)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
+
+  def delGalthen(user: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+
+    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ?;")
+    deleteStatement.setString(1, user)
+    deleteStatement.executeUpdate()
+
+    deleteStatement.close()
+    conn.close()
+  }
+
+  def addGalthen(user: String, when: ZonedDateTime): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val selectStatement = conn.prepareStatement("SELECT time FROM satchel WHERE userid = ?;")
+    selectStatement.setString(1, user)
+    val resultSet = selectStatement.executeQuery()
+
+    if (resultSet.next()) {
+      // Update existing row
+      val updateStatement = conn.prepareStatement(
+        s"""
+           |UPDATE satchel
+           |SET time = ?
+           |WHERE userid = ?;
+           |""".stripMargin
+      )
+      updateStatement.setTimestamp(1, Timestamp.from(when.toInstant))
+      updateStatement.setString(2, user)
+      updateStatement.executeUpdate()
+      updateStatement.close()
+    } else {
+      // Insert new row
+      val insertStatement = conn.prepareStatement(
+        s"""
+           |INSERT INTO satchel(userid, time)
+           |VALUES (?,?);
+           |""".stripMargin
+      )
+      insertStatement.setString(1, user)
+      insertStatement.setTimestamp(2, Timestamp.from(when.toInstant))
+      insertStatement.executeUpdate()
+      insertStatement.close()
+    }
+
+    selectStatement.close()
+    conn.close()
+  }
 
   def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
@@ -895,7 +1002,21 @@ object BotApp extends App with StrictLogging {
     val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
     deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(7, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
+    deleteStatement.close()
+    conn.close()
+  }
 
+  private def cleanGalthenList(): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+
+    // Modify the DELETE statement to include a WHERE clause with the condition for time
+    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE time < ?;")
+    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
+    deleteStatement.executeUpdate()
     deleteStatement.close()
     conn.close()
   }
@@ -905,11 +1026,10 @@ object BotApp extends App with StrictLogging {
      val formatter = DateTimeFormatter.ISO_INSTANT
      val instant = Instant.from(formatter.parse(dateString))
      val now = Instant.now()
-
-      if (Math.abs(instant.until(now, ChronoUnit.HOURS)) <= 12) {
-        s"<:daily:1133349016814485584> <t:${instant.getEpochSecond().toString}:R>"
+      if (Math.abs(instant.until(now, ChronoUnit.HOURS)) <= 24) {
+        s"<:daily:1133349016814485584><t:${instant.getEpochSecond().toString}:R>"
       } else {
-          ""
+        ""
       }
     } else ""
  }
