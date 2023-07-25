@@ -17,6 +17,7 @@ import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, Opti
 import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
 import org.postgresql.util.PSQLException
+import net.dv8tion.jda.api.entities.User
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -330,7 +331,7 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
-      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, galthenCommand)
+      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand) //galthenCommand
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -342,8 +343,8 @@ object BotApp extends App with StrictLogging {
   //clearListCache()
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 60.minutes) {
-    updateDashboard()
+  actorSystem.scheduler.schedule(60.seconds, 2.minutes) {
+    //updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
@@ -1013,11 +1014,42 @@ object BotApp extends App with StrictLogging {
 
     val conn = DriverManager.getConnection(url, username, password)
 
-    // Modify the DELETE statement to include a WHERE clause with the condition for time
+    // Retrieve the data before deletion
+    val selectStatement = conn.prepareStatement("SELECT userid,time FROM satchel WHERE time < ?;")
+    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(2, ChronoUnit.MINUTES).toInstant))
+    val resultSet = selectStatement.executeQuery()
+
+    // Retrieve the data from the result set
+    while (resultSet.next()) {
+      val userId = resultSet.getString("userid")
+      val user: User = jda.retrieveUserById(userId).complete()
+
+      if (user != null) {
+        val message = s"<:satchel:1030348072577945651> **Galthen Satchel** cooldown has expired.\nIt's time to grab them again!" // Customize the DM message here
+        try {
+          user.openPrivateChannel().queue { privateChannel =>
+            val embed = new EmbedBuilder()
+            embed.setColor(178877)
+            embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${userId}>!\nmark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+            privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.success("galthenSet", "Collected"),
+              Button.danger("galthenRemove", "Clear").asDisabled
+            ).queue()
+          }
+        } catch {
+          case ex: Exception =>
+        }
+      }
+    }
+
+    selectStatement.close()
+
+    // Now you have the list of userids and time before deletion, you can proceed with deletion
     val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE time < ?;")
     deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
     deleteStatement.close()
+
     conn.close()
   }
 
