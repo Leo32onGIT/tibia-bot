@@ -331,7 +331,7 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
-      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand) //galthenCommand
+      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, galthenCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -343,8 +343,8 @@ object BotApp extends App with StrictLogging {
   //clearListCache()
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 2.minutes) {
-    //updateDashboard()
+  actorSystem.scheduler.schedule(60.seconds, 60.minutes) {
+    updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
@@ -1016,7 +1016,7 @@ object BotApp extends App with StrictLogging {
 
     // Retrieve the data before deletion
     val selectStatement = conn.prepareStatement("SELECT userid,time FROM satchel WHERE time < ?;")
-    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(2, ChronoUnit.MINUTES).toInstant))
+    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
     val resultSet = selectStatement.executeQuery()
 
     // Retrieve the data from the result set
@@ -1025,19 +1025,18 @@ object BotApp extends App with StrictLogging {
       val user: User = jda.retrieveUserById(userId).complete()
 
       if (user != null) {
-        val message = s"<:satchel:1030348072577945651> **Galthen Satchel** cooldown has expired.\nIt's time to grab them again!" // Customize the DM message here
         try {
           user.openPrivateChannel().queue { privateChannel =>
             val embed = new EmbedBuilder()
             embed.setColor(178877)
-            embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${userId}>!\nmark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+            embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${userId}>.\nMark it as **Collected** once you've looted it <:gold:1133502093039251486>")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
-              Button.success("galthenSet", "Collected"),
-              Button.danger("galthenRemove", "Clear").asDisabled
+              Button.success("galthenRemind", "Collected"),
+              Button.secondary("galthenClear", "Dismiss")
             ).queue()
           }
         } catch {
-          case ex: Exception =>
+          case ex: Exception => //
         }
       }
     }

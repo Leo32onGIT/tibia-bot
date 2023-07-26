@@ -71,23 +71,31 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.deferEdit().queue();
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
       BotApp.addGalthen(user.getId, ZonedDateTime.now())
-      responseText = s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${user.getId()}> <t:$when:R>."
+      responseText = s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
       event.getHook().editOriginalComponents(ActionRow.of(
-        Button.secondary("galthenSet", "Reset").asDisabled,
+        Button.success("galthenSet", "Collected").asDisabled,
         Button.danger("galthenRemove", "Clear")
       )).queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).build()
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
     } else if (button == "galthenRemove") {
-      event.deferEdit().queue();
+      event.deferEdit().queue()
       BotApp.delGalthen(user.getId)
-      responseText = s"<:satchel:1030348072577945651> **Galthen Satchel** cooldown tracker for <@${user.getId()}> has been `Cleared`."
-      event.getHook().editOriginalComponents(ActionRow.of(
-        Button.secondary("galthenSet", "Reset"),
-        Button.danger("galthenRemove", "Clear").asDisabled
-      )).queue();
+      responseText = s"Your **Galthen Satchel** <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
+      event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
+    } else if (button == "galthenRemind") { // WIP
+      event.deferEdit().queue()
+      val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
+      BotApp.addGalthen(user.getId, ZonedDateTime.now())
+      responseText = s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
+      event.getHook().editOriginalComponents().queue();
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
+      event.getHook().editOriginalEmbeds(newEmbed).queue()
+    } else if (button == "galthenClear") { // WIP
+      event.deferEdit().queue()
+      event.getHook().editOriginalComponents().queue()
     } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
@@ -241,14 +249,15 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case Some(satchel) =>
         val when = satchel.when.plusDays(30).toEpochSecond.toString()
         embed.setColor(9855533)
-        embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${event.getUser.getId}> <t:$when:R>.")
+        embed.setFooter("You will be sent a message when the cooldown expires")
+        embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}> <t:$when:R>.")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
-          Button.secondary("galthenSet", "Reset").asDisabled,
+          Button.success("galthenSet", "Collected").asDisabled,
           Button.danger("galthenRemove", "Clear")
         ).queue()
       case None =>
         embed.setColor(178877)
-        embed.setDescription(s"<:satchel:1030348072577945651> **Galthen Satchel** can be collected by <@${event.getUser.getId}>!\nmark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+        embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}>!\nMark it as **Collected** once you've looted it <:gold:1133502093039251486>")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled
