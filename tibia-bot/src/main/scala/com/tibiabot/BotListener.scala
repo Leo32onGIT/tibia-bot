@@ -257,7 +257,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         ).queue()
       case None =>
         embed.setColor(178877)
-        embed.setDescription(s"This is a <:satchel:1030348072577945651> cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the cooldown expires.")
+        embed.setDescription(s"This is a **Galthen Satchel** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the `30 day cooldown` expires.")
+        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled

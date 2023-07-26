@@ -1029,7 +1029,8 @@ object BotApp extends App with StrictLogging {
           user.openPrivateChannel().queue { privateChannel =>
             val embed = new EmbedBuilder()
             embed.setColor(178877)
-            embed.setDescription(s"a <:satchel:1030348072577945651> cooldown has expired for c<@${userId}>.\nIt's time to grab another <:satchel:1030348072577945651>\nMark it as **Collected** if you would like me to message you again.")
+            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            embed.setDescription(s"Your **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown has expired!\nGo get them bags! <:gold:1133502093039251486>\n\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the `30 day cooldown` expires again.")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")
