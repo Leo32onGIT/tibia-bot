@@ -1029,7 +1029,7 @@ object BotApp extends App with StrictLogging {
           user.openPrivateChannel().queue { privateChannel =>
             val embed = new EmbedBuilder()
             embed.setColor(178877)
-            embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${userId}>.\nMark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+            embed.setDescription(s"a <:satchel:1030348072577945651> cooldown has expired for c<@${userId}>.\nIt's time to grab another <:satchel:1030348072577945651>\nMark it as **Collected** if you would like me to message you again.")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")

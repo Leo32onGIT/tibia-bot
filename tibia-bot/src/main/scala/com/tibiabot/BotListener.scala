@@ -71,7 +71,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.deferEdit().queue();
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
       BotApp.addGalthen(user.getId, ZonedDateTime.now())
-      responseText = s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
+      responseText = s"a <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
       event.getHook().editOriginalComponents(ActionRow.of(
         Button.success("galthenSet", "Collected").asDisabled,
         Button.danger("galthenRemove", "Clear")
@@ -81,7 +81,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else if (button == "galthenRemove") {
       event.deferEdit().queue()
       BotApp.delGalthen(user.getId)
-      responseText = s"Your **Galthen Satchel** <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
+      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
@@ -89,7 +89,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.deferEdit().queue()
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
       BotApp.addGalthen(user.getId, ZonedDateTime.now())
-      responseText = s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
+      responseText = s"a <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
       event.getHook().editOriginalEmbeds(newEmbed).queue()
@@ -250,14 +250,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val when = satchel.when.plusDays(30).toEpochSecond.toString()
         embed.setColor(9855533)
         embed.setFooter("You will be sent a message when the cooldown expires")
-        embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}> <t:$when:R>.")
+        embed.setDescription(s"a <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}> <t:$when:R>.")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected").asDisabled,
           Button.danger("galthenRemove", "Clear")
         ).queue()
       case None =>
         embed.setColor(178877)
-        embed.setDescription(s"a **Galthen Satchel** <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}>!\nMark it as **Collected** once you've looted it <:gold:1133502093039251486>")
+        embed.setDescription(s"This is a <:satchel:1030348072577945651> cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the cooldown expires.")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled
