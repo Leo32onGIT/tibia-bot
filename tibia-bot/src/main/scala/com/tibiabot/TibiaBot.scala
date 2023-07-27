@@ -45,6 +45,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   recentLevels ++= BotApp.getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time)))
 
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
+  private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -126,7 +127,18 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val newDeaths = characterResponses.flatMap { char =>
       val charName = char.characters.character.name
       val guildName = char.characters.character.guild.map(_.name).getOrElse("")
+
       val formerNamesList: List[String] = char.characters.character.former_names.map(_.toList).getOrElse(Nil)
+
+      // Caching attempt
+      val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+      if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
+        val cacheWorld = char.characters.character.world
+        val cacheFormerWorlds: List[String] = char.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
+        BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.characters.character.level.toInt.toString, char.characters.character.vocation, char.characters.character.last_login.getOrElse(""), ZonedDateTime.now())
+        cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
+      }
+
       // update the guildIcon depending on the discord this would be posted to
       if (discordsData.contains(world)) {
         val discordsList = discordsData(world)
@@ -230,7 +242,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     activityEmbed.setColor(playerType)
                     activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/namechange.png")
                     try {
-                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                     } catch {
                       case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                       case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -258,6 +270,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
               if (updatesTimeFromActivityData.plusMinutes(6).isBefore(ZonedDateTime.now())) {
+
+                //charResponse.characters.character.world
                 // Guild has changed
                 if (guildName != guildNameFromActivityData) {
                   //val newGuild = if (guildName == "") "None" else guildName
@@ -277,7 +291,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityEmbed.setColor(14397256)
                         activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleaveyellow.png")
                         try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                         } catch {
                           case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                           case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -297,7 +311,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityEmbed.setColor(colorType)
                         activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                         try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                         } catch {
                           case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                           case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -415,7 +429,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       activityEmbed.setColor(colorType)
                       activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                       try {
-                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                       } catch {
                         case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                         case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -501,7 +515,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   activityEmbed.setColor(colorType)
                   activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                   try {
-                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
+                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                   } catch {
                     case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                     case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -1096,6 +1110,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     try {
       var messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(BotApp.botUser)).toList.reverse.asJava
 
+      // val enemyTimer = enemiesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+      // if (ZonedDateTime.now().isAfter(neutralTimer.plusHours(6))) {
       // clear the channel every 6 hours
       val allyTimer = alliesListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
       val neutralTimer = neutralsListPurgeTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
