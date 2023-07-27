@@ -3470,8 +3470,7 @@ object BotApp extends App with StrictLogging {
       try {
         publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
       } catch {
-        case ex: Exception => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-        case _: Throwable => logger.error(s"Failed to send discordJoin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+        case ex: Throwable => logger.error(s"Failed to send 'New Discord Join' message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
       }
     }
   }
@@ -3536,7 +3535,7 @@ object BotApp extends App with StrictLogging {
           try {
             fullblessRole.delete().queue()
           } catch {
-            case _: Throwable => logger.info(s"Failed to delete Role ID: '${fullblessRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${fullblessRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
           }
         }
 
@@ -3544,7 +3543,7 @@ object BotApp extends App with StrictLogging {
           try {
             nemesisRole.delete().queue()
           } catch {
-            case _: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
           }
         }
 
@@ -3630,7 +3629,7 @@ object BotApp extends App with StrictLogging {
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         } catch {
-          case _: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
         }
       }
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
@@ -3664,7 +3663,7 @@ object BotApp extends App with StrictLogging {
           adminEmbed.setColor(3092790)
           adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
         } catch {
-          case _: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
         }
       } else {
         embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
