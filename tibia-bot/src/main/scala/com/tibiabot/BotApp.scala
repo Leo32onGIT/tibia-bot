@@ -31,6 +31,7 @@ import java.time.format._
 import scala.util.{Failure, Success}
 import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
 import java.time.temporal.ChronoUnit
+import scala.util.Try
 
 object BotApp extends App with StrictLogging {
 
@@ -67,7 +68,7 @@ object BotApp extends App with StrictLogging {
   case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
-  case class SatchelStamp(user: String, when: ZonedDateTime)
+  case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -320,6 +321,9 @@ object BotApp extends App with StrictLogging {
   private val galthenCommand: SlashCommandData = Commands.slash("galthen", "Use this to set a galthen satchel cooldown timer")
     .addSubcommands(
       new SubcommandData("satchel", "Use this to set a galthen satchel cooldown timer")
+      .addOptions(
+        new OptionData(OptionType.STRING, "character", "What character/tag is this for?")
+      )
     )
 
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, galthenCommand)
@@ -331,6 +335,7 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
+      //lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand)
       lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, galthenCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
@@ -342,7 +347,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 60.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
     updateDashboard()
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
@@ -836,7 +841,7 @@ object BotApp extends App with StrictLogging {
   }
 
   // V1.6 Galthen Satchel Command
-  def getGalthenTable(userId: String): List[SatchelStamp] = {
+  def getGalthenTable(userId: String): Option[List[SatchelStamp]] = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
@@ -845,7 +850,8 @@ object BotApp extends App with StrictLogging {
     val statement = conn.createStatement()
 
     // Check if the table already exists in bot_configuration
-    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'satchel'")
+    val tableExistsQuery =
+      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'satchel'")
     val tableExists = tableExistsQuery.next()
     tableExistsQuery.close()
 
@@ -855,31 +861,50 @@ object BotApp extends App with StrictLogging {
         s"""CREATE TABLE satchel (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |userid VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL
+           |time VARCHAR(255) NOT NULL,
+           |tag VARCHAR(255)
            |);""".stripMargin
 
       statement.executeUpdate(createListTable)
     }
 
+    val result = statement.executeQuery(s"SELECT time,tag FROM satchel WHERE userid = '$userId';")
 
-    val result = statement.executeQuery(s"SELECT time FROM satchel WHERE userid = '$userId';")
+    val satchelStampList: ListBuffer[SatchelStamp] = ListBuffer()
 
-    val results = new ListBuffer[SatchelStamp]()
     while (result.next()) {
-
-      val updatedTimeTemporal = Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
+      val updatedTimeTemporal =
+        Try(Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z")))
+          .getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
       val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
+      val tag = Option(result.getString("tag")).getOrElse("")
 
-      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
-      results += SatchelStamp(userId, updatedTime)
+      val satchelStamp = SatchelStamp(userId, updatedTime, tag)
+      satchelStampList += satchelStamp
     }
 
     statement.close()
     conn.close()
-    results.toList
+    Some(satchelStampList.toList)
   }
 
-  def delGalthen(user: String): Unit = {
+  def delGalthen(user: String, tag: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+
+    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND COALESCE(tag, '') = ?;")
+    deleteStatement.setString(1, user)
+    deleteStatement.setString(2, tag)
+    deleteStatement.executeUpdate()
+
+    deleteStatement.close()
+    conn.close()
+  }
+
+  def delAllGalthen(user: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
@@ -894,14 +919,14 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  def addGalthen(user: String, when: ZonedDateTime): Unit = {
+  def addGalthen(user: String, when: ZonedDateTime, tag: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
-
     val conn = DriverManager.getConnection(url, username, password)
-    val selectStatement = conn.prepareStatement("SELECT time FROM satchel WHERE userid = ?;")
+    val selectStatement = conn.prepareStatement("SELECT time FROM satchel WHERE userid = ? AND tag = ?;")
     selectStatement.setString(1, user)
+    selectStatement.setString(2, tag)
     val resultSet = selectStatement.executeQuery()
 
     if (resultSet.next()) {
@@ -910,23 +935,25 @@ object BotApp extends App with StrictLogging {
         s"""
            |UPDATE satchel
            |SET time = ?
-           |WHERE userid = ?;
+           |WHERE userid = ? AND tag = ?;
            |""".stripMargin
       )
       updateStatement.setTimestamp(1, Timestamp.from(when.toInstant))
       updateStatement.setString(2, user)
+      updateStatement.setString(3, tag)
       updateStatement.executeUpdate()
       updateStatement.close()
     } else {
       // Insert new row
       val insertStatement = conn.prepareStatement(
         s"""
-           |INSERT INTO satchel(userid, time)
-           |VALUES (?,?);
+           |INSERT INTO satchel(userid, time, tag)
+           |VALUES (?,?,?);
            |""".stripMargin
       )
       insertStatement.setString(1, user)
       insertStatement.setTimestamp(2, Timestamp.from(when.toInstant))
+      insertStatement.setString(3, tag)
       insertStatement.executeUpdate()
       insertStatement.close()
     }
@@ -1013,22 +1040,27 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
 
     // Retrieve the data before deletion
-    val selectStatement = conn.prepareStatement("SELECT userid,time FROM satchel WHERE time < ?;")
+    val selectStatement = conn.prepareStatement("SELECT userid,time,tag FROM satchel WHERE time < ?;")
     selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
     val resultSet = selectStatement.executeQuery()
 
     // Retrieve the data from the result set
     while (resultSet.next()) {
       val userId = resultSet.getString("userid")
+      val tagId = Option(resultSet.getString("tag")).getOrElse("")
       val user: User = jda.retrieveUserById(userId).complete()
+      val userTimeStamp = resultSet.getTimestamp("time").toInstant()
+      val cooldown = userTimeStamp.plus(30, ChronoUnit.DAYS).getEpochSecond.toString()
 
       if (user != null) {
         try {
           user.openPrivateChannel().queue { privateChannel =>
             val embed = new EmbedBuilder()
+            if (tagId.nonEmpty) embed.setFooter(s"Tag: ${tagId.toLowerCase}")
+            val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
             embed.setColor(178877)
             embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            embed.setDescription(s"Your **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown has expired!\nGo get them bags! <:gold:1133502093039251486>\n\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the `30 day cooldown` expires again.")
+            embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you: ```when the 30 day cooldown expires```")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")

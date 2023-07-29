@@ -12,7 +12,6 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.interactions.components.buttons._
 import java.time.ZonedDateTime
 import net.dv8tion.jda.api.interactions.components.ActionRow
-
 import scala.jdk.CollectionConverters._
 
 class BotListener extends ListenerAdapter with StrictLogging {
@@ -67,29 +66,59 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val user = event.getUser
     var responseText = ":x: An unknown error occured, please try again."
 
+    val footer = if (!embed.isEmpty) Option(embed.get(0).getFooter) else None
+    val tagId = footer.map(_.getText.replace("Tag: ", "")).getOrElse("")
+
     if (button == "galthenSet") {
       event.deferEdit().queue();
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
-      BotApp.addGalthen(user.getId, ZonedDateTime.now())
-      responseText = s"a <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
+      BotApp.addGalthen(user.getId, ZonedDateTime.now(), tagId)
+      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      responseText = s"<:satchel:1030348072577945651> can be collected by $tagDisplay <t:$when:R>"
       event.getHook().editOriginalComponents(ActionRow.of(
         Button.success("galthenSet", "Collected").asDisabled,
         Button.danger("galthenRemove", "Clear")
       )).queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
-      event.getHook().editOriginalEmbeds(newEmbed).queue();
+      val newEmbed = new EmbedBuilder()
+      newEmbed.setDescription(responseText)
+      newEmbed.setColor(9855533)
+      if (tagId != "") {
+        newEmbed.setFooter(s"Tag: ${tagId}")
+      }
+      event.getHook().editOriginalEmbeds(newEmbed.build()).queue();
     } else if (button == "galthenRemove") {
       event.deferEdit().queue()
-      BotApp.delGalthen(user.getId)
+      BotApp.delGalthen(user.getId, tagId)
+      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker for $tagDisplay has been **Disabled**."
+      event.getHook().editOriginalComponents().queue();
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
+      event.getHook().editOriginalEmbeds(newEmbed).queue();
+    } else if (button == "galthenRemoveAll") {
+      event.deferEdit().queue()
+      BotApp.delAllGalthen(user.getId)
       responseText = s"Your <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
+    } else if (button == "galthenLock") {
+      event.deferEdit().queue()
+      event.getHook().editOriginalComponents(ActionRow.of(
+        Button.secondary("galthenUnLock", "🔓"),
+        Button.danger("galthenRemoveAll", "Clear All")
+      )).queue();
+    } else if (button == "galthenUnLock") {
+      event.deferEdit().queue()
+      event.getHook().editOriginalComponents(ActionRow.of(
+        Button.secondary("galthenLock", "🔒"),
+        Button.danger("galthenRemoveAll", "Clear All").asDisabled
+      )).queue();
     } else if (button == "galthenRemind") { // WIP
       event.deferEdit().queue()
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
-      BotApp.addGalthen(user.getId, ZonedDateTime.now())
-      responseText = s"a <:satchel:1030348072577945651> can be collected by <@${user.getId()}> <t:$when:R>."
+      BotApp.addGalthen(user.getId, ZonedDateTime.now(), tagId)
+      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      responseText = s"<:satchel:1030348072577945651> can be collected by $tagDisplay <t:$when:R>"
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
       event.getHook().editOriginalEmbeds(newEmbed).queue()
@@ -242,27 +271,92 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   private def handleGalthen(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    val satchelTime = BotApp.getGalthenTable(event.getUser.getId)
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val tagOption: String = options.getOrElse("character", "")
+    val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
     val embed = new EmbedBuilder()
-    val firstSatchel = satchelTime.headOption
-    firstSatchel match {
-      case Some(satchel) =>
-        val when = satchel.when.plusDays(30).toEpochSecond.toString()
-        embed.setColor(9855533)
-        embed.setFooter("You will be sent a message when the cooldown expires")
-        embed.setDescription(s"a <:satchel:1030348072577945651> can be collected by <@${event.getUser.getId}> <t:$when:R>.")
-        event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
-          Button.success("galthenSet", "Collected").asDisabled,
-          Button.danger("galthenRemove", "Clear")
-        ).queue()
-      case None =>
+
+    satchelTimeOption match {
+      //
+      case Some(satchelTimeList) if satchelTimeList.isEmpty =>
         embed.setColor(178877)
-        embed.setDescription(s"This is a **Galthen Satchel** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the `30 day cooldown` expires.")
+        if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
+        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
         embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled
         ).queue()
+      //
+      case Some(satchelTimeList) =>
+      // ?
+        val tagList = satchelTimeList.collect {
+          case satchel if tagOption.equalsIgnoreCase(satchel.tag) =>
+            val when = satchel.when.plusDays(30).toEpochSecond.toString()
+            s"<:satchel:1030348072577945651> can be collected by **`${satchel.tag}`** <t:$when:R>"
+        }
+
+        val fullList = satchelTimeList.collect {
+          case satchel =>
+            val when = satchel.when.plusDays(30).toEpochSecond.toString()
+            val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+            s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
+        }
+
+        if (tagOption.isEmpty && fullList.nonEmpty) {
+          embed.setTitle("Existing Cooldowns:")
+          val descriptionTruncate = fullList.mkString("\n")
+          if (descriptionTruncate.length > 4050) {
+            val truncatedDescription = descriptionTruncate.substring(0, 4050)
+            val lastNewLineIndex = truncatedDescription.lastIndexOf("\n")
+            val finalDescription = if (lastNewLineIndex >= 0) truncatedDescription.substring(0, lastNewLineIndex) else truncatedDescription
+            embed.setDescription(finalDescription)
+          } else {
+            embed.setDescription(descriptionTruncate)
+          }
+          embed.setColor(13773097)
+          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          if (fullList.size == 1){
+            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.success("galthenSet", "Collected").asDisabled,
+              Button.danger("galthenRemoveAll", "Clear")
+            ).queue()
+          } else {
+            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.secondary("galthenLock", "🔒"),
+              Button.danger("galthenRemoveAll", "Clear All").asDisabled
+            ).queue()
+          }
+        } else if (tagOption.nonEmpty && tagList.nonEmpty) { // tag picked up
+          embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
+          embed.setDescription(tagList.mkString("\n"))
+          embed.setColor(9855533)
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected").asDisabled,
+            Button.danger("galthenRemove", "Clear")
+          ).queue()
+          // Add any other modifications to the embed if needed
+        } else {
+          embed.setColor(178877)
+          if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
+          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected"),
+            Button.danger("galthenRemove", "Clear").asDisabled
+          ).queue()
+        }
+      // /HERE
+      case None =>
+        embed.setColor(178877)
+        if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
+        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+          Button.success("galthenSet", "Collected"),
+          Button.danger("galthenRemove", "Clear").asDisabled
+        ).queue()
+      //
     }
   }
 
