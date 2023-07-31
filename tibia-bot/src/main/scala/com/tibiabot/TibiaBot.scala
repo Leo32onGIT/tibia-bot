@@ -178,6 +178,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val charVocation = vocEmoji(char)
             val charLevel = char.characters.character.level.toInt
 
+            var skipJoinLeave = false
+
             // Check formerNames
             var nameChangeCheck = false
             formerNamesList.foreach { formerName =>
@@ -210,10 +212,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   // update name in cache and db
                   activityData = activityData + (guildId -> updatedActivityData)
                   BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-
+                  skipJoinLeave = true
                   // if player is in hunted or allied 'players' list, update information there too
                   if (huntedPlayerCheck) {
-                  // change name in hunted players cache and db
+                    // change name in hunted players cache and db
                     BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
                     val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
                       if (player.name.toLowerCase == oldName.toLowerCase) {
@@ -252,82 +254,164 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
             }
 
-            // Check charName
-            val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+            // Player hasn't changed their name
+            if (!skipJoinLeave) {
 
-            // Did they just join one the tracked guilds?
-            var joinGuild = false
-            if (!currentNameCheck && !nameChangeCheck) {
-              if (allyGuildCheck || huntedGuildCheck) {
-                joinGuild = true
+              // Check charName
+              val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+
+              // Did they just join one the tracked guilds?
+              var joinGuild = false
+              if (!currentNameCheck) {
+                if (allyGuildCheck || huntedGuildCheck) {
+                  joinGuild = true
+                }
               }
-            }
 
-            // Player is already tracked
-            if (currentNameCheck) {
-              val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
-              val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
-              val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              // Player is already tracked
+              if (currentNameCheck) {
+                val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.toLowerCase == charName.toLowerCase())
+                val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
+                val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
-              if (updatesTimeFromActivityData.plusMinutes(6).isBefore(ZonedDateTime.now())) {
+                if (updatesTimeFromActivityData.plusMinutes(6).isBefore(ZonedDateTime.now())) {
 
-                //charResponse.characters.character.world
-                // Guild has changed
-                if (guildName != guildNameFromActivityData) {
-                  //val newGuild = if (guildName == "") "None" else guildName
-                  val newGuildLess = if (guildName == "") true else false
-                  val oldGuildLess = if (guildNameFromActivityData == "") true else false
-                  val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
-                  val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
-                  // Left a tracked guild
-                  if (wasInHuntedGuild || wasInAlliedGuild) {
-                    val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
-                    // No guild now
-                    if (newGuildLess) {
-                      // send message to activity channel
-                      if (activityTextChannel != null) {
-                        val activityEmbed = new EmbedBuilder()
-                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
-                        activityEmbed.setColor(14397256)
-                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleaveyellow.png")
-                        try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                        } catch {
-                          case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}':", ex)
-                          case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                  //charResponse.characters.character.world
+                  // Guild has changed
+                  if (guildName != guildNameFromActivityData) {
+                    //val newGuild = if (guildName == "") "None" else guildName
+                    val newGuildLess = if (guildName == "") true else false
+                    val oldGuildLess = if (guildNameFromActivityData == "") true else false
+                    val wasInHuntedGuild = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
+                    val wasInAlliedGuild = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildNameFromActivityData.toLowerCase())
+                    // Left a tracked guild
+                    if (wasInHuntedGuild || wasInAlliedGuild) {
+                      val guildType = if (wasInHuntedGuild) "hunted" else if (wasInAlliedGuild) "allied" else "neutral"
+                      // No guild now
+                      if (newGuildLess) {
+                        // send message to activity channel
+                        if (activityTextChannel != null) {
+                          val activityEmbed = new EmbedBuilder()
+                          activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
+                          activityEmbed.setColor(14397256)
+                          activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleaveyellow.png")
+                          try {
+                            activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
+                          } catch {
+                            case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}':", ex)
+                            case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                          }
+                        }
+                      } else { // Left a tracked guild, but joined a new one in the same turn
+                        val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
+                        // send message to activity channel
+                        if (activityTextChannel != null) {
+                          val activityEmbed = new EmbedBuilder()
+                          val thumbnailType = colorType match {
+                            case 13773097 => "guildswapred"
+                            case 36941 => "guildswapgreen"
+                            case _ => "guildswapgrey"
+                          }
+                          activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
+                          activityEmbed.setColor(colorType)
+                          activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                          try {
+                            activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
+                          } catch {
+                            case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                            case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                          }
+                        }
+                        // remove from hunted list if in allied guild
+                        if (allyGuildCheck) {
+                          huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
+                          BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                          val adminTextChannel = guild.getTextChannelById(adminChannel)
+                          if (adminTextChannel != null) {
+                            // send embed to admin channel
+                            val commandUser = s"<@${BotApp.botUser}>"
+                            val adminEmbed = new EmbedBuilder()
+                            adminEmbed.setTitle(":robot: enemy joined an allied guild:")
+                            adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
+                            adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                            adminEmbed.setColor(14397256) // orange for bot auto command
+                            try {
+                              adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                            } catch {
+                              case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                              case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                            }
+                          }
                         }
                       }
-                    } else { // Left a tracked guild, but joined a new one in the same turn
+
+                      // if he was in hunted guild add to hunted players list
+                      if (wasInHuntedGuild && !allyGuildCheck) {
+                        val adminTextChannel = guild.getTextChannelById(adminChannel)
+                        if (adminTextChannel != null) {
+                          // add them to cached huntedPlayersData list
+                          if (!(huntedPlayerCheck)) {
+                            huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                            BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
+                            // send embed to admin channel
+                            val commandUser = s"<@${BotApp.botUser}>"
+                            val adminEmbed = new EmbedBuilder()
+                            adminEmbed.setTitle(":robot: enemy automatically detected:")
+                            adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
+                            adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                            adminEmbed.setColor(14397256) // orange for bot auto command
+                            try {
+                              adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                            } catch {
+                              case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                              case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                            }
+                          }
+                        }
+                      } else if (wasInAlliedGuild && !huntedGuildCheck) {
+                        // remove from activity
+                        activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
+                        BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
+                      }
+                    }
+
+                    if (huntedPlayerCheck && oldGuildLess) {
                       val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
-                      // send message to activity channel
-                      if (activityTextChannel != null) {
-                        val activityEmbed = new EmbedBuilder()
-                        val thumbnailType = colorType match {
-                          case 13773097 => "guildswapred"
-                          case 36941 => "guildswapgreen"
-                          case _ => "guildswapgrey"
-                        }
-                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
-                        activityEmbed.setColor(colorType)
-                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
-                        try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                        } catch {
-                          case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                          case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                        }
-                      }
-                      // remove from hunted list if in allied guild
-                      if (allyGuildCheck) {
-                        huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
+                      val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
+                      // joined a hunted guild
+                      if (huntedGuildCheck) {
+                        // remove from hunted 'Player' cache and db
+                        huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
                         BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                        // send message to admin channel
                         val adminTextChannel = guild.getTextChannelById(adminChannel)
                         if (adminTextChannel != null) {
                           // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
-                          adminEmbed.setTitle(":robot: enemy joined an allied guild:")
-                          adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
+                          adminEmbed.setTitle(":robot: hunted list cleanup:")
+                          adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                          adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                          adminEmbed.setColor(14397256) // orange for bot auto command
+                          try {
+                            adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                          } catch {
+                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                            case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                          }
+                        }
+                      } else if (allyGuildCheck) {
+                        // remove from hunted 'Player' cache and db
+                        huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                        BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                        // send message to admin channel
+                        val adminTextChannel = guild.getTextChannelById(adminChannel)
+                        if (adminTextChannel != null) {
+                          // send embed to admin channel
+                          val commandUser = s"<@${BotApp.botUser}>"
+                          val adminEmbed = new EmbedBuilder()
+                          adminEmbed.setTitle(":robot: hunted list cleanup:")
+                          adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
                           try {
@@ -338,190 +422,113 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           }
                         }
                       }
-                    }
-
-                    // if he was in hunted guild add to hunted players list
-                    if (wasInHuntedGuild && !allyGuildCheck) {
-                      val adminTextChannel = guild.getTextChannelById(adminChannel)
-                      if (adminTextChannel != null) {
-                        // add them to cached huntedPlayersData list
-                        if (!(huntedPlayerCheck)) {
-                          huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
-                          BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
-                          // send embed to admin channel
-                          val commandUser = s"<@${BotApp.botUser}>"
-                          val adminEmbed = new EmbedBuilder()
-                          adminEmbed.setTitle(":robot: enemy automatically detected:")
-                          adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
-                          adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
-                          adminEmbed.setColor(14397256) // orange for bot auto command
-                          try {
-                            adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                            case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                          }
+                      // send message to activity channel
+                      if (activityTextChannel != null) {
+                        val activityEmbed = new EmbedBuilder()
+                        val thumbnailType = guildType match {
+                          case "hunted" => "guildjoinred"
+                          case "allied" => "guildjoingreen"
+                          case _ => "guildjoingrey"
+                        }
+                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
+                        activityEmbed.setColor(colorType)
+                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                        try {
+                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
+                        } catch {
+                          case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                          case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                         }
                       }
-                    } else if (wasInAlliedGuild && !huntedGuildCheck) {
-                      // remove from activity
-                      activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
-                      BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
                     }
+
+                    val updatedActivityData = matchingActivityOption.map { activity =>
+                      val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
+                      activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
+                    }.getOrElse(activityData.getOrElse(guildId, List()))
+
+                    // Update in cache and db
+                    activityData = activityData + (guildId -> updatedActivityData)
+                    BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                   }
-
-                  if (huntedPlayerCheck && oldGuildLess) {
-                    val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
-                    val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
-                    // joined a hunted guild
-                    if (huntedGuildCheck) {
-                      // remove from hunted 'Player' cache and db
-                      huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-                      BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                      // send message to admin channel
-                      val adminTextChannel = guild.getTextChannelById(adminChannel)
-                      if (adminTextChannel != null) {
-                        // send embed to admin channel
-                        val commandUser = s"<@${BotApp.botUser}>"
-                        val adminEmbed = new EmbedBuilder()
-                        adminEmbed.setTitle(":robot: hunted list cleanup:")
-                        adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
-                        adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                        adminEmbed.setColor(14397256) // orange for bot auto command
-                        try {
-                          adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                        } catch {
-                          case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                          case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                        }
-                      }
-                    } else if (allyGuildCheck) {
-                      // remove from hunted 'Player' cache and db
-                      huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-                      BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                      // send message to admin channel
-                      val adminTextChannel = guild.getTextChannelById(adminChannel)
-                      if (adminTextChannel != null) {
-                        // send embed to admin channel
-                        val commandUser = s"<@${BotApp.botUser}>"
-                        val adminEmbed = new EmbedBuilder()
-                        adminEmbed.setTitle(":robot: hunted list cleanup:")
-                        adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
-                        adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                        adminEmbed.setColor(14397256) // orange for bot auto command
-                        try {
-                          adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                        } catch {
-                          case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                          case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                        }
-                      }
-                    }
-                    // send message to activity channel
-                    if (activityTextChannel != null) {
-                      val activityEmbed = new EmbedBuilder()
-                      val thumbnailType = guildType match {
-                        case "hunted" => "guildjoinred"
-                        case "allied" => "guildjoingreen"
-                        case _ => "guildjoingrey"
-                      }
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                      activityEmbed.setColor(colorType)
-                      activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                }
+              } else if (joinGuild) { // Character doesn't exist in tracking_activity but should be
+                // add to cache and db
+                val newActivity = BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now())
+                val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
+                activityData = activityData + (guildId -> updatedActivityData)
+                BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
+                // joined a hunted guild
+                if (huntedGuildCheck) {
+                  if (huntedPlayerCheck) { // was he originally in hunted 'player' list?
+                    // remove from hunted 'Player' cache and db
+                    huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                    BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
+                    // send message to admin channel
+                    val adminTextChannel = guild.getTextChannelById(adminChannel)
+                    if (adminTextChannel != null) {
+                      // send embed to admin channel
+                      val commandUser = s"<@${BotApp.botUser}>"
+                      val adminEmbed = new EmbedBuilder()
+                      adminEmbed.setTitle(":robot: hunted list cleanup:")
+                      adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
+                      adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                      adminEmbed.setColor(14397256) // orange for bot auto command
                       try {
-                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
+                        adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                       } catch {
-                        case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                        case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                        case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                        case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                       }
                     }
                   }
-
-                  val updatedActivityData = matchingActivityOption.map { activity =>
-                    val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
-                    activityData.getOrElse(guildId, List()).filterNot(_.name.toLowerCase == charName.toLowerCase) :+ updatedActivity
-                  }.getOrElse(activityData.getOrElse(guildId, List()))
-
-                  // Update in cache and db
-                  activityData = activityData + (guildId -> updatedActivityData)
-                  BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-                }
-              }
-            } else if (joinGuild) { // Character doesn't exist in tracking_activity but should be
-              // add to cache and db
-              val newActivity = BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now())
-              val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
-              activityData = activityData + (guildId -> updatedActivityData)
-              BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
-              // joined a hunted guild
-              if (huntedGuildCheck) {
-                if (huntedPlayerCheck) { // was he originally in hunted 'player' list?
-                  // remove from hunted 'Player' cache and db
-                  huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-                  BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                  // send message to admin channel
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null) {
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: hunted list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
-                    try {
-                      adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                    } catch {
-                      case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                      case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                } else if (allyGuildCheck) { // joined an allied guild
+                  if (allyPlayerCheck) {
+                    // remove from allied 'Player' cache and db
+                    alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                    BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
+                    // send message to admin channel
+                    val adminTextChannel = guild.getTextChannelById(adminChannel)
+                    if (adminTextChannel != null) {
+                      // send embed to admin channel
+                      val commandUser = s"<@${BotApp.botUser}>"
+                      val adminEmbed = new EmbedBuilder()
+                      adminEmbed.setTitle(":robot: allied list cleanup:")
+                      adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
+                      adminEmbed.setThumbnail(creatureImageUrl("Broom"))
+                      adminEmbed.setColor(14397256) // orange for bot auto command
+                      try {
+                        adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                      } catch {
+                        case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                        case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                      }
                     }
                   }
                 }
-              } else if (allyGuildCheck) { // joined an allied guild
-                if (allyPlayerCheck) {
-                  // remove from allied 'Player' cache and db
-                  alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
-                  BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
-                  // send message to admin channel
-                  val adminTextChannel = guild.getTextChannelById(adminChannel)
-                  if (adminTextChannel != null) {
-                    // send embed to admin channel
-                    val commandUser = s"<@${BotApp.botUser}>"
-                    val adminEmbed = new EmbedBuilder()
-                    adminEmbed.setTitle(":robot: allied list cleanup:")
-                    adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
-                    adminEmbed.setThumbnail(creatureImageUrl("Broom"))
-                    adminEmbed.setColor(14397256) // orange for bot auto command
+                val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
+                val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
+                if (guildType != "neutral") { // ignore neutral guild changes, only show hunted/allied rejoins
+                  if (activityTextChannel != null) {
+                    val activityEmbed = new EmbedBuilder()
+                    val thumbnailType = guildType match {
+                      case "hunted" => "guildjoinred"
+                      case "allied" => "guildjoingreen"
+                      case _ => "guildjoingrey"
+                    }
+                    activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
+                    activityEmbed.setColor(colorType)
+                    activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
                     try {
-                      adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                     } catch {
-                      case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                      case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                      case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                      case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                     }
                   }
                 }
               }
-              val guildType = if (huntedGuildCheck) "hunted" else if (allyGuildCheck) "allied" else "neutral"
-              val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
-              if (guildType != "neutral") { // ignore neutral guild changes, only show hunted/allied rejoins
-                if (activityTextChannel != null) {
-                  val activityEmbed = new EmbedBuilder()
-                  val thumbnailType = guildType match {
-                    case "hunted" => "guildjoinred"
-                    case "allied" => "guildjoingreen"
-                    case _ => "guildjoingrey"
-                  }
-                  activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
-                  activityEmbed.setColor(colorType)
-                  activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
-                  try {
-                    activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                  } catch {
-                    case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                    case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                  }
-                }
-              }
+
             }
             // end name change check
           }
