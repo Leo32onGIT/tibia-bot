@@ -802,7 +802,7 @@ object BotApp extends App with StrictLogging {
            |world VARCHAR(255) NOT NULL,
            |former_worlds VARCHAR(255),
            |name VARCHAR(255) NOT NULL,
-           |former_names VARCHAR(255),
+           |former_names VARCHAR(1000),
            |level VARCHAR(255) NOT NULL,
            |guild_name VARCHAR(255),
            |vocation VARCHAR(255) NOT NULL,
