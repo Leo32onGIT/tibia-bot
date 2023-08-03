@@ -6,6 +6,7 @@ import com.tibiabot.discord.DiscordMessageSender
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, Members}
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
@@ -63,7 +64,7 @@ object BotApp extends App with StrictLogging {
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
   case class Discords(id: String, adminChannel: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
-  case class Activity(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
+  case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
@@ -100,7 +101,7 @@ object BotApp extends App with StrictLogging {
   var alliedPlayersData: Map[String, List[Players]] = Map.empty
   var huntedGuildsData: Map[String, List[Guilds]] = Map.empty
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
-  var activityData: Map[String, List[Activity]] = Map.empty
+  var activityData: Map[String, List[PlayerCache]] = Map.empty
   var activityCommandBlocker: Map[String, Boolean] = Map.empty
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
@@ -544,19 +545,20 @@ object BotApp extends App with StrictLogging {
   **/
 
   private def updateDashboard(): Unit = {
-    // Violent Bot Support discord
-    val dashboardGuild = jda.getGuildById(867319250708463628L)
-    val dashboardDiscordsTotal = dashboardGuild.getVoiceChannelById(1076431727838380032L)
-    val dashboardDiscordsActive = dashboardGuild.getVoiceChannelById(1082844559937114112L)
-    val dashboardWorldSubscriptions = dashboardGuild.getVoiceChannelById(1076432500294955098L)
-    val dashboardWorldStreams = dashboardGuild.getVoiceChannelById(1082844790439288872L)
 
+    // Violent Bot Support discord
     logger.info(s"Updating Violent Bot dashboard...")
 
     val guildCount = jda.getGuilds.asScala.toList.size
     val activeDiscordsCount: Int = worldsData.size
     val worldStreamCount: Int = discordsData.size
     val worldsTrackedCount: Int = worldsData.values.map(_.size).sum
+
+    val dashboardGuild = jda.getGuildById(867319250708463628L)
+    val dashboardDiscordsTotal = dashboardGuild.getVoiceChannelById(1076431727838380032L)
+    val dashboardDiscordsActive = dashboardGuild.getVoiceChannelById(1082844559937114112L)
+    val dashboardWorldSubscriptions = dashboardGuild.getVoiceChannelById(1076432500294955098L)
+    val dashboardWorldStreams = dashboardGuild.getVoiceChannelById(1082844790439288872L)
 
     // total Discord count
     val dashboardDiscordsTotalName = dashboardDiscordsTotal.getName
@@ -584,6 +586,15 @@ object BotApp extends App with StrictLogging {
     if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount of ${worlds.size}") {
       val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
       dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount of ${worlds.size}").queue()
+    }
+
+    try {
+      val worldsString = if (worldStreamCount == 1) "world" else "worlds"
+      val discordString = if (activeDiscordsCount == 1) "discord" else "discords"
+      jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, s"${worldStreamCount} $worldsString for ${activeDiscordsCount} $discordString"))
+    }
+    catch {
+      case _ : Throwable => logger.info("Failed to update the bots status counts")
     }
   }
 
@@ -1362,7 +1373,7 @@ object BotApp extends App with StrictLogging {
                 val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
                   val updatedTime = ZonedDateTime.now()
-                  activityData = activityData + (guildId -> (Activity(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  activityData = activityData + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers))
                   addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
                 }
               }
@@ -1486,7 +1497,7 @@ object BotApp extends App with StrictLogging {
                 val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
                   val updatedTime = ZonedDateTime.now()
-                  activityData = activityData + (guildId -> (Activity(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  activityData = activityData + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers))
                   addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
                 }
               }
@@ -2287,7 +2298,7 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def activityConfig(guild: Guild, query: String): List[Activity] = {
+  private def activityConfig(guild: Guild, query: String): List[PlayerCache] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
 
@@ -2312,7 +2323,7 @@ object BotApp extends App with StrictLogging {
 
     val result = statement.executeQuery(s"SELECT name,former_names,guild_name,updated FROM $query")
 
-    val results = new ListBuffer[Activity]()
+    val results = new ListBuffer[PlayerCache]()
     while (result.next()) {
       val name = Option(result.getString("name")).getOrElse("")
       val formerNames = Option(result.getString("former_names")).getOrElse("")
@@ -2321,7 +2332,7 @@ object BotApp extends App with StrictLogging {
       val updatedTimeTemporal = Option(result.getTimestamp("updated").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
       val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
 
-      results += Activity(name, formerNamesList, guildName, updatedTime)
+      results += PlayerCache(name, formerNamesList, guildName, updatedTime)
     }
 
     statement.close()

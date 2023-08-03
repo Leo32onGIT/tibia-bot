@@ -454,7 +454,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 }
               } else if (joinGuild) { // Character doesn't exist in tracking_activity but should be
                 // add to cache and db
-                val newActivity = BotApp.Activity(charName, formerNamesList, guildName, ZonedDateTime.now())
+                val newActivity = BotApp.PlayerCache(charName, formerNamesList, guildName, ZonedDateTime.now())
                 val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
                 activityData = activityData + (guildId -> updatedActivityData)
                 BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
