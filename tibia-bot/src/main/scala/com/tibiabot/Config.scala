@@ -16,6 +16,15 @@ object Config {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
 
+  // this is the message sent when the bot joins a discord or a user uses /help
+  val helpText = s"**How to use the bot:**\n" +
+    "Simply use `/setup <World Name>` to setup the bot.\n\n" +
+    "**Commands & Features:**\n" +
+    "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
+    "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
+    "*If you have any issues or suggestions or would like to donate, use the links below or simply send <:tibiacoin:1117280875818778637> to* **`Violent Beams`** 👍\n\n" +
+    "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.violentbot.xyz)"
+
   // discord config
   val worldList: List[String] = mappings.getStringList("worlds").asScala.toList
   val webHookAvatar: String = discord.getString("avatar-url")

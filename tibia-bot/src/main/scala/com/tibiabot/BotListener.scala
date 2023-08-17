@@ -614,13 +614,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
   private def handleHelp(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     val embedBuilder = new EmbedBuilder()
-    val descripText = s"**How to use the bot:**\n" +
-      "Simply use `/setup <World Name>` to setup the bot.\n\n" +
-      "**Commands & Features:**\n" +
-      "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
-      "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
-      "*If you have any issues or suggestions or would like to donate, use the links below or simply send <:tibiacoin:1117280875818778637> to* **`Violent Beams`** 👍\n\n" +
-      "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.violentbot.xyz)"
+    val descripText = Config.helpText
     embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
     embedBuilder.setDescription(descripText)
     embedBuilder.setThumbnail(Config.webHookAvatar)
