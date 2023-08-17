@@ -20,6 +20,14 @@ object Config {
   val worldList: List[String] = mappings.getStringList("worlds").asScala.toList
   val webHookAvatar: String = discord.getString("avatar-url")
   val aolThumbnail: String = discord.getString("fullbless-avatar-url")
+  val nameChangeThumbnail: String = discord.getString("namechange-thumbnail")
+  val guildLeaveThumbnail: String = discord.getString("guild-leave-thumbnail")
+  val guildSwapGrey: String = discord.getString("guild-swap-thumbnail-grey")
+  val guildSwapRed: String = discord.getString("guild-swap-thumbnail-red")
+  val guildSwapGreen: String = discord.getString("guild-swap-thumbnail-green")
+  val guildJoinGrey: String = discord.getString("guild-join-thumbnail-grey")
+  val guildJoinRed: String = discord.getString("guild-join-thumbnail-red")
+  val guildJoinGreen: String = discord.getString("guild-join-thumbnail-green")
 
   // emojis
   val nemesisEmoji: String = discord.getString("nemesis-emoji")

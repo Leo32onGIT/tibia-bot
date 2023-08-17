@@ -242,7 +242,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     val activityEmbed = new EmbedBuilder()
                     activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
                     activityEmbed.setColor(playerType)
-                    activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/namechange.png")
+                    activityEmbed.setThumbnail(Config.nameChangeThumbnail)
                     try {
                       activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                     } catch {
@@ -294,7 +294,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           val activityEmbed = new EmbedBuilder()
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                           activityEmbed.setColor(14397256)
-                          activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/guildleaveyellow.png")
+                          activityEmbed.setThumbnail(Config.guildLeaveThumbnail)
                           try {
                             activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                           } catch {
@@ -308,13 +308,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         if (activityTextChannel != null) {
                           val activityEmbed = new EmbedBuilder()
                           val thumbnailType = colorType match {
-                            case 13773097 => "guildswapred"
-                            case 36941 => "guildswapgreen"
-                            case _ => "guildswapgrey"
+                            case 13773097 => Config.guildSwapRed
+                            case 36941 => Config.guildSwapGreen
+                            case _ => Config.guildSwapGrey
                           }
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
                           activityEmbed.setColor(colorType)
-                          activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                          activityEmbed.setThumbnail(thumbnailType)
                           try {
                             activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                           } catch {
@@ -426,13 +426,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       if (activityTextChannel != null) {
                         val activityEmbed = new EmbedBuilder()
                         val thumbnailType = guildType match {
-                          case "hunted" => "guildjoinred"
-                          case "allied" => "guildjoingreen"
-                          case _ => "guildjoingrey"
+                          case "hunted" => Config.guildJoinRed
+                          case "allied" => Config.guildJoinGreen
+                          case _ => Config.guildJoinGrey
                         }
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                         activityEmbed.setColor(colorType)
-                        activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                        activityEmbed.setThumbnail(thumbnailType)
                         try {
                           activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                         } catch {
@@ -512,13 +512,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   if (activityTextChannel != null) {
                     val activityEmbed = new EmbedBuilder()
                     val thumbnailType = guildType match {
-                      case "hunted" => "guildjoinred"
-                      case "allied" => "guildjoingreen"
-                      case _ => "guildjoingrey"
+                      case "hunted" => Config.guildJoinRed
+                      case "allied" => Config.guildJoinGreen
+                      case _ => Config.guildJoinGrey
                     }
                     activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                     activityEmbed.setColor(colorType)
-                    activityEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$thumbnailType.png")
+                    activityEmbed.setThumbnail(thumbnailType)
                     try {
                       activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                     } catch {

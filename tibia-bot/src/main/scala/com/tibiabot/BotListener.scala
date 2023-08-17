@@ -623,7 +623,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.violentbot.xyz)"
     embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
     embedBuilder.setDescription(descripText)
-    embedBuilder.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Violent%20Bot.png")
+    embedBuilder.setThumbnail(Config.webHookAvatar)
     embedBuilder.setColor(14397256) // orange for bot auto command
     event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
   }
