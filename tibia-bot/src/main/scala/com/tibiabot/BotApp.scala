@@ -1952,6 +1952,47 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  private def createPremiumDatabase(): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'premium'")
+    val exist = result.next()
+
+    // if bot_configuration doesn't exist
+    if (!exist) {
+      statement.executeUpdate(s"CREATE DATABASE bot_cache;")
+      logger.info(s"Database 'bot_cache' created successfully")
+      statement.close()
+      conn.close()
+
+      val newUrl = s"jdbc:postgresql://${Config.postgresHost}:5432/premium"
+      val newConn = DriverManager.getConnection(newUrl, username, password)
+      val newStatement = newConn.createStatement()
+      // create the tables in bot_configuration
+      val createPaymentsTable =
+        s"""CREATE TABLE payments (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |discord_id VARCHAR(255) NOT NULL,
+           |discord_name VARCHAR(255) NOT NULL,
+           |user_id VARCHAR(255) NOT NULL,
+           |user_name VARCHAR(255) NOT NULL,
+           |expiry VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      newStatement.executeUpdate(createPaymentsTable)
+      logger.info("Table 'payments' created successfully")
+      newStatement.close()
+      newConn.close()
+    } else {
+      statement.close()
+      conn.close()
+    }
+  }
+
   private def createCacheDatabase(): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
     val username = "postgres"
