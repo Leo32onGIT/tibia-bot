@@ -11,7 +11,6 @@ object Config {
   val token: String = discord.getString("token")
   val postgresHost: String = discord.getString("postgres-host")
   val postgresPassword: String = discord.getString("postgres-password")
-
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
@@ -25,8 +24,128 @@ object Config {
     "*If you have any issues or suggestions or would like to donate, use the links below or simply send <:tibiacoin:1117280875818778637> to* **`Violent Beams`** 👍\n\n" +
     "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.violentbot.xyz)"
 
+  // worlds
+  val worldList = List(
+    "Antica",
+    "Astera",
+    "Axera",
+    "Belobra",
+    "Bombra",
+    "Bona",
+    "Calmera",
+    "Castela",
+    "Celebra",
+    "Celesta",
+    "Collabra",
+    "Damora",
+    "Descubra",
+    "Dia",
+    "Epoca",
+    "Esmera",
+    "Etebra",
+    "Ferobra",
+    "Firmera",
+    "Gentebra",
+    "Gladera",
+    "Gravitera",
+    "Guerribra",
+    "Harmonia",
+    "Havera",
+    "Honbra",
+    "Impulsa",
+    "Inabra",
+    "Issobra",
+    "Jacabra",
+    "Jadebra",
+    "Jaguna",
+    "Kalibra",
+    "Kardera",
+    "Kendria",
+    "Lobera",
+    "Luminera",
+    "Lutabra",
+    "Menera",
+    "Monza",
+    "Mykera",
+    "Nadora",
+    "Nefera",
+    "Nevia",
+    "Ombra",
+    "Obscubra",
+    "Ousabra",
+    "Pacera",
+    "Peloria",
+    "Premia",
+    "Pulsera",
+    "Quelibra",
+    "Quintera",
+    "Rasteibra",
+    "Refugia",
+    "Retalia",
+    "Runera",
+    "Secura",
+    "Serdebra",
+    "Solidera",
+    "Syrena",
+    "Talera",
+    "Thyria",
+    "Tornabra",
+    "Ustebra",
+    "Utobra",
+    "Venebra",
+    "Vitera",
+    "Vunira",
+    "Wildera",
+    "Wintera",
+    "Yonabra",
+    "Yovera",
+    "Zuna",
+    "Zunera"
+  )
+  val mergedWorlds = List(
+    // Pulsera
+    "Illusera",
+    "Wizera",
+    "Seanera",
+    // Yovera
+    "Optera",
+    "Marbera",
+    // Wildera
+    "Fera",
+    "Ardera",
+    // Kendria
+    "Trona",
+    "Marcia",
+    "Adra",
+    "Suna",
+    // Nevia
+    "Famosa",
+    "Karna",
+    "Olima",
+    // Retalia
+    "Versa",
+    "Bastia",
+    // Jadebra
+    "Ocebra",
+    "Alumbra",
+    "Dibra",
+    // Rasteibra
+    "Zenobra",
+    "Xandebra",
+    // Ustebra
+    "Tembra",
+    "Reinobra",
+    // Obscubra
+    "Cadebra",
+    "Visabra",
+    "Libertabra",
+    // Guerribra
+    "Mudabra",
+    "Nossobra",
+    "Batabra"
+  )
+
   // discord config
-  val worldList: List[String] = mappings.getStringList("worlds").asScala.toList
   val webHookAvatar: String = discord.getString("avatar-url")
   val aolThumbnail: String = discord.getString("fullbless-avatar-url")
   val nameChangeThumbnail: String = discord.getString("namechange-thumbnail")

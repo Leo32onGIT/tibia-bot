@@ -2454,7 +2454,11 @@ object BotApp extends App with StrictLogging {
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
       val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
-      results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel)
+
+      // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
+      if (!Config.mergedWorlds.exists(_.equalsIgnoreCase(name))) {
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel)
+      }
     }
 
     statement.close()
@@ -3579,7 +3583,7 @@ object BotApp extends App with StrictLogging {
   def removeChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
     // get guild & world information from the slash interaction
     val world: String = event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim().toLowerCase().capitalize
-    val embedText = if (worlds.contains(world)) {
+    val embedText = if (worlds.contains(world) || Config.mergedWorlds.contains(world)) {
       val guild = event.getGuild
       val worldConfigData = worldRetrieveConfig(guild, world)
       if (worldConfigData.nonEmpty) {
