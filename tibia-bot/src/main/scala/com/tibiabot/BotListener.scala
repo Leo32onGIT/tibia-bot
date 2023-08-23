@@ -44,6 +44,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         handleRepair(event)
       case "galthen" =>
         handleGalthen(event)
+      case "premium" =>
+        handlePremium(event)
       case _ =>
     }
   }
@@ -628,6 +630,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val worldOption: String = options.getOrElse("world", "")
 
     val embed = BotApp.repairChannel(event, worldOption)
+    event.getHook.sendMessageEmbeds(embed).queue()
+  }
+
+  private def handlePremium(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val embed = BotApp.processPremium(event)
     event.getHook.sendMessageEmbeds(embed).queue()
   }
 
