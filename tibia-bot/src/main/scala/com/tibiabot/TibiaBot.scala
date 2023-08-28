@@ -175,7 +175,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
             val activityTextChannel = guild.getTextChannelById(activityChannel)
             val adminChannel = discords.adminChannel
-            val charVocation = vocEmoji(char)
+            val charVocation = vocEmoji(char.characters.character.vocation)
             val charLevel = char.characters.character.level.toInt
 
             var skipJoinLeave = false
@@ -562,7 +562,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 val guildIcon = if (guildIconData != null) guildIconData.icon else ""
                 val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
-                val webhookMessage = s"${vocEmoji(char)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
+                val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
                 val levelsTextChannel = guild.getTextChannelById(levelsChannel)
                 if (levelsTextChannel != null) {
                   // check show_neutrals_levels setting
@@ -857,7 +857,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       val killerName = charResponse.characters.character.name
                       val killerGuild = charResponse.characters.character.guild
                       val killerWorld = charResponse.characters.character.world
-                      val killerVocation = vocEmoji(charResponse)
+                      val killerVocation = vocEmoji(charResponse.characters.character.vocation)
                       val killerLevel = charResponse.characters.character.level.toInt
                       val killerGuildName = if(killerGuild.isDefined) killerGuild.head.name else ""
                       var guildCheck = true
@@ -956,7 +956,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
             }
             val embed = new EmbedBuilder()
-            embed.setTitle(s"${vocEmoji(charDeath.char)} $charName ${vocEmoji(charDeath.char)}", charUrl(charName))
+            embed.setTitle(s"${vocEmoji(charDeath.char.characters.character.vocation)} $charName ${vocEmoji(charDeath.char.characters.character.vocation)}", charUrl(charName))
             embed.setDescription(embedText)
             embed.setThumbnail(embedThumbnail)
             embed.setColor(embedColor)
@@ -1015,14 +1015,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val sortedList = onlineData.sortWith(_.level > _.level)
     sortedList.foreach { player =>
       val voc = player.vocation.toLowerCase.split(' ').last
-      val vocEmoji = voc match {
-        case "knight" => ":shield:"
-        case "druid" => ":snowflake:"
-        case "sorcerer" => ":fire:"
-        case "paladin" => ":bow_and_arrow:"
-        case "none" => ":hatching_chick:"
-        case _ => ""
-      }
+      val vocationEmoji = vocEmoji(voc)
       val durationInSec = player.duration
       val durationInMin = durationInSec / 60
       val durationStr = if (durationInMin >= 60) {
@@ -1035,7 +1028,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val durationString = s"| `$durationStr`"
       val guildIconData = player.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
       val guildIcon = if (guildIconData != null) guildIconData.icon else ""
-      vocationBuffers(voc) += ((guildIcon, s"$vocEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
+      vocationBuffers(voc) += ((guildIcon, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
@@ -1211,8 +1204,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
   }
 
-  private def vocEmoji(char: CharacterResponse): String = {
-    val voc = char.characters.character.vocation.toLowerCase.split(' ').last
+  private def vocEmoji(vocation: String): String = {
+    val voc = vocation.toLowerCase.split(' ').last
     voc match {
       case "knight" => ":shield:"
       case "druid" => ":snowflake:"
