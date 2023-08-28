@@ -1025,7 +1025,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       } else {
         s"${durationInMin}min"
       }
-      val durationString = s"| `$durationStr`"
+      val durationString = s"`$durationStr`"
       val guildIconData = player.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
       val guildIcon = if (guildIconData != null) guildIconData.icon else ""
       vocationBuffers(voc) += ((guildIcon, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
