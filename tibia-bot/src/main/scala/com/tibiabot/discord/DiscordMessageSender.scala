@@ -24,6 +24,7 @@ class DiscordMessageSender() extends StrictLogging {
   private val guildQueues: mutable.Map[Guild, GuildMessageQueue] = mutable.Map.empty
   private val channelRateLimiters: mutable.Map[TextChannel, RateLimiter] = mutable.Map.empty
   private val webhookRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
+  private val guildProcessingThreads: mutable.Map[Guild, Thread] = mutable.Map.empty
 
   def sendWebhookMessage(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
     val messageDetails = MessageDetails(guild, webhookChannel, messageContent, messageAuthor)
@@ -31,8 +32,12 @@ class DiscordMessageSender() extends StrictLogging {
       val guildQueue = guildQueues.getOrElseUpdate(guild, {
         val newQueue = new LinkedBlockingQueue[MessageDetails]()
         val guildMessageQueue = GuildMessageQueue(guild, newQueue)
-        // Start processing the new queue in a separate thread
-        startProcessingGuildQueue(guildMessageQueue)
+        // Start processing the new queue in a separate thread if not already started
+        if (!guildProcessingThreads.contains(guild)) {
+          val processingThread = new Thread(() => processGuildQueue(guildMessageQueue))
+          guildProcessingThreads(guild) = processingThread
+          processingThread.start()
+        }
         guildMessageQueue
       })
       guildQueue.queue.put(messageDetails)
@@ -42,9 +47,11 @@ class DiscordMessageSender() extends StrictLogging {
     }
   }
 
-  private def startProcessingGuildQueue(guildQueue: GuildMessageQueue): Unit = {
-    val scheduler = Executors.newSingleThreadScheduledExecutor()
-    scheduler.scheduleAtFixedRate(() => sendGuildMessages(guildQueue), 0, 5, TimeUnit.SECONDS)
+  private def processGuildQueue(guildQueue: GuildMessageQueue): Unit = {
+    while (true) { // This loop keeps the thread alive for processing messages continuously
+      sendGuildMessages(guildQueue)
+      Thread.sleep(30000) // Wait for 30 seconds before processing the next batch
+    }
   }
 
   private def sendGuildMessages(guildQueue: GuildMessageQueue): Unit = {
