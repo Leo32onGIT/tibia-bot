@@ -3759,16 +3759,4 @@ object BotApp extends App with StrictLogging {
     .build()
   }
 
-  def processPremium(event: SlashCommandInteractionEvent): MessageEmbed = {
-    // get guild & world information from the slash interaction
-    val guildL: Long = java.lang.Long.parseLong(guildId)
-    val guild = jda.getGuildById(guildL)
-    var embedMessage = "This is under construction"
-    // embed reply
-    new EmbedBuilder()
-    .setColor(3092790)
-    .setDescription(embedMessage)
-    .build()
-  }
-
 }
