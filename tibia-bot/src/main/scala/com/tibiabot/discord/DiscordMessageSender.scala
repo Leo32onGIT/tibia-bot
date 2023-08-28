@@ -13,6 +13,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
+import java.util.concurrent.Executors
 
 //noinspection UnstableApiUsage
 class DiscordMessageSender() extends StrictLogging {
@@ -26,17 +27,19 @@ class DiscordMessageSender() extends StrictLogging {
   private val webhookRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
   private val guildProcessingThreads: mutable.Map[Guild, Thread] = mutable.Map.empty
 
+  // Create a thread pool with a fixed number of threads
+  private val threadPool = Executors.newFixedThreadPool(10) // Choose an appropriate number of threads
+
   def sendWebhookMessage(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
     val messageDetails = MessageDetails(guild, webhookChannel, messageContent, messageAuthor)
     try {
       val guildQueue = guildQueues.getOrElseUpdate(guild, {
         val newQueue = new LinkedBlockingQueue[MessageDetails]()
         val guildMessageQueue = GuildMessageQueue(guild, newQueue)
-        // Start processing the new queue in a separate thread if not already started
+        // Start processing the new queue in the thread pool if not already started
         if (!guildProcessingThreads.contains(guild)) {
-          val processingThread = new Thread(() => processGuildQueue(guildMessageQueue))
-          guildProcessingThreads(guild) = processingThread
-          processingThread.start()
+          threadPool.submit(() => processGuildQueue(guildMessageQueue))
+          guildProcessingThreads(guild) = true
         }
         guildMessageQueue
       })
