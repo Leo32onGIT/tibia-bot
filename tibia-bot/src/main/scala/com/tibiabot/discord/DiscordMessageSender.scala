@@ -19,25 +19,37 @@ class DiscordMessageSender() extends StrictLogging {
 
   private case class MessageDetails(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String)
 
-  private val queue: BlockingQueue[MessageDetails] = new LinkedBlockingQueue[MessageDetails]()
+  private case class GuildMessageQueue(guild: Guild, queue: BlockingQueue[MessageDetails])
+
+  private val guildQueues: mutable.Map[Guild, GuildMessageQueue] = mutable.Map.empty
   private val channelRateLimiters: mutable.Map[TextChannel, RateLimiter] = mutable.Map.empty
   private val webhookRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
-
-  val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
-  scheduler.scheduleAtFixedRate(() => sendMessages(), 0, 5, TimeUnit.SECONDS)
 
   def sendWebhookMessage(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
     val messageDetails = MessageDetails(guild, webhookChannel, messageContent, messageAuthor)
     try {
-        queue.put(messageDetails)
+      val guildQueue = guildQueues.getOrElseUpdate(guild, {
+        val newQueue = new LinkedBlockingQueue[MessageDetails]()
+        val guildMessageQueue = GuildMessageQueue(guild, newQueue)
+        // Start processing the new queue in a separate thread
+        startProcessingGuildQueue(guildMessageQueue)
+        guildMessageQueue
+      })
+      guildQueue.queue.put(messageDetails)
     } catch {
-      case ex: Exception => logger.error(s"Failed to add level message to queue for Guild: '${guild.getId}' Channel: '${webhookChannel.getId}' World: '$messageAuthor':\nMessage: $messageContent", ex)
+      case ex: Exception =>
+        logger.error(s"Failed to add level message to queue for Guild: '${guild.getId}' Channel: '${webhookChannel.getId}' World: '$messageAuthor':\nMessage: $messageContent", ex)
     }
   }
 
-  private def sendMessages(): Unit = {
+  private def startProcessingGuildQueue(guildQueue: GuildMessageQueue): Unit = {
+    val scheduler = Executors.newSingleThreadScheduledExecutor()
+    scheduler.scheduleAtFixedRate(() => sendGuildMessages(guildQueue), 0, 5, TimeUnit.SECONDS)
+  }
+
+  private def sendGuildMessages(guildQueue: GuildMessageQueue): Unit = {
     val messages: ListBuffer[MessageDetails] = ListBuffer.empty[MessageDetails]
-    queue.drainTo(messages.asJava)
+    guildQueue.queue.drainTo(messages.asJava)
     if (!messages.isEmpty) {
       for (messageDetails <- messages) {
 
