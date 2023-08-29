@@ -23,6 +23,7 @@ class DiscordMessageSender() extends StrictLogging {
   private val webhookRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
 
   private implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(10))
+  private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   def sendWebhookMessage(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
     val messageDetails = MessageDetails(webhookChannel, messageContent, messageAuthor)
@@ -123,5 +124,14 @@ class DiscordMessageSender() extends StrictLogging {
         sendMessagesForGuild(guild, messages)
       }
     }
+
+    executor.schedule(new Runnable {
+      def run(): Unit = sendMessages()
+    }, 30, TimeUnit.SECONDS)
   }
+
+  executor.schedule(new Runnable {
+    def run(): Unit = sendMessages()
+  }, 30, TimeUnit.SECONDS)
+
 }
