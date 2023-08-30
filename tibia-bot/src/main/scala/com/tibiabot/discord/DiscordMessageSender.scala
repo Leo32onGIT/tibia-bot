@@ -22,7 +22,7 @@ class DiscordMessageSender() extends StrictLogging {
   private val channelRateLimiters: mutable.Map[TextChannel, RateLimiter] = mutable.Map.empty
   private val webhookRateLimits: mutable.Map[TextChannel, (Int, Long)] = mutable.Map.empty
 
-  private implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(10))
+  private implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(6))
   private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   def sendWebhookMessage(guild: Guild, webhookChannel: TextChannel, messageContent: String, messageAuthor: String): Unit = {
