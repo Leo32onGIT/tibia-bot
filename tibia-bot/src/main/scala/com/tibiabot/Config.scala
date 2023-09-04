@@ -187,6 +187,7 @@ object Config {
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
+  val primalCreatures: List[String] = mappings.getStringList("primal-creatures").asScala.toList
   val bossSummons: List[String] = mappings.getStringList("boss-summons").asScala.toList
   val nemesisCreatures: List[String] = mappings.getStringList("nemesis-creatures").asScala.toList
   val archfoeCreatures: List[String] = mappings.getStringList("archfoe-creatures").asScala.toList
