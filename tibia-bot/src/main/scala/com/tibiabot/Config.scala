@@ -181,6 +181,9 @@ object Config {
   val exivaEmoji: String = discord.getString("exiva-emoji")
   val indentEmoji: String = discord.getString("indent-emoji")
   val levelUpEmoji: String = discord.getString("levelup-emoji")
+  val desireEmoji: String = discord.getString("desire-emoji")
+  val covetEmoji: String = discord.getString("covet-emoji")
+  val primalEmoji: String = discord.getString("primal-emoji")
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
