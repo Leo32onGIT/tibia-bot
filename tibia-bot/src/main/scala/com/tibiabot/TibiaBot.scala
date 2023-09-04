@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, sender, worldsData, activityData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -591,13 +591,25 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))) {
                       if (levelsCheck) {
                         //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                        sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                        //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                        try {
+                          levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                        } catch {
+                          case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                          case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                        }
                       }
                     }
                   } else {
                     if (levelsCheck) {
                       //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                      sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                      //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
+                      try {
+                        levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                      } catch {
+                        case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                        case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                      }
                     }
                   }
                 }
