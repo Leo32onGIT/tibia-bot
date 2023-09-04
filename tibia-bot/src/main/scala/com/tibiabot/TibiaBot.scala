@@ -821,7 +821,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     Config.feruBosses -> Config.feruEmoji,
                     Config.inqBosses -> Config.inqEmoji,
                     Config.kilmareshBosses -> Config.kilmareshEmoji,
-                    Config.primalCreatures -> Config.primalEmoji
+                    Config.primalCreatures -> Config.primalEmoji,
+                    Config.hazardCreatures -> Config.hazardEmoji
                   )
                   // assign the appropriate emoji
                   val bossIcon = creatureEmojis.find {

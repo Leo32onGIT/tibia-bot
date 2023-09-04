@@ -184,10 +184,12 @@ object Config {
   val desireEmoji: String = discord.getString("desire-emoji")
   val covetEmoji: String = discord.getString("covet-emoji")
   val primalEmoji: String = discord.getString("primal-emoji")
+  val hazardEmoji: String = discord.getString("hazard-emoji")
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
   val primalCreatures: List[String] = mappings.getStringList("primal-creatures").asScala.toList
+  val hazardCreatures: List[String] = mappings.getStringList("hazard-creatures").asScala.toList
   val bossSummons: List[String] = mappings.getStringList("boss-summons").asScala.toList
   val nemesisCreatures: List[String] = mappings.getStringList("nemesis-creatures").asScala.toList
   val archfoeCreatures: List[String] = mappings.getStringList("archfoe-creatures").asScala.toList
