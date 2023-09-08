@@ -179,11 +179,19 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val charLevel = char.characters.character.level.toInt
 
             var skipJoinLeave = false
+            var buggedName = false
 
             // Check formerNames
             var nameChangeCheck = false
             formerNamesList.foreach { formerName =>
               if (charName != "") {
+                // Hotfix for this:
+                // Unsure how this occurs, maybe namelock/manual cipsoft intervention
+                // Name:	         Trombadinha De Rua
+                // Former Names:	 Trombadinha De Rua
+                if (charName.toLowerCase == formerName.toLowerCase) {
+                  buggedName = true
+                }
                 if (activityData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == formerName.toLowerCase())) {
                   nameChangeCheck = true
                 }
@@ -191,7 +199,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
 
             // Player has changed their name
-            if (nameChangeCheck) {
+            if (nameChangeCheck && !buggedName) {
               var oldName = ""
               var timeDelay: Option[ZonedDateTime] = None
               val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
