@@ -281,7 +281,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case Some(satchelTimeList) if satchelTimeList.isEmpty =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
         embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
@@ -339,7 +339,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         } else {
           embed.setColor(178877)
           if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
           embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
             Button.success("galthenSet", "Collected"),
@@ -350,7 +350,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case None =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen%27s_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
         embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
