@@ -44,6 +44,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         handleRepair(event)
       case "galthen" =>
         handleGalthen(event)
+      case "online" =>
+        handleOnlineList(event)
       case _ =>
     }
   }
@@ -607,6 +609,28 @@ class BotListener extends ListenerAdapter with StrictLogging {
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/exiva`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+
+  private def handleOnlineList(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
+    val subCommand = event.getInteraction.getSubcommandName
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val toggleOption: String = options.getOrElse("option", "")
+    val worldOption: String = options.getOrElse("world", "")
+
+    subCommand match {
+      case "list" =>
+        if (toggleOption == "separate") {
+          val embed = BotApp.onlineListConfig(event, worldOption, "separate")
+          event.getHook.sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "combine") {
+          val embed = BotApp.onlineListConfig(event, worldOption, "combine")
+          event.getHook.sendMessageEmbeds(embed).queue()
+        }
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/online`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }

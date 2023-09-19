@@ -667,9 +667,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
           val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
+          val onlineCombinedOption = worldData.headOption.map(_.onlineCombined).getOrElse("false")
           //if (currentOnlineList.size > 1) {
             onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
-            onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel)
+            onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel, onlineCombinedOption)
           //}
         }
       }
@@ -1024,7 +1025,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     Future.successful()
   }.withAttributes(logAndResume)
 
-  private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String): Unit = {
+  private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, onlineCombined: String): Unit = {
 
     val vocationBuffers = ListMap(
       "druid" -> ListBuffer[(String, String)](),
@@ -1054,7 +1055,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
-    //val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == s"${Config.noGuild}" }.map(_._2)).toList
     val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == "" }.map(_._2)).toList
     val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}" || first == s"${Config.enemy}" }.map(_._2)).toList
 
@@ -1066,63 +1066,125 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
-    val alliesTextChannel = guild.getTextChannelById(alliesChannel)
-    if (alliesTextChannel != null) {
-      // allow for custom channel names
-      val channelName = alliesTextChannel.getName
-      val extractName = pattern.findFirstMatchIn(channelName)
-      val customName = if (extractName.isDefined) {
-        val m = extractName.get
-        m.group(1)
-      } else "allies"
-      if (channelName != s"$customName-$alliesCount") {
-        val channelManager = alliesTextChannel.getManager
-        channelManager.setName(s"$customName-$alliesCount").queue()
+
+    // combined online list into one channel
+    if (onlineCombined == "true") {
+      val combinedTextChannel = guild.getTextChannelById(alliesChannel)
+      if (combinedTextChannel != null) {
+        val totalCount = alliesCount + neutralsCount + enemiesCount
+        val combinedList: List[String] = vocationBuffers.values.flatMap(_.map(_._2)).toList
+        // allow for custom channel names
+        val channelName = combinedTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "online"
+        if (channelName != s"$customName-$totalCount") {
+          val channelManager = combinedTextChannel.getManager
+          channelManager.setName(s"$customName-$totalCount").queue()
+        }
+        if (combinedList.nonEmpty) {
+          updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
+        } else {
+          updateMultiFields(List("*No one is online right now.*"), combinedTextChannel, "allies", guildId, guild.getName)
+        }
       }
-      if (alliesList.nonEmpty) {
-        updateMultiFields(alliesList, alliesTextChannel, "allies", guildId, guild.getName)
-      } else {
-        updateMultiFields(List("*No allies are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
+      val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+      if (neutralsTextChannel != null) {
+        // allow for custom channel names
+        val channelName = neutralsTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "neutrals"
+        if (channelName != s"$customName-0") {
+          val channelManager = neutralsTextChannel.getManager
+          channelManager.setName(s"$customName-0").queue()
+        }
+        // placeholder message
+        updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
+      }
+      val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+      if (enemiesTextChannel != null) {
+        // allow for custom channel names
+        val channelName = enemiesTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "enemies"
+        if (channelName != s"$customName-0") {
+          val channelManager = enemiesTextChannel.getManager
+          channelManager.setName(s"$customName-0").queue()
+        }
+        // placeholder message
+        updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
       }
     }
-    val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
-    if (neutralsTextChannel != null) {
-      // allow for custom channel names
-      val channelName = neutralsTextChannel.getName
-      val extractName = pattern.findFirstMatchIn(channelName)
-      val customName = if (extractName.isDefined) {
-        val m = extractName.get
-        m.group(1)
-      } else "neutrals"
-      if (channelName != s"$customName-$neutralsCount") {
-        val channelManager = neutralsTextChannel.getManager
-        channelManager.setName(s"$customName-$neutralsCount").queue()
+
+    // separated online list channels
+    else {
+      val alliesTextChannel = guild.getTextChannelById(alliesChannel)
+      if (alliesTextChannel != null) {
+        // allow for custom channel names
+        val channelName = alliesTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "allies"
+        if (channelName != s"$customName-$alliesCount") {
+          val channelManager = alliesTextChannel.getManager
+          channelManager.setName(s"$customName-$alliesCount").queue()
+        }
+        if (alliesList.nonEmpty) {
+          updateMultiFields(alliesList, alliesTextChannel, "allies", guildId, guild.getName)
+        } else {
+          updateMultiFields(List("*No allies are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
+        }
       }
-      if (neutralsList.nonEmpty) {
-        updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
-      } else {
-        updateMultiFields(List("*No neutrals are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
+      val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+      if (neutralsTextChannel != null) {
+        // allow for custom channel names
+        val channelName = neutralsTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "neutrals"
+        if (channelName != s"$customName-$neutralsCount") {
+          val channelManager = neutralsTextChannel.getManager
+          channelManager.setName(s"$customName-$neutralsCount").queue()
+        }
+        if (neutralsList.nonEmpty) {
+          updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
+        } else {
+          updateMultiFields(List("*No neutrals are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
+        }
+      }
+      val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+      if (enemiesTextChannel != null) {
+        // allow for custom channel names
+        val channelName = enemiesTextChannel.getName
+        val extractName = pattern.findFirstMatchIn(channelName)
+        val customName = if (extractName.isDefined) {
+          val m = extractName.get
+          m.group(1)
+        } else "enemies"
+        if (channelName != s"$customName-$enemiesCount") {
+          val channelManager = enemiesTextChannel.getManager
+          channelManager.setName(s"$customName-$enemiesCount").queue()
+        }
+        if (enemiesList.nonEmpty) {
+          updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
+        } else {
+          updateMultiFields(List("*No enemies are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
+        }
       }
     }
-    val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
-    if (enemiesTextChannel != null) {
-      // allow for custom channel names
-      val channelName = enemiesTextChannel.getName
-      val extractName = pattern.findFirstMatchIn(channelName)
-      val customName = if (extractName.isDefined) {
-        val m = extractName.get
-        m.group(1)
-      } else "enemies"
-      if (channelName != s"$customName-$enemiesCount") {
-        val channelManager = enemiesTextChannel.getManager
-        channelManager.setName(s"$customName-$enemiesCount").queue()
-      }
-      if (enemiesList.nonEmpty) {
-        updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
-      } else {
-        updateMultiFields(List("*No enemies are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
-      }
-    }
+
   }
 
   private def updateMultiFields(values: List[String], channel: TextChannel, purgeType: String, guildId: String, guildName: String): Unit = {

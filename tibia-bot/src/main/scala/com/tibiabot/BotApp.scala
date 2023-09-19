@@ -31,7 +31,7 @@ import java.time.format._
 import scala.util.{Failure, Success}
 import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
 import java.time.temporal.ChronoUnit
-import scala.util.Try
+import scala.util.{Try, Success, Failure}
 
 object BotApp extends App with StrictLogging {
 
@@ -57,7 +57,8 @@ object BotApp extends App with StrictLogging {
     levelsMin: Int,
     deathsMin: Int,
     exivaList: String,
-    activityChannel: String
+    activityChannel: String,
+    onlineCombined: String
   )
 
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
@@ -325,7 +326,26 @@ object BotApp extends App with StrictLogging {
       )
     )
 
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, galthenCommand)
+  // online list config  command
+  private val onlineCombineCommand: SlashCommandData = Commands.slash("online", "Configure how the online list is displayed")
+    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+    .addSubcommands(
+      new SubcommandData("list", "Configure the online list")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
+            .addChoices(
+              new Choice("separate", "separate"),
+              new Choice("combine", "combine")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        )
+    )
+
+  lazy val commands =
+      if (Config.prod)
+        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand)
+      else
+        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -334,8 +354,11 @@ object BotApp extends App with StrictLogging {
   guilds.foreach{g =>
     // update the commands
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
-      //lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand)
-      lazy val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, galthenCommand)
+      lazy val adminCommands =
+        if (Config.prod)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand)
+        else
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -347,7 +370,9 @@ object BotApp extends App with StrictLogging {
 
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
-    updateDashboard()
+    if (Config.prod) {
+      updateDashboard()
+    }
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
@@ -2267,6 +2292,7 @@ object BotApp extends App with StrictLogging {
             |levels_min INT NOT NULL,
             |deaths_min INT NOT NULL,
             |exiva_list VARCHAR(255) NOT NULL,
+            |online_combined VARCHAR(255) NOT NULL,
             |PRIMARY KEY (name)
             |);""".stripMargin
 
@@ -2424,7 +2450,17 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE worlds ADD COLUMN activity_channel VARCHAR(255) DEFAULT '0'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel FROM worlds")
+    // Check if the column already exists in the table
+    val onlineCombinedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'online_combined'")
+    val onlineCombinedExists = onlineCombinedExistsQuery.next()
+    onlineCombinedExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!onlineCombinedExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
+    }
+
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -2452,10 +2488,11 @@ object BotApp extends App with StrictLogging {
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
       val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
+      val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
 
       // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
       if (!Config.mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
       }
     }
 
@@ -2466,7 +2503,7 @@ object BotApp extends App with StrictLogging {
 
   private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -2491,28 +2528,30 @@ object BotApp extends App with StrictLogging {
     statement.setInt(21, 8)
     statement.setString(22, "false")
     statement.setString(23, activityChannel)
-    statement.setString(24, alliesChannel)
-    statement.setString(25, enemiesChannel)
-    statement.setString(26, neutralsChannels)
-    statement.setString(27, levelsChannel)
-    statement.setString(28, deathsChannel)
-    statement.setString(29, category)
-    statement.setString(30, fullblessRole)
-    statement.setString(31, nemesisRole)
-    statement.setString(32, fullblessChannel)
-    statement.setString(33, nemesisChannel)
-    statement.setInt(34, 250)
-    statement.setString(35, "true")
+    statement.setString(24, "false")
+    statement.setString(25, alliesChannel)
+    statement.setString(26, enemiesChannel)
+    statement.setString(27, neutralsChannels)
+    statement.setString(28, levelsChannel)
+    statement.setString(29, deathsChannel)
+    statement.setString(30, category)
+    statement.setString(31, fullblessRole)
+    statement.setString(32, nemesisRole)
+    statement.setString(33, fullblessChannel)
+    statement.setString(34, nemesisChannel)
+    statement.setInt(35, 250)
     statement.setString(36, "true")
     statement.setString(37, "true")
     statement.setString(38, "true")
     statement.setString(39, "true")
     statement.setString(40, "true")
-    statement.setString(41, "on")
-    statement.setInt(42, 8)
+    statement.setString(41, "true")
+    statement.setString(42, "on")
     statement.setInt(43, 8)
-    statement.setString(44, "false")
-    statement.setString(45, activityChannel)
+    statement.setInt(44, 8)
+    statement.setString(45, "false")
+    statement.setString(46, activityChannel)
+    statement.setString(47, "false")
     statement.executeUpdate()
 
     statement.close()
@@ -2584,6 +2623,12 @@ object BotApp extends App with StrictLogging {
           configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
           configMap += ("exiva_list" -> result.getString("exiva_list"))
           configMap += ("activity_channel" -> result.getString("activity_channel"))
+
+          val combinedOnlineValue: String = Try(result.getString("combined_online")) match {
+            case Success(value) => value // Column exists, use the retrieved value
+            case Failure(_) => "false" // Column doesn't exist, use the default value
+          }
+          configMap += ("combined_online" -> combinedOnlineValue)
       }
       statement.close()
       conn.close()
@@ -2989,6 +3034,68 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val statement = conn.prepareStatement("UPDATE worlds SET exiva_list = ? WHERE name = ?;")
     statement.setString(1, detectSetting)
+    statement.setString(2, worldFormal)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def onlineListConfig(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val guild = event.getGuild
+    val commandUser = event.getUser.getId
+    val settingType = if (setting == "combine") "true" else "false"
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    val thumbnailIcon = "Blackboard"
+    val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val existingSetting = cache.headOption.map(_.onlineCombined)
+    if (existingSetting.isDefined) {
+      if (existingSetting.get == settingType) {
+        // embed reply
+        embedBuild.setDescription(s":x: The online list is already set to **$setting** for the world **$worldFormal**.")
+        embedBuild.build()
+      } else {
+        // set the setting here
+        val modifiedWorlds = worldsData(guild.getId).map { w =>
+          if (w.name.toLowerCase() == world.toLowerCase()) {
+            w.copy(onlineCombined = settingType)
+          } else {
+            w
+          }
+        }
+        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        onlineListConfigToDatabase(guild, world, settingType)
+
+        val disclaimer = if (setting == "combine") "\n\n> *I suggest renaming the channel to `online` to reflect its new functionality.*" else "\n\n> *If you deleted the `enemies` & `neutrals` channels in the past, you will need to run the `/repair` command to recreate them.*"
+
+        val discordConfig = discordRetrieveConfig(guild)
+        val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
+        val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
+        if (adminChannel != null) {
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.$disclaimer")
+          adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+
+        embedBuild.setDescription(s":gear: The online list channel is now set to **$setting** for the world **$worldFormal**.$disclaimer")
+        embedBuild.build()
+      }
+    } else {
+      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.build()
+    }
+  }
+
+  private def onlineListConfigToDatabase(guild: Guild, world: String, setting: String): Unit = {
+    val worldFormal = world.toLowerCase().capitalize
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"UPDATE worlds SET online_combined = ? WHERE name = ?;")
+    statement.setString(1, setting)
     statement.setString(2, worldFormal)
     statement.executeUpdate()
 
