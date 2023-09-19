@@ -1087,7 +1087,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         if (combinedList.nonEmpty) {
           updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
         } else {
-          updateMultiFields(List("*No one is online right now.*"), combinedTextChannel, "allies", guildId, guild.getName)
+          updateMultiFields(List("*Nobody is online right now.*"), combinedTextChannel, "allies", guildId, guild.getName)
         }
       }
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
@@ -1142,7 +1142,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         if (alliesList.nonEmpty) {
           updateMultiFields(alliesList, alliesTextChannel, "allies", guildId, guild.getName)
         } else {
-          updateMultiFields(List("*No allies are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
+          updateMultiFields(List("*No `allies` are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
         }
       }
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
@@ -1161,7 +1161,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         if (neutralsList.nonEmpty) {
           updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
         } else {
-          updateMultiFields(List("*No neutrals are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
+          updateMultiFields(List("*No `neutrals` are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
         }
       }
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
@@ -1180,7 +1180,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         if (enemiesList.nonEmpty) {
           updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
         } else {
-          updateMultiFields(List("*No enemies are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
+          updateMultiFields(List("*No `enemies` are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
         }
       }
     }
