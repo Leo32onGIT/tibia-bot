@@ -8,7 +8,7 @@ object Config {
   private val discord = ConfigFactory.load().getConfig("discord-config")
   private val mappings = ConfigFactory.load().getConfig("mapping-config")
 
-  val prod = false
+  val prod = true
 
   val token: String = discord.getString("token")
   val postgresHost: String = discord.getString("postgres-host")
