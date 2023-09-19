@@ -98,7 +98,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
     // cache bypass for Seanera
-    if (world == "Pulsera") {
+    if (world == "Pulsera" && Config.prod) {
       // Remove existing online chars from the list...
       recentOnlineBypass.filterInPlace { i =>
         !online.exists(player => player.name == i.char)
@@ -151,10 +151,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
           val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
             case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-            case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
-            case (_, _, _, true, _) => Config.allyGuild // allied-players
-            case (_, _, _, _, true) => Config.enemy // hunted-players
-            case ("", _, _, _, _) => "" //Config.noGuild // no guild (not ally or hunted)
+            case (_, _, true, _, _) => s"${Config.enemyGuild}${Config.enemy}" // hunted-guilds
+            case ("", _, _, true, _) => Config.ally // allied-players not in any guild
+            case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
+            case ("", _, _, _, true) => Config.enemy // hunted-players no guild
+            case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
+            case ("", _, _, _, _) => "" // no guild (not ally or hunted)
             case _ => Config.otherGuild // guild (not ally or hunted)
           }
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
@@ -578,8 +580,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
                   val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
                   val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
-                  val enemyIcons = List(Config.enemy, Config.enemyGuild)
-                  val alliesIcons = List(Config.allyGuild)
+                  val enemyIcons = List(Config.enemy, s"${Config.enemyGuild}${Config.enemy}", s"${Config.otherGuild}${Config.enemy}")
+                  val alliesIcons = List(Config.allyGuild, Config.ally)
                   val neutralIcons = List(Config.otherGuild, "")
                   // don't post level if showNeutrals is set to false and its a neutral level
                   val levelsCheck =
@@ -789,14 +791,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         case _ => "a"
                         }
                         killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}](${charUrl(isSummon(1))})**"
-                        if (guildIcon == Config.allyGuild) {
+                        if (embedColor == 13773097) {
                           if (exivaListCheck == "true") {
                             exivaBuffer += isSummon(1)
                           }
                         }
                       } else {
                         killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
-                        if (guildIcon == Config.allyGuild) {
+                        if (embedColor == 13773097) {
                           if (exivaListCheck == "true") {
                             exivaBuffer += k.name
                           }
@@ -804,7 +806,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       }
                     } else {
                       killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // summon not detected
-                      if (guildIcon == Config.allyGuild) {
+                      if (embedColor == 13773097) {
                         if (exivaListCheck == "true") {
                           exivaBuffer += k.name
                         }
@@ -1053,26 +1055,26 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val guildIcon = if (guildIconData != null) guildIconData.icon else ""
       vocationBuffers(voc) += ((guildIcon, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
     }
-
-    val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter(_._1 == s"${Config.allyGuild}").map(_._2)).toList
-    val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == "" }.map(_._2)).toList
-    val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}" || first == s"${Config.enemy}" }.map(_._2)).toList
-
-    val alliesCount = alliesList.size
-    val neutralsCount = neutralsList.size
-    val enemiesCount = enemiesList.size
-
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
 
+    val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.allyGuild}" || first == s"${Config.ally}" || first == s"${Config.otherGuild}${Config.ally}" }.map(_._2)).toList
+    val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == "" }.map(_._2)).toList
+    val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}${Config.enemy}" || first == s"${Config.otherGuild}${Config.enemy}" || first == s"${Config.enemy}" }.map(_._2)).toList
+
     // combined online list into one channel
     if (onlineCombined == "true") {
       val combinedTextChannel = guild.getTextChannelById(alliesChannel)
       if (combinedTextChannel != null) {
-        val totalCount = alliesCount + neutralsCount + enemiesCount
-        val combinedList: List[String] = vocationBuffers.values.flatMap(_.map(_._2)).toList
+
+        val totalCount = alliesList.size + neutralsList.size + enemiesList.size
+        val modifiedAlliesList = if (alliesList.nonEmpty) List(s"### ${Config.ally} **Allies** ${Config.ally}") ++ alliesList else alliesList
+        val modifiedEnemiesList = if (enemiesList.nonEmpty) List(s"### ${Config.enemy} **Enemies** ${Config.enemy}") ++ enemiesList else enemiesList
+        val modifiedNeutralsList = if (neutralsList.nonEmpty) List(s"### ${Config.neutral} **Neutrals** ${Config.neutral}") ++ neutralsList else neutralsList
+        val combinedList = modifiedAlliesList ++ modifiedEnemiesList ++ modifiedNeutralsList
+
         // allow for custom channel names
         val channelName = combinedTextChannel.getName
         val extractName = pattern.findFirstMatchIn(channelName)
@@ -1126,6 +1128,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
     // separated online list channels
     else {
+
+      val alliesCount = alliesList.size
+      val neutralsCount = neutralsList.size
+      val enemiesCount = enemiesList.size
+
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       if (alliesTextChannel != null) {
         // allow for custom channel names
@@ -1223,7 +1230,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       var currentMessage = 0
       values.foreach { v =>
         val currentField = field + "\n" + v
-        if (currentField.length <= 4096) { // don't add field yet, there is still room
+        if (currentField.length <= 4096 && v != s"### ${Config.enemy} **Enemies** ${Config.enemy}" && v != s"### ${Config.neutral} **Neutrals** ${Config.neutral}") { // don't add field yet, there is still room
           field = currentField
         }
         else { // it's full, add the field

@@ -5,10 +5,11 @@ import com.typesafe.config.ConfigFactory
 import scala.jdk.CollectionConverters._
 
 object Config {
+  // prod or dev environment
+  val prod = true
+
   private val discord = ConfigFactory.load().getConfig("discord-config")
   private val mappings = ConfigFactory.load().getConfig("mapping-config")
-
-  val prod = true
 
   val token: String = discord.getString("token")
   val postgresHost: String = discord.getString("postgres-host")
@@ -166,9 +167,10 @@ object Config {
   val summonEmoji: String = discord.getString("summon-emoji")
   val allyGuild: String = discord.getString("allyguild-emoji")
   val otherGuild: String = discord.getString("otherguild-emoji")
-  val noGuild: String = discord.getString("noguild-emoji")
   val enemyGuild: String = discord.getString("enemyguild-emoji")
+  val ally: String = discord.getString("ally-emoji")
   val enemy: String = discord.getString("enemy-emoji")
+  val neutral: String = discord.getString("neutral-emoji")
   val mkEmoji: String = discord.getString("mk-emoji")
   val cubeEmoji: String = discord.getString("cube-emoji")
   val svarGreenEmoji: String = discord.getString("svar-green-emoji")

@@ -1133,6 +1133,7 @@ object BotApp extends App with StrictLogging {
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
     val guild = event.getGuild
+    val guildId = guild.getId
     val embedColor = 3092790
 
     //val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
@@ -1191,8 +1192,20 @@ object BotApp extends App with StrictLogging {
               case _ => ""
             }
             val pGuild = player.guild
+            val allyGuildCheck = if (pGuild != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == pGuild.toLowerCase()) else false
+            val huntedGuildCheck = if (pGuild != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == pGuild.toLowerCase()) else false
+            val pIcon = (pGuild, allyGuildCheck, huntedGuildCheck, arg) match {
+              case (_, true, _, "allies") => Config.allyGuild // allied guilds
+              case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
+              case (_, _, true, "hunted") => s"${Config.enemyGuild}${Config.enemy}" // enemy player in hunted guild
+              case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
+              case ("", _, _, "hunted") => Config.enemy // hunted players no guild
+              case ("", _, _, "allies") => Config.ally // allied player in no guild
+              case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
+              case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
+              case _ => ""
+            }
             val pLoginRelative = dateStringToEpochSeconds(player.last_login) // "2022-01-01T01:00:00Z"
-            val pIcon = if (pGuild != "" && arg == "allies") Config.allyGuild else if (pGuild != "" && arg == "hunted") Config.enemyGuild else if (pGuild == "" && arg == "hunted") Config.enemy else ""
             if (pVoc != "") {
               // only show players on worlds that you have setup
               if (allWorlds.exists(_.name.toLowerCase == pWorld.toLowerCase)) {
@@ -1206,7 +1219,19 @@ object BotApp extends App with StrictLogging {
               val charLevel = charResponse.characters.character.level.toInt
               val charGuild = charResponse.characters.character.guild
               val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
-              val guildIcon = if (charGuildName != "" && arg == "allies") Config.allyGuild else if (charGuildName != "" && arg == "hunted") Config.enemyGuild else if (charGuildName == "" && arg == "hunted") Config.enemy else ""
+              val allyGuildCheck = if (charGuildName != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
+              val huntedGuildCheck = if (charGuildName != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
+              val guildIcon = (charGuildName, allyGuildCheck, huntedGuildCheck, arg) match {
+                case (_, true, _, "allies") => Config.allyGuild // allied guilds
+                case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
+                case (_, _, true, "hunted") => s"${Config.enemyGuild}${Config.enemy}" // enemy player in hunted guild
+                case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
+                case ("", _, _, "hunted") => Config.enemy // hunted players no guild
+                case ("", _, _, "allies") => Config.ally // allied player in no guild
+                case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
+                case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
+                case _ => ""
+              }
               val charVocation = charResponse.characters.character.vocation
               val charWorld = charResponse.characters.character.world
               val charLink = charUrl(charName)
@@ -3068,7 +3093,7 @@ object BotApp extends App with StrictLogging {
         worldsData = worldsData + (guild.getId -> modifiedWorlds)
         onlineListConfigToDatabase(guild, world, settingType)
 
-        val disclaimer = if (setting == "combine") "\n\n> *I suggest renaming the channel to `online` to reflect its new functionality.*" else "\n\n> *If you deleted the `enemies` & `neutrals` channels in the past, you will need to run the `/repair` command to recreate them.*"
+        val disclaimer = if (setting == "combine") "\n\n> *I suggest renaming the `allies` channel to '**online**' or '**online list**' to reflect its new functionality.*" else "\n\n> *If you deleted the `enemies` & `neutrals` channels in the past, you will need to run the `/repair` command to recreate them.*"
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
