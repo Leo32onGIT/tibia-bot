@@ -1090,7 +1090,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         val modifiedNeutralsList = if (neutralsList.nonEmpty) {
           if (alliesList.nonEmpty || enemiesList.nonEmpty) {
-            List(s"### ${Config.neutral} **Neutrals** ${Config.neutral} ${neutralsList.size}") ++ neutralsList
+            List(s"### ${Config.neutral} **Others** ${Config.neutral} ${neutralsList.size}") ++ neutralsList
           } else {
             neutralsList
           }
