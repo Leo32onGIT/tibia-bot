@@ -1,7 +1,7 @@
 ThisBuild / version := "1.1.0-SNAPSHOT"
 
 name := "tibia-bot"
-version := "1.6"
+version := "1.7"
 
 scalaVersion := "2.13.9"
 
