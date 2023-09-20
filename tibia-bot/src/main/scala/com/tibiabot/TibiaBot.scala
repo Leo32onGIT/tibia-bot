@@ -151,7 +151,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
           val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
             case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-            case (_, _, true, _, _) => s"${Config.enemyGuild}${Config.enemy}" // hunted-guilds
+            case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
             case ("", _, _, true, _) => Config.ally // allied-players not in any guild
             case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
             case ("", _, _, _, true) => Config.enemy // hunted-players no guild
@@ -580,8 +580,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
                   val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
                   val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
-                  val enemyIcons = List(Config.enemy, s"${Config.enemyGuild}${Config.enemy}", s"${Config.otherGuild}${Config.enemy}")
-                  val alliesIcons = List(Config.allyGuild, Config.ally)
+                  val enemyIcons = List(Config.enemy, Config.enemyGuild, s"${Config.otherGuild}${Config.enemy}")
+                  val alliesIcons = List(Config.allyGuild, Config.ally, s"${Config.otherGuild}${Config.ally}")
                   val neutralIcons = List(Config.otherGuild, "")
                   // don't post level if showNeutrals is set to false and its a neutral level
                   val levelsCheck =
@@ -1062,7 +1062,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
     val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.allyGuild}" || first == s"${Config.ally}" || first == s"${Config.otherGuild}${Config.ally}" }.map(_._2)).toList
     val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == "" }.map(_._2)).toList
-    val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}${Config.enemy}" || first == s"${Config.otherGuild}${Config.enemy}" || first == s"${Config.enemy}" }.map(_._2)).toList
+    val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}" || first == s"${Config.otherGuild}${Config.enemy}" || first == s"${Config.enemy}" }.map(_._2)).toList
 
     // combined online list into one channel
     if (onlineCombined == "true") {
@@ -1292,7 +1292,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
           field = v
           currentMessage += 1
-        } else if (v.startsWith(s"### ${Config.ally}") || v.startsWith(s"### ${Config.enemy}") || v.startsWith(s"### ${Config.neutral}")) {
+        } else if (v.startsWith(s"### ")) {
           if (field == "") {
             field = currentField
           } else {

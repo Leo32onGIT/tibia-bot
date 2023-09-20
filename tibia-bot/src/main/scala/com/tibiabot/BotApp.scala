@@ -1197,7 +1197,7 @@ object BotApp extends App with StrictLogging {
             val pIcon = (pGuild, allyGuildCheck, huntedGuildCheck, arg) match {
               case (_, true, _, "allies") => Config.allyGuild // allied guilds
               case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
-              case (_, _, true, "hunted") => s"${Config.enemyGuild}${Config.enemy}" // enemy player in hunted guild
+              case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
               case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
               case ("", _, _, "hunted") => Config.enemy // hunted players no guild
               case ("", _, _, "allies") => Config.ally // allied player in no guild
@@ -1224,7 +1224,7 @@ object BotApp extends App with StrictLogging {
               val guildIcon = (charGuildName, allyGuildCheck, huntedGuildCheck, arg) match {
                 case (_, true, _, "allies") => Config.allyGuild // allied guilds
                 case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
-                case (_, _, true, "hunted") => s"${Config.enemyGuild}${Config.enemy}" // enemy player in hunted guild
+                case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
                 case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
                 case ("", _, _, "hunted") => Config.enemy // hunted players no guild
                 case ("", _, _, "allies") => Config.ally // allied player in no guild
