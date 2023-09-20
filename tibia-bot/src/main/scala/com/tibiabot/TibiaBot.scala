@@ -1070,9 +1070,33 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (combinedTextChannel != null) {
 
         val totalCount = alliesList.size + neutralsList.size + enemiesList.size
-        val modifiedAlliesList = if (alliesList.nonEmpty) List(s"### ${Config.ally} **Allies** ${Config.ally} ${alliesList.size}") ++ alliesList else alliesList
-        val modifiedEnemiesList = if (enemiesList.nonEmpty) List(s"### ${Config.enemy} **Enemies** ${Config.enemy} ${enemiesList.size}") ++ enemiesList else enemiesList
-        val modifiedNeutralsList = if (neutralsList.nonEmpty) List(s"### ${Config.neutral} **Neutrals** ${Config.neutral} ${neutralsList.size}") ++ neutralsList else neutralsList
+        val modifiedAlliesList = if (alliesList.nonEmpty) {
+          if (neutralsList.nonEmpty || enemiesList.nonEmpty) {
+            List(s"### ${Config.ally} **Allies** ${Config.ally} ${alliesList.size}") ++ alliesList
+          } else {
+            alliesList
+          }
+        } else {
+          alliesList
+        }
+        val modifiedEnemiesList = if (enemiesList.nonEmpty) {
+          if (alliesList.nonEmpty || neutralsList.nonEmpty) {
+            List(s"### ${Config.enemy} **Enemies** ${Config.enemy} ${enemiesList.size}") ++ enemiesList
+          } else {
+            enemiesList
+          }
+        } else {
+          enemiesList
+        }
+        val modifiedNeutralsList = if (neutralsList.nonEmpty) {
+          if (alliesList.nonEmpty || enemiesList.nonEmpty) {
+            List(s"### ${Config.neutral} **Neutrals** ${Config.neutral} ${neutralsList.size}") ++ neutralsList
+          } else {
+            neutralsList
+          }
+        } else {
+          neutralsList
+        }
         val combinedList = modifiedAlliesList ++ modifiedEnemiesList ++ modifiedNeutralsList
 
         // allow for custom channel names
@@ -1230,10 +1254,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       var currentMessage = 0
       values.foreach { v =>
         val currentField = field + "\n" + v
-        if (currentField.length <= 4096 && !v.startsWith(s"### ${Config.enemy}") && !v.startsWith(s"### ${Config.neutral}")) { // don't add field yet, there is still room
-          field = currentField
-        }
-        else { // it's full, add the field
+        if (currentField.length >= 4096) { // don't add field yet, there is still room
           val interimEmbed = new EmbedBuilder()
           interimEmbed.setDescription(field)
           interimEmbed.setColor(embedColor)
@@ -1247,6 +1268,26 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
           field = v
           currentMessage += 1
+        } else if (v.startsWith(s"### ${Config.ally}") || v.startsWith(s"### ${Config.enemy}") || v.startsWith(s"### ${Config.neutral}")) {
+          if (field == "") {
+            field = currentField
+          } else {
+            val interimEmbed = new EmbedBuilder()
+            interimEmbed.setDescription(field)
+            interimEmbed.setColor(embedColor)
+            if (currentMessage < messages.size) {
+              // edit the existing message
+              messages.get(currentMessage).editMessageEmbeds(interimEmbed.build()).queue()
+            }
+            else {
+              // there isn't an existing message to edit, so post a new one
+              channel.sendMessageEmbeds(interimEmbed.build()).setSuppressedNotifications(true).queue()
+            }
+            field = v
+            currentMessage += 1
+          }
+        } else { // it's full, add the field
+          field = currentField
         }
       }
       val finalEmbed = new EmbedBuilder()
