@@ -1107,8 +1107,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "online"
         if (channelName != s"$customName-$totalCount") {
-          val channelManager = combinedTextChannel.getManager
-          channelManager.setName(s"$customName-$totalCount").queue()
+          try {
+            val channelManager = combinedTextChannel.getManager
+            channelManager.setName(s"$customName-$totalCount").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         if (combinedList.nonEmpty) {
           updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
@@ -1126,8 +1130,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "neutrals"
         if (channelName != s"$customName-0") {
-          val channelManager = neutralsTextChannel.getManager
-          channelManager.setName(s"$customName-0").queue()
+          try {
+            val channelManager = neutralsTextChannel.getManager
+            channelManager.setName(s"$customName-0").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         // placeholder message
         updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
@@ -1142,8 +1150,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "enemies"
         if (channelName != s"$customName-0") {
-          val channelManager = enemiesTextChannel.getManager
-          channelManager.setName(s"$customName-0").queue()
+          try {
+            val channelManager = enemiesTextChannel.getManager
+            channelManager.setName(s"$customName-0").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         // placeholder message
         updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
@@ -1167,8 +1179,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "allies"
         if (channelName != s"$customName-$alliesCount") {
-          val channelManager = alliesTextChannel.getManager
-          channelManager.setName(s"$customName-$alliesCount").queue()
+          try {
+            val channelManager = alliesTextChannel.getManager
+            channelManager.setName(s"$customName-$alliesCount").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         if (alliesList.nonEmpty) {
           updateMultiFields(alliesList, alliesTextChannel, "allies", guildId, guild.getName)
@@ -1186,8 +1202,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "neutrals"
         if (channelName != s"$customName-$neutralsCount") {
-          val channelManager = neutralsTextChannel.getManager
-          channelManager.setName(s"$customName-$neutralsCount").queue()
+          try {
+            val channelManager = neutralsTextChannel.getManager
+            channelManager.setName(s"$customName-$neutralsCount").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         if (neutralsList.nonEmpty) {
           updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
@@ -1205,8 +1225,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           m.group(1)
         } else "enemies"
         if (channelName != s"$customName-$enemiesCount") {
-          val channelManager = enemiesTextChannel.getManager
-          channelManager.setName(s"$customName-$enemiesCount").queue()
+          try {
+            val channelManager = enemiesTextChannel.getManager
+            channelManager.setName(s"$customName-$enemiesCount").queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
         if (enemiesList.nonEmpty) {
           updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
