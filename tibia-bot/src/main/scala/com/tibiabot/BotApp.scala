@@ -70,6 +70,7 @@ object BotApp extends App with StrictLogging {
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
   case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
+  case class CustomSort(entityType: String, name: String, emoji: String, label: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -96,6 +97,7 @@ object BotApp extends App with StrictLogging {
   private val botName = jda.getSelfUser.getName
 
   // initialize core hunted/allied list
+  var customSortData: Map[String, List[CustomSort]] = Map.empty
   var huntedPlayersData: Map[String, List[Players]] = Map.empty
   var alliedPlayersData: Map[String, List[Players]] = Map.empty
   var huntedGuildsData: Map[String, List[Guilds]] = Map.empty
@@ -338,6 +340,35 @@ object BotApp extends App with StrictLogging {
               new Choice("combine", "combine")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("categorize", "Categorize a guild or player for sorting on the combined online list")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to add or remove?").setRequired(true)
+            .addChoices(
+              new Choice("add", "add"),
+              new Choice("remove", "remove")
+            ),
+          new OptionData(OptionType.STRING, "type", "Would you like to categorize a guild or a player?").setRequired(true)
+            .addChoices(
+              new Choice("guild", "guild"),
+              new Choice("player", "player")
+            ),
+          new OptionData(OptionType.STRING, "name", "The name of the player or guild you want to add/remove").setRequired(true),
+          new OptionData(OptionType.STRING, "label", "The label you would like to assign to this guild or player").setMaxLength(30),
+          new OptionData(OptionType.STRING, "emoji", "If you are adding a new category, what emoji would you like to assign? (if you leave this blank :star: will be used)")
+            .addChoices(
+              new Choice(":star:", ":star:"),
+              new Choice(":crossed_swords:", ":crossed_swords:"),
+              new Choice(":trophy:", ":trophy:"),
+              new Choice(":detective:", ":detective:"),
+              new Choice(":mag:", ":mag:"),
+              new Choice(":clown:", ":clown:"),
+              new Choice(":skull_crossbones:", ":skull_crossbones:"),
+              new Choice(":flag_white:", ":flag_white:"),
+              new Choice(":rat:", ":rat:"),
+              new Choice(":bust_in_silhouette:", ":bust_in_silhouette:"),
+              new Choice(":rainbows:", ":rainbow:")
+            )
         )
     )
 
@@ -3346,6 +3377,198 @@ object BotApp extends App with StrictLogging {
     statement.close()
     conn.close()
   }
+
+  // WIP
+  def addOnlineListCategory(event: SlashCommandInteractionEvent, guildOrPlayer: String, name: String, label: String, emoji: String, callback: MessageEmbed => Unit): Unit = {
+    // get command information
+    val commandUser = event.getUser.getId
+    val nameLower = name.toLowerCase
+    val guild = event.getGuild
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    // default embed content
+    var embedText = ":x: An error occurred while running the `/online` command"
+    if (checkConfigDatabase(guild)) {
+      val guildId = guild.getId
+      // get admin channel info from database
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      if (guildOrPlayer == "guild") { // command run with 'guild'
+        // run api against guild
+        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(nameLower)
+        guildCheck.map { guildResponse =>
+          val guildName = guildResponse.guilds.guild.name
+          guildName
+        }.map { guildName =>
+          if (guildName != "") {
+            if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == nameLower)) {
+              // add guild to hunted list and database
+              // case class CustomSort(type: String, name: String, emoji: String, label: String)
+              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, guildName, label, emoji) :: customSortData.getOrElse(guildId, List())))
+              addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, label, emoji)
+              embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with the category $emoji **$label**."
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the category $emoji **$label** for the **combined** online list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+
+            } else {
+              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already has a category assigned."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+
+            }
+          } else {
+            embedText = s":x: The guild **$nameLower** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
+
+          }
+        }
+      } else if (guildOrPlayer == "player") { // command run with 'player'
+        // run api against player
+        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(nameLower)
+        playerCheck.map { charResponse =>
+          val character = charResponse.characters.character
+          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        }.map { case (playerName, world, vocation, level) =>
+          if (playerName != "") {
+            if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
+              // add player to hunted list and database
+              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, playerName, label, emoji) :: customSortData.getOrElse(guildId, List())))
+              addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, label, emoji)
+              embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with the category $emoji **$label**."
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the category $emoji **$label** for the **combined** online list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+
+            } else {
+              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already has a category assigned."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+
+            }
+          } else {
+            embedText = s":x: The player **$nameLower** does not exist."
+            embedBuild.setDescription(embedText)
+            callback(embedBuild.build())
+
+          }
+        }
+      }
+    } else {
+      embedText = s":x: You need to run `/setup` and add a world first."
+    }
+    embedBuild.setDescription(embedText)
+    embedBuild.build()
+  }
+
+  private def addOnlineListCategoryToDatabase(guild: Guild, guildOrPlayer: String, name: String, label: String, emoji: String): Unit = {
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"INSERT INTO online_list_categories(type, name, label, emoji) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
+    statement.setString(1, guildOrPlayer)
+    statement.setString(2, name)
+    statement.setString(3, label)
+    statement.setString(4, emoji)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def removeOnlineListCategory(event: SlashCommandInteractionEvent, guildOrPlayer: String, name: String): MessageEmbed = {
+    // get command information
+    val commandUser = event.getUser.getId
+    val nameLower = name.toLowerCase
+    val guild = event.getGuild
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    // default embed content
+    var embedText = ":x: An error occurred while running the `/online` command"
+    if (checkConfigDatabase(guild)) {
+      val guildId = guild.getId
+      // get admin channel info from database
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      if (guildOrPlayer == "guild") { // command run with 'guild'
+        if (customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == nameLower)) {
+
+          customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "guild" && entry.name.equalsIgnoreCase(nameLower)))
+          removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
+
+          embedText = s":gear: The guild **$nameLower** had its custom category removed."
+
+          // send embed to admin channel
+          if (adminChannel != null) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom categorization in the **combined** online list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
+        } else {
+          embedText = s":x: The guild **$nameLower** does not have a category assigned."
+
+        }
+      } else if (guildOrPlayer == "player") { // command run with 'player'
+        if (customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
+
+          customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "player" && entry.name.equalsIgnoreCase(nameLower)))
+          removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
+
+          embedText = s":gear: The player **$nameLower** had its custom category removed."
+
+          // send embed to admin channel
+          if (adminChannel != null) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom categorization in the **combined** online list.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
+        } else {
+          embedText = s":x: The player **$nameLower** already has a category assigned."
+        }
+      }
+    } else {
+      embedText = s":x: You need to run `/setup` and add a world first."
+    }
+    embedBuild.setDescription(embedText)
+    embedBuild.build()
+  }
+
+  private def removeOnlineListCategoryFromDatabase(guild: Guild, guildOrPlayer: String, name: String): Unit = {
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE name = ? AND type = ?;")
+    statement.setString(1, name)
+    statement.setString(2, guildOrPlayer)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+  // WIP
 
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
     val worldFormal = world.toLowerCase().capitalize

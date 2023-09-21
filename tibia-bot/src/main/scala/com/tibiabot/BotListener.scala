@@ -618,15 +618,33 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
-    val worldOption: String = options.getOrElse("world", "")
 
     subCommand match {
       case "list" =>
+        val worldOption: String = options.getOrElse("world", "")
         if (toggleOption == "separate") {
           val embed = BotApp.onlineListConfig(event, worldOption, "separate")
           event.getHook.sendMessageEmbeds(embed).queue()
         } else if (toggleOption == "combine") {
           val embed = BotApp.onlineListConfig(event, worldOption, "combine")
+          event.getHook.sendMessageEmbeds(embed).queue()
+        }
+      case "categorize" =>
+        val typeOption: String = options.getOrElse("type", "")
+        val nameOption: String = options.getOrElse("name", "")
+        val labelOption: String = options.getOrElse("label", "")
+        val emojiOption: String = options.getOrElse("emoji", "")
+        if (toggleOption == "add") {
+          if (labelOption == "" || emojiOption == ""){
+            val embed = new EmbedBuilder().setDescription(s":x: You must supply a **label** and **emoji** when categorizing a guild or player.").build()
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else {
+            BotApp.addOnlineListCategory(event, typeOption, nameOption, labelOption, emojiOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue()
+            })
+          }
+        } else if (toggleOption == "remove") {
+          val embed = BotApp.removeOnlineListCategory(event, typeOption, nameOption)
           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case _ =>

@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -27,10 +27,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
   private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
-  private case class GuildIcon(discordGuild: String, icon: String)
-  private case class CurrentOnline(name: String, level: Int, vocation: String, guildIcon: List[GuildIcon], time: ZonedDateTime, duration: Long = 0L, flag: String)
+  private case class CurrentOnline(name: String, level: Int, vocation: String, guildName: String, time: ZonedDateTime, duration: Long = 0L, flag: String)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
+  private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, categoryEmoji: String, category: String, message: String)
 
   //val guildId: String = guild.getId
 
@@ -82,8 +82,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       currentOnline.find(_.name == player.name) match {
         case Some(existingPlayer) =>
           val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
-          CurrentOnline(player.name, player.level.toInt, player.vocation, List.empty[GuildIcon], now, existingPlayer.duration + duration, existingPlayer.flag)
-        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, List.empty[GuildIcon], now, 0L, "")
+          CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
+        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
       }
     }
 
@@ -149,25 +149,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
           val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
           val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-          val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
-            case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-            case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
-            case ("", _, _, true, _) => Config.ally // allied-players not in any guild
-            case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
-            case ("", _, _, _, true) => Config.enemy // hunted-players no guild
-            case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
-            case ("", _, _, _, _) => "" // no guild (not ally or hunted)
-            case _ => Config.otherGuild // guild (not ally or hunted)
-          }
+
+          // add guild to online list cache
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-            val newGuildIcon = GuildIcon(discordGuild = guildId, icon = guildIcon)
-            val updatedPlayer = onlinePlayer.copy(guildIcon =
-              if (onlinePlayer.guildIcon != null && onlinePlayer.guildIcon.nonEmpty)
-                onlinePlayer.guildIcon ++ List(newGuildIcon)
-              else
-                List(newGuildIcon)
-            )
-            currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
+            if (onlinePlayer.guildName != guildName){
+              val updatedPlayer = onlinePlayer.copy(guildName = guildName)
+              currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
+            }
           }
 
           // Activity channel
@@ -568,8 +556,22 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               discordsList.foreach { discords =>
                 val guild = BotApp.jda.getGuildById(discords.id)
                 val guildId = discords.id
-                val guildIconData = onlinePlayer.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
-                val guildIcon = if (guildIconData != null) guildIconData.icon else ""
+
+                // get appropriate guildIcon
+                val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+                val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+                val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+                val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+                val guildIcon = (guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
+                  case (_, true, _, _, _) => Config.allyGuild // allied-guilds
+                  case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
+                  case ("", _, _, true, _) => Config.ally // allied-players not in any guild
+                  case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
+                  case ("", _, _, _, true) => Config.enemy // hunted-players no guild
+                  case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
+                  case ("", _, _, _, _) => "" // no guild (not ally or hunted)
+                  case _ => Config.otherGuild // guild (not ally or hunted)
+                }
                 val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
                 val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
@@ -1030,11 +1032,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, onlineCombined: String): Unit = {
 
     val vocationBuffers = ListMap(
-      "druid" -> ListBuffer[(String, String)](),
-      "knight" -> ListBuffer[(String, String)](),
-      "paladin" -> ListBuffer[(String, String)](),
-      "sorcerer" -> ListBuffer[(String, String)](),
-      "none" -> ListBuffer[(String, String)]()
+      "druid" -> ListBuffer[CharSort](),
+      "knight" -> ListBuffer[CharSort](),
+      "paladin" -> ListBuffer[CharSort](),
+      "sorcerer" -> ListBuffer[CharSort](),
+      "none" -> ListBuffer[CharSort]()
     )
 
     val sortedList = onlineData.sortWith(_.level > _.level)
@@ -1051,25 +1053,95 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         s"${durationInMin}min"
       }
       val durationString = s"`$durationStr`"
-      val guildIconData = player.guildIcon.find(_.discordGuild == guildId).getOrElse(null)
-      val guildIcon = if (guildIconData != null) guildIconData.icon else ""
-      vocationBuffers(voc) += ((guildIcon, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}"))
+      // get appropriate guild icon
+      val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
+      val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
+      val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
+      val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
+      val guildIcon = (player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
+        case (_, true, _, _, _) => Config.allyGuild // allied-guilds
+        case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
+        case ("", _, _, true, _) => Config.ally // allied-players not in any guild
+        case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
+        case ("", _, _, _, true) => Config.enemy // hunted-players no guild
+        case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
+        case ("", _, _, _, _) => "" // no guild (not ally or hunted)
+        case _ => Config.otherGuild // guild (not ally or hunted)
+      }
+
+      // Initialize with empty strings
+      var (categoryLabel, categoryEmoji) = ("", "")
+
+      // Query customSortData for the guildId and match player.guildName within the guild's data
+      val customSortGuildMatches = customSortData.getOrElse(guildId, List())
+        .filter(entry => entry.entityType == "guild" && entry.name.toLowerCase() == player.guildName.toLowerCase())
+      if (customSortGuildMatches.nonEmpty) {
+        val matchData = customSortGuildMatches.head // Use the first match found
+        categoryLabel = matchData.label
+        categoryEmoji = matchData.emoji
+      }
+
+      // Query customSortData for the guildId and match player.name within the player's data
+      val customSortPlayerMatches = customSortData.getOrElse(guildId, List())
+        .filter(entry => entry.entityType == "player" && entry.name.toLowerCase() == player.name.toLowerCase())
+      if (customSortPlayerMatches.nonEmpty) {
+        val matchData = customSortPlayerMatches.head // Use the first match found
+        categoryLabel = matchData.label
+        categoryEmoji = matchData.emoji
+      }
+
+      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, categoryEmoji, categoryLabel, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
     }
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
 
-    val alliesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.allyGuild}" || first == s"${Config.ally}" || first == s"${Config.otherGuild}${Config.ally}" }.map(_._2)).toList
-    val neutralsList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.otherGuild}" || first == "" }.map(_._2)).toList
-    val enemiesList: List[String] = vocationBuffers.values.flatMap(_.filter { case (first, _) => first == s"${Config.enemyGuild}" || first == s"${Config.otherGuild}${Config.enemy}" || first == s"${Config.enemy}" }.map(_._2)).toList
+    // default online list
+    val alliesList: List[String] = vocationBuffers.values
+      .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+      .map(_.message)
+      .toList
+
+    val enemiesList: List[String] = vocationBuffers.values
+      .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+      .map(_.message)
+      .toList
+
+    val neutralsList: List[String] = vocationBuffers.values
+      .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+      .map(_.message)
+      .toList
 
     // combined online list into one channel
     if (onlineCombined == "true") {
       val combinedTextChannel = guild.getTextChannelById(alliesChannel)
       if (combinedTextChannel != null) {
 
+        val groupedNeutrals: List[(String, List[String])] = vocationBuffers.values
+          .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+          .groupBy(_.category)
+          .toList
+          .sortBy { case (category, _) => (category.isEmpty, category) }
+          .map { case (category, charSorts) =>
+            val (countOfItems, messages) = charSorts.foldLeft(0 -> List.empty[String]) {
+              case ((count, accMessages), charSort) =>
+                count + 1 -> (accMessages :+ charSort.message)
+            }
+            val categoryHeader = if (category.isEmpty) {
+              s"### ${Config.neutral} Others ${Config.neutral}"
+            } else {
+              val categoryEmoji = charSorts.headOption.map(_.categoryEmoji).getOrElse("") // Use categoryEmoji from the first CharSort if available
+              s"### $categoryEmoji ${category.capitalize} $categoryEmoji"
+            }
+            (s"$categoryHeader $countOfItems", messages)
+          }
+
+        val groupedNeutralsList: List[String] = groupedNeutrals.flatMap { case (categoryHeader, messages) =>
+          categoryHeader :: messages
+        }
         val totalCount = alliesList.size + neutralsList.size + enemiesList.size
+
         val modifiedAlliesList = if (alliesList.nonEmpty) {
           if (neutralsList.nonEmpty || enemiesList.nonEmpty) {
             List(s"### ${Config.ally} **Allies** ${Config.ally} ${alliesList.size}") ++ alliesList
@@ -1088,16 +1160,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         } else {
           enemiesList
         }
-        val modifiedNeutralsList = if (neutralsList.nonEmpty) {
-          if (alliesList.nonEmpty || enemiesList.nonEmpty) {
-            List(s"### ${Config.neutral} **Others** ${Config.neutral} ${neutralsList.size}") ++ neutralsList
-          } else {
-            neutralsList
-          }
-        } else {
-          neutralsList
-        }
-        val combinedList = modifiedAlliesList ++ modifiedEnemiesList ++ modifiedNeutralsList
+        val combinedList = modifiedAlliesList ++ modifiedEnemiesList ++ groupedNeutralsList
 
         // allow for custom channel names
         val channelName = combinedTextChannel.getName
