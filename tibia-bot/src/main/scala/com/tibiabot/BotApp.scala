@@ -12,7 +12,7 @@ import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
-import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
+import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData, SubcommandGroupData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
@@ -224,8 +224,40 @@ object BotApp extends App with StrictLogging {
       )
 
   // neutrals command
-  private val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Show or hide neutral level or deaths entries")
+  private val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Configuration options for neutrals")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+    .addSubcommandGroups(
+      new SubcommandGroupData("tag", "Manage your custom tags for neutrals")
+      .addSubcommands(
+        new SubcommandData("add", "Tag a neutral guild or player for deaths and for the combined online list")
+          .addOptions(
+            new OptionData(OptionType.STRING, "type", "Would you like to tag a guild or a player?").setRequired(true)
+              .addChoices(
+                new Choice("guild", "guild"),
+                new Choice("player", "player")
+              ),
+            new OptionData(OptionType.STRING, "name", "The name of the player or guild").setRequired(true),
+            new OptionData(OptionType.STRING, "label", "The label you want for these tags in the combined online list")
+              .setRequired(true)
+              .setMaxLength(30),
+            new OptionData(OptionType.STRING, "emoji", "The emoji you want for these tags in the combined online list").setRequired(true)
+          ),
+        new SubcommandData("remove", "remove a tag")
+          .addOptions(
+            new OptionData(OptionType.STRING, "type", "Would you like to tag a guild or a player?").setRequired(true)
+              .addChoices(
+                new Choice("guild", "guild"),
+                new Choice("player", "player")
+              ),
+            new OptionData(OptionType.STRING, "name", "The name of the player or guild").setRequired(true)
+          ),
+        new SubcommandData("clear", "Clear all entries everything for a specific tag")
+          .addOptions(
+            new OptionData(OptionType.STRING, "label", "What tag would you like to clear?").setRequired(true)
+          ),
+        new SubcommandData("list", "Show a list all of your custom tags")
+      )
+    )
     .addSubcommands(
       new SubcommandData("levels", "Show or hide neutral levels")
         .addOptions(
@@ -244,22 +276,6 @@ object BotApp extends App with StrictLogging {
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("tag", "tag a neutral guild or player for deaths and for the combined online list")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to add or remove?").setRequired(true)
-            .addChoices(
-              new Choice("add", "add"),
-              new Choice("remove", "remove")
-            ),
-          new OptionData(OptionType.STRING, "type", "Would you like to categorize a guild or a player?").setRequired(true)
-            .addChoices(
-              new Choice("guild", "guild"),
-              new Choice("player", "player")
-            ),
-          new OptionData(OptionType.STRING, "name", "The name of the player or guild you want to add/remove").setRequired(true),
-          new OptionData(OptionType.STRING, "label", "The label you would like to assign to this guild or player").setMaxLength(30),
-          new OptionData(OptionType.STRING, "emoji", "If you are adding a new category, what emoji would you like to assign?")
         )
     )
 
@@ -3418,6 +3434,7 @@ object BotApp extends App with StrictLogging {
     // get command information
     val commandUser = event.getUser.getId
     val nameLower = name.toLowerCase
+    val labelCapital = label.capitalize
     val guild = event.getGuild
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
@@ -3437,17 +3454,21 @@ object BotApp extends App with StrictLogging {
         }.map { guildName =>
           if (guildName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == nameLower)) {
+
+              val emojiDupeOption = customSortData.getOrElse(guildId, List()).find(g => g.label == labelCapital)
+              val emojiDupe = emojiDupeOption.map(_.emoji).getOrElse(emoji)
+
               // add guild to hunted list and database
               // case class CustomSort(type: String, name: String, emoji: String, label: String)
-              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, guildName, label, emoji) :: customSortData.getOrElse(guildId, List())))
-              addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, label, emoji)
-              embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with: $emoji **$label** $emoji"
+              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, guildName, labelCapital, emojiDupe) :: customSortData.getOrElse(guildId, List())))
+              addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, labelCapital, emojiDupe)
+              embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
               // send embed to admin channel
               if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emoji **$label** $emoji")
+                adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -3478,16 +3499,20 @@ object BotApp extends App with StrictLogging {
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
+
+              val emojiDupeOption = customSortData.getOrElse(guildId, List()).find(g => g.label == labelCapital)
+              val emojiDupe = emojiDupeOption.map(_.emoji).getOrElse(emoji)
+
               // add player to hunted list and database
-              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, playerName, label, emoji) :: customSortData.getOrElse(guildId, List())))
-              addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, label, emoji)
-              embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with: $emoji **$label** $emoji"
+              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, playerName, labelCapital, emojiDupe) :: customSortData.getOrElse(guildId, List())))
+              addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, labelCapital, emojiDupe)
+              embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
               // send embed to admin channel
               if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emoji **$label** $emoji")
+                adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -3604,6 +3629,111 @@ object BotApp extends App with StrictLogging {
 
     statement.close()
     conn.close()
+  }
+
+  def clearOnlineListCategory(event: SlashCommandInteractionEvent, label: String): MessageEmbed = {
+    // get command information
+    val commandUser = event.getUser.getId
+    val labelLower = label.toLowerCase
+    val guild = event.getGuild
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
+    // default embed content
+    var embedText = ":x: An error occurred while running the `/online` command"
+    if (checkConfigDatabase(guild)) {
+      val guildId = guild.getId
+      // get admin channel info from database
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      if (customSortData.getOrElse(guildId, List()).exists(g => g.label.toLowerCase == labelLower)) {
+
+        customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.label.equalsIgnoreCase(labelLower)))
+        clearOnlineListCategoryFromDatabase(guild, labelLower)
+
+        embedText = s":gear: The tag **$labelLower** has been cleared."
+
+        // send embed to admin channel
+        if (adminChannel != null) {
+          val adminEmbed = new EmbedBuilder()
+          adminEmbed.setTitle(s":gear: a command was run:")
+          adminEmbed.setDescription(s"<@$commandUser> cleared everyone from the tag **$labelLower**.")
+          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+          adminEmbed.setColor(3092790)
+          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+        }
+      } else {
+        embedText = s":x: The tag **$labelLower** does not exist."
+
+      }
+    } else {
+      embedText = s":x: You need to run `/setup` and add a world first."
+    }
+    embedBuild.setDescription(embedText)
+    embedBuild.build()
+  }
+
+  private def clearOnlineListCategoryFromDatabase(guild: Guild, label: String): Unit = {
+    val conn = getConnection(guild)
+    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE LOWER(label) = LOWER(?);")
+    statement.setString(1, label)
+    statement.executeUpdate()
+
+    statement.close()
+    conn.close()
+  }
+
+  def listOnlineListCategory(event: SlashCommandInteractionEvent): List[MessageEmbed] = {
+    // get command information
+    val guild = event.getGuild
+    val embedBuffer = ListBuffer[MessageEmbed]()
+
+    // default embed content
+    val guildId = guild.getId
+    val guildTags: List[CustomSort] = customSortData.getOrElse(guildId, List())
+
+    if (guildTags.isEmpty) {
+      val interimEmbed = new EmbedBuilder()
+      interimEmbed.setDescription(s":x: You do not have any custom tags.")
+      interimEmbed.setColor(3092790)
+      embedBuffer += interimEmbed.build()
+    } else {
+      val groupedTags: Map[(String, String), List[CustomSort]] = guildTags.groupBy(tag => (tag.label, tag.emoji))
+      val groupList = ListBuffer[String]()
+
+      val infoEmbed = new EmbedBuilder()
+      infoEmbed.setDescription(s":speech_balloon: Tags are for *players* or *guilds* that arn't in your **allies** or **enemies** lists.\n\n- Their deaths will be highlighted **yellow**.\n- If you use the **`/online list combine`** version of the online list they will appear under their own category.\n\nThis is very useful for tagging guilds that are 'in war'.\nWhich should make your **online list** and **deaths** feed much more useful.")
+      infoEmbed.setColor(14397256)
+      embedBuffer += infoEmbed.build()
+
+      // guildTags contains data
+      groupedTags.foreach { case ((label, emoji), tags) =>
+        groupList += s"\n$emoji **$label** $emoji"
+        val tagInformation = tags.map { customSort =>
+          groupList += s"- ${customSort.name} *(${customSort.entityType})*"
+        }
+      }
+
+      // build the embed
+      var field = ""
+      groupList.foreach { v =>
+        val currentField = field + "\n" + v
+        if (currentField.length <= 4096) { // don't add field yet, there is still room
+          field = currentField
+        } else { // it's full, add the field
+          val interimEmbed = new EmbedBuilder()
+          interimEmbed.setDescription(field)
+          interimEmbed.setColor(14397256)
+          embedBuffer += interimEmbed.build()
+          field = v
+        }
+      }
+      val finalEmbed = new EmbedBuilder()
+      finalEmbed.setDescription(field)
+      finalEmbed.setColor(14397256)
+      embedBuffer += finalEmbed.build()
+
+    }
+    embedBuffer.toList
   }
 
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
