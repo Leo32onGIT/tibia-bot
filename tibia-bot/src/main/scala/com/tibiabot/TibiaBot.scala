@@ -732,6 +732,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               if (embedColor == 3092790) {
                 embedColor = 4540237
               }
+              val customSortGuildCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == guildName.toLowerCase)
+              if (customSortGuildCheck) {
+                embedColor = 14397256 // yellow
+              }
               // is player an ally
               val allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
               if (allyGuilds) {
@@ -750,6 +754,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
 
             // player
+            val customSortPlayerCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == charName.toLowerCase)
+            if (customSortPlayerCheck) {
+              embedColor = 14397256 // yellow
+            }
             // ally player
             val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
             if (allyPlayers) {
@@ -969,7 +977,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
             val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
             var embedCheck = true
-            if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237) {
+            if (embedColor == 3092790 || embedColor == 14869218 || embedColor == 4540237 || embedColor == 14397256) {
               if(showNeutralDeaths == "false") {
                 embedCheck = false
               }

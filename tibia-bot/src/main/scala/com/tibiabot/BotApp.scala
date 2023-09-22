@@ -70,7 +70,7 @@ object BotApp extends App with StrictLogging {
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
   case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
-  case class CustomSort(entityType: String, name: String, emoji: String, label: String)
+  case class CustomSort(entityType: String, name: String, label: String, emoji: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -244,6 +244,22 @@ object BotApp extends App with StrictLogging {
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("tag", "tag a neutral guild or player for deaths and for the combined online list")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to add or remove?").setRequired(true)
+            .addChoices(
+              new Choice("add", "add"),
+              new Choice("remove", "remove")
+            ),
+          new OptionData(OptionType.STRING, "type", "Would you like to categorize a guild or a player?").setRequired(true)
+            .addChoices(
+              new Choice("guild", "guild"),
+              new Choice("player", "player")
+            ),
+          new OptionData(OptionType.STRING, "name", "The name of the player or guild you want to add/remove").setRequired(true),
+          new OptionData(OptionType.STRING, "label", "The label you would like to assign to this guild or player").setMaxLength(30),
+          new OptionData(OptionType.STRING, "emoji", "If you are adding a new category, what emoji would you like to assign?")
         )
     )
 
@@ -340,35 +356,6 @@ object BotApp extends App with StrictLogging {
               new Choice("combine", "combine")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("categorize", "Categorize a guild or player for sorting on the combined online list")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to add or remove?").setRequired(true)
-            .addChoices(
-              new Choice("add", "add"),
-              new Choice("remove", "remove")
-            ),
-          new OptionData(OptionType.STRING, "type", "Would you like to categorize a guild or a player?").setRequired(true)
-            .addChoices(
-              new Choice("guild", "guild"),
-              new Choice("player", "player")
-            ),
-          new OptionData(OptionType.STRING, "name", "The name of the player or guild you want to add/remove").setRequired(true),
-          new OptionData(OptionType.STRING, "label", "The label you would like to assign to this guild or player").setMaxLength(30),
-          new OptionData(OptionType.STRING, "emoji", "If you are adding a new category, what emoji would you like to assign? (if you leave this blank :star: will be used)")
-            .addChoices(
-              new Choice(":star:", ":star:"),
-              new Choice(":crossed_swords:", ":crossed_swords:"),
-              new Choice(":trophy:", ":trophy:"),
-              new Choice(":detective:", ":detective:"),
-              new Choice(":mag:", ":mag:"),
-              new Choice(":clown:", ":clown:"),
-              new Choice(":skull_crossbones:", ":skull_crossbones:"),
-              new Choice(":flag_white:", ":flag_white:"),
-              new Choice(":rat:", ":rat:"),
-              new Choice(":bust_in_silhouette:", ":bust_in_silhouette:"),
-              new Choice(":rainbows:", ":rainbow:")
-            )
         )
     )
 
@@ -446,6 +433,10 @@ object BotApp extends App with StrictLogging {
       val activityInfo = activityConfig(guild.get, "tracked_activity")
       activityData += (guildId -> activityInfo)
 
+      // get customSort Data
+      val customSortInfo = customSortConfig(guild.get, "online_list_categories")
+      customSortData += (guildId -> customSortInfo)
+
       // set default activityCommandBlocker state
       activityCommandBlocker += (guildId -> false)
 
@@ -503,6 +494,10 @@ object BotApp extends App with StrictLogging {
           // get tracked activity characters
           val activityInfo = activityConfig(g, "tracked_activity")
           activityData += (guildId -> activityInfo)
+
+          // get customSort Data
+          val customSortInfo = customSortConfig(g, "online_list_categories")
+          customSortData += (guildId -> customSortInfo)
 
           // set default activityCommandBlocker state
           activityCommandBlocker += (guildId -> false)
@@ -3378,7 +3373,47 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  // WIP
+  private def customSortConfig(guild: Guild, query: String): List[CustomSort] = {
+    val conn = getConnection(guild)
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'online_list_categories'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createCustomSortTable =
+        s"""CREATE TABLE online_list_categories (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |entity VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |label VARCHAR(255) NOT NULL,
+           |emoji VARCHAR(255) NOT NULL,
+           |added VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
+      statement.executeUpdate(createCustomSortTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT entity,name,label,emoji FROM $query")
+
+    val results = new ListBuffer[CustomSort]()
+    while (result.next()) {
+      val entity = Option(result.getString("entity")).getOrElse("")
+      val name = Option(result.getString("name")).getOrElse("")
+      val label = Option(result.getString("label")).getOrElse("")
+      val emoji = Option(result.getString("emoji")).getOrElse("")
+
+      results += CustomSort(entity, name, label, emoji)
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
+
   def addOnlineListCategory(event: SlashCommandInteractionEvent, guildOrPlayer: String, name: String, label: String, emoji: String, callback: MessageEmbed => Unit): Unit = {
     // get command information
     val commandUser = event.getUser.getId
@@ -3406,13 +3441,13 @@ object BotApp extends App with StrictLogging {
               // case class CustomSort(type: String, name: String, emoji: String, label: String)
               customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, guildName, label, emoji) :: customSortData.getOrElse(guildId, List())))
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, label, emoji)
-              embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with the category $emoji **$label**."
+              embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with: $emoji **$label** $emoji"
 
               // send embed to admin channel
               if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the category $emoji **$label** for the **combined** online list.")
+                adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emoji **$label** $emoji")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -3422,7 +3457,7 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already has a category assigned."
+              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already has a tag assigned."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
@@ -3446,13 +3481,13 @@ object BotApp extends App with StrictLogging {
               // add player to hunted list and database
               customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, playerName, label, emoji) :: customSortData.getOrElse(guildId, List())))
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, label, emoji)
-              embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with the category $emoji **$label**."
+              embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with: $emoji **$label** $emoji"
 
               // send embed to admin channel
               if (adminChannel != null) {
                 val adminEmbed = new EmbedBuilder()
                 adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the category $emoji **$label** for the **combined** online list.")
+                adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emoji **$label** $emoji")
                 adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
                 adminEmbed.setColor(3092790)
                 adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -3462,7 +3497,7 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already has a category assigned."
+              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already has a tag assigned."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
@@ -3477,18 +3512,20 @@ object BotApp extends App with StrictLogging {
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
+      embedBuild.setDescription(embedText)
+      callback(embedBuild.build())
     }
-    embedBuild.setDescription(embedText)
-    embedBuild.build()
   }
 
   private def addOnlineListCategoryToDatabase(guild: Guild, guildOrPlayer: String, name: String, label: String, emoji: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"INSERT INTO online_list_categories(type, name, label, emoji) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
+    val query = "INSERT INTO online_list_categories(entity, name, label, emoji, added) VALUES (?, ?, ?, ?, ?);"
+    val statement = conn.prepareStatement(query)
     statement.setString(1, guildOrPlayer)
     statement.setString(2, name)
     statement.setString(3, label)
     statement.setString(4, emoji)
+    statement.setString(5, ZonedDateTime.now().toEpochSecond().toString)
     statement.executeUpdate()
 
     statement.close()
@@ -3515,19 +3552,19 @@ object BotApp extends App with StrictLogging {
           customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "guild" && entry.name.equalsIgnoreCase(nameLower)))
           removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
 
-          embedText = s":gear: The guild **$nameLower** had its custom category removed."
+          embedText = s":gear: The guild **$nameLower** had its tag removed."
 
           // send embed to admin channel
           if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom categorization in the **combined** online list.")
+            adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom tagging.")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
         } else {
-          embedText = s":x: The guild **$nameLower** does not have a category assigned."
+          embedText = s":x: The guild **$nameLower** does not have a tag assigned."
 
         }
       } else if (guildOrPlayer == "player") { // command run with 'player'
@@ -3536,19 +3573,19 @@ object BotApp extends App with StrictLogging {
           customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "player" && entry.name.equalsIgnoreCase(nameLower)))
           removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
 
-          embedText = s":gear: The player **$nameLower** had its custom category removed."
+          embedText = s":gear: The player **$nameLower** had its tag removed."
 
           // send embed to admin channel
           if (adminChannel != null) {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom categorization in the **combined** online list.")
+            adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom tagging.")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
         } else {
-          embedText = s":x: The player **$nameLower** already has a category assigned."
+          embedText = s":x: The player **$nameLower** already has a tag assigned."
         }
       }
     } else {
@@ -3560,7 +3597,7 @@ object BotApp extends App with StrictLogging {
 
   private def removeOnlineListCategoryFromDatabase(guild: Guild, guildOrPlayer: String, name: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE name = ? AND type = ?;")
+    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE name = ? AND entity = ?;")
     statement.setString(1, name)
     statement.setString(2, guildOrPlayer)
     statement.executeUpdate()
@@ -3568,7 +3605,6 @@ object BotApp extends App with StrictLogging {
     statement.close()
     conn.close()
   }
-  // WIP
 
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
     val worldFormal = world.toLowerCase().capitalize
