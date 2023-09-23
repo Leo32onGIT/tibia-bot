@@ -242,7 +242,7 @@ object BotApp extends App with StrictLogging {
               .setMaxLength(30),
             new OptionData(OptionType.STRING, "emoji", "The emoji you want for these tags in the combined online list").setRequired(true)
           ),
-        new SubcommandData("remove", "remove a tag")
+        new SubcommandData("remove", "Remove a tag")
           .addOptions(
             new OptionData(OptionType.STRING, "type", "Would you like to tag a guild or a player?").setRequired(true)
               .addChoices(
@@ -3701,7 +3701,7 @@ object BotApp extends App with StrictLogging {
       val groupList = ListBuffer[String]()
 
       val infoEmbed = new EmbedBuilder()
-      infoEmbed.setDescription(s":speech_balloon: Tags are for *players* or *guilds* that arn't in your **allies** or **enemies** lists.\n\n- Their deaths will be highlighted **yellow**.\n- If you use the **`/online list combine`** version of the online list they will appear under their own category.\n\nThis is very useful for tagging guilds that are 'in war'.\nWhich should make your **online list** and **deaths** feed much more useful.")
+      infoEmbed.setDescription(s":speech_balloon: Tags are for *players* or *guilds* that arn't in your **allies** or **enemies** lists.\n\n- Their deaths will be highlighted **yellow**.\n- If you use the **`/online list combine`** version of the online list they will appear under their own category.")
       infoEmbed.setColor(14397256)
       embedBuffer += infoEmbed.build()
 
