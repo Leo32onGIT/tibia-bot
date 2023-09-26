@@ -376,24 +376,32 @@ class BotListener extends ListenerAdapter with StrictLogging {
         if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addHunted(event, "player", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
         } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeHunted(event, "player", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
         }
       case "guild" =>
         if (toggleOption == "add") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.addHunted(event, "guild", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
         } else if (toggleOption == "remove") {
           BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
           BotApp.removeHunted(event, "guild", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => {
+              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+            })
           })
         }
       case "list" =>
