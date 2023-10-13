@@ -671,10 +671,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
           val enemiesChannel = worldData.headOption.map(_.enemiesChannel).getOrElse("0")
+          val categoryChannel = worldData.headOption.map(_.category).getOrElse("0")
           val onlineCombinedOption = worldData.headOption.map(_.onlineCombined).getOrElse("false")
           //if (currentOnlineList.size > 1) {
             onlineListTimer = onlineListTimer + (guildId -> ZonedDateTime.now())
-            onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel, onlineCombinedOption)
+            onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel, categoryChannel, onlineCombinedOption, world)
           //}
         }
       }
@@ -1037,7 +1038,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     Future.successful()
   }.withAttributes(logAndResume)
 
-  private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, onlineCombined: String): Unit = {
+  private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, categoryChannel: String, onlineCombined: String, world: String): Unit = {
 
     val vocationBuffers = ListMap(
       "druid" -> ListBuffer[CharSort](),
@@ -1230,6 +1231,22 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         // placeholder message
         updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
+      }
+
+      // add allies/enemies count to the category
+      val categoryLiteral = guild.getCategoryById(categoryChannel)
+      if (categoryLiteral != null){
+        try {
+          val categoryName = categoryLiteral.getName
+          val categoryAllies = if (alliesList.size > 0) s"❤${alliesList.size}" else ""
+          val categoryEnemies = if (enemiesList.size > 0) s"💀${enemiesList.size}" else ""
+          if (categoryName != s"${world} $categoryAllies$categoryEnemies") {
+            val channelManager = categoryLiteral.getManager
+            channelManager.setName(s"${worldName} $categoryAllies$categoryEnemies").queue()
+          }
+        } catch {
+          case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+        }
       }
     }
 
