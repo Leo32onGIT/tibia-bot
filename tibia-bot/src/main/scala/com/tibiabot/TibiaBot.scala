@@ -1169,8 +1169,18 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         } else {
           enemiesList
         }
-        val combinedList = modifiedAlliesList ++ modifiedEnemiesList ++ groupedNeutralsList
 
+        val combinedList = {
+          val headerToRemove = s"### ${Config.neutral} Others ${Config.neutral}"
+          val hasOtherHeaders = groupedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
+
+          if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
+            groupedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
+          } else {
+            modifiedAlliesList ++ modifiedEnemiesList ++ groupedNeutralsList
+          }
+        }
+        
         // allow for custom channel names
         val channelName = combinedTextChannel.getName
         val extractName = pattern.findFirstMatchIn(channelName)
