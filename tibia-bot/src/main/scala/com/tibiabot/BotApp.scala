@@ -2595,7 +2595,7 @@ object BotApp extends App with StrictLogging {
     statement.setInt(21, 8)
     statement.setString(22, "false")
     statement.setString(23, activityChannel)
-    statement.setString(24, "false")
+    statement.setString(24, "true")
     statement.setString(25, alliesChannel)
     statement.setString(26, enemiesChannel)
     statement.setString(27, neutralsChannels)
@@ -2618,7 +2618,7 @@ object BotApp extends App with StrictLogging {
     statement.setInt(44, 8)
     statement.setString(45, "false")
     statement.setString(46, activityChannel)
-    statement.setString(47, "false")
+    statement.setString(47, "true")
     statement.executeUpdate()
 
     statement.close()
@@ -2792,9 +2792,9 @@ object BotApp extends App with StrictLogging {
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
-        val alliesChannel = guild.createTextChannel("allies", newCategory).complete()
-        val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
-        val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
+        val alliesChannel = guild.createTextChannel("online", newCategory).complete()
+        //val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
+        //val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
         val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
         val activityChannel = guild.createTextChannel("activity", newCategory).complete()
@@ -2802,7 +2802,7 @@ object BotApp extends App with StrictLogging {
         val nemesisChannel = guild.createTextChannel("boss-notifications", newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, activityChannel, fullblessChannel, nemesisChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, fullblessChannel, nemesisChannel)
         channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
@@ -2854,8 +2854,8 @@ object BotApp extends App with StrictLogging {
           .queue()
 
         val alliesId = alliesChannel.getId
-        val enemiesId = enemiesChannel.getId
-        val neutralsId = neutralsChannel.getId
+        val enemiesId = "0" //enemiesChannel.getId
+        val neutralsId = "0" //neutralsChannel.getId
         val levelsId = levelsChannel.getId
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
@@ -3149,71 +3149,23 @@ object BotApp extends App with StrictLogging {
         val publicRole = guild.getPublicRole
 
         if (setting == "combine") {
-          if (alliesChannel == null) {
-            try {
-              if (category == null) {
-                // create the category
-                val newCategory = guild.createCategory(worldFormal).complete()
-                newCategory.upsertPermissionOverride(botRole)
-                  .grant(Permission.VIEW_CHANNEL)
-                  .grant(Permission.MESSAGE_SEND)
-                  .grant(Permission.MESSAGE_MENTION_EVERYONE)
-                  .grant(Permission.MESSAGE_EMBED_LINKS)
-                  .grant(Permission.MESSAGE_HISTORY)
-                  .grant(Permission.MANAGE_CHANNEL)
-                  .grant(Permission.MANAGE_WEBHOOKS)
-                  .complete()
-                newCategory.upsertPermissionOverride(publicRole).deny(Permission.MESSAGE_SEND).complete()
-                category = newCategory
-                worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
-                // update the record in worldsData
-                if (worldsData.contains(guild.getId)) {
-                  val worldsList = worldsData(guild.getId)
-                  val updatedWorldsList = worldsList.map { world =>
-                    if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                      world.copy(category = newCategory.getId)
-                    } else {
-                      world
-                    }
-                  }
-                  worldsData += (guild.getId -> updatedWorldsList)
-                }
-              }
-              // create the allies channel
-              val recreateAlliesChannel = guild.createTextChannel("online", category).complete()
-              worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
-              // update the record in worldsData
-              if (worldsData.contains(guild.getId)) {
-                val worldsList = worldsData(guild.getId)
-                val updatedWorldsList = worldsList.map { world =>
-                  if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                    world.copy(alliesChannel = recreateAlliesChannel.getId)
-                  } else {
-                    world
-                  }
-                }
-                worldsData += (guild.getId -> updatedWorldsList)
-              }
-              // apply permissions to created channel
-              recreateAlliesChannel.upsertPermissionOverride(botRole)
-                .grant(Permission.VIEW_CHANNEL)
-                .grant(Permission.MESSAGE_SEND)
-                .grant(Permission.MESSAGE_MENTION_EVERYONE)
-                .grant(Permission.MESSAGE_EMBED_LINKS)
-                .grant(Permission.MESSAGE_HISTORY)
-                .grant(Permission.MANAGE_CHANNEL)
-                .complete()
-              recreateAlliesChannel.upsertPermissionOverride(publicRole)
-                .deny(Permission.MESSAGE_SEND)
-                .complete()
-              disclaimer += s"\n- *You may want to move the new <#${recreateAlliesChannel.getId}> channel.*"
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to create category or allies channels for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
-            }
-          } else {
-            disclaimer += s"\n- *You should rename the <#${alliesChannel.getId}> channel to **online** or something similar to reflect its new purpose.*"
+          if (event.getChannel.getId == alliesChannelInfo.getOrElse("0") || event.getChannel.getId == enemiesChannelInfo.getOrElse("0") || event.getChannel.getId == neutralsChannelInfo.getOrElse("0")) {
+            return new EmbedBuilder()
+            .setColor(3092790)
+            .setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            .build()
           }
+
+          if (alliesChannel != null) {
+            try {
+              alliesChannel.delete().queue()
+              disclaimer += s"\n- *The now unused `allies` channel has been deleted.*"
+            } catch {
+              case ex: Throwable => logger.info(s"Failed to delete Channel ID: '${alliesChannelInfo}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
+            }
+          }
+
           if (enemiesChannel != null) {
             try {
               enemiesChannel.delete().queue()
@@ -3231,8 +3183,80 @@ object BotApp extends App with StrictLogging {
               case ex: Throwable => logger.info(s"Failed to delete Channel ID: '${neutralsChannelInfo}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
             }
           }
+
+          // Now that separate channels are deleted, create a new 'online' channel
+          try {
+            if (category == null) {
+              // create the category
+              val newCategory = guild.createCategory(worldFormal).complete()
+              newCategory.upsertPermissionOverride(botRole)
+                .grant(Permission.VIEW_CHANNEL)
+                .grant(Permission.MESSAGE_SEND)
+                .grant(Permission.MESSAGE_MENTION_EVERYONE)
+                .grant(Permission.MESSAGE_EMBED_LINKS)
+                .grant(Permission.MESSAGE_HISTORY)
+                .grant(Permission.MANAGE_CHANNEL)
+                .grant(Permission.MANAGE_WEBHOOKS)
+                .complete()
+              newCategory.upsertPermissionOverride(publicRole).deny(Permission.MESSAGE_SEND).complete()
+              category = newCategory
+              worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
+
+              // update the record in worldsData
+              if (worldsData.contains(guild.getId)) {
+                val worldsList = worldsData(guild.getId)
+                val updatedWorldsList = worldsList.map { world =>
+                  if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                    world.copy(category = newCategory.getId)
+                  } else {
+                    world
+                  }
+                }
+                worldsData += (guild.getId -> updatedWorldsList)
+              }
+            }
+            // create the online channel
+            val recreateAlliesChannel = guild.createTextChannel("online", category).complete()
+            worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
+            // update the record in worldsData
+            if (worldsData.contains(guild.getId)) {
+              val worldsList = worldsData(guild.getId)
+              val updatedWorldsList = worldsList.map { world =>
+                if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                  world.copy(alliesChannel = recreateAlliesChannel.getId)
+                } else {
+                  world
+                }
+              }
+              worldsData += (guild.getId -> updatedWorldsList)
+            }
+            // apply permissions to created channel
+            recreateAlliesChannel.upsertPermissionOverride(botRole)
+              .grant(Permission.VIEW_CHANNEL)
+              .grant(Permission.MESSAGE_SEND)
+              .grant(Permission.MESSAGE_MENTION_EVERYONE)
+              .grant(Permission.MESSAGE_EMBED_LINKS)
+              .grant(Permission.MESSAGE_HISTORY)
+              .grant(Permission.MANAGE_CHANNEL)
+              .complete()
+            recreateAlliesChannel.upsertPermissionOverride(publicRole)
+              .deny(Permission.MESSAGE_SEND)
+              .complete()
+            disclaimer += s"\n- *You may want to move the new <#${recreateAlliesChannel.getId}> channel.*"
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to create category or online channels for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
+          }
+
         } else {
           // setting == "separate"
+
+          if (event.getChannel.getId == alliesChannelInfo.getOrElse("0")) {
+            return new EmbedBuilder()
+            .setColor(3092790)
+            .setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            .build()
+          }
+
           // get the bots main roles
           try {
             if (category == null) {
@@ -3265,25 +3289,35 @@ object BotApp extends App with StrictLogging {
               }
             }
             val channelList = ListBuffer[(TextChannel, Boolean)]()
-            // create the channels underneath the new/existing category
-            if (alliesChannel == null) {
-              val recreateAlliesChannel = guild.createTextChannel("allies", category).complete()
-              channelList += ((recreateAlliesChannel, false))
-              worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
-              // update the record in worldsData
-              if (worldsData.contains(guild.getId)) {
-                val worldsList = worldsData(guild.getId)
-                val updatedWorldsList = worldsList.map { world =>
-                  if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                    world.copy(alliesChannel = recreateAlliesChannel.getId)
-                  } else {
-                    world
-                  }
-                }
-                worldsData += (guild.getId -> updatedWorldsList)
+
+            // delete the combined 'online' channel
+            if (alliesChannel != null) {
+              try {
+                alliesChannel.delete().queue()
+                disclaimer += s"\n- *The now unused `online` channel has been deleted.*"
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to delete Channel ID: '${alliesChannelInfo}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
               }
-              disclaimer += s"\n- *The channel <#${recreateAlliesChannel.getId}> has been recreated (you may want to move it).*"
             }
+
+            // create the channels underneath the new/existing category
+            val recreateAlliesChannel = guild.createTextChannel("allies", category).complete()
+            channelList += ((recreateAlliesChannel, false))
+            worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
+            // update the record in worldsData
+            if (worldsData.contains(guild.getId)) {
+              val worldsList = worldsData(guild.getId)
+              val updatedWorldsList = worldsList.map { world =>
+                if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                  world.copy(alliesChannel = recreateAlliesChannel.getId)
+                } else {
+                  world
+                }
+              }
+              worldsData += (guild.getId -> updatedWorldsList)
+            }
+            disclaimer += s"\n- *The channel <#${recreateAlliesChannel.getId}> has been recreated (you may want to move it).*"
+
             if (enemiesChannel == null) {
               val recreateEnemiesChannel = guild.createTextChannel("enemies", category).complete()
               channelList += ((recreateEnemiesChannel, false))
@@ -3302,6 +3336,7 @@ object BotApp extends App with StrictLogging {
               }
               disclaimer += s"\n- *The channel <#${recreateEnemiesChannel.getId}> has been recreated (you may want to move it).*"
             }
+
             if (neutralsChannel == null) {
               val recreateNeutralsChannel = guild.createTextChannel("neutrals", category).complete()
               channelList += ((recreateNeutralsChannel, false))
@@ -3842,6 +3877,7 @@ object BotApp extends App with StrictLogging {
       val botRole = guild.getRolesByName(botName, true).get(0)
       val publicRole = guild.getPublicRole
 
+      //WIP
       // get channel Ids
       val categoryInfo: Option[String] = cache.flatMap(_.headOption.map(_.category))
       val alliesChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.alliesChannel))
@@ -3852,6 +3888,7 @@ object BotApp extends App with StrictLogging {
       val activityChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.activityChannel))
       val fullblessChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
       val nemesisChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.nemesisChannel))
+      val onlineCombinedInfo: Option[String] = cache.flatMap(_.headOption.map(_.onlineCombined))
 
       // get admin ids
       val discordConfig = discordRetrieveConfig(guild)
@@ -3868,9 +3905,12 @@ object BotApp extends App with StrictLogging {
       val activityChannel = guild.getTextChannelById(activityChannelInfo.getOrElse("0"))
       val fullblessChannel = guild.getTextChannelById(fullblessChannelInfo.getOrElse("0"))
       val nemesisChannel = guild.getTextChannelById(nemesisChannelInfo.getOrElse("0"))
+      val onlineCombinedVal = onlineCombinedInfo.getOrElse("true")
+
+      val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
       // check if any of the world channels need to be recreated
-      if (alliesChannel == null || enemiesChannel == null || neutralsChannel == null || levelsChannel == null || deathsChannel == null || activityChannel == null || fullblessChannel == null || nemesisChannel == null || adminChannel == null) {
+      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || fullblessChannel == null || nemesisChannel == null || adminChannel == null) {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
@@ -3903,7 +3943,8 @@ object BotApp extends App with StrictLogging {
         val channelList = ListBuffer[(TextChannel, Boolean)]()
         // create the channels underneath the new/existing category
         if (alliesChannel == null) {
-          val recreateAlliesChannel = guild.createTextChannel("allies", category).complete()
+          val alliesName = if (onlineCombinedVal == "false") "allies" else "online"
+          val recreateAlliesChannel = guild.createTextChannel(s"$alliesName", category).complete()
           channelList += ((recreateAlliesChannel, false))
           worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
           // update the record in worldsData
@@ -3919,7 +3960,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (enemiesChannel == null) {
+        if (enemiesChannel == null && onlineCombinedVal == "false") {
           val recreateEnemiesChannel = guild.createTextChannel("enemies", category).complete()
           channelList += ((recreateEnemiesChannel, false))
           worldRepairConfig(guild, worldFormal, "enemies_channel", recreateEnemiesChannel.getId)
@@ -3936,7 +3977,7 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (neutralsChannel == null) {
+        if (neutralsChannel == null && onlineCombinedVal == "false") {
           val recreateNeutralsChannel = guild.createTextChannel("neutrals", category).complete()
           channelList += ((recreateNeutralsChannel, false))
           worldRepairConfig(guild, worldFormal, "neutrals_channel", recreateNeutralsChannel.getId)
