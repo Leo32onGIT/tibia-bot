@@ -3287,6 +3287,12 @@ object BotApp extends App with StrictLogging {
                 }
                 worldsData += (guild.getId -> updatedWorldsList)
               }
+            } else {
+              val categoryName = category.getName
+              if (categoryName != s"${worldFormal}") {
+                val channelManager = category.getManager
+                channelManager.setName(s"${worldFormal}").queue()
+              }
             }
             val channelList = ListBuffer[(TextChannel, Boolean)]()
 
