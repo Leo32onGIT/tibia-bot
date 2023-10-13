@@ -1238,11 +1238,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       if (categoryLiteral != null){
         try {
           val categoryName = categoryLiteral.getName
-          val categoryAllies = if (alliesList.size > 0) s"❤${alliesList.size}" else ""
+          val categoryAllies = if (alliesList.size > 0) s"🤍${alliesList.size}" else ""
           val categoryEnemies = if (enemiesList.size > 0) s"💀${enemiesList.size}" else ""
-          if (categoryName != s"${world} $categoryAllies$categoryEnemies") {
+          val categorySpacer = if (alliesList.size > 0 || enemiesList.size > 0) "・" else ""
+          if (categoryName != s"${world}$categorySpacer$categoryAllies$categoryEnemies") {
             val channelManager = categoryLiteral.getManager
-            channelManager.setName(s"${worldName} $categoryAllies$categoryEnemies").queue()
+            channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
           }
         } catch {
           case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
