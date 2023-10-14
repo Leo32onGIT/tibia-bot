@@ -3151,10 +3151,8 @@ object BotApp extends App with StrictLogging {
         if (setting == "combine") {
 
           if (event.getChannel.getId == alliesChannelInfo.getOrElse("0") || event.getChannel.getId == enemiesChannelInfo.getOrElse("0") || event.getChannel.getId == neutralsChannelInfo.getOrElse("0")) {
-            return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: That command would delete this channel, run it somewhere else.")
-            .build()
+            embedBuild.setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            return embedBuild.build()
           }
 
           if (alliesChannel != null) {
@@ -3251,10 +3249,8 @@ object BotApp extends App with StrictLogging {
           // setting == "separate"
 
           if (event.getChannel.getId == alliesChannelInfo.getOrElse("0")) {
-            return new EmbedBuilder()
-            .setColor(3092790)
-            .setDescription(s":x: That command would delete this channel, run it somewhere else.")
-            .build()
+            embedBuild.setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            return embedBuild.build()
           }
 
           // get the bots main roles
@@ -3288,10 +3284,14 @@ object BotApp extends App with StrictLogging {
                 worldsData += (guild.getId -> updatedWorldsList)
               }
             } else {
-              val categoryName = category.getName
-              if (categoryName != s"${worldFormal}") {
-                val channelManager = category.getManager
-                channelManager.setName(s"${worldFormal}").queue()
+              try {
+                val categoryName = category.getName
+                if (categoryName != s"${worldFormal}") {
+                  val channelManager = category.getManager
+                  channelManager.setName(s"${worldFormal}").queue()
+                }
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename category for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while separating the online list", ex)
               }
             }
             val channelList = ListBuffer[(TextChannel, Boolean)]()
@@ -3302,7 +3302,7 @@ object BotApp extends App with StrictLogging {
                 alliesChannel.delete().queue()
                 disclaimer += s"\n- *The now unused `online` channel has been deleted.*"
               } catch {
-                case ex: Throwable => logger.info(s"Failed to delete Channel ID: '${alliesChannelInfo}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
+                case ex: Throwable => logger.info(s"Failed to delete Channel ID: '${alliesChannelInfo}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while separating the online list", ex)
               }
             }
 
