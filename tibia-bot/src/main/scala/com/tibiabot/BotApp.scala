@@ -2863,6 +2863,26 @@ object BotApp extends App with StrictLogging {
         val nemesisId = nemesisChannel.getId
         val activityId = activityChannel.getId
 
+        // post initial embed in levels channel
+        val levelsTextChannel: TextChannel = guild.getTextChannelById(levelsId)
+        if (levelsTextChannel != null) {
+          val levelsEmbed = new EmbedBuilder()
+          levelsEmbed.setDescription(s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
+          levelsEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          levelsEmbed.setColor(3092790)
+          levelsTextChannel.sendMessageEmbeds(levelsEmbed.build()).queue()
+        }
+
+        // post initial embed in deaths channel
+        val deathsTextChannel: TextChannel = guild.getTextChannelById(deathsId)
+        if (deathsTextChannel != null) {
+          val deathsEmbed = new EmbedBuilder()
+          deathsEmbed.setDescription(s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
+          deathsEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          deathsEmbed.setColor(3092790)
+          deathsTextChannel.sendMessageEmbeds(deathsEmbed.build()).queue()
+        }
+
         // post initial embed in activity channel
         val activityTextChannel: TextChannel = guild.getTextChannelById(activityId)
         if (activityTextChannel != null) {
