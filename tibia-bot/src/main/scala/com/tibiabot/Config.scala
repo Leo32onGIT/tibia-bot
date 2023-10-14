@@ -29,6 +29,7 @@ object Config {
 
   // worlds
   val worldList = List(
+    "Ambra",
     "Antica",
     "Astera",
     "Axera",
@@ -48,6 +49,7 @@ object Config {
     "Etebra",
     "Ferobra",
     "Firmera",
+    "Flamera",
     "Gentebra",
     "Gladera",
     "Gravitera",
@@ -98,6 +100,7 @@ object Config {
     "Venebra",
     "Vitera",
     "Vunira",
+    "Wadira",
     "Wildera",
     "Wintera",
     "Yonabra",
