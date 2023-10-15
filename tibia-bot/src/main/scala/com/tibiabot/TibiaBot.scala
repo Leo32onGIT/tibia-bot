@@ -204,49 +204,51 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 }
                 updatedActivity
               }
-              if (oldName != "" && timeDelay.isDefined) {
-                val delayEndTime = timeDelay.map(_.plusMinutes(6))
-                if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))) {
-                  // update name in cache and db
-                  activityData = activityData + (guildId -> updatedActivityData)
-                  BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-                  skipJoinLeave = true
-                  // if player is in hunted or allied 'players' list, update information there too
-                  if (huntedPlayerCheck) {
-                    // change name in hunted players cache and db
-                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
-                    val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                      if (player.name.toLowerCase == oldName.toLowerCase) {
-                        player.copy(name = charName.toLowerCase)
-                      } else {
-                        player
+              if (oldName != ""){
+                // update name in cache and db
+                activityData = activityData + (guildId -> updatedActivityData)
+                BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+                if (timeDelay.isDefined) {
+                  val delayEndTime = timeDelay.map(_.plusMinutes(6))
+                  if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))) {
+                    skipJoinLeave = true
+                    // if player is in hunted or allied 'players' list, update information there too
+                    if (huntedPlayerCheck) {
+                      // change name in hunted players cache and db
+                      BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
+                      val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
+                        if (player.name.toLowerCase == oldName.toLowerCase) {
+                          player.copy(name = charName.toLowerCase)
+                        } else {
+                          player
+                        }
                       }
+                      huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
                     }
-                    huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
-                  }
-                  if (allyPlayerCheck) {
-                    // change name in allied players cache and db
-                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
-                    val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                      if (player.name.toLowerCase == oldName.toLowerCase) {
-                        player.copy(name = charName.toLowerCase)
-                      } else {
-                        player
+                    if (allyPlayerCheck) {
+                      // change name in allied players cache and db
+                      BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
+                      val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
+                        if (player.name.toLowerCase == oldName.toLowerCase) {
+                          player.copy(name = charName.toLowerCase)
+                        } else {
+                          player
+                        }
                       }
+                      alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
                     }
-                    alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
-                  }
-                  if (activityTextChannel != null) {
-                    // send message to activity channel
-                    val activityEmbed = new EmbedBuilder()
-                    activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
-                    activityEmbed.setColor(playerType)
-                    activityEmbed.setThumbnail(Config.nameChangeThumbnail)
-                    try {
-                      activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                    } catch {
-                      case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                      case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                    if (activityTextChannel != null) {
+                      // send message to activity channel
+                      val activityEmbed = new EmbedBuilder()
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                      activityEmbed.setColor(playerType)
+                      activityEmbed.setThumbnail(Config.nameChangeThumbnail)
+                      try {
+                        activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
+                      } catch {
+                        case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                        case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                      }
                     }
                   }
                 }
