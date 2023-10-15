@@ -4,7 +4,7 @@ import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -147,8 +147,17 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           val blocker = BotApp.activityCommandBlocker.getOrElse(guildId, false)
           val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
           val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
-          val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
-          val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
+
+          val guildAlliedPlayers: List[Players] = alliedPlayersData.getOrElse(guildId, List())
+          val guildHuntedPlayers: List[Players] = huntedPlayersData.getOrElse(guildId, List())
+          val allyPlayerCheck = guildAlliedPlayers.exists(player =>
+            player.name.toLowerCase() == charName.toLowerCase() ||
+            formerNamesList.exists(formerName => formerName.toLowerCase == player.name.toLowerCase())
+          )
+          val huntedPlayerCheck = guildHuntedPlayers.exists(player =>
+            player.name.toLowerCase() == charName.toLowerCase() ||
+            formerNamesList.exists(formerName => formerName.toLowerCase == player.name.toLowerCase())
+          )
 
           // add guild to online list cache
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
