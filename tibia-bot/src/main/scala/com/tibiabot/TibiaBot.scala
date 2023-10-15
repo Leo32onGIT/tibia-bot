@@ -217,10 +217,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 // update name in cache and db
                 activityData = activityData + (guildId -> updatedActivityData)
                 BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+                skipJoinLeave = true
                 if (timeDelay.isDefined) {
                   val delayEndTime = timeDelay.map(_.plusMinutes(6))
                   if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))) {
-                    skipJoinLeave = true
                     // if player is in hunted or allied 'players' list, update information there too
                     if (huntedPlayerCheck) {
                       // change name in hunted players cache and db
