@@ -214,7 +214,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   // if player is in hunted or allied 'players' list, update information there too
                   if (huntedPlayerCheck) {
                     // change name in hunted players cache and db
-                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName.toLowerCase(), charName.toLowerCase())
+                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
                     val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
                       if (player.name.toLowerCase == oldName.toLowerCase) {
                         player.copy(name = charName.toLowerCase)
@@ -223,9 +223,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       }
                     }
                     huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
-                  } else if (allyPlayerCheck) {
+                  }
+                  if (allyPlayerCheck) {
                     // change name in allied players cache and db
-                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName.toLowerCase(), charName.toLowerCase())
+                    BotApp.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
                     val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
                       if (player.name.toLowerCase == oldName.toLowerCase) {
                         player.copy(name = charName.toLowerCase)
@@ -1180,7 +1181,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             modifiedAlliesList ++ modifiedEnemiesList ++ groupedNeutralsList
           }
         }
-        
+
         // allow for custom channel names
         val channelName = combinedTextChannel.getName
         val extractName = pattern.findFirstMatchIn(channelName)
