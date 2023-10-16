@@ -1683,9 +1683,25 @@ object BotApp extends App with StrictLogging {
           val updatedList = huntedGuildsList.find(_.name == subOptionValueLower) match {
             case Some(_) => huntedGuildsList.filterNot(_.name == subOptionValueLower)
             case None =>
-              embedText = s":x: The guild **$guildString** is not on the hunted list."
-              embedBuild.setDescription(embedText)
+              // Remove players that the bot auto-hunted due to being in that guild from cache and db
+              val filteredPlayers: List[Players] = {
+                huntedPlayersData.getOrElse(guildId, List()).filter(_.reasonText.toLowerCase == s"was originally in hunted guild ${subOptionValueLower}".toLowerCase)
+              }
+              if (filteredPlayers.nonEmpty){
+                val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
+                val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
+                huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
 
+                activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
+                filteredPlayers.foreach { filterPlayer =>
+                  removeHuntedFromDatabase(guild, "player", filterPlayer.name)
+                  removePlayerActivityfromDatabase(guild, filterPlayer.name)
+                }
+                embedText = s":gear: Stale **$guildString** records have been cleaned from the hunted list."
+              } else {
+                embedText = s":x: The guild **$guildString** is not on the hunted list."
+              }
+              embedBuild.setDescription(embedText)
               return callback(embedBuild.build())
           }
           // Remove guilds from cache and db
