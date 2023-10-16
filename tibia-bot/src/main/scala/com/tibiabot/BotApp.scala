@@ -1680,9 +1680,46 @@ object BotApp extends App with StrictLogging {
             guildString = s"[$guildName](${guildUrl(guildName)})"
           }
           val huntedGuildsList = huntedGuildsData.getOrElse(guildId, List())
-          val updatedList = huntedGuildsList.find(_.name == subOptionValueLower) match {
-            case Some(_) => huntedGuildsList.filterNot(_.name == subOptionValueLower)
+          huntedGuildsList.find(_.name.toLowerCase == subOptionValueLower) match {
+            case Some(_) =>
+              val updatedList = huntedGuildsList.filterNot(_.name.toLowerCase == subOptionValueLower)
+              // Remove guilds from cache and db
+              huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
+              removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
+
+              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+              removeGuildActivityfromDatabase(guild, subOptionValueLower)
+
+              // Remove players that the bot auto-hunted due to being in that guild from cache and db
+              val filteredPlayers: List[Players] = {
+                huntedPlayersData.getOrElse(guildId, List()).filter(_.reasonText.toLowerCase == s"was originally in hunted guild ${subOptionValueLower}".toLowerCase)
+              }
+              val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
+              val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
+              huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
+
+              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
+              filteredPlayers.foreach { filterPlayer =>
+                removeHuntedFromDatabase(guild, "player", filterPlayer.name)
+                removePlayerActivityfromDatabase(guild, filterPlayer.name)
+              }
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedText = s":gear: The guild **$guildString** was removed from the hunted list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             case None =>
+              embedText = s":x: The guild **$guildString** is not on the hunted list."
+
               // Remove players that the bot auto-hunted due to being in that guild from cache and db
               val filteredPlayers: List[Players] = {
                 huntedPlayersData.getOrElse(guildId, List()).filter(_.reasonText.toLowerCase == s"was originally in hunted guild ${subOptionValueLower}".toLowerCase)
@@ -1697,48 +1734,12 @@ object BotApp extends App with StrictLogging {
                   removeHuntedFromDatabase(guild, "player", filterPlayer.name)
                   removePlayerActivityfromDatabase(guild, filterPlayer.name)
                 }
-                embedText = s":gear: Stale **$guildString** records have been cleaned from the hunted list."
-              } else {
-                embedText = s":x: The guild **$guildString** is not on the hunted list."
+                embedText = s":gear: The guild **$guildString** had stale records that have now been removed from the hunted list."
               }
+
               embedBuild.setDescription(embedText)
-              return callback(embedBuild.build())
+              callback(embedBuild.build())
           }
-          // Remove guilds from cache and db
-          huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
-          removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
-
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
-          removeGuildActivityfromDatabase(guild, subOptionValueLower)
-
-          // Remove players that the bot auto-hunted due to being in that guild from cache and db
-          val filteredPlayers: List[Players] = {
-            huntedPlayersData.getOrElse(guildId, List()).filter(_.reasonText.toLowerCase == s"was originally in hunted guild ${subOptionValueLower}".toLowerCase)
-          }
-          val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
-          val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
-          huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
-
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
-          filteredPlayers.foreach { filterPlayer =>
-            removeHuntedFromDatabase(guild, "player", filterPlayer.name)
-            removePlayerActivityfromDatabase(guild, filterPlayer.name)
-          }
-
-          // send embed to admin channel
-          if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-
-          embedText = s":gear: The guild **$guildString** was removed from the hunted list."
-          embedBuild.setDescription(embedText)
-          callback(embedBuild.build())
-
         }
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
