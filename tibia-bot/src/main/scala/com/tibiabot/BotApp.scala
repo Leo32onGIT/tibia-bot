@@ -1703,7 +1703,7 @@ object BotApp extends App with StrictLogging {
           val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
           huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
 
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.contains(player.name)))
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
           filteredPlayers.foreach { filterPlayer =>
             removeHuntedFromDatabase(guild, "player", filterPlayer.name)
             removePlayerActivityfromDatabase(guild, filterPlayer.name)
