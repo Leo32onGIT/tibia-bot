@@ -1688,11 +1688,26 @@ object BotApp extends App with StrictLogging {
 
               return callback(embedBuild.build())
           }
+          // Remove guilds from cache and db
           huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
           removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
 
           activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
           removeGuildActivityfromDatabase(guild, subOptionValueLower)
+
+          // Remove players that the bot auto-hunted due to being in that guild from cache and db
+          val filteredPlayers: List[Players] = {
+            huntedPlayersData.getOrElse(guildId, List()).filter(_.reasonText.toLowerCase == s"was originally in hunted guild ${subOptionValueLower}".toLowerCase)
+          }
+          val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
+          val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
+          huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
+
+          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.contains(player.name)))
+          filteredPlayers.foreach { filterPlayer =>
+            removeHuntedFromDatabase(guild, "player", filterPlayer.name)
+            removePlayerActivityfromDatabase(guild, filterPlayer.name)
+          }
 
           // send embed to admin channel
           if (adminChannel != null) {
