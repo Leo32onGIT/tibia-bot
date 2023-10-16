@@ -360,7 +360,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         val adminTextChannel = guild.getTextChannelById(adminChannel)
                         if (adminTextChannel != null) {
                           // add them to cached huntedPlayersData list
-                          if (!(huntedPlayerCheck)) {
+                          if (!(huntedPlayerCheck) && !huntedGuildCheck) {
                             huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
                             BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
                             // send embed to admin channel
