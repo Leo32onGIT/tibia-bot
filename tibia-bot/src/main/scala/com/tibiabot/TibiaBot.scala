@@ -357,31 +357,29 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
                       // if he was in hunted guild add to hunted players list
                       if (wasInHuntedGuild) {
-                        if (!alliedGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !alliedPlayerCheck) {
+                        if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
                             // add them to cached huntedPlayersData list
-                            if (!(huntedPlayerCheck) && !huntedGuildCheck) {
-                              huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
-                              BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
-                              // send embed to admin channel
-                              val commandUser = s"<@${BotApp.botUser}>"
-                              val adminEmbed = new EmbedBuilder()
-                              adminEmbed.setTitle(":robot: enemy automatically detected:")
-                              adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
-                              adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
-                              adminEmbed.setColor(14397256) // orange for bot auto command
-                              try {
-                                adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
-                                case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                            huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                            BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
+                            // send embed to admin channel
+                            val commandUser = s"<@${BotApp.botUser}>"
+                            val adminEmbed = new EmbedBuilder()
+                            adminEmbed.setTitle(":robot: enemy automatically detected:")
+                            adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
+                            adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                            adminEmbed.setColor(14397256) // orange for bot auto command
+                            try {
+                              adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                            } catch {
+                              case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                              case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                             }
                           }
                         }
                       } else if (wasInAlliedGuild){
-                        if (!alliedGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !alliedPlayerCheck) {
+                        if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                           // remove from activity
                           activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
                           BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
