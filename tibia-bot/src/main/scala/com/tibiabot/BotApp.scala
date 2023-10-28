@@ -2044,7 +2044,7 @@ object BotApp extends App with StrictLogging {
   def removeAllyFromDatabase(guild: Guild, option: String, name: String): Unit = {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
-    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE name = ?;")
+    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, name)
     statement.executeUpdate()
 
