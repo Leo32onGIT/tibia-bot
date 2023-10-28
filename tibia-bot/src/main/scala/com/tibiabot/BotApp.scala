@@ -2012,7 +2012,7 @@ object BotApp extends App with StrictLogging {
   def removeHuntedFromDatabase(guild: Guild, option: String, name: String): Unit = {
     val conn = getConnection(guild)
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
-    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE name = ?;")
+    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, name)
     statement.executeUpdate()
 
