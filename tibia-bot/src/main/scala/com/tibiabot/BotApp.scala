@@ -1753,41 +1753,40 @@ object BotApp extends App with StrictLogging {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
           val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
-          val updatedList = huntedPlayersList.find(_.name == subOptionValueLower) match {
-            case Some(_) => huntedPlayersList.filterNot(_.name == subOptionValueLower)
+          huntedPlayersList.find(_.name.toLowerCase == subOptionValueLower) match {
+            case Some(_) =>
+              val updatedList = huntedPlayersList.filterNot(_.name.toLowerCase == subOptionValueLower)
+
+              huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
+              removeHuntedFromDatabase(guild, "player", subOptionValueLower)
+
+              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+              removePlayerActivityfromDatabase(guild, subOptionValueLower)
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedText = s":gear: The player **$playerString** was removed from the hunted list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
             case None =>
               embedText = s":x: The player **$playerString** is not on the hunted list."
               embedBuild.setDescription(embedText)
-
-              return callback(embedBuild.build())
+              callback(embedBuild.build())
           }
-          huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
-          removeHuntedFromDatabase(guild, "player", subOptionValueLower)
-
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
-          removePlayerActivityfromDatabase(guild, subOptionValueLower)
-
-          // send embed to admin channel
-          if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-
-          embedText = s":gear: The player **$playerString** was removed from the hunted list."
-          embedBuild.setDescription(embedText)
-          callback(embedBuild.build())
-
         }
       }
     } else {
       embedText = s":x: You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
-
     }
   }
 
@@ -1816,34 +1815,35 @@ object BotApp extends App with StrictLogging {
             guildString = s"[$guildName](${guildUrl(guildName)})"
           }
           val alliedGuildsList = alliedGuildsData.getOrElse(guildId, List())
-          val updatedList = alliedGuildsList.find(_.name == subOptionValueLower) match {
-            case Some(_) => alliedGuildsList.filterNot(_.name == subOptionValueLower)
+          alliedGuildsList.find(_.name.toLowerCase == subOptionValueLower) match {
+            case Some(_) =>
+              val updatedList = alliedGuildsList.filterNot(_.name.toLowerCase == subOptionValueLower)
+              alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
+              removeAllyFromDatabase(guild, "guild", subOptionValueLower)
+
+              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+              removeGuildActivityfromDatabase(guild, subOptionValueLower)
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedText = s":gear: The guild **$guildString** was removed from the allies list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+              
             case None =>
               embedText = s":x: The guild **$guildString** is not on the allies list."
               embedBuild.setDescription(embedText)
 
-              return callback(embedBuild.build())
+              callback(embedBuild.build())
           }
-          alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
-          removeAllyFromDatabase(guild, "guild", subOptionValueLower)
-
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
-          removeGuildActivityfromDatabase(guild, subOptionValueLower)
-
-          // send embed to admin channel
-          if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-
-          embedText = s":gear: The guild **$guildString** was removed from the allies list."
-          embedBuild.setDescription(embedText)
-          callback(embedBuild.build())
-
         }
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
@@ -1857,34 +1857,34 @@ object BotApp extends App with StrictLogging {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
           val alliedPlayersList = alliedPlayersData.getOrElse(guildId, List())
-          val updatedList = alliedPlayersList.find(_.name == subOptionValueLower) match {
-            case Some(_) => alliedPlayersList.filterNot(_.name == subOptionValueLower)
+          alliedPlayersList.find(_.name.toLowerCase == subOptionValueLower) match {
+            case Some(_) =>
+              val updatedList = alliedPlayersList.filterNot(_.name.toLowerCase == subOptionValueLower)
+              alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
+              removeAllyFromDatabase(guild, "player", subOptionValueLower)
+
+              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+              removePlayerActivityfromDatabase(guild, subOptionValueLower)
+
+              // send embed to admin channel
+              if (adminChannel != null) {
+                val adminEmbed = new EmbedBuilder()
+                adminEmbed.setTitle(s":gear: a command was run:")
+                adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
+                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                adminEmbed.setColor(3092790)
+                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+              }
+
+              embedText = s":gear: The player **$playerString** was removed from the allies list."
+              embedBuild.setDescription(embedText)
+              callback(embedBuild.build())
+
             case None =>
               embedText = s":x: The player **$playerString** is not on the allies list."
               embedBuild.setDescription(embedText)
-
-              return callback(embedBuild.build())
+              callback(embedBuild.build())
           }
-          alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
-          removeAllyFromDatabase(guild, "player", subOptionValueLower)
-
-          activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
-          removePlayerActivityfromDatabase(guild, subOptionValueLower)
-
-          // send embed to admin channel
-          if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-
-          embedText = s":gear: The player **$playerString** was removed from the allies list."
-          embedBuild.setDescription(embedText)
-          callback(embedBuild.build())
-
         }
       }
     } else {
