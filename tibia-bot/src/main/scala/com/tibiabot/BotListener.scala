@@ -17,36 +17,43 @@ import scala.jdk.CollectionConverters._
 class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
-    event.getName match {
-      //case "reload" =>
-      //  handleReload(event)
-      case "setup" =>
-        handleSetup(event)
-      case "remove" =>
-        handleRemove(event)
-      case "hunted" =>
-        handleHunted(event)
-      case "allies" =>
-        handleAllies(event)
-      case "neutral" =>
-        handleNeutrals(event)
-      case "fullbless" =>
-        handleFullbless(event)
-      case "filter" =>
-        handleFilter(event)
-      case "admin" =>
-        handleAdmin(event)
-      case "exiva" =>
-        handleExiva(event)
-      case "help" =>
-        handleHelp(event)
-      case "repair" =>
-        handleRepair(event)
-      case "galthen" =>
-        handleGalthen(event)
-      case "online" =>
-        handleOnlineList(event)
-      case _ =>
+    if (BotApp.startUpComplete) {
+      event.getName match {
+        //case "reload" =>
+        //  handleReload(event)
+        case "setup" =>
+          handleSetup(event)
+        case "remove" =>
+          handleRemove(event)
+        case "hunted" =>
+          handleHunted(event)
+        case "allies" =>
+          handleAllies(event)
+        case "neutral" =>
+          handleNeutrals(event)
+        case "fullbless" =>
+          handleFullbless(event)
+        case "filter" =>
+          handleFilter(event)
+        case "admin" =>
+          handleAdmin(event)
+        case "exiva" =>
+          handleExiva(event)
+        case "help" =>
+          handleHelp(event)
+        case "repair" =>
+          handleRepair(event)
+        case "galthen" =>
+          handleGalthen(event)
+        case "online" =>
+          handleOnlineList(event)
+        case _ =>
+      }
+    } else {
+      val responseText = s":x: The bot is still starting up, please try running your command in a minute or two."
+      val embed = new EmbedBuilder().setDescription(responseText).setColor(3092790).build()
+      event.deferReply(true).queue()
+      event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 

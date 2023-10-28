@@ -400,6 +400,7 @@ object BotApp extends App with StrictLogging {
   }
 
   // Start all world streams
+  var startUpComplete = false
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
@@ -536,6 +537,7 @@ object BotApp extends App with StrictLogging {
         botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
         Thread.sleep(5500) // space each stream out 3 seconds
       }
+      startUpComplete = true
     }
 
     /***
@@ -1837,7 +1839,7 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The guild **$guildString** was removed from the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
-              
+
             case None =>
               embedText = s":x: The guild **$guildString** is not on the allies list."
               embedBuild.setDescription(embedText)
