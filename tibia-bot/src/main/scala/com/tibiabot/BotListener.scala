@@ -50,7 +50,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         case _ =>
       }
     } else {
-      val responseText = s":x: The bot is still starting up, please try running your command in a minute or two."
+      val responseText = s":x: The bot is still starting up, try running your command later."
       val embed = new EmbedBuilder().setDescription(responseText).setColor(3092790).build()
       event.deferReply(true).queue()
       event.getHook.sendMessageEmbeds(embed).queue()
