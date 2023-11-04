@@ -590,7 +590,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
                 val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
                 val levelsTextChannel = guild.getTextChannelById(levelsChannel)
-                if (levelsTextChannel != null) {
+                if (levelsTextChannel != null && onlinePlayer.level >= 100) {
                   // check show_neutrals_levels setting
                   val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
                   val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
