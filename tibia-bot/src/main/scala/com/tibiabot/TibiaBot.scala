@@ -63,7 +63,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = if (world == "Double") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
+  private lazy val sourceTick = if (world == "Pulsera") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -98,7 +98,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
     // cache bypass for Seanera
-    if (world == "Double" && Config.prod) {
+    if (world == "Pulsera" && Config.prod) {
       // Remove existing online chars from the list...
       recentOnlineBypass.filterInPlace { i =>
         !online.exists(player => player.name == i.char)
@@ -590,7 +590,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
                 val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
                 val levelsTextChannel = guild.getTextChannelById(levelsChannel)
-                if (levelsTextChannel != null && onlinePlayer.level >= 100) {
+                if (levelsTextChannel != null) {
                   // check show_neutrals_levels setting
                   val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
                   val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
