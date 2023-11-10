@@ -1021,12 +1021,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               try {
                 // nemesis and enemy fullbless ignore the level filter
                 if (embed._2 == "nemesis") {
-                  deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+                  if (guild.getRoleById(nemesisRole) != null) {
+                    deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+                  } else {
+                    deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+                  }
                 } else if (embed._2 == "fullbless") {
                   // send adjusted embed for fullblesses
                   val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
                   val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-                  if (embed._5 >= fullblessLevel) { // only poke for 250+
+                  if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
                     deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
                   } else {
                     deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
