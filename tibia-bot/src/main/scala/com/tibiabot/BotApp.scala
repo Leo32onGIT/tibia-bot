@@ -32,6 +32,8 @@ import scala.util.{Failure, Success}
 import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
 import java.time.temporal.ChronoUnit
 import scala.util.{Try, Success, Failure}
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 object BotApp extends App with StrictLogging {
 
@@ -1406,11 +1408,15 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def charUrl(char: String): String =
-    s"https://www.tibia.com/community/?name=${char.replaceAll(" ", "+")}"
+  def charUrl(char: String): String = {
+    val encodedString = URLEncoder.encode(char, StandardCharsets.UTF_8.toString)
+    s"https://www.tibia.com/community/?name=${encodedString}"
+  }
 
-  def guildUrl(guild: String): String =
-    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guild.replaceAll(" ", "+")}"
+  def guildUrl(guild: String): String = {
+    val encodedString = URLEncoder.encode(guild, StandardCharsets.UTF_8.toString)
+    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${encodedString}"
+  }
 
   def updateAdminChannel(inputId: String, channelId: String): Unit = {
     discordsData = discordsData.view.mapValues(_.map {

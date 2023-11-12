@@ -20,6 +20,8 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
 import java.time.OffsetDateTime
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
@@ -765,7 +767,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   notablePoke = "fullbless" // PVE fullbless opportuniy (only poke for level 400+)
                 }
               }
-              guildText = s"$guildIcon *$guildRank* of the [$guildName](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guildName.replace(" ", "%20")})\n"
+              guildText = s"$guildIcon *$guildRank* of the [$guildName](${guildUrl(guildName)})\n"
             }
 
             // player
@@ -1489,11 +1491,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
   }
 
-  private def guildUrl(guild: String): String =
-    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${guild.replaceAll(" ", "+")}"
+  private def guildUrl(guild: String): String = {
+    val encodedString = URLEncoder.encode(guild, StandardCharsets.UTF_8.toString)
+    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${encodedString}"
+  }
 
-  private def charUrl(char: String): String =
-    s"https://www.tibia.com/community/?name=${char.replaceAll(" ", "+")}"
+  private def charUrl(char: String): String = {
+    val encodedString = URLEncoder.encode(char, StandardCharsets.UTF_8.toString)
+    s"https://www.tibia.com/community/?name=${encodedString}"
+  }
 
   private def creatureImageUrl(creature: String): String = {
     val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
