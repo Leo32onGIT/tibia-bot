@@ -6,7 +6,7 @@ import scala.jdk.CollectionConverters._
 
 object Config {
   // prod or dev environment
-  val prod = false
+  val prod = true
 
   private val discord = ConfigFactory.load().getConfig("discord-config")
   private val mappings = ConfigFactory.load().getConfig("mapping-config")
