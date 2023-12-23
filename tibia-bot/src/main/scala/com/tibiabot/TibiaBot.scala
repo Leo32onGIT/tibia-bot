@@ -65,7 +65,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = if (world == "Pulsera") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
+  private lazy val sourceTick = if (world == "Double") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for World: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -100,7 +100,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
     // cache bypass for Seanera
-    if (world == "Pulsera" && Config.prod) {
+    if (world == "Double" && Config.prod) {
       // Remove existing online chars from the list...
       recentOnlineBypass.filterInPlace { i =>
         !online.exists(player => player.name == i.char)
@@ -564,7 +564,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
       if (!recentlyDied) {
         currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-          if (onlinePlayer.level > sheetLevel) {
+          if (onlinePlayer.level > sheetLevel && onlinePlayer.level > 200) {
             val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
             // post level to each discord
             if (discordsData.contains(world)) {
