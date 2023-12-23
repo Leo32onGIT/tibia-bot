@@ -38,10 +38,7 @@ case class GuildData(
   members: Option[List[Members]],
   invites: Option[List[Invites]]
 )
-case class Guilds(
-  guild: GuildData
-)
 case class GuildResponse(
-  guilds: Guilds,
+  guild: GuildData,
   information: Information
 )

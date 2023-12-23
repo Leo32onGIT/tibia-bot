@@ -14,11 +14,12 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
     override def read(json: JsValue): String = StringEscapeUtils.unescapeHtml4(JsonConvertNoCustomImplicits.convert(json))
   }
 
+  implicit val apiFormat: RootJsonFormat[Api] = jsonFormat3(Api)
+  implicit val statusFormat: RootJsonFormat[Status] = jsonFormat1(Status)
   implicit val informationFormat: RootJsonFormat[Information] = jsonFormat2(Information)
 
   implicit val onlinePlayersFormat: RootJsonFormat[OnlinePlayers] = jsonFormat3(OnlinePlayers)
   implicit val worldFormat: RootJsonFormat[World] = jsonFormat16(World)
-  implicit val worldsFormat: RootJsonFormat[Worlds] = jsonFormat1(Worlds)
   implicit val worldResponseFormat: RootJsonFormat[WorldResponse] = jsonFormat2(WorldResponse)
 
   implicit val housesFormat: RootJsonFormat[Houses] = jsonFormat4(Houses)
@@ -45,14 +46,14 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
 
     override def write(obj: Option[AccountInformation]): JsValue = ???
   }
-  implicit val charactersFormat: RootJsonFormat[Characters] = jsonFormat3(Characters)
+
+  implicit val charactersFormat: RootJsonFormat[CharacterSheet] = jsonFormat3(CharacterSheet)
   implicit val characterResponseFormat: RootJsonFormat[CharacterResponse] = jsonFormat2(CharacterResponse)
 
   implicit val invitesFormat: RootJsonFormat[Invites] = jsonFormat2(Invites)
   implicit val membersFormat: RootJsonFormat[Members] = jsonFormat7(Members)
   implicit val guildHallFormat: RootJsonFormat[GuildHalls] = jsonFormat3(GuildHalls)
   implicit val guildDataFormat: RootJsonFormat[GuildData] = jsonFormat18(GuildData)
-  implicit val guildsFormat: RootJsonFormat[Guilds] = jsonFormat1(Guilds)
   implicit val guildResponseFormat: RootJsonFormat[GuildResponse] = jsonFormat2(GuildResponse)
 
 }

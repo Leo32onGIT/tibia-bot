@@ -564,12 +564,12 @@ object BotApp extends App with StrictLogging {
       futureResults.onComplete {
         case Success(output) =>
           output.foreach { case (charResponse, name, reason, reasonText) =>
-            if (charResponse.characters.character.name != "") {
-              val charName = charResponse.characters.character.name
-              val charLevel = charResponse.characters.character.level.toInt
-              val charGuild = charResponse.characters.character.guild
+            if (charResponse.character.character.name != "") {
+              val charName = charResponse.character.character.name
+              val charLevel = charResponse.character.character.level.toInt
+              val charGuild = charResponse.character.character.guild
               val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
-              val charWorld = charResponse.characters.character.world
+              val charWorld = charResponse.character.character.world
               val charEmoji = vocEmoji(charResponse)
 
               val huntedGuildCheck = huntedGuildsData.getOrElse(guild.getId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase())
@@ -804,21 +804,24 @@ object BotApp extends App with StrictLogging {
     if (listGuilds.nonEmpty) {
       // run api against guild
       val guildListFlow = Source(listGuilds.map(p => (p.name, p.reason)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getGuildWithInput).toMat(Sink.seq)(Keep.right)
-      val futureResults: Future[Seq[(GuildResponse, String, String)]] = guildListFlow.run()
+      val futureResults: Future[Seq[(Either[String, GuildResponse], String, String)]] = guildListFlow.run()
       futureResults.onComplete {
         case Success(output) =>
           val guildApiBuffer = ListBuffer[String]()
-          output.foreach { case (guildResponse, name, reason) =>
-            val guildName = guildResponse.guilds.guild.name
-            val reasonEmoji = if (reason == "true") ":pencil:" else ""
-            if (guildName != "") {
-              val guildMembers = guildResponse.guilds.guild.members_total.toInt
-              val guildLine = s":busts_in_silhouette: **$guildMembers** — **[$guildName](${guildUrl(guildName)})** $reasonEmoji"
-              guildApiBuffer += guildLine
-            }
-            else {
-              guildApiBuffer += s"**$name** *(This guild doesn't exist)* $reasonEmoji"
-            }
+          output.foreach {
+            case (Right(guildResponse), name, reason) =>
+              val guildName = guildResponse.guild.name
+              val reasonEmoji = if (reason == "true") ":pencil:" else ""
+              if (guildName != "") {
+                val guildMembers = guildResponse.guild.members_total.toInt
+                val guildLine = s":busts_in_silhouette: **$guildMembers** — **[$guildName](${guildUrl(guildName)})** $reasonEmoji"
+                guildApiBuffer += guildLine
+              }
+              else {
+                guildApiBuffer += s"**$name** *(This guild doesn't exist)* $reasonEmoji"
+              }
+            case (Left(errorMessage), name, reason) =>
+              guildApiBuffer += s"**$name** *(This guild doesn't exist)*"
           }
           val guildsAsList: List[String] = List(guildHeader) ++ guildApiBuffer
           var field = ""
@@ -1213,7 +1216,7 @@ object BotApp extends App with StrictLogging {
       }
       // run api against players
       val listPlayersFlow = Source(playersToUpdate.map(p => (p.name, p.reason, p.reasonText)).toSet).mapAsyncUnordered(4)(tibiaDataClient.getCharacterWithInput).toMat(Sink.seq)(Keep.right)
-      val futureResults: Future[Seq[(CharacterResponse, String, String, String)]] = listPlayersFlow.run()
+      val futureResults: Future[Seq[(Either[String, CharacterResponse], String, String, String)]] = listPlayersFlow.run()
       futureResults.onComplete {
         case Success(output) =>
           val vocationBuffers = ListMap(
@@ -1259,44 +1262,47 @@ object BotApp extends App with StrictLogging {
               }
             }
           }
-          output.foreach { case (charResponse, name, _, _) =>
-            if (charResponse.characters.character.name != "") {
-              val charName = charResponse.characters.character.name
-              val charLevel = charResponse.characters.character.level.toInt
-              val charGuild = charResponse.characters.character.guild
-              val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
-              val allyGuildCheck = if (charGuildName != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
-              val huntedGuildCheck = if (charGuildName != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
-              val guildIcon = (charGuildName, allyGuildCheck, huntedGuildCheck, arg) match {
-                case (_, true, _, "allies") => Config.allyGuild // allied guilds
-                case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
-                case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
-                case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
-                case ("", _, _, "hunted") => Config.enemy // hunted players no guild
-                case ("", _, _, "allies") => Config.ally // allied player in no guild
-                case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
-                case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
-                case _ => ""
+          output.foreach {
+            case (Right(charResponse), name, _, _) =>
+              if (charResponse.character.character.name != "") {
+                val charName = charResponse.character.character.name
+                val charLevel = charResponse.character.character.level.toInt
+                val charGuild = charResponse.character.character.guild
+                val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
+                val allyGuildCheck = if (charGuildName != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
+                val huntedGuildCheck = if (charGuildName != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
+                val guildIcon = (charGuildName, allyGuildCheck, huntedGuildCheck, arg) match {
+                  case (_, true, _, "allies") => Config.allyGuild // allied guilds
+                  case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
+                  case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
+                  case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
+                  case ("", _, _, "hunted") => Config.enemy // hunted players no guild
+                  case ("", _, _, "allies") => Config.ally // allied player in no guild
+                  case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
+                  case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
+                  case _ => ""
+                }
+                val charVocation = charResponse.character.character.vocation
+                val charWorld = charResponse.character.character.world
+                val charLink = charUrl(charName)
+                val charEmoji = vocEmoji(charResponse)
+                val pNameFormal = name.split(" ").map(_.capitalize).mkString(" ")
+                val voc = charVocation.toLowerCase.split(' ').last
+                val lastLoginTime = charResponse.character.character.last_login.getOrElse("")
+                // only show players on worlds that you have setup
+                if (allWorlds.exists(_.name.toLowerCase == charWorld.toLowerCase)) {
+                  vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon ${dateStringToEpochSeconds(lastLoginTime)}"))
+                }
+                //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
+                val formerNamesList = charResponse.character.character.former_names.map(_.toList).getOrElse(Nil)
+                val formerWorldsList = charResponse.character.character.former_worlds.map(_.toList).getOrElse(Nil)
+                val charLastLogin = charResponse.character.character.last_login.getOrElse("")
+                addListToCache(charName, formerNamesList, charWorld, formerWorldsList, charGuildName, charLevel.toString, charVocation, charLastLogin, ZonedDateTime.now())
+              } else {
+                vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
               }
-              val charVocation = charResponse.characters.character.vocation
-              val charWorld = charResponse.characters.character.world
-              val charLink = charUrl(charName)
-              val charEmoji = vocEmoji(charResponse)
-              val pNameFormal = name.split(" ").map(_.capitalize).mkString(" ")
-              val voc = charVocation.toLowerCase.split(' ').last
-              val lastLoginTime = charResponse.characters.character.last_login.getOrElse("")
-              // only show players on worlds that you have setup
-              if (allWorlds.exists(_.name.toLowerCase == charWorld.toLowerCase)) {
-                vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon ${dateStringToEpochSeconds(lastLoginTime)}"))
-              }
-              //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
-              val formerNamesList = charResponse.characters.character.former_names.map(_.toList).getOrElse(Nil)
-              val formerWorldsList = charResponse.characters.character.former_worlds.map(_.toList).getOrElse(Nil)
-              val charLastLogin = charResponse.characters.character.last_login.getOrElse("")
-              addListToCache(charName, formerNamesList, charWorld, formerWorldsList, charGuildName, charLevel.toString, charVocation, charLastLogin, ZonedDateTime.now())
-            } else {
+            case (Left(errorMessage), name, _, _) =>
               vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
-            }
           }
           // group by world
           val vocationWorldBuffers = vocationBuffers.map {
@@ -1384,7 +1390,7 @@ object BotApp extends App with StrictLogging {
   }
 
   def vocEmoji(char: CharacterResponse): String = {
-    val voc = char.characters.character.vocation.toLowerCase.split(' ').last
+    val voc = char.character.character.vocation.toLowerCase.split(' ').last
     voc match {
       case "knight" => ":shield:"
       case "druid" => ":snowflake:"
@@ -1443,11 +1449,14 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (subCommand == "guild") { // command run with 'guild'
         // run api against guild
-        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
-        guildCheck.map { guildResponse =>
-          val guildName = guildResponse.guilds.guild.name
-          val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
-          (guildName, guildMembers)
+        val guildCheck: Future[Either[String, GuildResponse]] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map {
+          case Right(guildResponse) =>
+            val guildName = guildResponse.guild.name
+            val guildMembers = guildResponse.guild.members.getOrElse(List.empty[Members])
+            (guildName, guildMembers)
+          case Left(errorMessage) =>
+            ("", List.empty)
         }.map { case (guildName, guildMembers) =>
           if (guildName != "") {
             if (!huntedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1458,12 +1467,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               // add each player in the guild to the activity list
@@ -1494,10 +1505,13 @@ object BotApp extends App with StrictLogging {
         }
       } else if (subCommand == "player") { // command run with 'player'
         // run api against player
-        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map { charResponse =>
-          val character = charResponse.characters.character
-          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map {
+          case Right(charResponse) =>
+            val character = charResponse.character.character
+            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          case Left(errorMessage) =>
+            ("", "" , ":x:", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!huntedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1508,12 +1522,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedBuild.setDescription(embedText)
@@ -1558,11 +1574,14 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (subCommand == "guild") {
         // run api against guild
-        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
-        guildCheck.map { guildResponse =>
-          val guildName = guildResponse.guilds.guild.name
-          val guildMembers = guildResponse.guilds.guild.members.getOrElse(List.empty[Members])
-          (guildName, guildMembers)
+        val guildCheck: Future[Either[String, GuildResponse]] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map {
+          case Right(guildResponse) =>
+            val guildName = guildResponse.guild.name
+            val guildMembers = guildResponse.guild.members.getOrElse(List.empty[Members])
+            (guildName, guildMembers)
+          case Left(errorMessage) =>
+            ("", List.empty)
         }.map { case (guildName, guildMembers) =>
           if (guildName != "") {
             if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1571,12 +1590,14 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the allies list."
 
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               // add each player in the guild to the hunted list
@@ -1618,10 +1639,13 @@ object BotApp extends App with StrictLogging {
         }
       } else if (subCommand == "player") {
         // run api against player
-        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map { charResponse =>
-          val character = charResponse.characters.character
-          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map {
+          case Right(charResponse) =>
+            val character = charResponse.character.character
+            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          case Left(errorMessage) =>
+            ("", "", ":x:", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1630,12 +1654,14 @@ object BotApp extends App with StrictLogging {
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the allies list."
 
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedBuild.setDescription(embedText)
@@ -1679,10 +1705,13 @@ object BotApp extends App with StrictLogging {
       if (subCommand == "guild") {
         var guildString = subOptionValueLower
         // run api against guild
-        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
-        guildCheck.map { guildResponse =>
-          val guildName = guildResponse.guilds.guild.name
-          guildName
+        val guildCheck: Future[Either[String, GuildResponse]] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map {
+          case Right(guildResponse) =>
+            val guildName = guildResponse.guild.name
+            guildName
+          case Left(errorMessage) =>
+            ""
         }.map { guildName =>
           if (guildName != "") {
             guildString = s"[$guildName](${guildUrl(guildName)})"
@@ -1714,12 +1743,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedText = s":gear: The guild **$guildString** was removed from the hunted list."
@@ -1752,10 +1783,13 @@ object BotApp extends App with StrictLogging {
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
-        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map { charResponse =>
-          val character = charResponse.characters.character
-          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map {
+          case Right(charResponse) =>
+            val character = charResponse.character.character
+            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          case Left(errorMessage) =>
+            ("", "", ":x:", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
@@ -1773,12 +1807,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedText = s":gear: The player **$playerString** was removed from the hunted list."
@@ -1814,10 +1850,13 @@ object BotApp extends App with StrictLogging {
       if (subCommand == "guild") {
         var guildString = subOptionValueLower
         // run api against guild
-        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(subOptionValueLower)
-        guildCheck.map { guildResponse =>
-          val guildName = guildResponse.guilds.guild.name
-          guildName
+        val guildCheck: Future[Either[String, GuildResponse]] = tibiaDataClient.getGuild(subOptionValueLower)
+        guildCheck.map {
+          case Right(guildResponse) =>
+            val guildName = guildResponse.guild.name
+            guildName
+          case Left(errorMessage) =>
+            ""
         }.map { guildName =>
           if (guildName != "") {
             guildString = s"[$guildName](${guildUrl(guildName)})"
@@ -1834,12 +1873,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedText = s":gear: The guild **$guildString** was removed from the allies list."
@@ -1856,10 +1897,13 @@ object BotApp extends App with StrictLogging {
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
-        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map { charResponse =>
-          val character = charResponse.characters.character
-          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
+        playerCheck.map {
+          case Right(charResponse) =>
+            val character = charResponse.character.character
+            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          case Left(errorMessage) =>
+            ("", "", ":x:", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
@@ -1876,12 +1920,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedText = s":gear: The player **$playerString** was removed from the allies list."
@@ -2984,12 +3030,14 @@ object BotApp extends App with StrictLogging {
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
 
         embedBuild.setDescription(s":gear: **Automatic enemy detection** is now set to **$settingOption** for the world **$worldFormal**.")
@@ -3089,12 +3137,14 @@ object BotApp extends App with StrictLogging {
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
+            adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
 
         embedBuild.setDescription(s":gear: The **$channelType** channel is now set to **$setting $playerType** for the world **$worldFormal**.")
@@ -3139,12 +3189,14 @@ object BotApp extends App with StrictLogging {
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Find_Person.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Find_Person.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
 
         embedBuild.setDescription(s":gear: **exiva list on deaths** is now set to **$settingOption** for the world **$worldFormal**.")
@@ -3461,12 +3513,14 @@ object BotApp extends App with StrictLogging {
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer")
-          adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer")
+            adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
 
         embedBuild.setDescription(s":gear: The online list channel is now set to **$setting** for the world **$worldFormal**.\n$disclaimer")
@@ -3548,10 +3602,13 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (guildOrPlayer == "guild") { // command run with 'guild'
         // run api against guild
-        val guildCheck: Future[GuildResponse] = tibiaDataClient.getGuild(nameLower)
-        guildCheck.map { guildResponse =>
-          val guildName = guildResponse.guilds.guild.name
-          guildName
+        val guildCheck: Future[Either[String, GuildResponse]] = tibiaDataClient.getGuild(nameLower)
+        guildCheck.map {
+          case Right(guildResponse) =>
+            val guildName = guildResponse.guild.name
+            guildName
+          case Left(errorMessage) =>
+            ""
         }.map { guildName =>
           if (guildName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == nameLower)) {
@@ -3567,12 +3624,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedBuild.setDescription(embedText)
@@ -3593,10 +3652,13 @@ object BotApp extends App with StrictLogging {
         }
       } else if (guildOrPlayer == "player") { // command run with 'player'
         // run api against player
-        val playerCheck: Future[CharacterResponse] = tibiaDataClient.getCharacter(nameLower)
-        playerCheck.map { charResponse =>
-          val character = charResponse.characters.character
-          (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(nameLower)
+        playerCheck.map {
+          case Right(charResponse) =>
+            val character = charResponse.character.character
+            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          case Left(errorMessage) =>
+            ("", "", ":x:", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
@@ -3611,12 +3673,14 @@ object BotApp extends App with StrictLogging {
 
               // send embed to admin channel
               if (adminChannel != null) {
-                val adminEmbed = new EmbedBuilder()
-                adminEmbed.setTitle(s":gear: a command was run:")
-                adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe")
-                adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
-                adminEmbed.setColor(3092790)
-                adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                if (adminChannel.canTalk()) {
+                  val adminEmbed = new EmbedBuilder()
+                  adminEmbed.setTitle(s":gear: a command was run:")
+                  adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe")
+                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                  adminEmbed.setColor(3092790)
+                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+                }
               }
 
               embedBuild.setDescription(embedText)
@@ -3682,12 +3746,14 @@ object BotApp extends App with StrictLogging {
 
           // send embed to admin channel
           if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom tagging.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+            if (adminChannel.canTalk()) {
+              val adminEmbed = new EmbedBuilder()
+              adminEmbed.setTitle(s":gear: a command was run:")
+              adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom tagging.")
+              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+              adminEmbed.setColor(3092790)
+              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+            }
           }
         } else {
           embedText = s":x: The guild **$nameLower** does not have a tag assigned."
@@ -3703,12 +3769,14 @@ object BotApp extends App with StrictLogging {
 
           // send embed to admin channel
           if (adminChannel != null) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom tagging.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+            if (adminChannel.canTalk()) {
+              val adminEmbed = new EmbedBuilder()
+              adminEmbed.setTitle(s":gear: a command was run:")
+              adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom tagging.")
+              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+              adminEmbed.setColor(3092790)
+              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+            }
           }
         } else {
           embedText = s":x: The player **$nameLower** already has a tag assigned."
@@ -3755,12 +3823,14 @@ object BotApp extends App with StrictLogging {
 
         // send embed to admin channel
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> cleared everyone from the tag **$labelLower**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> cleared everyone from the tag **$labelLower**.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
       } else {
         embedText = s":x: The tag **$labelLower** does not exist."
@@ -3908,12 +3978,14 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
 
         embedBuild.setDescription(s":gear: The level to poke for **enemy fullblesses**\nis now set to **$level** for the world **$worldFormal**.")
@@ -4239,12 +4311,14 @@ object BotApp extends App with StrictLogging {
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Hammer.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Hammer.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       } else {
@@ -4301,12 +4375,14 @@ object BotApp extends App with StrictLogging {
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
         if (adminChannel != null) {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":gear: a command was run:")
-          adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          if (adminChannel.canTalk()) {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":gear: a command was run:")
+            adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          }
         }
         embedBuild.setDescription(s":gear: The minimum level for the **$levelsOrDeaths channel**\nis now set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
@@ -4388,16 +4464,18 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     val publicChannel = guild.getTextChannelById(guild.getDefaultChannel.getId)
     if (publicChannel != null) {
-      val embedBuilder = new EmbedBuilder()
-      val descripText = Config.helpText
-      embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
-      embedBuilder.setDescription(descripText)
-      embedBuilder.setThumbnail(Config.webHookAvatar)
-      embedBuilder.setColor(14397256) // orange for bot auto command
-      try {
-        publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
-      } catch {
-        case ex: Throwable => logger.error(s"Failed to send 'New Discord Join' message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+      if (publicChannel.canTalk()) {
+        val embedBuilder = new EmbedBuilder()
+        val descripText = Config.helpText
+        embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
+        embedBuilder.setDescription(descripText)
+        embedBuilder.setThumbnail(Config.webHookAvatar)
+        embedBuilder.setColor(14397256) // orange for bot auto command
+        try {
+          publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
+        } catch {
+          case ex: Throwable => logger.error(s"Failed to send 'New Discord Join' message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+        }
       }
     }
   }
@@ -4548,15 +4626,17 @@ object BotApp extends App with StrictLogging {
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null) {
-        try {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
-          adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        } catch {
-          case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+        if (adminChannel.canTalk()) {
+          try {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+            adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          }
         }
       }
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
@@ -4582,15 +4662,17 @@ object BotApp extends App with StrictLogging {
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null) {
-        try {
-          val adminEmbed = new EmbedBuilder()
-          adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
-          adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
-          adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
-          adminEmbed.setColor(3092790)
-          adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-        } catch {
-          case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+        if (adminChannel.canTalk()) {
+          try {
+            val adminEmbed = new EmbedBuilder()
+            adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+            adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
+            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
+            adminEmbed.setColor(3092790)
+            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
         }
       } else {
         embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
