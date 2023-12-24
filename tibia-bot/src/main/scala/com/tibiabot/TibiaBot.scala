@@ -118,8 +118,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           .map(_.toSet)
       }
     case Left(warning) =>
-      // log a warning
-      logger.warn(warning)
       // use data from previous online list check
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
       Source(charsToCheck)
