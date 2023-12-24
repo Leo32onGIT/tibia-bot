@@ -26,12 +26,22 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
   private val guildUrl = "https://api.tibiadata.com/v4/guild/"
 
-  def getWorld(world: String): Future[WorldResponse] = {
+  def getWorld(world: String): Future[Either[String, WorldResponse]] = {
     val encodedName = URLEncoder.encode(world, "UTF-8").replaceAll("\\+", "%20")
     for {
       response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/world/$encodedName"))
       decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[WorldResponse]
+      unmarshalled <- Unmarshal(decoded).to[WorldResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get world: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse world: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
     } yield unmarshalled
   }
 
@@ -41,10 +51,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[GuildResponse].map(Right(_))
-        .recover { case e @ (_: ParsingException | _: DeserializationException) =>
-          val errorMessage = s"Failed to parse guild: $encodedName"
-          logger.warn(errorMessage)
-          Left(errorMessage)
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get guild: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse guild: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
         }
     } yield unmarshalled
   }
@@ -57,10 +72,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       response <- Http().singleRequest(HttpRequest(uri = s"$guildUrl$encodedName"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[GuildResponse].map(Right(_))
-        .recover { case e @ (_: ParsingException | _: DeserializationException) =>
-          val errorMessage = s"Failed to parse guild: $encodedName"
-          logger.warn(errorMessage)
-          Left(errorMessage)
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get guild: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse guild: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
         }
     } yield (unmarshalled, guild, reason)
   }
@@ -71,10 +91,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
-        .recover { case e @ (_: ParsingException | _: DeserializationException) =>
-          val errorMessage = s"Failed to parse character: $encodedName"
-          logger.warn(errorMessage)
-          Left(errorMessage)
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
         }
     } yield unmarshalled
   }
@@ -99,10 +124,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
-        .recover { case e @ (_: ParsingException | _: DeserializationException) =>
-          val errorMessage = s"Failed to parse character: $encodedName"
-          logger.warn(errorMessage)
-          Left(errorMessage)
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
         }
     } yield unmarshalled
   }
@@ -116,10 +146,15 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
-        .recover { case e @ (_: ParsingException | _: DeserializationException) =>
-          val errorMessage = s"Failed to parse character: $encodedName"
-          logger.warn(errorMessage)
-          Left(errorMessage)
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
         }
     } yield (unmarshalled, name, reason, reasonText)
   }

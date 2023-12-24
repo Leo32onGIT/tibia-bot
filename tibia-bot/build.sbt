@@ -1,5 +1,3 @@
-ThisBuild / version := "1.1.0-SNAPSHOT"
-
 name := "tibia-bot"
 version := "1.8"
 

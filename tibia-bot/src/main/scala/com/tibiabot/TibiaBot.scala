@@ -67,55 +67,65 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
   private lazy val sourceTick = if (world == "Pulsera") Source.tick(2.seconds, 30.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
-    logger.info(s"Running stream for World: '$world'")
+    logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
   }.withAttributes(logAndResume)
 
-  private lazy val getCharacterData = Flow[WorldResponse].mapAsync(1) { worldResponse =>
-    val now = ZonedDateTime.now()
-    val online: List[OnlinePlayers] = worldResponse.world.online_players.getOrElse(List.empty[OnlinePlayers])
+  private lazy val getCharacterData = Flow[Either[String, WorldResponse]].mapAsync(1) {
+    case Right(worldResponse) =>
+      val now = ZonedDateTime.now()
+      val online: List[OnlinePlayers] = worldResponse.world.online_players.getOrElse(List.empty[OnlinePlayers])
 
-    // get online data with durations
-    val onlineWithVocLvlAndDuration = online.map { player =>
-      currentOnline.find(_.name == player.name) match {
-        case Some(existingPlayer) =>
-          val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
-          CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
-        case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
+      // get online data with durations
+      val onlineWithVocLvlAndDuration = online.map { player =>
+        currentOnline.find(_.name == player.name) match {
+          case Some(existingPlayer) =>
+            val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
+            CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
+          case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
+        }
       }
-    }
 
-    // Add online data to sets
-    currentOnline.clear()
-    currentOnline.addAll(onlineWithVocLvlAndDuration)
+      // Add online data to sets
+      currentOnline.clear()
+      currentOnline.addAll(onlineWithVocLvlAndDuration)
 
-    // Remove existing online chars from the list...
-    recentOnline.filterInPlace { i =>
-      !online.exists(player => player.name == i.char)
-    }
-    recentOnline.addAll(online.map(player => CharKey(player.name, now)))
-
-    // cache bypass for Seanera
-    if (world == "Pulsera" && Config.prod) {
       // Remove existing online chars from the list...
-      recentOnlineBypass.filterInPlace { i =>
+      recentOnline.filterInPlace { i =>
         !online.exists(player => player.name == i.char)
       }
-      recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-      val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
-        (key.char, key.level.toInt)
-      }.toSet
-      Source(charsToCheck)
-        .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
-        .runWith(Sink.collection)
-        .map(_.toSet)
-    } else {
+      recentOnline.addAll(online.map(player => CharKey(player.name, now)))
+
+      // cache bypass for Seanera
+      if (worldResponse.world.name == "Pulsera" && Config.prod) {
+        // Remove existing online chars from the list...
+        recentOnlineBypass.filterInPlace { i =>
+          !online.exists(player => player.name == i.char)
+        }
+        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
+        val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
+          (key.char, key.level.toInt)
+        }.toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      } else {
+        val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      }
+    case Left(warning) =>
+      // log a warning
+      logger.warn(warning)
+      // use data from previous online list check
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
       Source(charsToCheck)
         .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
         .runWith(Sink.collection)
         .map(_.toSet)
-    }
   }.withAttributes(logAndResume)
 
   private lazy val scanForDeaths = Flow[Set[Either[String, CharacterResponse]]].mapAsync(1) { characterResponses =>
@@ -310,7 +320,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               try {
                                 activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                               } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}':", ex)
+                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                 case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                               }
                             }
@@ -332,7 +342,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               try {
                                 activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                               } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                 case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                               }
                             }
@@ -354,7 +364,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 try {
                                   adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                                 } catch {
-                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                   case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                                 }
                               }
@@ -381,7 +391,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 try {
                                   adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                                 } catch {
-                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                   case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                                 }
                               }
@@ -418,7 +428,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               try {
                                 adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                               } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                 case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                               }
                             }
@@ -441,7 +451,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               try {
                                 adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                               } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                                 case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                               }
                             }
@@ -462,7 +472,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             try {
                               activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
                             } catch {
-                              case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                              case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                               case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                             }
                           }
@@ -505,7 +515,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           try {
                             adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                           } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}", ex)
+                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                             case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                           }
                         }
@@ -1239,7 +1249,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = combinedTextChannel.getManager
               channelManager.setName(s"$customName-$totalCount").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           if (combinedList.nonEmpty) {
@@ -1264,7 +1274,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = neutralsTextChannel.getManager
               channelManager.setName(s"$customName-0").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           // placeholder message
@@ -1286,7 +1296,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = enemiesTextChannel.getManager
               channelManager.setName(s"$customName-0").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           // placeholder message
@@ -1307,7 +1317,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
           }
         } catch {
-          case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+          case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
         }
       }
     }
@@ -1334,7 +1344,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = alliesTextChannel.getManager
               channelManager.setName(s"$customName-$alliesCount").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           if (alliesList.nonEmpty) {
@@ -1359,7 +1369,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = neutralsTextChannel.getManager
               channelManager.setName(s"$customName-$neutralsCount").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           if (neutralsList.nonEmpty) {
@@ -1384,7 +1394,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val channelManager = enemiesTextChannel.getManager
               channelManager.setName(s"$customName-$enemiesCount").queue()
             } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+              case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
             }
           }
           if (enemiesList.nonEmpty) {
@@ -1491,7 +1501,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
     } catch {
       case e: Exception =>
-      logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName' because of an error: ${e.getMessage()}" )
+      logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${e.getMessage}")
     }
   }
 
