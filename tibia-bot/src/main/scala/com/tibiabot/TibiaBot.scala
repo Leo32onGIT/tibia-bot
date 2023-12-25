@@ -591,7 +591,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         if (!recentlyDied) {
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-            if (onlinePlayer.level > sheetLevel && onlinePlayer.level > 150) {
+            if (onlinePlayer.level > sheetLevel && onlinePlayer.level > 200) {
               val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
               // post level to each discord
               if (discordsData.contains(world)) {
