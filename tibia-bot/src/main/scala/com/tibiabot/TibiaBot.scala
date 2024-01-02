@@ -1370,6 +1370,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
       }
 
+      /**
       // neutrals grouped by Guild
       val neutralsGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
         .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
@@ -1385,7 +1386,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case ("", messages) => s"### No Guild  ${messages.length}" :: messages
         case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
       }
-
+      **/
 
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
@@ -1406,7 +1407,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           }
           if (neutralsList.nonEmpty) {
-            updateMultiFields(flattenedNeutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
+            updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
           } else {
             updateMultiFields(List("*No `neutrals` are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
           }
