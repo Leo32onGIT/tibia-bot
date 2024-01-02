@@ -1160,6 +1160,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
 
+
     // default online list
     val alliesList: List[String] = vocationBuffers.values
       .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
@@ -1327,6 +1328,22 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val neutralsCount = neutralsList.size
       val enemiesCount = enemiesList.size
 
+      // allies grouped by Guild
+      val alliesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
+        .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+        .groupBy(_.guildName)
+        .mapValues(_.map(_.message).toList)
+        .toList
+        .partition(_._1.isEmpty) match {
+           case (guildless, withGuilds) =>
+             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+         }
+
+      val flattenedAlliesList: List[String] = alliesGroupedByGuild.flatMap {
+        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+      }
+
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       if (alliesTextChannel != null) {
         if (alliesTextChannel.canTalk()) {
@@ -1346,12 +1363,30 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           }
           if (alliesList.nonEmpty) {
-            updateMultiFields(alliesList, alliesTextChannel, "allies", guildId, guild.getName)
+            updateMultiFields(flattenedAlliesList, alliesTextChannel, "allies", guildId, guild.getName)
           } else {
             updateMultiFields(List("*No `allies` are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
           }
         }
       }
+
+      // neutrals grouped by Guild
+      val neutralsGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
+        .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+        .groupBy(_.guildName)
+        .mapValues(_.map(_.message).toList)
+        .toList
+        .partition(_._1.isEmpty) match {
+           case (guildless, withGuilds) =>
+             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+         }
+
+      val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.flatMap {
+        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+      }
+
+
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
         if (neutralsTextChannel.canTalk()) {
@@ -1371,12 +1406,29 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           }
           if (neutralsList.nonEmpty) {
-            updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
+            updateMultiFields(flattenedNeutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
           } else {
             updateMultiFields(List("*No `neutrals` are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
           }
         }
       }
+
+      // enemies grouped by Guild
+      val enemiesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
+        .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+        .groupBy(_.guildName)
+        .mapValues(_.map(_.message).toList)
+        .toList
+        .partition(_._1.isEmpty) match {
+           case (guildless, withGuilds) =>
+             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+         }
+
+      val flattenedEnemiesList: List[String] = enemiesGroupedByGuild.flatMap {
+        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+      }
+
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
         if (enemiesTextChannel.canTalk()) {
@@ -1396,7 +1448,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
           }
           if (enemiesList.nonEmpty) {
-            updateMultiFields(enemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
+            updateMultiFields(flattenedEnemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
           } else {
             updateMultiFields(List("*No `enemies` are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
           }
@@ -1442,7 +1494,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       var currentMessage = 0
       values.foreach { v =>
         val currentField = field + "\n" + v
-        if (currentField.length >= 4096) { // don't add field yet, there is still room
+        if (currentField.length >= 4096 || (currentField.length >= 3900 && v.startsWith(s"### ["))) { // don't add field yet, there is still room
           val interimEmbed = new EmbedBuilder()
           interimEmbed.setDescription(field)
           interimEmbed.setColor(embedColor)
@@ -1456,7 +1508,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
           field = v
           currentMessage += 1
-        } else if (v.startsWith(s"### ")) {
+        } else if (v.matches("### [^\\[].*")) {
           if (field == "") {
             field = currentField
           } else {
