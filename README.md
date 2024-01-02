@@ -1,4 +1,4 @@
-# Discord Bot for Tibia
+# Violent Bot
 
 Production:
 - [Website](https://violentbot.xyz)

@@ -4685,5 +4685,23 @@ object BotApp extends App with StrictLogging {
     .setDescription(embedMessage)
     .build()
   }
-
+  /**
+  def discordChannelMessageEmbed(guild: Guild, channel: Option[TextChannel], title: String, description: String, thumbnail: String, colour: Int): Unit = {
+    channel.foreach { actualChannel =>
+      if (actualChannel.canTalk) {
+        try {
+          val messageEmbed = new EmbedBuilder()
+          messageEmbed.setTitle(title)
+          messageEmbed.setDescription(description)
+          messageEmbed.setThumbnail(thumbnail)
+          messageEmbed.setColor(colour)
+          actualChannel.sendMessageEmbeds(messageEmbed.build()).queue()
+        } catch {
+          case ex: Throwable =>
+            logger.info(s"Failed to send message:\nGuild ID: '${guild.getId}' Guild Name: '${guild.getName}' Channel ID: '${actualChannel.getId}' Channel Name: '${actualChannel.getName}':\n${ex.getMessage}")
+        }
+      }
+    }
+  }
+  **/
 }
