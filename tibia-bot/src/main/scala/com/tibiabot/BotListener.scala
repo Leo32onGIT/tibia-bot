@@ -17,6 +17,7 @@ import scala.jdk.CollectionConverters._
 class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
+    event.deferReply(true).queue()
     if (BotApp.startUpComplete) {
       event.getName match {
         //case "reload" =>
@@ -52,7 +53,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else {
       val responseText = s":x: The bot is still starting up, try running your command later."
       val embed = new EmbedBuilder().setDescription(responseText).setColor(3092790).build()
-      event.deferReply(true).queue()
       event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -268,18 +268,15 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleSetup(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val embed = BotApp.createChannels(event)
     event.getHook.sendMessageEmbeds(embed).queue()
   }
   private def handleRemove(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val embed = BotApp.removeChannels(event)
     event.getHook.sendMessageEmbeds(embed).queue()
   }
 
   private def handleGalthen(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val tagOption: String = options.getOrElse("character", "")
     val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
@@ -370,7 +367,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleHunted(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
@@ -453,7 +449,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleAllies(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
@@ -534,7 +529,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleNeutrals(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val subcommandGroupName = event.getInteraction.getSubcommandGroup
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
@@ -613,7 +607,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleFullbless(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
     val levelOption: Int = options.get("level").map(_.toInt).getOrElse(250)
@@ -623,7 +616,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleFilter(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
@@ -643,7 +635,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleAdmin(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val guildOption: String = options.getOrElse("guildid", "")
@@ -664,7 +655,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleExiva(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
 
     subCommand match {
@@ -678,7 +668,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleOnlineList(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
@@ -700,7 +689,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleHelp(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val embedBuilder = new EmbedBuilder()
     val descripText = Config.helpText
     embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
@@ -711,7 +699,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   private def handleRepair(event: SlashCommandInteractionEvent): Unit = {
-    event.deferReply(true).queue()
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
 
