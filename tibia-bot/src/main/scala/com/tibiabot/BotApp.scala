@@ -537,7 +537,7 @@ object BotApp extends App with StrictLogging {
       discordsData.foreach { case (worldName, discordsList) =>
         val botStream = new TibiaBot(worldName)
         botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
-        Thread.sleep(5500) // space each stream out 3 seconds
+        Thread.sleep(7500) // space each stream out 3 seconds
       }
       startUpComplete = true
     }
