@@ -108,7 +108,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val name = input._1
     val level = input._2
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 350) {
+    val bypassName: String = if (level >= 250) {
       // Split the name into words
       val words = encodedName.split("%20")
       // Append randomly generated "+" characters to the last word, limited to a maximum length of 20
