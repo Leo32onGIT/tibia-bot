@@ -34,6 +34,7 @@ import java.time.temporal.ChronoUnit
 import scala.util.{Try, Success, Failure}
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import scala.util.Random
 
 object BotApp extends App with StrictLogging {
 
