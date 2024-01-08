@@ -2088,10 +2088,27 @@ object BotApp extends App with StrictLogging {
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
+     val createListTable =
+       s"""CREATE TABLE list (
+          |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          |world VARCHAR(255) NOT NULL,
+          |former_worlds VARCHAR(255),
+          |name VARCHAR(255) NOT NULL,
+          |former_names VARCHAR(1000),
+          |level VARCHAR(255) NOT NULL,
+          |guild_name VARCHAR(255),
+          |vocation VARCHAR(255) NOT NULL,
+          |last_login VARCHAR(255) NOT NULL,
+          |time VARCHAR(255) NOT NULL
+          |);""".stripMargin
+
+
       newStatement.executeUpdate(createDeathsTable)
       logger.info("Table 'deaths' created successfully")
       newStatement.executeUpdate(createLevelsTable)
       logger.info("Table 'levels' created successfully")
+      newStatement.executeUpdate(createListTable)
+      logger.info("Table 'list' created successfully")
       newStatement.close()
       newConn.close()
     } else {
