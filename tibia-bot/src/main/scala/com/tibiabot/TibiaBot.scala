@@ -65,7 +65,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = if (world == "Pulsera") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 60.seconds, ()) // im kinda cow-boying it here
+  private lazy val sourceTick = if (world == "Pulsera") Source.tick(2.seconds, 20.seconds, ()) else Source.tick(2.seconds, 40.seconds, ()) // im kinda cow-boying it here
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -97,7 +97,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
       // cache bypass for Seanera
-      if (worldResponse.world.name == "Pulsera" && Config.prod) {
+      if (worldResponse.world.name == "Pulsera") {
         // Remove existing online chars from the list...
         recentOnlineBypass.filterInPlace { i =>
           !online.exists(player => player.name == i.char)
@@ -254,7 +254,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
                       }
                       if (activityTextChannel != null) {
-                        if (activityTextChannel.canTalk()) {
+                        if (activityTextChannel.canTalk() || (!Config.prod)) {
                           // send message to activity channel
                           val activityEmbed = new EmbedBuilder()
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
@@ -310,7 +310,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         if (newGuildLess) {
                           // send message to activity channel
                           if (activityTextChannel != null) {
-                            if (activityTextChannel.canTalk()) {
+                            if (activityTextChannel.canTalk() || (!Config.prod)) {
                               val activityEmbed = new EmbedBuilder()
                               activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                               activityEmbed.setColor(14397256)
@@ -327,7 +327,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256 // hunted join = red, allied join = green, otherwise = yellow
                           // send message to activity channel
                           if (activityTextChannel != null) {
-                            if (activityTextChannel.canTalk()) {
+                            if (activityTextChannel.canTalk() || (!Config.prod)) {
                               val activityEmbed = new EmbedBuilder()
                               val thumbnailType = colorType match {
                                 case 13773097 => Config.guildSwapRed
@@ -351,7 +351,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
-                              if (adminTextChannel.canTalk()) {
+                              if (adminTextChannel.canTalk() || (!Config.prod)) {
                                 // send embed to admin channel
                                 val commandUser = s"<@${BotApp.botUser}>"
                                 val adminEmbed = new EmbedBuilder()
@@ -378,7 +378,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
-                              if (adminTextChannel.canTalk()) {
+                              if (adminTextChannel.canTalk() || (!Config.prod)) {
                                 // send embed to admin channel
                                 val commandUser = s"<@${BotApp.botUser}>"
                                 val adminEmbed = new EmbedBuilder()
@@ -415,7 +415,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
-                            if (adminTextChannel.canTalk()) {
+                            if (adminTextChannel.canTalk() || (!Config.prod)) {
                               // send embed to admin channel
                               val commandUser = s"<@${BotApp.botUser}>"
                               val adminEmbed = new EmbedBuilder()
@@ -438,7 +438,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
-                            if (adminTextChannel.canTalk()) {
+                            if (adminTextChannel.canTalk() || (!Config.prod)) {
                               // send embed to admin channel
                               val commandUser = s"<@${BotApp.botUser}>"
                               val adminEmbed = new EmbedBuilder()
@@ -457,7 +457,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         }
                         // send message to activity channel
                         if (activityTextChannel != null) {
-                          if (activityTextChannel.canTalk()) {
+                          if (activityTextChannel.canTalk() || (!Config.prod)) {
                             val activityEmbed = new EmbedBuilder()
                             val thumbnailType = guildType match {
                               case "hunted" => Config.guildJoinRed
@@ -502,7 +502,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
-                        if (adminTextChannel.canTalk()) {
+                        if (adminTextChannel.canTalk() || (!Config.prod)) {
                           // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
@@ -527,7 +527,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
-                        if (adminTextChannel.canTalk()) {
+                        if (adminTextChannel.canTalk() || (!Config.prod)) {
                           // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
@@ -549,7 +549,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val colorType = if (huntedGuildCheck) 13773097 else if (allyGuildCheck) 36941 else 14397256
                   if (guildType != "neutral") { // ignore neutral guild changes, only show hunted/allied rejoins
                     if (activityTextChannel != null) {
-                      if (activityTextChannel.canTalk()) {
+                      if (activityTextChannel.canTalk() || (!Config.prod)) {
                         val activityEmbed = new EmbedBuilder()
                         val thumbnailType = guildType match {
                           case "hunted" => Config.guildJoinRed
@@ -620,7 +620,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
                   val levelsTextChannel = guild.getTextChannelById(levelsChannel)
                   if (levelsTextChannel != null) {
-                    if (levelsTextChannel.canTalk()) {
+                    if (levelsTextChannel.canTalk() || (!Config.prod)) {
                       // check show_neutrals_levels setting
                       val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
                       val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
@@ -752,7 +752,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         **/
         if (deathsTextChannel != null) {
-          if (deathsTextChannel.canTalk()) {
+          if (deathsTextChannel.canTalk() || (!Config.prod)) {
             val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
               var notablePoke = ""
               val charName = charDeath.char.character.character.name
@@ -1181,7 +1181,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     if (onlineCombined == "true") {
       val combinedTextChannel = guild.getTextChannelById(alliesChannel)
       if (combinedTextChannel != null) {
-        if (combinedTextChannel.canTalk()) {
+        if (combinedTextChannel.canTalk() || (!Config.prod)) {
           val groupedNeutrals: List[(String, List[String])] = vocationBuffers.values
             .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
             .groupBy(_.category)
@@ -1260,7 +1260,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
-        if (neutralsTextChannel.canTalk()) {
+        if (neutralsTextChannel.canTalk() || (!Config.prod)) {
           // allow for custom channel names
           val channelName = neutralsTextChannel.getName
           val extractName = pattern.findFirstMatchIn(channelName)
@@ -1282,7 +1282,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
-        if (enemiesTextChannel.canTalk()) {
+        if (enemiesTextChannel.canTalk() || (!Config.prod)) {
           // allow for custom channel names
           val channelName = enemiesTextChannel.getName
           val extractName = pattern.findFirstMatchIn(channelName)
@@ -1346,7 +1346,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       if (alliesTextChannel != null) {
-        if (alliesTextChannel.canTalk()) {
+        if (alliesTextChannel.canTalk() || (!Config.prod)) {
           // allow for custom channel names
           val channelName = alliesTextChannel.getName
           val extractName = pattern.findFirstMatchIn(channelName)
@@ -1369,7 +1369,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
         }
       }
-
       /**
       // neutrals grouped by Guild
       val neutralsGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
@@ -1390,7 +1389,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
-        if (neutralsTextChannel.canTalk()) {
+        if (neutralsTextChannel.canTalk() || (!Config.prod)) {
           // allow for custom channel names
           val channelName = neutralsTextChannel.getName
           val extractName = pattern.findFirstMatchIn(channelName)
@@ -1432,7 +1431,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
-        if (enemiesTextChannel.canTalk()) {
+        if (enemiesTextChannel.canTalk() || (!Config.prod)) {
           // allow for custom channel names
           val channelName = enemiesTextChannel.getName
           val extractName = pattern.findFirstMatchIn(channelName)
