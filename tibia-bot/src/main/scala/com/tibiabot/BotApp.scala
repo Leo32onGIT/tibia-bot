@@ -394,16 +394,24 @@ object BotApp extends App with StrictLogging {
   var startUpComplete = false
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
-  // set activity status
-  try {
-    jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, s"Pulsera activity"))
-  }
-  catch {
-    case _ : Throwable => logger.info("Failed to update the bots status counts")
-  }
-
   // run the scheduler to clean cache and update dashboard every hour
   actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
+    // set activity status
+    try {
+      val randomActivity = List(
+        "Pulsera activity",
+        "people press buttons",
+        "Tibia players die",
+        "people fumble e-rings",
+        "UE combos slap",
+        "another 50k spent on twist"
+      )
+      val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("Pulsera activity")
+      jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
+    }
+    catch {
+      case _ : Throwable => logger.info("Failed to update the bots status counts")
+    }
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
