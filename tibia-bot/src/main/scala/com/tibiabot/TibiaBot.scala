@@ -22,6 +22,7 @@ import scala.util.{Failure, Success}
 import java.time.OffsetDateTime
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import scala.util.Random
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
