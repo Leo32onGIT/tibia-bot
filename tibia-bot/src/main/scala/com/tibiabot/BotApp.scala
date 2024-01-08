@@ -2102,6 +2102,13 @@ object BotApp extends App with StrictLogging {
           |time VARCHAR(255) NOT NULL
           |);""".stripMargin
 
+    val createGalthenTable =
+      s"""CREATE TABLE satchel (
+         |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+         |userid VARCHAR(255) NOT NULL,
+         |time VARCHAR(255) NOT NULL,
+         |tag VARCHAR(255)
+         |);""".stripMargin
 
       newStatement.executeUpdate(createDeathsTable)
       logger.info("Table 'deaths' created successfully")
@@ -2109,6 +2116,8 @@ object BotApp extends App with StrictLogging {
       logger.info("Table 'levels' created successfully")
       newStatement.executeUpdate(createListTable)
       logger.info("Table 'list' created successfully")
+      newStatement.executeUpdate(createGalthenTable)
+      logger.info("Table 'galthen' created successfully")
       newStatement.close()
       newConn.close()
     } else {
