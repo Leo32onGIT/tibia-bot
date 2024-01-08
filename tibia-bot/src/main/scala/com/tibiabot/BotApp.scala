@@ -492,48 +492,51 @@ object BotApp extends App with StrictLogging {
 
         val guildId = g.getId
 
-        if (checkConfigDatabase(g)) {
-          // get hunted Players
-          val huntedPlayers = playerConfig(g, "hunted_players")
-          huntedPlayersData += (guildId -> huntedPlayers)
+        if (guildId != "912739993015947324") { // handled by Pulsera Bot
 
-          // get allied Players
-          val alliedPlayers = playerConfig(g, "allied_players")
-          alliedPlayersData += (guildId -> alliedPlayers)
+          if (checkConfigDatabase(g)) {
+            // get hunted Players
+            val huntedPlayers = playerConfig(g, "hunted_players")
+            huntedPlayersData += (guildId -> huntedPlayers)
 
-          // get hunted guilds
-          val huntedGuilds = guildConfig(g, "hunted_guilds")
-          huntedGuildsData += (guildId -> huntedGuilds)
+            // get allied Players
+            val alliedPlayers = playerConfig(g, "allied_players")
+            alliedPlayersData += (guildId -> alliedPlayers)
 
-          // get allied guilds
-          val alliedGuilds = guildConfig(g, "allied_guilds")
-          alliedGuildsData += (guildId -> alliedGuilds)
+            // get hunted guilds
+            val huntedGuilds = guildConfig(g, "hunted_guilds")
+            huntedGuildsData += (guildId -> huntedGuilds)
 
-          // get worlds
-          val worldsInfo = worldConfig(g)
-          worldsData += (guildId -> worldsInfo)
+            // get allied guilds
+            val alliedGuilds = guildConfig(g, "allied_guilds")
+            alliedGuildsData += (guildId -> alliedGuilds)
 
-          // get tracked activity characters
-          val activityInfo = activityConfig(g, "tracked_activity")
-          activityData += (guildId -> activityInfo)
+            // get worlds
+            val worldsInfo = worldConfig(g)
+            worldsData += (guildId -> worldsInfo)
 
-          // get customSort Data
-          val customSortInfo = customSortConfig(g, "online_list_categories")
-          customSortData += (guildId -> customSortInfo)
+            // get tracked activity characters
+            val activityInfo = activityConfig(g, "tracked_activity")
+            activityData += (guildId -> activityInfo)
 
-          // set default activityCommandBlocker state
-          activityCommandBlocker += (guildId -> false)
+            // get customSort Data
+            val customSortInfo = customSortConfig(g, "online_list_categories")
+            customSortData += (guildId -> customSortInfo)
 
-          val adminChannels = discordRetrieveConfig(g)
-          val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
+            // set default activityCommandBlocker state
+            activityCommandBlocker += (guildId -> false)
 
-          // populate a new Discords list so i can only run 1 stream per world
-          worldsInfo.foreach{ w =>
-            val discords = Discords(
-              id = guildId,
-              adminChannel = adminChannelId
-            )
-            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+            val adminChannels = discordRetrieveConfig(g)
+            val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
+
+            // populate a new Discords list so i can only run 1 stream per world
+            worldsInfo.foreach{ w =>
+              val discords = Discords(
+                id = guildId,
+                adminChannel = adminChannelId
+              )
+              discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+            }
           }
         }
       }
