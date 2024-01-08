@@ -396,6 +396,9 @@ object BotApp extends App with StrictLogging {
         else
           List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
+    } else if (g.getIdLong == 912739993015947324L) {
+      // they are using Pulsera Bot commands, only /galthen appears here
+      List(galthenCommand)
     } else {
       g.updateCommands().addCommands(commands.asJava).complete()
     }
