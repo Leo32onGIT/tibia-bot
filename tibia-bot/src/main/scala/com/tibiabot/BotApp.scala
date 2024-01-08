@@ -377,11 +377,7 @@ object BotApp extends App with StrictLogging {
         )
     )
 
-  lazy val commands =
-      if (Config.prod)
-        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand)
-      else
-        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand)
+  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -389,14 +385,7 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
     // update the commands
-    if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
-      lazy val adminCommands =
-        if (Config.prod)
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand)
-        else
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
-      g.updateCommands().addCommands(adminCommands.asJava).complete()
-    } else {
+    if (g.getIdLong != 867319250708463628L) {
       g.updateCommands().addCommands(commands.asJava).complete()
     }
   }
@@ -423,6 +412,7 @@ object BotApp extends App with StrictLogging {
   private val interval = 24.hours
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
+
 
     if (guild.isDefined && world.isDefined) {
 
@@ -488,49 +478,50 @@ object BotApp extends App with StrictLogging {
       guilds.foreach{g =>
 
         val guildId = g.getId
+        if (guildId != "867319250708463628") {
+          if (checkConfigDatabase(g)) {
+            // get hunted Players
+            val huntedPlayers = playerConfig(g, "hunted_players")
+            huntedPlayersData += (guildId -> huntedPlayers)
 
-        if (checkConfigDatabase(g)) {
-          // get hunted Players
-          val huntedPlayers = playerConfig(g, "hunted_players")
-          huntedPlayersData += (guildId -> huntedPlayers)
+            // get allied Players
+            val alliedPlayers = playerConfig(g, "allied_players")
+            alliedPlayersData += (guildId -> alliedPlayers)
 
-          // get allied Players
-          val alliedPlayers = playerConfig(g, "allied_players")
-          alliedPlayersData += (guildId -> alliedPlayers)
+            // get hunted guilds
+            val huntedGuilds = guildConfig(g, "hunted_guilds")
+            huntedGuildsData += (guildId -> huntedGuilds)
 
-          // get hunted guilds
-          val huntedGuilds = guildConfig(g, "hunted_guilds")
-          huntedGuildsData += (guildId -> huntedGuilds)
+            // get allied guilds
+            val alliedGuilds = guildConfig(g, "allied_guilds")
+            alliedGuildsData += (guildId -> alliedGuilds)
 
-          // get allied guilds
-          val alliedGuilds = guildConfig(g, "allied_guilds")
-          alliedGuildsData += (guildId -> alliedGuilds)
+            // get worlds
+            val worldsInfo = worldConfig(g)
+            worldsData += (guildId -> worldsInfo)
 
-          // get worlds
-          val worldsInfo = worldConfig(g)
-          worldsData += (guildId -> worldsInfo)
+            // get tracked activity characters
+            val activityInfo = activityConfig(g, "tracked_activity")
+            activityData += (guildId -> activityInfo)
 
-          // get tracked activity characters
-          val activityInfo = activityConfig(g, "tracked_activity")
-          activityData += (guildId -> activityInfo)
+            // get customSort Data
+            val customSortInfo = customSortConfig(g, "online_list_categories")
+            customSortData += (guildId -> customSortInfo)
 
-          // get customSort Data
-          val customSortInfo = customSortConfig(g, "online_list_categories")
-          customSortData += (guildId -> customSortInfo)
+            // set default activityCommandBlocker state
+            activityCommandBlocker += (guildId -> false)
 
-          // set default activityCommandBlocker state
-          activityCommandBlocker += (guildId -> false)
+            val adminChannels = discordRetrieveConfig(g)
+            val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
-          val adminChannels = discordRetrieveConfig(g)
-          val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
-
-          // populate a new Discords list so i can only run 1 stream per world
-          worldsInfo.foreach{ w =>
-            val discords = Discords(
-              id = guildId,
-              adminChannel = adminChannelId
-            )
-            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+            // populate a new Discords list so i can only run 1 stream per world
+            worldsInfo.foreach{ w =>
+              val discords = Discords(
+                id = guildId,
+                adminChannel = adminChannelId
+              )
+              discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+            }
           }
         }
       }
