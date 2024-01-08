@@ -4457,7 +4457,16 @@ object BotApp extends App with StrictLogging {
     if (updatedBotStreams != botStreams) {
       botStreams = updatedBotStreams
     }
-    removeConfigDatabase(guildId)
+
+    logger.info(guildId)
+
+    if (guildId == "912739993015947324") {
+      // Config is shared with Pulsera Bot
+      logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
+    } else {
+      removeConfigDatabase(guildId)
+    }
+
   }
 
   def discordJoin(event: GuildJoinEvent): Unit = {
