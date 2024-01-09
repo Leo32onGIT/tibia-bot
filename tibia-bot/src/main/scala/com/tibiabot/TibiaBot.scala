@@ -47,6 +47,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   recentLevels ++= BotApp.getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time)))
 
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
+  private var onlineListCategoryTimer: Map[String, ZonedDateTime] = Map.empty
   private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -712,7 +713,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(6))) {
+        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(1))) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
@@ -1243,14 +1244,19 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "online"
-          if (channelName != s"$customName-$totalCount") {
-            try {
-              val channelManager = combinedTextChannel.getManager
-              channelManager.setName(s"$customName-$totalCount").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(combinedTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (combinedTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-$totalCount") { //WIP
+              try {
+                val channelManager = combinedTextChannel.getManager
+                channelManager.setName(s"$customName-$totalCount").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
+
           if (combinedList.nonEmpty) {
             updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
           } else {
@@ -1268,12 +1274,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "neutrals"
-          if (channelName != s"$customName-0") {
-            try {
-              val channelManager = neutralsTextChannel.getManager
-              channelManager.setName(s"$customName-0").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-0") {
+              try {
+                val channelManager = neutralsTextChannel.getManager
+                channelManager.setName(s"$customName-0").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
           // placeholder message
@@ -1290,12 +1300,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "enemies"
-          if (channelName != s"$customName-0") {
-            try {
-              val channelManager = enemiesTextChannel.getManager
-              channelManager.setName(s"$customName-0").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-0") {
+              try {
+                val channelManager = enemiesTextChannel.getManager
+                channelManager.setName(s"$customName-0").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
           // placeholder message
@@ -1354,12 +1368,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "allies"
-          if (channelName != s"$customName-$alliesCount") {
-            try {
-              val channelManager = alliesTextChannel.getManager
-              channelManager.setName(s"$customName-$alliesCount").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(alliesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (alliesTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-$alliesCount") {
+              try {
+                val channelManager = alliesTextChannel.getManager
+                channelManager.setName(s"$customName-$alliesCount").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
           if (alliesList.nonEmpty) {
@@ -1398,12 +1416,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "neutrals"
-          if (channelName != s"$customName-$neutralsCount") {
-            try {
-              val channelManager = neutralsTextChannel.getManager
-              channelManager.setName(s"$customName-$neutralsCount").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-$neutralsCount") {
+              try {
+                val channelManager = neutralsTextChannel.getManager
+                channelManager.setName(s"$customName-$neutralsCount").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
           if (neutralsList.nonEmpty) {
@@ -1440,12 +1462,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val m = extractName.get
             m.group(1)
           } else "enemies"
-          if (channelName != s"$customName-$enemiesCount") {
-            try {
-              val channelManager = enemiesTextChannel.getManager
-              channelManager.setName(s"$customName-$enemiesCount").queue()
-            } catch {
-              case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+            onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
+            if (channelName != s"$customName-$enemiesCount") {
+              try {
+                val channelManager = enemiesTextChannel.getManager
+                channelManager.setName(s"$customName-$enemiesCount").queue()
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
             }
           }
           if (enemiesList.nonEmpty) {
