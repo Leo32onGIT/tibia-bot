@@ -48,6 +48,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleGalthen(event)
         case "online" =>
           handleOnlineList(event)
+        case "boosted" =>
+          handleBoosted(event)
         case _ =>
       }
     } else {
@@ -138,6 +140,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else if (button == "galthenClear") { // WIP
       event.deferEdit().queue()
       event.getHook().editOriginalComponents().queue()
+    } else if (button == "boosted") {
+      event.deferReply(true).queue()
+      val replyEmbed = new EmbedBuilder()
+      replyEmbed.setTitle(s"Receiving boosted boss & creature notifications:")
+      responseText = s"Use the `/boosted` command to filter specific `bosses` & `creatures`."
+      replyEmbed.setDescription(responseText)
+      event.getHook.sendMessageEmbeds(replyEmbed.build()).queue()
     } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
@@ -688,6 +697,33 @@ class BotListener extends ListenerAdapter with StrictLogging {
         }
       case _ =>
         val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/online`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+
+  private def handleBoosted(event: SlashCommandInteractionEvent): Unit = {
+    val subCommand = event.getInteraction.getSubcommandName
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val toggleOption: String = options.getOrElse("option", "")
+    val toggleName: String = options.getOrElse("name", "")
+
+    subCommand match {
+      case "boss" | "creature" =>
+        if (toggleOption == "add") {
+          val embed = BotApp.boosted(event.getUser.getId, toggleOption, toggleName)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        } else if (toggleOption == "remove") {
+          val embed = BotApp.boosted(event.getUser.getId, toggleOption, toggleName)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        }
+      case "disable" =>
+        val embed = BotApp.boosted(event.getUser.getId, subCommand, "")
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case "list" =>
+        val embed = BotApp.boosted(event.getUser.getId, subCommand, "")
+        event.getHook.sendMessageEmbeds(embed).queue()
+      case _ =>
+        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/boosted`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }

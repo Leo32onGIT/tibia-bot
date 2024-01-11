@@ -7,7 +7,7 @@ import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse, BoostedResponse, CreatureResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -39,6 +39,42 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
             Left(errorMessage)
           case e @ (_: ParsingException | _: DeserializationException) =>
             val errorMessage = s"Failed to parse world: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getBoostedBoss(): Future[Either[String, BoostedResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/boostablebosses"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[BoostedResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get boosted boss with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse boosted boss"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getBoostedCreature(): Future[Either[String, CreatureResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/creatures"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[CreatureResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get boosted creature with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse boosted creature"
             logger.warn(errorMessage)
             Left(errorMessage)
         }
