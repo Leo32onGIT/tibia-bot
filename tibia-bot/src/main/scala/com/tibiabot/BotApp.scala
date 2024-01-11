@@ -390,6 +390,8 @@ object BotApp extends App with StrictLogging {
       g.updateCommands().addCommands(commands.asJava).complete()
     } else if (g.getId == "1082484147492237515") { // pulsera bot beta discord
       g.updateCommands().addCommands(commands.asJava).complete()
+    } else if (g.getId == "867319250708463628") { // pulsera bot beta discord
+      g.updateCommands().queue()
     } else {
       g.leave().queue()
     }
