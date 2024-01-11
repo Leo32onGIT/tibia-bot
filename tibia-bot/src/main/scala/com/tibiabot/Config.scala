@@ -192,6 +192,10 @@ object Config {
   val covetEmoji: String = discord.getString("covet-emoji")
   val primalEmoji: String = discord.getString("primal-emoji")
   val hazardEmoji: String = discord.getString("hazard-emoji")
+  val boostedBossEmoji: String = discord.getString("boosted-boss-emoji")
+  val boostedCreatureEmoji: String = discord.getString("boosted-creature-emoji")
+  val yesEmoji: String = discord.getString("yes-emoji")
+  val noEmoji: String = discord.getString("no-emoji")
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList

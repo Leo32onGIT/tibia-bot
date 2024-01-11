@@ -3,7 +3,7 @@ package com.tibiabot
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, Members}
+import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, Members}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
@@ -72,6 +72,7 @@ object BotApp extends App with StrictLogging {
   case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
   case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
+  case class BoostedStamp(user: String, boostedType: String, boostedName: String)
   case class CustomSort(entityType: String, name: String, label: String, emoji: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
@@ -377,11 +378,32 @@ object BotApp extends App with StrictLogging {
         )
     )
 
-  lazy val commands =
-      if (Config.prod)
-        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand)
-      else
-        List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand)
+  // online list config  command
+  private val boostedCommand: SlashCommandData = Commands.slash("boosted", "Turn off these notifications or filter them")
+    .addSubcommands(
+      new SubcommandData("boss", "Configure your server save notifications for bosses")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
+            .addChoices(
+              new Choice("add", "add"),
+              new Choice("remove", "remove")
+            ),
+          new OptionData(OptionType.STRING, "name", "what is the bosses name?").setRequired(true)
+        ),
+      new SubcommandData("creature", "Configure your server save notifications for creatures")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
+            .addChoices(
+              new Choice("add", "add"),
+              new Choice("remove", "remove")
+            ),
+          new OptionData(OptionType.STRING, "name", "what is the creatures name?").setRequired(true)
+        ),
+      new SubcommandData("list", "List your current notifications"),
+      new SubcommandData("disable", "turn all notifications off")
+    )
+
+  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -392,7 +414,7 @@ object BotApp extends App with StrictLogging {
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
       lazy val adminCommands =
         if (Config.prod)
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
         else
           List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
@@ -2890,11 +2912,10 @@ object BotApp extends App with StrictLogging {
         val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
         val activityChannel = guild.createTextChannel("activity", newCategory).complete()
-        val fullblessChannel = guild.createTextChannel("fullbless-notifications", newCategory).complete()
-        val nemesisChannel = guild.createTextChannel("boss-notifications", newCategory).complete()
+        val notificationsChannel = guild.createTextChannel("notifications", newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, fullblessChannel, nemesisChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, notificationsChannel)
         channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
@@ -2910,13 +2931,14 @@ object BotApp extends App with StrictLogging {
         }
         levelsChannel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
 
+        // Fullbless Role
         val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
         val fullblessEmbed = new EmbedBuilder()
         fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
         fullblessEmbed.setThumbnail(Config.aolThumbnail)
         fullblessEmbed.setColor(3092790)
         fullblessEmbed.setDescription(fullblessEmbedText)
-        fullblessChannel.sendMessageEmbeds(fullblessEmbed.build())
+        notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
           .setActionRow(
             Button.success(s"add", "Add Role"),
             Button.danger(s"remove", "Remove Role")
@@ -2938,12 +2960,97 @@ object BotApp extends App with StrictLogging {
         nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
         nemesisEmbed.setColor(3092790)
         nemesisEmbed.setDescription(nemesisEmbedText)
-        nemesisChannel.sendMessageEmbeds(nemesisEmbed.build())
+        notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
           .setActionRow(
             Button.success("add", "Add Role"),
             Button.danger("remove", "Remove Role")
           )
           .queue()
+
+        /**
+        // Boosted Notifications
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossName = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            val boostedBossEmbed = new EmbedBuilder()
+            val boostedBossEmbedText = s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"
+            boostedBossEmbed.setTitle(s"${Config.boostedBossEmoji} Boosted Boss ${Config.boostedBossEmoji}", s"https://www.tibia.com/library/?subtopic=boostablebosses")
+            boostedBossEmbed.setThumbnail(creatureImageUrl(boostedBoss))
+            boostedBossEmbed.setColor(3092790)
+            boostedBossEmbed.setDescription(boostedBossEmbedText)
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            val boostedBossEmbed = new EmbedBuilder()
+            val boostedBossEmbedText = s"The boosted boss today failed to load?"
+            boostedBossEmbed.setTitle(s"${Config.boostedBossEmoji} Boosted Boss ${Config.boostedBossEmoji}", s"https://www.tibia.com/library/?subtopic=boostablebosses")
+            boostedBossEmbed.setThumbnail(creatureImageUrl(boostedBoss))
+            boostedBossEmbed.setColor(3092790)
+            boostedBossEmbed.setDescription(boostedBossEmbedText)
+        }
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureName = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            val boostedCreatureEmbed = new EmbedBuilder()
+            val boostedCreatureEmbedText = s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"
+            boostedCreatureEmbed.setTitle(s"${Config.boostedCreatureEmoji} Boosted Creature ${Config.boostedCreatureEmoji}", s"https://www.tibia.com/library/?subtopic=creatures")
+            boostedCreatureEmbed.setThumbnail(creatureImageUrl(boostedCreature))
+            boostedCreatureEmbed.setColor(3092790)
+            boostedCreatureEmbed.setDescription(boostedCreatureEmbedText)
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            val boostedCreatureEmbed = new EmbedBuilder()
+            val boostedCreatureEmbedText = s"The boosted boss today failed to load?"
+            boostedCreatureEmbed.setTitle(s"${Config.boostedCreatureEmoji} Boosted Creature ${Config.boostedCreatureEmoji}", s"https://www.tibia.com/library/?subtopic=creatures")
+            boostedCreatureEmbed.setThumbnail(creatureImageUrl(creatureThumbnail))
+            boostedCreatureEmbed.setColor(3092790)
+            boostedCreatureEmbed.setDescription(boostedCreatureEmbedText)
+        }
+
+        val boostedEmbeds = List(boostedBossembed.build(), boostedCreatureEmbed.build())
+        notificationsChannel.sendMessageEmbeds(boostedEmbeds)
+          .setActionRow(
+            Button.primary("boosted", "boosted")
+          )
+          .queue()
+        **/
+
+        // Boosted Boss
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+        }
+
+        // Boosted Creature
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+        }
+
+        // Combine both futures and send the message
+        val combinedFutures: Future[List[MessageEmbed]] = for {
+          bossEmbed <- bossEmbedFuture
+          creatureEmbed <- creatureEmbedFuture
+        } yield List(bossEmbed, creatureEmbed)
+
+        combinedFutures
+          .map(embeds => notificationsChannel.sendMessageEmbeds(embeds.asJava)
+            .setActionRow(Button.primary("boosted", "boosted"))
+            .queue()
+          )
 
         val alliesId = alliesChannel.getId
         val enemiesId = "0" //enemiesChannel.getId
@@ -2951,8 +3058,7 @@ object BotApp extends App with StrictLogging {
         val levelsId = levelsChannel.getId
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
-        val fullblessId = fullblessChannel.getId
-        val nemesisId = nemesisChannel.getId
+        val notificationsId = notificationsChannel.getId
         val activityId = activityChannel.getId
 
         // post initial embed in levels channel
@@ -2986,7 +3092,7 @@ object BotApp extends App with StrictLogging {
         }
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, fullblessId, nemesisId, activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, notificationsId, "0", activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
@@ -4030,8 +4136,7 @@ object BotApp extends App with StrictLogging {
       val levelsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.levelsChannel))
       val deathsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.deathsChannel))
       val activityChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.activityChannel))
-      val fullblessChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
-      val nemesisChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.nemesisChannel))
+      val notificationsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
       val onlineCombinedInfo: Option[String] = cache.flatMap(_.headOption.map(_.onlineCombined))
 
       // get admin ids
@@ -4047,14 +4152,13 @@ object BotApp extends App with StrictLogging {
       val levelsChannel = guild.getTextChannelById(levelsChannelInfo.getOrElse("0"))
       val deathsChannel = guild.getTextChannelById(deathsChannelInfo.getOrElse("0"))
       val activityChannel = guild.getTextChannelById(activityChannelInfo.getOrElse("0"))
-      val fullblessChannel = guild.getTextChannelById(fullblessChannelInfo.getOrElse("0"))
-      val nemesisChannel = guild.getTextChannelById(nemesisChannelInfo.getOrElse("0"))
+      val notificationsChannel = guild.getTextChannelById(notificationsChannelInfo.getOrElse("0"))
       val onlineCombinedVal = onlineCombinedInfo.getOrElse("true")
 
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
       // check if any of the world channels need to be recreated
-      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || fullblessChannel == null || nemesisChannel == null || adminChannel == null) {
+      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || notificationsChannel == null || adminChannel == null) {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
@@ -4197,8 +4301,8 @@ object BotApp extends App with StrictLogging {
             recreateActivityChannel.sendMessageEmbeds(activityEmbed.build()).queue()
           }
         }
-        if (fullblessChannel == null) {
-          val recreateFullblessChannel = guild.createTextChannel("fullbless-notifications", category).complete()
+        if (notificationsChannel == null) {
+          val recreateFullblessChannel = guild.createTextChannel("notifications", category).complete()
           channelList += ((recreateFullblessChannel, false))
           worldRepairConfig(guild, worldFormal, "fullbless_channel", recreateFullblessChannel.getId)
 
@@ -4206,6 +4310,7 @@ object BotApp extends App with StrictLogging {
           val fullblessLevel = worldConfigData("fullbless_level")
           val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
           val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
+
           // post fullbless message again
           val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
           val fullblessEmbed = new EmbedBuilder()
@@ -4233,14 +4338,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-        }
-        if (nemesisChannel == null) {
-          val recreateNemesisChannel = guild.createTextChannel("boss-notifications", category).complete()
-          channelList += ((recreateNemesisChannel, false))
-          worldRepairConfig(guild, worldFormal, "nemesis_channel", recreateNemesisChannel.getId)
-
           // post nemesis message again
-          val worldConfigData = worldRetrieveConfig(guild, world)
           val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
           val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
           val worldCount = worldConfig(guild)
@@ -4254,7 +4352,7 @@ object BotApp extends App with StrictLogging {
           nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
           nemesisEmbed.setColor(3092790)
           nemesisEmbed.setDescription(nemesisEmbedText)
-          recreateNemesisChannel.sendMessageEmbeds(nemesisEmbed.build())
+          recreateFullblessChannel.sendMessageEmbeds(nemesisEmbed.build())
             .setActionRow(
               Button.success("add", "Add Role"),
               Button.danger("remove", "Remove Role")
@@ -4262,12 +4360,49 @@ object BotApp extends App with StrictLogging {
             .queue()
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
+
+          // Boosted Boss
+          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+            case Right(boostedResponse) =>
+              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+              createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+            case Left(errorMessage) =>
+              val boostedBoss = "Podium_of_Vigour"
+              createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+          }
+
+          // Boosted Creature
+          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+            case Right(creatureResponse) =>
+              val boostedCreature = creatureResponse.creatures.boosted.name
+              createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+            case Left(errorMessage) =>
+              val boostedCreature = "Podium_of_Tenacity"
+              createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+          }
+
+          // Combine both futures and send the message
+          val combinedFutures: Future[List[MessageEmbed]] = for {
+            bossEmbed <- bossEmbedFuture
+            creatureEmbed <- creatureEmbedFuture
+          } yield List(bossEmbed, creatureEmbed)
+
+          combinedFutures
+            .map(embeds => recreateFullblessChannel.sendMessageEmbeds(embeds.asJava)
+              .setActionRow(Button.primary("boosted", "Message Me"))
+              .queue()
+            )
+
           // update the record in worldsData
           if (worldsData.contains(guild.getId)) {
             val worldsList = worldsData(guild.getId)
             val updatedWorldsList = worldsList.map { world =>
               if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(nemesisChannel = recreateNemesisChannel.getId, nemesisRole = nemesisRole.getId)
+                world.copy(nemesisChannel = recreateFullblessChannel.getId, nemesisRole = nemesisRole.getId)
               } else {
                 world
               }
@@ -4691,6 +4826,142 @@ object BotApp extends App with StrictLogging {
     .setDescription(embedMessage)
     .build()
   }
+
+  private def creatureImageUrl(creature: String): String = {
+    val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
+      // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
+      val rx1 = """([^\w]\w)""".r
+      val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
+
+      // Lowercase the articles, prepositions etc., e.g. "The Voice of Ruin"
+      val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
+      val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
+
+      // Replace spaces with underscores and make sure the first letter is capitalised
+      parsed2.replaceAll(" ", "_").capitalize
+    })
+    s"https://tibia.fandom.com/wiki/Special:Redirect/file/$finalCreature.gif"
+  }
+
+  private def creatureWikiUrl(creature: String): String = {
+    val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
+      // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
+      val rx1 = """([^\w]\w)""".r
+      val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
+
+      // Lowercase the articles, prepositions etc., e.g. "The Voice of Ruin"
+      val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
+      val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
+
+      // Replace spaces with underscores and make sure the first letter is capitalised
+      parsed2.replaceAll(" ", "_").capitalize
+    })
+    s"https://tibia.fandom.com/wiki/$finalCreature"
+  }
+
+  // V1.9 Boosted Command
+  def createBoostedEmbed(name: String, emoji: String, wikiUrl: String, thumbnail: String, embedText: String): MessageEmbed = {
+    val embed = new EmbedBuilder()
+    embed.setTitle(s"$emoji Boosted $name $emoji", wikiUrl)
+    embed.setThumbnail(thumbnail)
+    embed.setColor(3092790)
+    embed.setDescription(embedText)
+    embed.build()
+  }
+
+  def boosted(userId: String, boostedOption: String, boostedName: String): MessageEmbed = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    var embedMessage = ":x: This command failed to run, try again?"
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery =
+      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE boosted_notifications (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |userid VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |type VARCHAR(255)
+           |);""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT name,type FROM boosted_notifications WHERE userid = '$userId';")
+    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
+
+    while (result.next()) {
+      val boostedName = Option(result.getString("name")).getOrElse("")
+      val boostedType = Option(result.getString("type")).getOrElse("")
+
+      val boostedStamp = BoostedStamp(userId, boostedType, boostedName)
+      boostedStampList += boostedStamp
+    }
+    statement.close()
+
+    val existingNames = boostedStampList.toList
+
+    val replyEmbed = new EmbedBuilder()
+    replyEmbed.setColor(3092790)
+    if (boostedOption == "list") { // UNFINISHED
+      if (existingNames.size > 0) {
+        val listString = existingNames.map(boostedName => s"- **$boostedName**${if (boostedOption != "default") s" *($boostedOption)*" else ""}").mkString("\n")
+        replyEmbed.setTitle(s"Boosted Boss & Creature Notifications:")
+        embedMessage = listString
+      } else {
+        embedMessage = s"you have *nothing configured*.\nUse `add` or `remove` to enable **server save notifications**."
+      }
+    } else if (boostedOption == "add"){
+      val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim
+      if (existingNames.contains(sanitizedName)) {
+        embedMessage = s":x: **$sanitizedName** already exists."
+      } else {
+        val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
+        val preparedStatement = conn.prepareStatement(query)
+        preparedStatement.setString(1, userId)
+        preparedStatement.setString(2, sanitizedName)
+        preparedStatement.setString(3, boostedOption)
+        preparedStatement.executeUpdate()
+        preparedStatement.close()
+      }
+    } else if (boostedOption == "remove"){
+      val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim
+      if (existingNames.contains(sanitizedName)) {
+        val query = "DELETE FROM boosted_notifications WHERE userid = ? AND name = ?"
+        val preparedStatement = conn.prepareStatement(query)
+        preparedStatement.setString(1, userId)
+        preparedStatement.setString(2, sanitizedName)
+        preparedStatement.executeUpdate()
+        preparedStatement.close()
+
+        embedMessage = s"${Config.yesEmoji} you removed **$sanitizedName** from the list."
+      } else {
+        embedMessage = s"${Config.noEmoji} **$sanitizedName** is not on your list."
+      }
+    } else if (boostedOption == "disable"){
+      val query = "DELETE FROM boosted_notifications WHERE userid = ?"
+      val preparedStatement = conn.prepareStatement(query)
+      preparedStatement.setString(1, userId)
+      preparedStatement.executeUpdate()
+      preparedStatement.close()
+
+      embedMessage = s"${Config.yesEmoji} have disabled all **server save notifications**."
+    }
+    conn.close()
+    replyEmbed.setDescription(embedMessage).build()
+  }
+
   /**
   def discordChannelMessageEmbed(guild: Guild, channel: Option[TextChannel], title: String, description: String, thumbnail: String, colour: Int): Unit = {
     channel.foreach { actualChannel =>
