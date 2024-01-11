@@ -386,9 +386,14 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
     // update the commands
-    if (g.getIdLong != 867319250708463628L) {
+    if (g.getId == "912739993015947324") { // premium?
       g.updateCommands().addCommands(commands.asJava).complete()
+    } else if (g.getId == "1082484147492237515") { // pulsera bot beta discord
+      g.updateCommands().addCommands(commands.asJava).complete()
+    } else {
+      g.leave().queue()
     }
+
   }
 
   // Start all world streams
@@ -431,59 +436,61 @@ object BotApp extends App with StrictLogging {
 
       val guildId = guild.get.getId
 
-      // get hunted Players
-      val huntedPlayers = playerConfig(guild.get, "hunted_players")
-      huntedPlayersData += (guildId -> huntedPlayers)
+      if (Config.verifiedDiscords.contains(guildId)) {
+        // get hunted Players
+        val huntedPlayers = playerConfig(guild.get, "hunted_players")
+        huntedPlayersData += (guildId -> huntedPlayers)
 
-      // get allied Players
-      val alliedPlayers = playerConfig(guild.get, "allied_players")
-      alliedPlayersData += (guildId -> alliedPlayers)
+        // get allied Players
+        val alliedPlayers = playerConfig(guild.get, "allied_players")
+        alliedPlayersData += (guildId -> alliedPlayers)
 
-      // get hunted guilds
-      val huntedGuilds = guildConfig(guild.get, "hunted_guilds")
-      huntedGuildsData += (guildId -> huntedGuilds)
+        // get hunted guilds
+        val huntedGuilds = guildConfig(guild.get, "hunted_guilds")
+        huntedGuildsData += (guildId -> huntedGuilds)
 
-      // get allied guilds
-      val alliedGuilds = guildConfig(guild.get, "allied_guilds")
-      alliedGuildsData += (guildId -> alliedGuilds)
+        // get allied guilds
+        val alliedGuilds = guildConfig(guild.get, "allied_guilds")
+        alliedGuildsData += (guildId -> alliedGuilds)
 
-      // get worlds
-      val worldsInfo = worldConfig(guild.get)
-      worldsData += (guildId -> worldsInfo)
+        // get worlds
+        val worldsInfo = worldConfig(guild.get)
+        worldsData += (guildId -> worldsInfo)
 
-      // get tracked activity characters
-      val activityInfo = activityConfig(guild.get, "tracked_activity")
-      activityData += (guildId -> activityInfo)
+        // get tracked activity characters
+        val activityInfo = activityConfig(guild.get, "tracked_activity")
+        activityData += (guildId -> activityInfo)
 
-      // get customSort Data
-      val customSortInfo = customSortConfig(guild.get, "online_list_categories")
-      customSortData += (guildId -> customSortInfo)
+        // get customSort Data
+        val customSortInfo = customSortConfig(guild.get, "online_list_categories")
+        customSortData += (guildId -> customSortInfo)
 
-      // set default activityCommandBlocker state
-      activityCommandBlocker += (guildId -> false)
+        // set default activityCommandBlocker state
+        activityCommandBlocker += (guildId -> false)
 
-      val adminChannels = discordRetrieveConfig(guild.get)
-      val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
+        val adminChannels = discordRetrieveConfig(guild.get)
+        val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
 
-      worldsInfo.foreach{ w =>
-        if (w.name == world.get) {
-          val discords = Discords(
-            id = guildId,
-            adminChannel = adminChannelId
-          )
-          discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
-          val botStream = if (botStreams.contains(world.get)) {
-            // If the stream already exists, update its usedBy list
-            val existingStream = botStreams(world.get)
-            val updatedUsedBy = existingStream.usedBy :+ discords
-            botStreams += (world.get -> existingStream.copy(usedBy = updatedUsedBy))
-            existingStream
-          } else {
-            // If the stream doesn't exist, create a new one with an empty usedBy list
-            val bot = new TibiaBot(world.get)
-            Streams(bot.stream.run(), List(discords))
+        worldsInfo.foreach{ w =>
+          if (w.name == world.get) {
+            val discords = Discords(
+              id = guildId,
+              adminChannel = adminChannelId
+            )
+            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+            val botStream = if (botStreams.contains(world.get)) {
+              // If the stream already exists, update its usedBy list
+              val existingStream = botStreams(world.get)
+              val updatedUsedBy = existingStream.usedBy :+ discords
+              botStreams += (world.get -> existingStream.copy(usedBy = updatedUsedBy))
+              existingStream
+            } else {
+              // If the stream doesn't exist, create a new one with an empty usedBy list
+              val bot = new TibiaBot(world.get)
+              Streams(bot.stream.run(), List(discords))
+            }
+            botStreams = botStreams + (world.get -> botStream)
           }
-          botStreams = botStreams + (world.get -> botStream)
         }
       }
     } else {
@@ -491,7 +498,8 @@ object BotApp extends App with StrictLogging {
       guilds.foreach{g =>
 
         val guildId = g.getId
-        if (guildId != "867319250708463628") {
+        if (Config.verifiedDiscords.contains(guildId)) {
+
           if (checkConfigDatabase(g)) {
             // get hunted Players
             val huntedPlayers = playerConfig(g, "hunted_players")

@@ -59,8 +59,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
-    guild.updateCommands().addCommands(commands.asJava).complete()
-    BotApp.discordJoin(event)
+    if (Config.verifiedDiscords.contains(guild.getId)) {
+      guild.updateCommands().addCommands(commands.asJava).complete()
+      BotApp.discordJoin(event)
+    } else {
+      guild.updateCommands().queue()
+    }
   }
 
   override def onGuildLeave(event: GuildLeaveEvent): Unit = {

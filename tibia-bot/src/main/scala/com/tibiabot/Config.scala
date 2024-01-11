@@ -7,6 +7,10 @@ import scala.jdk.CollectionConverters._
 object Config {
   // prod or dev environment
   val prod = false
+  val verifiedDiscords = List(
+    "1082484147492237515", // alpha/testing server
+    "912739993015947324"  // user
+  )
 
   private val discord = ConfigFactory.load().getConfig("discord-config")
   private val mappings = ConfigFactory.load().getConfig("mapping-config")
