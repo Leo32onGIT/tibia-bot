@@ -7,12 +7,17 @@ import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
+import net.dv8tion.jda.api.interactions.commands.CommandAutoCompleteInteraction
+import net.dv8tion.jda.api.entities.emoji.Emoji
+import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.interactions.components.buttons._
 import java.time.ZonedDateTime
 import net.dv8tion.jda.api.interactions.components.ActionRow
 import scala.jdk.CollectionConverters._
+import net.dv8tion.jda.api.interactions.modals.Modal
+import net.dv8tion.jda.api.interactions.components.text.{TextInput, TextInputStyle}
 
 class BotListener extends ListenerAdapter with StrictLogging {
 
@@ -53,7 +58,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         case _ =>
       }
     } else {
-      val responseText = s":x: The bot is still starting up, try running your command later."
+      val responseText = s"${Config.noEmoji} The bot is still starting up, try running your command later."
       val embed = new EmbedBuilder().setDescription(responseText).setColor(3092790).build()
       event.getHook.sendMessageEmbeds(embed).queue()
     }
@@ -73,17 +78,79 @@ class BotListener extends ListenerAdapter with StrictLogging {
     BotApp.discordLeave(event)
   }
 
+  override def onModalInteraction(event: ModalInteractionEvent): Unit = {
+    event.deferEdit().queue()
+     val user = event.getUser
+     val modalValues = event.getValues.asScala.toList
+     modalValues.map { element =>
+       val id = element.getId
+       // Your code here based on the id, for example:
+       if (id == "boosted add") {
+         // WIP
+         val newEmbed = BotApp.boosted(user.getId, "add", element.getAsString)
+         event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
+           Button.success("boosted add", "Add"),
+           Button.danger("boosted remove", "Remove"),
+           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
+         ).queue()
+       } else if (id == "boosted remove") {
+         val newEmbed = BotApp.boosted(user.getId, "remove", element.getAsString)
+         event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
+           Button.success("boosted add", "Add"),
+           Button.danger("boosted remove", "Remove"),
+           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
+         ).queue()
+       } else {
+         // val newEmbed = BotApp.boosted(user.getId, "remove", removeSubmit)
+         // Do something else
+       }
+     }
+   }
+
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit = {
     val embed = event.getInteraction.getMessage.getEmbeds
     val title = if (!embed.isEmpty) embed.get(0).getTitle else ""
     val button = event.getComponentId
     val guild = event.getGuild
     val user = event.getUser
-    var responseText = ":x: An unknown error occured, please try again."
+    var responseText = s"${Config.noEmoji} An unknown error occured, please try again."
 
     val footer = if (!embed.isEmpty) Option(embed.get(0).getFooter) else None
     val tagId = footer.map(_.getText.replace("Tag: ", "")).getOrElse("")
 
+    /**
+    if (button == "galthen board") {
+      event.deferReply(true).queue()
+      //WIP
+      val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
+      satchelTimeOption match {
+        case Some(satchelTimeList) =>
+          val fullList = satchelTimeList.collect {
+            case satchel =>
+              val when = satchel.when.plusDays(30).toEpochSecond.toString()
+              val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+              s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
+          } else {
+            embed.setColor(178877)
+            embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.success("galthenSet", "Collected"),
+              Button.danger("galthenRemove", "Clear").asDisabled
+            ).queue()
+          }
+        // /HERE
+        case None =>
+          embed.setColor(178877)
+          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected"),
+            Button.danger("galthenRemove", "Clear").asDisabled
+          ).queue()
+      }
+    } else
+    **/
     if (button == "galthenSet") {
       event.deferEdit().queue();
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
@@ -147,7 +214,59 @@ class BotListener extends ListenerAdapter with StrictLogging {
       responseText = s"Use the `/boosted` command to filter specific `bosses` & `creatures`."
       replyEmbed.setDescription(responseText)
       event.getHook.sendMessageEmbeds(replyEmbed.build()).queue()
-    } else {
+    } else if (button == "boosted add") {
+      //WIP
+      val inputWindow = TextInput.create("boosted add", "Boss or Creature name", TextInputStyle.SHORT)
+        .setPlaceholder("Grand Master Oberon")
+        .build()
+      val modal = Modal.create("add modal", "Add a Boss or Creature").addComponents(ActionRow.of(inputWindow)).build()
+      event.replyModal(modal).queue()
+    } else if (button == "boosted remove") {
+
+      val inputWindow = TextInput.create("boosted remove", "Boss or Creature name", TextInputStyle.SHORT).build()
+      val modal = Modal.create("remove modal", "Add Server Save Notificiations:").addComponents(ActionRow.of(inputWindow)).build()
+      event.replyModal(modal).queue()
+    } else if (button == "boosted list") {
+      event.deferReply(true).queue()
+      //WIP
+      val allCheck = BotApp.boostedList(event.getUser.getId)
+      if (allCheck) {
+        val embed = BotApp.boosted(event.getUser.getId, "list", "")
+        event.getHook.sendMessageEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add").asDisabled,
+          Button.danger("boosted remove", "Remove").asDisabled,
+          Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
+        ).queue()
+      } else {
+        val embed = BotApp.boosted(event.getUser.getId, "list", "")
+        event.getHook.sendMessageEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add"),
+          Button.danger("boosted remove", "Remove"),
+          Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
+        ).queue()
+      }
+    } else if (button == "boosted toggle") {
+      event.deferEdit().queue()
+
+      //WIP
+      val allCheck = BotApp.boostedList(event.getUser.getId)
+      if (allCheck) {
+        val embed = BotApp.boosted(event.getUser.getId, "toggle", "all")
+        event.getHook.editOriginalEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add"),
+          Button.danger("boosted remove", "Remove"),
+          Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
+        ).queue()
+      } else {
+        val embed = BotApp.boosted(event.getUser.getId, "toggle", "all")
+        event.getHook.editOriginalEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add").asDisabled,
+          Button.danger("boosted remove", "Remove").asDisabled,
+          Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
+        ).queue()
+      }
+
+    }  else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
       if (roleType == "fullbless") {
@@ -162,14 +281,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
               responseText = s":gear: You have been added to the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
-                responseText = s":x: Failed to add you to the <@&${role.getId}> role."
+                responseText = s"${Config.noEmoji} Failed to add you to the <@&${role.getId}> role."
                 val discordInfo = BotApp.discordRetrieveConfig(guild)
                 val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
                 val adminTextChannel = guild.getTextChannelById(adminChannelId)
                 if (adminTextChannel != null) {
                   val commandPlayer = s"<@${user.getId}>"
                   val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
@@ -188,14 +307,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
               responseText = s":gear: You have been removed from the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
-                responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
+                responseText = s"${Config.noEmoji} Failed to remove you from the <@&${role.getId}> role."
                 val discordInfo = BotApp.discordRetrieveConfig(guild)
                 val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
                 val adminTextChannel = guild.getTextChannelById(adminChannelId)
                 if (adminTextChannel != null) {
                   val commandPlayer = s"<@${user.getId}>"
                   val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
@@ -210,7 +329,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           }
         } else {
           // role doesn't exist
-          responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
+          responseText = s"${Config.noEmoji} The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
       } else if (roleType == "nemesis") {
         val world = title.replace(s"${Config.nemesisEmoji}", "").trim()
@@ -224,14 +343,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
               responseText = s":gear: You have been added to the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
-                responseText = s":x: Failed to add you to the <@&${role.getId}> role."
+                responseText = s"${Config.noEmoji} Failed to add you to the <@&${role.getId}> role."
                 val discordInfo = BotApp.discordRetrieveConfig(guild)
                 val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
                 val adminTextChannel = guild.getTextChannelById(adminChannelId)
                 if (adminTextChannel != null) {
                   val commandPlayer = s"<@${user.getId}>"
                   val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
@@ -250,14 +369,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
               responseText = s":gear: You have been removed from the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
-                responseText = s":x: Failed to remove you from the <@&${role.getId}> role."
+                responseText = s"${Config.noEmoji} Failed to remove you from the <@&${role.getId}> role."
                 val discordInfo = BotApp.discordRetrieveConfig(guild)
                 val adminChannelId = if (discordInfo.nonEmpty) discordInfo("admin_channel") else "0"
                 val adminTextChannel = guild.getTextChannelById(adminChannelId)
                 if (adminTextChannel != null) {
                   val commandPlayer = s"<@${user.getId}>"
                   val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(":x: a player interaction has failed:")
+                  adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to remove user $commandPlayer from the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
                   adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
@@ -272,7 +391,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           }
         } else {
           // role doesn't exist
-          responseText = s":x: The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
+          responseText = s"${Config.noEmoji} The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
       }
       val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
@@ -308,7 +427,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
         ).queue()
       //
       case Some(satchelTimeList) =>
-      // ?
         val tagList = satchelTimeList.collect {
           case satchel if tagOption.equalsIgnoreCase(satchel.tag) =>
             val when = satchel.when.plusDays(30).toEpochSecond.toString()
@@ -456,7 +574,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val embed = BotApp.detectHunted(event)
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/hunted`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/hunted`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -535,7 +653,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val embed = BotApp.infoAllies(event, "player", nameOption)
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/allies`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/allies`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
 
@@ -558,7 +676,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               val labelOption: String = options.getOrElse("label", "").replaceAll("[^a-zA-Z0-9\\s]", "").trim
               val emojiOption: String = options.getOrElse("emoji", "").trim
               if (labelOption == "" || emojiOption == ""){
-                val embed = new EmbedBuilder().setDescription(s":x: You must supply a **label** and **emoji** when tagging a guild or player.").setColor(3092790).build()
+                val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You must supply a **label** and **emoji** when tagging a guild or player.").setColor(3092790).build()
                 event.getHook.sendMessageEmbeds(embed).queue()
               } else {
 
@@ -571,7 +689,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                     event.getHook.sendMessageEmbeds(embed).queue()
                   })
                 } else {
-                  val embed = new EmbedBuilder().setDescription(s":x: The provided emoji is invalid - use a standard discord emoji.\n:warning: Custom emojis are not supported.").setColor(3092790).build()
+                  val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} The provided emoji is invalid - use a standard discord emoji.\n:warning: Custom emojis are not supported.").setColor(3092790).build()
                   event.getHook.sendMessageEmbeds(embed).queue()
                 }
               }
@@ -591,7 +709,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               }
           }
         case _ =>
-          val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommandGroup '$subcommandGroupName' for `/neutral`.").setColor(3092790).build()
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommandGroup '$subcommandGroupName' for `/neutral`.").setColor(3092790).build()
           event.getHook.sendMessageEmbeds(embed).queue()
       }
     } else {
@@ -613,7 +731,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             event.getHook.sendMessageEmbeds(embed).queue()
           }
         case _ =>
-          val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/neutral`.").setColor(3092790).build()
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/neutral`.").setColor(3092790).build()
           event.getHook.sendMessageEmbeds(embed).queue()
       }
     }
@@ -642,7 +760,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val embed = BotApp.minLevel(event, worldOption, levelOption, "deaths")
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/filter`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/filter`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -662,7 +780,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val embed = BotApp.adminMessage(event, guildOption, messageOption)
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/admin`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/admin`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -675,7 +793,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val embed = BotApp.exivaList(event)
         event.getHook.sendMessageEmbeds(embed).queue()
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/exiva`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/exiva`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -696,7 +814,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/online`.").build()
+        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/online`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
@@ -705,26 +823,28 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
-    val toggleName: String = options.getOrElse("name", "")
 
-    subCommand match {
-      case "boss" | "creature" =>
-        if (toggleOption == "add") {
-          val embed = BotApp.boosted(event.getUser.getId, toggleOption, toggleName)
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "remove") {
-          val embed = BotApp.boosted(event.getUser.getId, toggleOption, toggleName)
-          event.getHook.sendMessageEmbeds(embed).queue()
-        }
-      case "disable" =>
-        val embed = BotApp.boosted(event.getUser.getId, subCommand, "")
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case "list" =>
-        val embed = BotApp.boosted(event.getUser.getId, subCommand, "")
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case _ =>
-        val embed = new EmbedBuilder().setDescription(s":x: Invalid subcommand '$subCommand' for `/boosted`.").build()
-        event.getHook.sendMessageEmbeds(embed).queue()
+    if (toggleOption == "clear") { // "disabled"
+      val embed = BotApp.boosted(event.getUser.getId, "disable", "")
+      event.getHook.sendMessageEmbeds(embed).queue()
+    } else if (toggleOption == "list") {
+      val embed = BotApp.boosted(event.getUser.getId, "list", "")
+      val allCheck = BotApp.boostedList(event.getUser.getId)
+      if (allCheck) {
+        event.getHook.sendMessageEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add").asDisabled,
+          Button.danger("boosted remove", "Remove").asDisabled,
+          Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
+        ).queue()
+      } else {
+        event.getHook.sendMessageEmbeds(embed).setActionRow(
+          Button.success("boosted add", "Add"),
+          Button.danger("boosted remove", "Remove")
+        ).queue()
+      }
+    } else {
+      val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid option for `/boosted`.").setColor(3092790).build()
+      event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
 

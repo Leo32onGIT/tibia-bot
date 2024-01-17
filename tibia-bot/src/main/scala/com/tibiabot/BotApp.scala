@@ -3,7 +3,7 @@ package com.tibiabot
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, Members}
+import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, Members}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
@@ -18,6 +18,8 @@ import net.dv8tion.jda.api.interactions.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
 import org.postgresql.util.PSQLException
 import net.dv8tion.jda.api.entities.User
+import net.dv8tion.jda.api.entities.emoji.Emoji
+import net.dv8tion.jda.api.entities.Message
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -35,6 +37,8 @@ import scala.util.{Try, Success, Failure}
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import scala.util.Random
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 object BotApp extends App with StrictLogging {
 
@@ -65,8 +69,9 @@ object BotApp extends App with StrictLogging {
   )
 
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
-  case class Discords(id: String, adminChannel: String)
+  case class Discords(id: String, adminChannel: String, boostedChannel: String, boostedMessage: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
+  case class BoostedCache(boss: String, creature: String)
   case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
@@ -112,6 +117,25 @@ object BotApp extends App with StrictLogging {
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
+
+  // Boosted Boss
+  val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+  val bossFuture: Future[List[String]] = boostedBosses.map {
+    case Right(boostedResponse) =>
+      val boostedBoss = boostedResponse.boostable_bosses.boostable_boss_list
+      val boostedBossList = boostedBoss.map(_.name.toLowerCase).toList
+      boostedBossList
+    case Left(errorMessage) =>
+      List.empty[String]
+  }
+
+  // Combine both futures and send the message
+  private var updateOnOdd = true
+  val bossesFutures: Future[List[String]] = for {
+    bosses <- bossFuture
+  } yield bosses
+
+  val boostedBossesList: List[String] = Await.result(bossesFutures, 10.seconds)
 
   // create the command to set up the bot
   private val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be tracked")
@@ -381,27 +405,12 @@ object BotApp extends App with StrictLogging {
 
   // online list config  command
   private val boostedCommand: SlashCommandData = Commands.slash("boosted", "Turn off these notifications or filter them")
-    .addSubcommands(
-      new SubcommandData("boss", "Configure your server save notifications for bosses")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
-            .addChoices(
-              new Choice("add", "add"),
-              new Choice("remove", "remove")
-            ),
-          new OptionData(OptionType.STRING, "name", "what is the bosses name?").setRequired(true)
-        ),
-      new SubcommandData("creature", "Configure your server save notifications for creatures")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
-            .addChoices(
-              new Choice("add", "add"),
-              new Choice("remove", "remove")
-            ),
-          new OptionData(OptionType.STRING, "name", "what is the creatures name?").setRequired(true)
-        ),
-      new SubcommandData("list", "List your current notifications"),
-      new SubcommandData("disable", "turn all notifications off")
+    .addOptions(
+      new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)
+        .addChoices(
+          new Choice("list", "list"),
+          new Choice("clear", "clear")
+        )
     )
 
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand)
@@ -416,7 +425,7 @@ object BotApp extends App with StrictLogging {
       g.updateCommands().addCommands(commands.asJava).complete()
     } else if (g.getId == "1082484147492237515") { // pulsera bot beta discord
       g.updateCommands().addCommands(commands.asJava).complete()
-    } else if (g.getId == "867319250708463628") { // pulsera bot beta discord
+    } else if (g.getId == "867319250708463628") { // violent bot discord
       g.updateCommands().queue()
     } else {
       g.leave().queue()
@@ -429,27 +438,158 @@ object BotApp extends App with StrictLogging {
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 2.minutes) {
     // set activity status
-    try {
-      val randomActivity = List(
-        "Pulsera activity",
-        "people press buttons",
-        "Tibia players die",
-        "people fumble e-rings",
-        "UE combos slap",
-        "another 50k spent on twist"
-      )
-      val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("Pulsera activity")
-      jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
+    // only do this every second cycle
+    if (updateOnOdd) {
+      try {
+        val randomActivity = List(
+          "Pulsera activity",
+          "people press buttons",
+          "Tibia players die",
+          "people fumble e-rings",
+          "UE combos slap",
+          "another 50k spent on twist"
+        )
+        val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("Pulsera activity")
+        jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
+      } catch {
+        case _: Throwable => logger.info("Failed to update the bot's status counts")
+      }
+      removeDeathsCache(ZonedDateTime.now())
+      removeLevelsCache(ZonedDateTime.now())
+      cleanHuntedList()
+      cleanGalthenList()
+
+      updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    catch {
-      case _ : Throwable => logger.info("Failed to update the bots status counts")
+    //WIP
+    val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
+    //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
+    if (currentTime.isAfter(LocalTime.of(5,55)) && currentTime.isBefore(LocalTime.of(7, 30))) {
+      try {
+        boostedMessages().map { boostedBossAndCreature =>
+          val currentBoss = boostedBossAndCreature.boss
+          val currentCreature = boostedBossAndCreature.creature
+
+          // Boosted Boss
+          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+          val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
+            case Right(boostedResponse) =>
+              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+              if (boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss != "None") {
+                boostedMonsterUpdate(boostedBoss, "")
+              }
+              (
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+                boostedBoss != currentBoss && currentBoss != "None",
+                boostedBoss
+              )
+
+            case Left(errorMessage) =>
+              val boostedBoss = "Podium_of_Vigour"
+              (
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?"),
+                false,
+                boostedBoss
+              )
+          }
+
+          // Boosted Creature
+          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+          val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
+            case Right(creatureResponse) =>
+              val boostedCreature = creatureResponse.creatures.boosted.name
+              if (boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature != "None") {
+                boostedMonsterUpdate("", boostedCreature)
+              }
+              (
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                boostedCreature != currentCreature && currentCreature != "None",
+                boostedCreature
+              )
+
+            case Left(errorMessage) =>
+              val boostedCreature = "Podium_of_Tenacity"
+              (
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?"),
+                false,
+                boostedCreature
+              )
+          }
+
+          // Combine both futures and send the message
+          val combinedFutures: Future[List[(MessageEmbed, Boolean, String)]] = for {
+            bossEmbed <- bossEmbedFuture
+            creatureEmbed <- creatureEmbedFuture
+          } yield List(bossEmbed, creatureEmbed)
+
+          combinedFutures.map { boostedInfoList =>
+            if (boostedInfoList.exists(_._2)) {
+              // Do something if at least one of the embeds changed
+              val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
+
+              val notificationsList: List[BoostedStamp] = boostedAll()
+              notificationsList.foreach { entry =>
+                var matchedNotification = false
+                boostedInfoList.foreach { case (_, _, boostedName) =>
+                  if (boostedName == entry.boostedName || entry.boostedName == "all")
+                  {
+                    matchedNotification = true
+                  }
+                }
+                if (matchedNotification) {
+                  val user: User = jda.retrieveUserById(entry.user).complete()
+                  if (user != null) {
+                    try {
+                      user.openPrivateChannel().queue { privateChannel =>
+                        privateChannel.sendMessageEmbeds(embeds.asJava).queue()
+                      }
+                    } catch {
+                      case ex: Exception => //
+                    }
+                  }
+                }
+              }
+
+              jda.getGuilds.forEach { guild =>
+                val discordInfo = discordRetrieveConfig(guild)
+                val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
+
+                if (boostedChannel != null) {
+                  if (boostedChannel.canTalk()) {
+                    // WIP
+                    try {
+                      boostedChannel.deleteMessageById(discordInfo("boosted_messageid")).queue()
+                    }
+                    catch {
+                      case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                    }
+                    boostedChannel.sendMessageEmbeds(embeds.asJava)
+                      .setActionRow(
+                        Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                      )
+                      .queue((message: Message) => {
+                        updateBoostedMessage(guild.getId, message.getId)
+                        discordUpdateConfig(guild, "", "", "", message.getId)
+                      }, (e: Throwable) => {
+                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                      }
+                    )
+                  } else {
+                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      catch {
+        case _ : Throwable => logger.info("Failed to update the boosted messages")
+      }
     }
-    removeDeathsCache(ZonedDateTime.now())
-    removeLevelsCache(ZonedDateTime.now())
-    cleanHuntedList()
-    cleanGalthenList()
+    //WIP END
   }
 
   // run hunted list cleanup every day at 6:30 PM AEST
@@ -457,6 +597,104 @@ object BotApp extends App with StrictLogging {
   private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
+
+
+  //WIP
+  private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+
+    val results = new ListBuffer[BoostedCache]()
+    while (result.next()) {
+      val boss = Option(result.getString("boss")).getOrElse("None")
+      val creature = Option(result.getString("creature")).getOrElse("None")
+
+      results += BoostedCache(boss, creature)
+    }
+    statement.close()
+
+    if (results.isEmpty) {
+      // If the result list is empty, insert default values
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      insertStatement.setString(1, "None") // Default value for boss
+      insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.executeUpdate()
+      insertStatement.close()
+    }
+
+    // update category if exists
+    if (boss != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
+      statement.setString(1, boss)
+
+      statement.executeUpdate()
+      statement.close()
+    }
+    if (creature != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET creature = ?;")
+      statement.setString(1, creature)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+    conn.close()
+  }
+
+  private def boostedMessages(): List[BoostedCache] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_info'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE boosted_info (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |boss VARCHAR(255) NOT NULL,
+           |creature VARCHAR(255) NOT NULL
+           );""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+
+    val results = new ListBuffer[BoostedCache]()
+    while (result.next()) {
+      val boss = Option(result.getString("boss")).getOrElse("None")
+      val creature = Option(result.getString("creature")).getOrElse("None")
+
+      results += BoostedCache(boss, creature)
+    }
+
+    if (results.isEmpty) {
+      // If the result list is empty, insert default values
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      insertStatement.setString(1, "None") // Default value for boss
+      insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.executeUpdate()
+      insertStatement.close()
+
+      results += BoostedCache("None", "None")
+    }
+
+    statement.close()
+    conn.close()
+    results.toList
+  }
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
@@ -498,12 +736,16 @@ object BotApp extends App with StrictLogging {
 
         val adminChannels = discordRetrieveConfig(guild.get)
         val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
+        val boostedChannelId = if (adminChannels.nonEmpty) adminChannels("boosted_channel") else "0"
+        val boostedMessageId = if (adminChannels.nonEmpty) adminChannels("boosted_messageid") else "0"
 
         worldsInfo.foreach{ w =>
           if (w.name == world.get) {
             val discords = Discords(
               id = guildId,
-              adminChannel = adminChannelId
+              adminChannel = adminChannelId,
+              boostedChannel = boostedChannelId,
+              boostedMessage = boostedMessageId
             )
             discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
             val botStream = if (botStreams.contains(world.get)) {
@@ -562,12 +804,16 @@ object BotApp extends App with StrictLogging {
 
             val adminChannels = discordRetrieveConfig(g)
             val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
+            val boostedChannelId = if (adminChannels.nonEmpty) adminChannels("boosted_channel") else "0"
+            val boostedMessageId = if (adminChannels.nonEmpty) adminChannels("boosted_messageid") else "0"
 
             // populate a new Discords list so i can only run 1 stream per world
             worldsInfo.foreach{ w =>
               val discords = Discords(
                 id = guildId,
-                adminChannel = adminChannelId
+                adminChannel = adminChannelId,
+                boostedChannel = boostedChannelId,
+                boostedMessage = boostedMessageId
               )
               discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
             }
@@ -596,7 +842,7 @@ object BotApp extends App with StrictLogging {
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild
     // default embed content
-    var embedText = ":x: An error occurred while running the `info` command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the `info` command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       if (subCommand == "guild") { // command run with 'guild'
@@ -645,7 +891,7 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
     new EmbedBuilder()
       .setColor(3092790)
@@ -658,7 +904,7 @@ object BotApp extends App with StrictLogging {
     val subOptionValueLower = subOptionValue.toLowerCase()
     val guild = event.getGuild
     // default embed content
-    var embedText = ":x: An error occurred while running the `info` command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the `info` command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       if (subCommand == "guild") { // command run with 'guild'
@@ -707,7 +953,7 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
     new EmbedBuilder()
       .setColor(3092790)
@@ -1092,16 +1338,16 @@ object BotApp extends App with StrictLogging {
 
   def dateStringToEpochSeconds(dateString: String): String = {
     if (dateString != "") {
-     val formatter = DateTimeFormatter.ISO_INSTANT
-     val instant = Instant.from(formatter.parse(dateString))
-     val now = Instant.now()
+      val formatter = DateTimeFormatter.ISO_INSTANT
+      val instant = Instant.from(formatter.parse(dateString))
+      val now = Instant.now()
       if (Math.abs(instant.until(now, ChronoUnit.HOURS)) <= 24) {
         s"<:daily:1133349016814485584><t:${instant.getEpochSecond().toString}:R>"
       } else {
         ""
       }
     } else ""
- }
+  }
 
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
@@ -1223,10 +1469,10 @@ object BotApp extends App with StrictLogging {
                 val charLastLogin = charResponse.character.character.last_login.getOrElse("")
                 addListToCache(charName, formerNamesList, charWorld, formerWorldsList, charGuildName, charLevel.toString, charVocation, charLastLogin, ZonedDateTime.now())
               } else {
-                vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
+                vocationBuffers("none") += ((0, "Character does not exist", s"${Config.noEmoji} **N/A** — **$name**"))
               }
             case (Left(errorMessage), name, _, _) =>
-              vocationBuffers("none") += ((0, "Character does not exist", s":x: **N/A** — **$name**"))
+              vocationBuffers("none") += ((0, "Character does not exist", s"${Config.noEmoji} **N/A** — **$name**"))
           }
           // group by world
           val vocationWorldBuffers = vocationBuffers.map {
@@ -1350,8 +1596,24 @@ object BotApp extends App with StrictLogging {
 
   def updateAdminChannel(inputId: String, channelId: String): Unit = {
     discordsData = discordsData.view.mapValues(_.map {
-      case discord @ Discords(id, _) if id == inputId =>
+      case discord @ Discords(id, _, _, _) if id == inputId =>
         discord.copy(adminChannel = channelId)
+      case other => other
+    }).toMap
+  }
+
+  def updateBoostedChannel(inputId: String, channelId: String): Unit = {
+    discordsData = discordsData.view.mapValues(_.map {
+      case discord @ Discords(id, _, _, _) if id == inputId =>
+        discord.copy(boostedChannel = channelId)
+      case other => other
+    }).toMap
+  }
+
+  def updateBoostedMessage(inputId: String, messageId: String): Unit = {
+    discordsData = discordsData.view.mapValues(_.map {
+      case discord @ Discords(id, _, _, _) if id == inputId =>
+        discord.copy(boostedMessage = messageId)
       case other => other
     }).toMap
   }
@@ -1365,7 +1627,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occurred while running the /hunted command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the /hunted command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
@@ -1415,13 +1677,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already exists in the hunted list."
+              embedText = s"${Config.noEmoji} The guild **[$guildName](${guildUrl(guildName)})** already exists in the hunted list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The guild **$subOptionValueLower** does not exist."
+            embedText = s"${Config.noEmoji} The guild **$subOptionValueLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -1435,7 +1697,7 @@ object BotApp extends App with StrictLogging {
             val character = charResponse.character.character
             (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
           case Left(errorMessage) =>
-            ("", "" , ":x:", 0)
+            ("", "" , s"${Config.noEmoji}", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!huntedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1460,13 +1722,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already exists in the hunted list."
+              embedText = s"${Config.noEmoji} The player **[$playerName](${charUrl(playerName)})** already exists in the hunted list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The player **$subOptionValueLower** does not exist."
+            embedText = s"${Config.noEmoji} The player **$subOptionValueLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -1474,7 +1736,7 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
 
@@ -1490,7 +1752,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occurred while running the /allies command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the /allies command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
@@ -1549,13 +1811,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already exists in the allies list."
+              embedText = s"${Config.noEmoji} The guild **[$guildName](${guildUrl(guildName)})** already exists in the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The guild **$subOptionValueLower** does not exist."
+            embedText = s"${Config.noEmoji} The guild **$subOptionValueLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -1569,7 +1831,7 @@ object BotApp extends App with StrictLogging {
             val character = charResponse.character.character
             (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
           case Left(errorMessage) =>
-            ("", "", ":x:", 0)
+            ("", "", s"${Config.noEmoji}", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
@@ -1592,13 +1854,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already exists in the allies list."
+              embedText = s"${Config.noEmoji} The player **[$playerName](${charUrl(playerName)})** already exists in the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The player **$subOptionValueLower** does not exist."
+            embedText = s"${Config.noEmoji} The player **$subOptionValueLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -1606,7 +1868,7 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
 
@@ -1620,7 +1882,7 @@ object BotApp extends App with StrictLogging {
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
-    var embedText = ":x: An error occurred while running the /removehunted command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
@@ -1681,7 +1943,7 @@ object BotApp extends App with StrictLogging {
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
             case None =>
-              embedText = s":x: The guild **$guildString** is not on the hunted list."
+              embedText = s"${Config.noEmoji} The guild **$guildString** is not on the hunted list."
 
               // Remove players that the bot auto-hunted due to being in that guild from cache and db
               val filteredPlayers: List[Players] = {
@@ -1713,7 +1975,7 @@ object BotApp extends App with StrictLogging {
             val character = charResponse.character.character
             (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
           case Left(errorMessage) =>
-            ("", "", ":x:", 0)
+            ("", "", s"${Config.noEmoji}", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
@@ -1745,14 +2007,14 @@ object BotApp extends App with StrictLogging {
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
             case None =>
-              embedText = s":x: The player **$playerString** is not on the hunted list."
+              embedText = s"${Config.noEmoji} The player **$playerString** is not on the hunted list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
           }
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
     }
@@ -1765,7 +2027,7 @@ object BotApp extends App with StrictLogging {
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
-    var embedText = ":x: An error occurred while running the /removehunted command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       val discordInfo = discordRetrieveConfig(guild)
@@ -1812,7 +2074,7 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             case None =>
-              embedText = s":x: The guild **$guildString** is not on the allies list."
+              embedText = s"${Config.noEmoji} The guild **$guildString** is not on the allies list."
               embedBuild.setDescription(embedText)
 
               callback(embedBuild.build())
@@ -1827,7 +2089,7 @@ object BotApp extends App with StrictLogging {
             val character = charResponse.character.character
             (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
           case Left(errorMessage) =>
-            ("", "", ":x:", 0)
+            ("", "", s"${Config.noEmoji}", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
@@ -1859,14 +2121,14 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             case None =>
-              embedText = s":x: The player **$playerString** is not on the allies list."
+              embedText = s"${Config.noEmoji} The player **$playerString** is not on the allies list."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
           }
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
 
@@ -2330,6 +2592,8 @@ object BotApp extends App with StrictLogging {
            |guild_owner VARCHAR(255) NOT NULL,
            |admin_category VARCHAR(255) NOT NULL,
            |admin_channel VARCHAR(255) NOT NULL,
+           |boosted_channel VARCHAR(255) NOT NULL,
+           |boosted_messageid VARCHAR(255) NOT NULL,
            |flags VARCHAR(255) NOT NULL,
            |created TIMESTAMP NOT NULL,
            |PRIMARY KEY (guild_name)
@@ -2511,14 +2775,34 @@ object BotApp extends App with StrictLogging {
   def discordRetrieveConfig(guild: Guild): Map[String, String] = {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT * FROM discord_info")
 
+    val channelExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_channel'")
+    val channelExists = channelExistsQuery.next()
+    channelExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!channelExists) {
+      statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_channel VARCHAR(255) DEFAULT '0'")
+    }
+
+    val messageExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_messageid'")
+    val messageExists = messageExistsQuery.next()
+    messageExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!messageExists) {
+      statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_messageid VARCHAR(255) DEFAULT '0'")
+    }
+
+    val result = statement.executeQuery(s"SELECT * FROM discord_info")
     var configMap = Map[String, String]()
     while (result.next()) {
       configMap += ("guild_name" -> result.getString("guild_name"))
       configMap += ("guild_owner" -> result.getString("guild_owner"))
       configMap += ("admin_category" -> result.getString("admin_category"))
       configMap += ("admin_channel" -> result.getString("admin_channel"))
+      configMap += ("boosted_channel" -> result.getString("boosted_channel"))
+      configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
       configMap += ("flags" -> result.getString("flags"))
       configMap += ("created" -> result.getString("created"))
     }
@@ -2661,22 +2945,24 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, created: ZonedDateTime): Unit = {
+  private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessageId: String, created: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, flags, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, flags = EXCLUDED.flags, created = EXCLUDED.created;")
+    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, boosted_channel, boosted_messageid, flags, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, boosted_channel = EXCLUDED.boosted_channel, boosted_messageid = EXCLUDED.boosted_messageid, flags = EXCLUDED.flags, created = EXCLUDED.created;")
     statement.setString(1, guildName)
     statement.setString(2, guildOwner)
     statement.setString(3, adminCategory)
     statement.setString(4, adminChannel)
-    statement.setString(5, "none")
-    statement.setTimestamp(6, Timestamp.from(created.toInstant))
+    statement.setString(5, boostedChannel)
+    statement.setString(6, boostedMessageId)
+    statement.setString(7, "none")
+    statement.setTimestamp(8, Timestamp.from(created.toInstant))
     statement.executeUpdate()
 
     statement.close()
     conn.close()
   }
 
-  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String): Unit = {
+  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String): Unit = {
     val conn = getConnection(guild)
     // update category if exists
     if (adminCategory != "") {
@@ -2685,12 +2971,30 @@ object BotApp extends App with StrictLogging {
       statement.executeUpdate()
       statement.close()
     }
-    // update channel
-    val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
-    statement.setString(1, adminChannel)
-    statement.executeUpdate()
+    if (adminChannel != "") {
+      // update channel
+      val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
+      statement.setString(1, adminChannel)
+      statement.executeUpdate()
+      statement.close()
+    }
 
-    statement.close()
+    if (boostedChannel != "") {
+      // update channel
+      val statement = conn.prepareStatement("UPDATE discord_info SET boosted_channel = ?;")
+      statement.setString(1, boostedChannel)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+    if (boostedMessage != "") {
+      // update channel
+      val statement = conn.prepareStatement("UPDATE discord_info SET boosted_messageid = ?;")
+      statement.setString(1, boostedMessage)
+      statement.executeUpdate()
+      statement.close()
+    }
+
     conn.close()
   }
 
@@ -2767,7 +3071,7 @@ object BotApp extends App with StrictLogging {
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
-        val adminCategory = guild.createCategory("Violent Bot Administration").complete()
+        val adminCategory = guild.createCategory("Violent Bot").complete()
         adminCategory.upsertPermissionOverride(botRole)
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
@@ -2779,26 +3083,29 @@ object BotApp extends App with StrictLogging {
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
         val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
-        discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, ZonedDateTime.now())
+        discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, "0", "0", ZonedDateTime.now())
       } else {
         val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
+        val boostedChannelCheck = guild.getTextChannelById(discordConfig("boosted_channel"))
+        val boostedIdCheck = guild.getTextChannelById(discordConfig("boosted_messageid"))
         if (adminChannelCheck == null) {
           // admin channel has been deleted
           if (adminCategoryCheck == null) {
             // admin category has been deleted
-            val adminCategory = guild.createCategory("Violent Bot Administration").complete()
+            val adminCategory = guild.createCategory("Violent Bot").complete()
             adminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
             adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            // create command-log channel
             val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId)
+            discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId, "", "")
           } else {
             // admin category still exists
             val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
@@ -2806,11 +3113,79 @@ object BotApp extends App with StrictLogging {
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, "", adminChannel.getId)
+            discordUpdateConfig(guild, "", adminChannel.getId, "", "")
+          }
+        }
+        if (boostedChannelCheck == null) {
+          if (adminCategoryCheck == null) {
+            // admin category has been deleted
+            val adminCategory = guild.createCategory("Violent Bot").complete()
+            adminCategory.upsertPermissionOverride(botRole)
+              .grant(Permission.VIEW_CHANNEL)
+              .grant(Permission.MESSAGE_SEND)
+              .complete()
+            adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            // create boosted board
+            val boostedChannel = guild.createTextChannel("boosted", adminCategory).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
+          } else {
+            // admin category still exists
+            val boostedChannel = guild.createTextChannel("boosted", adminCategoryCheck).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+
+            // Boosted Boss
+            val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+            val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+              case Right(boostedResponse) =>
+                val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+              case Left(errorMessage) =>
+                val boostedBoss = "Podium_of_Vigour"
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+            }
+
+            // Boosted Creature
+            val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+            val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+              case Right(creatureResponse) =>
+                val boostedCreature = creatureResponse.creatures.boosted.name
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+              case Left(errorMessage) =>
+                val boostedCreature = "Podium_of_Tenacity"
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+            }
+
+            // Combine both futures and send the message
+            val combinedFutures: Future[List[MessageEmbed]] = for {
+              bossEmbed <- bossEmbedFuture
+              creatureEmbed <- creatureEmbedFuture
+            } yield List(bossEmbed, creatureEmbed)
+
+            combinedFutures
+              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+                .setActionRow(
+                  Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                )
+                .queue((message: Message) => {
+                  updateBoostedMessage(guild.getId, message.getId)
+                  discordUpdateConfig(guild, "", "", "", message.getId)
+                }, (e: Throwable) => {
+                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                })
+              )
           }
         }
       }
-
       // check is world has already been setup
       val worldConfigData = worldRetrieveConfig(guild, world)
       // it it doesn't create it
@@ -2887,91 +3262,6 @@ object BotApp extends App with StrictLogging {
           )
           .queue()
 
-        /**
-        // Boosted Notifications
-        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-        val bossName = boostedBoss.map {
-          case Right(boostedResponse) =>
-            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-            val boostedBossEmbed = new EmbedBuilder()
-            val boostedBossEmbedText = s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"
-            boostedBossEmbed.setTitle(s"${Config.boostedBossEmoji} Boosted Boss ${Config.boostedBossEmoji}", s"https://www.tibia.com/library/?subtopic=boostablebosses")
-            boostedBossEmbed.setThumbnail(creatureImageUrl(boostedBoss))
-            boostedBossEmbed.setColor(3092790)
-            boostedBossEmbed.setDescription(boostedBossEmbedText)
-          case Left(errorMessage) =>
-            val boostedBoss = "Podium_of_Vigour"
-            val boostedBossEmbed = new EmbedBuilder()
-            val boostedBossEmbedText = s"The boosted boss today failed to load?"
-            boostedBossEmbed.setTitle(s"${Config.boostedBossEmoji} Boosted Boss ${Config.boostedBossEmoji}", s"https://www.tibia.com/library/?subtopic=boostablebosses")
-            boostedBossEmbed.setThumbnail(creatureImageUrl(boostedBoss))
-            boostedBossEmbed.setColor(3092790)
-            boostedBossEmbed.setDescription(boostedBossEmbedText)
-        }
-        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-        val creatureName = boostedCreature.map {
-          case Right(creatureResponse) =>
-            val boostedCreature = creatureResponse.creatures.boosted.name
-            val boostedCreatureEmbed = new EmbedBuilder()
-            val boostedCreatureEmbedText = s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"
-            boostedCreatureEmbed.setTitle(s"${Config.boostedCreatureEmoji} Boosted Creature ${Config.boostedCreatureEmoji}", s"https://www.tibia.com/library/?subtopic=creatures")
-            boostedCreatureEmbed.setThumbnail(creatureImageUrl(boostedCreature))
-            boostedCreatureEmbed.setColor(3092790)
-            boostedCreatureEmbed.setDescription(boostedCreatureEmbedText)
-          case Left(errorMessage) =>
-            val boostedCreature = "Podium_of_Tenacity"
-            val boostedCreatureEmbed = new EmbedBuilder()
-            val boostedCreatureEmbedText = s"The boosted boss today failed to load?"
-            boostedCreatureEmbed.setTitle(s"${Config.boostedCreatureEmoji} Boosted Creature ${Config.boostedCreatureEmoji}", s"https://www.tibia.com/library/?subtopic=creatures")
-            boostedCreatureEmbed.setThumbnail(creatureImageUrl(creatureThumbnail))
-            boostedCreatureEmbed.setColor(3092790)
-            boostedCreatureEmbed.setDescription(boostedCreatureEmbedText)
-        }
-
-        val boostedEmbeds = List(boostedBossembed.build(), boostedCreatureEmbed.build())
-        notificationsChannel.sendMessageEmbeds(boostedEmbeds)
-          .setActionRow(
-            Button.primary("boosted", "boosted")
-          )
-          .queue()
-        **/
-
-        // Boosted Boss
-        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-        val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-          case Right(boostedResponse) =>
-            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-            createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-          case Left(errorMessage) =>
-            val boostedBoss = "Podium_of_Vigour"
-            createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-        }
-
-        // Boosted Creature
-        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-        val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-          case Right(creatureResponse) =>
-            val boostedCreature = creatureResponse.creatures.boosted.name
-            createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-          case Left(errorMessage) =>
-            val boostedCreature = "Podium_of_Tenacity"
-            createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-        }
-
-        // Combine both futures and send the message
-        val combinedFutures: Future[List[MessageEmbed]] = for {
-          bossEmbed <- bossEmbedFuture
-          creatureEmbed <- creatureEmbedFuture
-        } yield List(bossEmbed, creatureEmbed)
-
-        combinedFutures
-          .map(embeds => notificationsChannel.sendMessageEmbeds(embeds.asJava)
-            .setActionRow(Button.primary("boosted", "boosted"))
-            .queue()
-          )
-
         val alliesId = alliesChannel.getId
         val enemiesId = "0" //enemiesChannel.getId
         val neutralsId = "0" //neutralsChannel.getId
@@ -3018,10 +3308,10 @@ object BotApp extends App with StrictLogging {
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
-        s":x: The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+        s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
       }
     } else {
-      ":x: This is not a valid World on Tibia."
+      s"${Config.noEmoji} This is not a valid World on Tibia."
     }
     // embed reply
     new EmbedBuilder()
@@ -3044,7 +3334,7 @@ object BotApp extends App with StrictLogging {
     if (detectSetting != null) {
       if (detectSetting == settingOption) {
         // embed reply
-        embedBuild.setDescription(s":x: **Automatic enemy detection** is already set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} **Automatic enemy detection** is already set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -3076,7 +3366,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -3137,7 +3427,7 @@ object BotApp extends App with StrictLogging {
     if (selectedSetting.isDefined) {
       if (selectedSetting.get == settingType) {
         // embed reply
-        embedBuild.setDescription(s":x: The **$channelType** channel is already set to **$setting $playerType** for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} The **$channelType** channel is already set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -3183,7 +3473,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -3203,7 +3493,7 @@ object BotApp extends App with StrictLogging {
     if (detectSetting != null) {
       if (detectSetting == settingType) {
         // embed reply
-        embedBuild.setDescription(s":x: The **exiva list on deaths** is already set to **$settingOption** for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} The **exiva list on deaths** is already set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -3235,7 +3525,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -3265,7 +3555,7 @@ object BotApp extends App with StrictLogging {
     if (existingSetting.isDefined) {
       if (existingSetting.get == settingType) {
         // embed reply
-        embedBuild.setDescription(s":x: The online list is already set to **$setting** for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} The online list is already set to **$setting** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
 
@@ -3295,7 +3585,7 @@ object BotApp extends App with StrictLogging {
         if (setting == "combine") {
 
           if (event.getChannel.getId == alliesChannelInfo.getOrElse("0") || event.getChannel.getId == enemiesChannelInfo.getOrElse("0") || event.getChannel.getId == neutralsChannelInfo.getOrElse("0")) {
-            embedBuild.setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            embedBuild.setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
             return embedBuild.build()
           }
 
@@ -3392,7 +3682,7 @@ object BotApp extends App with StrictLogging {
           // setting == "separate"
 
           if (event.getChannel.getId == alliesChannelInfo.getOrElse("0")) {
-            embedBuild.setDescription(s":x: That command would delete this channel, run it somewhere else.")
+            embedBuild.setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
             return embedBuild.build()
           }
 
@@ -3554,7 +3844,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -3621,7 +3911,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occurred while running the `/online` command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
@@ -3665,13 +3955,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The guild **[$guildName](${guildUrl(guildName)})** already has a tag assigned."
+              embedText = s"${Config.noEmoji} The guild **[$guildName](${guildUrl(guildName)})** already has a tag assigned."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The guild **$nameLower** does not exist."
+            embedText = s"${Config.noEmoji} The guild **$nameLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -3685,7 +3975,7 @@ object BotApp extends App with StrictLogging {
             val character = charResponse.character.character
             (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
           case Left(errorMessage) =>
-            ("", "", ":x:", 0)
+            ("", "", s"${Config.noEmoji}", 0)
         }.map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
@@ -3714,13 +4004,13 @@ object BotApp extends App with StrictLogging {
               callback(embedBuild.build())
 
             } else {
-              embedText = s":x: The player **[$playerName](${charUrl(playerName)})** already has a tag assigned."
+              embedText = s"${Config.noEmoji} The player **[$playerName](${charUrl(playerName)})** already has a tag assigned."
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
 
             }
           } else {
-            embedText = s":x: The player **$nameLower** does not exist."
+            embedText = s"${Config.noEmoji} The player **$nameLower** does not exist."
             embedBuild.setDescription(embedText)
             callback(embedBuild.build())
 
@@ -3728,7 +4018,7 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
       embedBuild.setDescription(embedText)
       callback(embedBuild.build())
     }
@@ -3757,7 +4047,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occurred while running the `/online` command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
@@ -3783,7 +4073,7 @@ object BotApp extends App with StrictLogging {
             }
           }
         } else {
-          embedText = s":x: The guild **$nameLower** does not have a tag assigned."
+          embedText = s"${Config.noEmoji} The guild **$nameLower** does not have a tag assigned."
 
         }
       } else if (guildOrPlayer == "player") { // command run with 'player'
@@ -3806,11 +4096,11 @@ object BotApp extends App with StrictLogging {
             }
           }
         } else {
-          embedText = s":x: The player **$nameLower** already has a tag assigned."
+          embedText = s"${Config.noEmoji} The player **$nameLower** already has a tag assigned."
         }
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
     embedBuild.setDescription(embedText)
     embedBuild.build()
@@ -3835,7 +4125,7 @@ object BotApp extends App with StrictLogging {
     val embedBuild = new EmbedBuilder()
     embedBuild.setColor(3092790)
     // default embed content
-    var embedText = ":x: An error occurred while running the `/online` command"
+    var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
       // get admin channel info from database
@@ -3860,11 +4150,11 @@ object BotApp extends App with StrictLogging {
           }
         }
       } else {
-        embedText = s":x: The tag **$labelLower** does not exist."
+        embedText = s"${Config.noEmoji} The tag **$labelLower** does not exist."
 
       }
     } else {
-      embedText = s":x: You need to run `/setup` and add a world first."
+      embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
     embedBuild.setDescription(embedText)
     embedBuild.build()
@@ -3891,7 +4181,7 @@ object BotApp extends App with StrictLogging {
 
     if (guildTags.isEmpty) {
       val interimEmbed = new EmbedBuilder()
-      interimEmbed.setDescription(s":x: You do not have any custom tags.")
+      interimEmbed.setDescription(s"${Config.noEmoji} You do not have any custom tags.")
       interimEmbed.setColor(3092790)
       embedBuffer += interimEmbed.build()
     } else {
@@ -3964,7 +4254,7 @@ object BotApp extends App with StrictLogging {
     if (levelSetting != null) {
       if (levelSetting == level) {
         // embed reply
-        embedBuild.setDescription(s":x: The level to poke for **enemy fullblesses**\nis already set to **$level** for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} The level to poke for **enemy fullblesses**\nis already set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -4019,7 +4309,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -4042,7 +4332,6 @@ object BotApp extends App with StrictLogging {
       val botRole = guild.getRolesByName(botName, true).get(0)
       val publicRole = guild.getPublicRole
 
-      //WIP
       // get channel Ids
       val categoryInfo: Option[String] = cache.flatMap(_.headOption.map(_.category))
       val alliesChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.alliesChannel))
@@ -4058,6 +4347,8 @@ object BotApp extends App with StrictLogging {
       val discordConfig = discordRetrieveConfig(guild)
       var adminCategory = guild.getCategoryById(discordConfig("admin_category"))
       var adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
+      var boostedChannel = guild.getTextChannelById(discordConfig("boosted_channel"))
+      var boostedMessage = discordConfig("boosted_messageid")
 
       // get channel literals
       var category = guild.getCategoryById(categoryInfo.getOrElse("0"))
@@ -4073,7 +4364,7 @@ object BotApp extends App with StrictLogging {
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
       // check if any of the world channels need to be recreated
-      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || notificationsChannel == null || adminChannel == null) {
+      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || notificationsChannel == null || adminChannel == null || boostedChannel == null) {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
@@ -4275,42 +4566,6 @@ object BotApp extends App with StrictLogging {
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
 
-          // Boosted Boss
-          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-            case Right(boostedResponse) =>
-              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is: **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-            case Left(errorMessage) =>
-              val boostedBoss = "Podium_of_Vigour"
-              createBoostedEmbed(boostedBoss, Config.boostedBossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-          }
-
-          // Boosted Creature
-          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-            case Right(creatureResponse) =>
-              val boostedCreature = creatureResponse.creatures.boosted.name
-              createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is: **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-            case Left(errorMessage) =>
-              val boostedCreature = "Podium_of_Tenacity"
-              createBoostedEmbed(boostedCreature, Config.boostedCreatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-          }
-
-          // Combine both futures and send the message
-          val combinedFutures: Future[List[MessageEmbed]] = for {
-            bossEmbed <- bossEmbedFuture
-            creatureEmbed <- creatureEmbedFuture
-          } yield List(bossEmbed, creatureEmbed)
-
-          combinedFutures
-            .map(embeds => recreateFullblessChannel.sendMessageEmbeds(embeds.asJava)
-              .setActionRow(Button.primary("boosted", "Message Me"))
-              .queue()
-            )
-
           // update the record in worldsData
           if (worldsData.contains(guild.getId)) {
             val worldsList = worldsData(guild.getId)
@@ -4323,6 +4578,82 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
+        }
+        if (boostedChannel == null){
+          if (adminCategory == null) {
+            val newAdminCategory = guild.createCategory("Violent Bot").complete()
+            newAdminCategory.upsertPermissionOverride(botRole)
+              .grant(Permission.VIEW_CHANNEL)
+              .grant(Permission.MESSAGE_SEND)
+              .complete()
+            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            adminCategory = newAdminCategory
+          }
+          // create the channel
+          val newBoostedChannel = guild.createTextChannel("boosted", adminCategory).complete()
+
+          // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
+          newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+          newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          boostedChannel = newBoostedChannel
+          // update db & cache
+          discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "")
+          updateBoostedChannel(guild.getId, newBoostedChannel.getId)
+
+          boostedChannel.upsertPermissionOverride(botRole)
+            .grant(Permission.VIEW_CHANNEL)
+            .grant(Permission.MESSAGE_SEND)
+            .grant(Permission.MESSAGE_EMBED_LINKS)
+            .grant(Permission.MESSAGE_HISTORY)
+            .grant(Permission.MANAGE_CHANNEL)
+            .complete()
+          boostedChannel.upsertPermissionOverride(publicRole)
+            .deny(Permission.MESSAGE_SEND)
+            .complete()
+
+          // Boosted Boss
+          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+            case Right(boostedResponse) =>
+              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+            case Left(errorMessage) =>
+              val boostedBoss = "Podium_of_Vigour"
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+          }
+
+          // Boosted Creature
+          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+            case Right(creatureResponse) =>
+              val boostedCreature = creatureResponse.creatures.boosted.name
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+            case Left(errorMessage) =>
+              val boostedCreature = "Podium_of_Tenacity"
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+          }
+
+          // Combine both futures and send the message
+          val combinedFutures: Future[List[MessageEmbed]] = for {
+            bossEmbed <- bossEmbedFuture
+            creatureEmbed <- creatureEmbedFuture
+          } yield List(bossEmbed, creatureEmbed)
+
+          combinedFutures
+            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+              .setActionRow(
+                Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+              )
+              .queue((message: Message) => {
+                updateBoostedMessage(guild.getId, message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId)
+              }, (e: Throwable) => {
+                logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+              })
+            )
         }
         // apply required permissions to the new channel(s)
         if (channelList.nonEmpty) {
@@ -4359,7 +4690,7 @@ object BotApp extends App with StrictLogging {
           newAdminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           adminChannel = newAdminChannel
           // update db & cache
-          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId)
+          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "")
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
         if (adminChannel != null) {
@@ -4374,10 +4705,10 @@ object BotApp extends App with StrictLogging {
         }
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       } else {
-        embedBuild.setDescription(s":x: No action was taken as all channels for **$worldFormal** still exist.")
+        embedBuild.setDescription(s"${Config.noEmoji} No action was taken as all channels for **$worldFormal** still exist.")
       }
     } else {
-      embedBuild.setDescription(s":x: You cannot run a `/repair` on **$worldFormal** because that world has not been `/setup` yet.")
+      embedBuild.setDescription(s"${Config.noEmoji} You cannot run a `/repair` on **$worldFormal** because that world has not been `/setup` yet.")
     }
     embedBuild.build()
   }
@@ -4406,7 +4737,7 @@ object BotApp extends App with StrictLogging {
     if (chosenSetting != null) {
       if (chosenSetting == level) {
         // embed reply
-        embedBuild.setDescription(s":x: The minimum level for the **$levelsOrDeaths channel**\nis already set to `$level` for the world **$worldFormal**.")
+        embedBuild.setDescription(s"${Config.noEmoji} The minimum level for the **$levelsOrDeaths channel**\nis already set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
       } else {
         // set the setting here
@@ -4440,7 +4771,7 @@ object BotApp extends App with StrictLogging {
         embedBuild.build()
       }
     } else {
-      embedBuild.setDescription(s":x: You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
+      embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
   }
@@ -4587,7 +4918,7 @@ object BotApp extends App with StrictLogging {
         if (channelIds.contains(event.getChannel.getId)) {
           return new EmbedBuilder()
           .setColor(3092790)
-          .setDescription(s":x: That command would delete this channel, run it somewhere else.")
+          .setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
           .build()
         }
 
@@ -4663,10 +4994,10 @@ object BotApp extends App with StrictLogging {
 
         s":gear: The world **$world** has been removed."
       } else {
-        s":x: The world **$world** is not configured here."
+        s"${Config.noEmoji} The world **$world** is not configured here."
       }
     } else {
-      ":x: This is not a valid World on Tibia."
+      s"${Config.noEmoji} This is not a valid World on Tibia."
     }
     // embed reply
     new EmbedBuilder()
@@ -4690,7 +5021,7 @@ object BotApp extends App with StrictLogging {
         if (adminChannel.canTalk() || !(Config.prod)) {
           try {
             val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
             adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
             adminEmbed.setColor(3092790)
@@ -4719,14 +5050,14 @@ object BotApp extends App with StrictLogging {
     var embedMessage = ""
 
     if (discordInfo.isEmpty) {
-      embedMessage = s":x: The Guild: **${guild.getName()}** doesn't have any worlds setup yet, so a message cannot be sent."
+      embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** doesn't have any worlds setup yet, so a message cannot be sent."
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null) {
         if (adminChannel.canTalk() || !(Config.prod)) {
           try {
             val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":x: The creator of the bot has run a command:")
+            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
             adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
             adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
             adminEmbed.setColor(3092790)
@@ -4736,7 +5067,7 @@ object BotApp extends App with StrictLogging {
           }
         }
       } else {
-        embedMessage = s":x: The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
+        embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
       }
       embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
     }
@@ -4782,22 +5113,23 @@ object BotApp extends App with StrictLogging {
   // V1.9 Boosted Command
   def createBoostedEmbed(name: String, emoji: String, wikiUrl: String, thumbnail: String, embedText: String): MessageEmbed = {
     val embed = new EmbedBuilder()
-    embed.setTitle(s"$emoji Boosted $name $emoji", wikiUrl)
+    //embed.setTitle(s"$emoji $name $emoji", wikiUrl)
     embed.setThumbnail(thumbnail)
     embed.setColor(3092790)
     embed.setDescription(embedText)
     embed.build()
   }
 
-  def boosted(userId: String, boostedOption: String, boostedName: String): MessageEmbed = {
+  def capitalizeAllWords(s: String): String = {
+    s.split(" ").map(_.capitalize).mkString(" ")
+  }
+
+  def boostedAll(): List[BoostedStamp] = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
-
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.createStatement()
-
-    var embedMessage = ":x: This command failed to run, try again?"
 
     // Check if the table already exists in bot_configuration
     val tableExistsQuery =
@@ -4812,7 +5144,53 @@ object BotApp extends App with StrictLogging {
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |userid VARCHAR(255) NOT NULL,
            |name VARCHAR(255) NOT NULL,
-           |type VARCHAR(255)
+           |type VARCHAR(255),
+           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
+           |);""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT userid,name,type FROM boosted_notifications;")
+    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
+
+    while (result.next()) {
+      val boostedUserSql = Option(result.getString("userid")).getOrElse("")
+      val boostedNameSql = Option(result.getString("name")).getOrElse("")
+      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
+
+      val boostedStamp = BoostedStamp(boostedUserSql, boostedTypeSql, boostedNameSql)
+      boostedStampList += boostedStamp
+    }
+
+    statement.close()
+    conn.close()
+
+    boostedStampList.toList
+  }
+
+  def boostedList(userId: String): Boolean = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+    val conn = DriverManager.getConnection(url, username, password)
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery =
+      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE boosted_notifications (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |userid VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |type VARCHAR(255),
+           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
            |);""".stripMargin
 
       statement.executeUpdate(createListTable)
@@ -4822,62 +5200,299 @@ object BotApp extends App with StrictLogging {
     val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
 
     while (result.next()) {
-      val boostedName = Option(result.getString("name")).getOrElse("")
-      val boostedType = Option(result.getString("type")).getOrElse("")
+      val boostedNameSql = Option(result.getString("name")).getOrElse("")
+      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
 
-      val boostedStamp = BoostedStamp(userId, boostedType, boostedName)
+      val boostedStamp = BoostedStamp(userId, boostedTypeSql, boostedNameSql)
+      boostedStampList += boostedStamp
+    }
+
+    statement.close()
+    conn.close()
+
+    val existingNames = boostedStampList.toList
+    existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+  }
+
+  def boosted(userId: String, boostedOption: String, boostedName: String): MessageEmbed = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
+    val username = "postgres"
+    val password = Config.postgresPassword
+    val conn = DriverManager.getConnection(url, username, password)
+    var embedMessage = s"${Config.noEmoji} This command failed to run, try again?"
+
+    val statement = conn.createStatement()
+
+    // Check if the table already exists in bot_configuration
+    val tableExistsQuery =
+      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    // Create the table if it doesn't exist
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE boosted_notifications (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |userid VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |type VARCHAR(255),
+           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
+           |);""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    val result = statement.executeQuery(s"SELECT name,type FROM boosted_notifications WHERE userid = '$userId';")
+    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
+
+    while (result.next()) {
+      val boostedNameSql = Option(result.getString("name")).getOrElse("")
+      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
+
+      val boostedStamp = BoostedStamp(userId, boostedTypeSql, boostedNameSql)
       boostedStampList += boostedStamp
     }
     statement.close()
 
+    val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase
     val existingNames = boostedStampList.toList
 
     val replyEmbed = new EmbedBuilder()
     replyEmbed.setColor(3092790)
     if (boostedOption == "list") { // UNFINISHED
       if (existingNames.size > 0) {
-        val listString = existingNames.map(boostedName => s"- **$boostedName**${if (boostedOption != "default") s" *($boostedOption)*" else ""}").mkString("\n")
-        replyEmbed.setTitle(s"Boosted Boss & Creature Notifications:")
-        embedMessage = listString
+        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+        val groupedAndSorted = existingNames
+          .groupBy(_.boostedType)
+          .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+          .toSeq
+          .sortBy(_._1) // Sort groups by type
+          .flatMap { case (group, names) =>
+            names.map { boosted =>
+              val emoji =
+                if (group == "boss") Config.bossEmoji
+                else if (group == "creature") Config.creatureEmoji
+                else Config.indentEmoji
+
+              val nameWithLink =
+                if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+              s"$emoji $nameWithLink"
+            }
+          }.mkString("\n")
+        embedMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
       } else {
-        embedMessage = s"you have *nothing configured*.\nUse `add` or `remove` to enable **server save notifications**."
+        embedMessage = s"${Config.letterEmoji} Your notification list is *empty*."
       }
     } else if (boostedOption == "add"){
-      val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim
-      if (existingNames.contains(sanitizedName)) {
-        embedMessage = s":x: **$sanitizedName** already exists."
+      if (sanitizedName != "") {
+        if (existingNames.exists(_.boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase == sanitizedName)) {
+          embedMessage = s"${Config.noEmoji} **$sanitizedName** already exists."
+        } else {
+          if (sanitizedName == "all") {
+            val query =
+              "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
+            val preparedStatement = conn.prepareStatement(query)
+            preparedStatement.setString(1, userId)
+            preparedStatement.setString(2, sanitizedName)
+            preparedStatement.setString(3, "all")
+            preparedStatement.executeUpdate()
+            preparedStatement.close()
+            embedMessage = s"${Config.yesEmoji} you have enabled notifications for **all** bosses and creatures."
+          } else {
+            // Check if sanitizedName exists in boostedBossesList
+            val isBoostedBoss = boostedBossesList.contains(sanitizedName)
+
+            // Check if sanitizedName is a valid creature
+            val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
+            val creatureCheck: Future[Boolean] = boostedCreature.map {
+              case Right(raceResponse) =>
+              raceResponse.creature.isDefined
+              case Left(errorMessage) => false
+            }
+
+            val creatureValue: Boolean = Await.result(creatureCheck, 10.seconds)
+            val monsterType = if (isBoostedBoss) "boss" else if (creatureValue) "creature" else "all"
+            if (monsterType == "all") {
+              val groupedAndSorted = existingNames
+                .groupBy(_.boostedType)
+                .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+                .toSeq
+                .sortBy(_._1) // Sort groups by type
+                .flatMap { case (group, names) =>
+                  names.map { boosted =>
+                    val emoji =
+                      if (group == "boss") Config.bossEmoji
+                      else if (group == "creature") Config.creatureEmoji
+                      else Config.indentEmoji
+
+                    val nameWithLink =
+                      if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                      else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+                    s"$emoji $nameWithLink"
+                  }
+                }.mkString("\n")
+              val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
+              val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
+              embedMessage = listMessage + s"\n\n$commandMessage"
+            } else {
+              val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
+              val preparedStatement = conn.prepareStatement(query)
+              preparedStatement.setString(1, userId)
+              preparedStatement.setString(2, sanitizedName)
+              preparedStatement.setString(3, monsterType)
+              preparedStatement.executeUpdate()
+              preparedStatement.close()
+
+              val newNames = existingNames :+ BoostedStamp(userId, monsterType, sanitizedName)
+              val groupedAndSorted = newNames
+                .groupBy(_.boostedType)
+                .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+                .toSeq
+                .sortBy(_._1) // Sort groups by type
+                .flatMap { case (group, names) =>
+                  names.map { boosted =>
+                    val emoji =
+                      if (group == "boss") Config.bossEmoji
+                      else if (group == "creature") Config.creatureEmoji
+                      else Config.indentEmoji
+
+                    val nameWithLink =
+                      if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                      else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+                    s"$emoji $nameWithLink"
+                  }
+                }.mkString("\n")
+
+              val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
+              val commandMessage = s"${Config.yesEmoji} **$sanitizedName** was added."
+              embedMessage = listMessage + s"\n\n$commandMessage"
+            }
+          }
+        }
       } else {
-        val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
-        val preparedStatement = conn.prepareStatement(query)
-        preparedStatement.setString(1, userId)
-        preparedStatement.setString(2, sanitizedName)
-        preparedStatement.setString(3, boostedOption)
-        preparedStatement.executeUpdate()
-        preparedStatement.close()
+        // Check if sanitizedName exists in boostedBossesList
+        val isBoostedBoss = boostedBossesList.contains(sanitizedName)
+
+        // Check if sanitizedName is a valid creature
+        val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
+        val creatureCheck: Future[Boolean] = boostedCreature.map {
+          case Right(raceResponse) =>
+          raceResponse.creature.isDefined
+          case Left(errorMessage) => false
+        }
+
+        val creatureValue: Boolean = Await.result(creatureCheck, 10.seconds)
+        val monsterType = if (isBoostedBoss) "boss" else if (creatureValue) "creature" else "all"
+        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+        val newNames = existingNames :+ BoostedStamp(userId, monsterType, boostedName)
+        val groupedAndSorted = newNames
+          .groupBy(_.boostedType)
+          .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+          .toSeq
+          .sortBy(_._1) // Sort groups by type
+          .flatMap { case (group, names) =>
+            names.map { boosted =>
+              val emoji =
+                if (group == "boss") Config.bossEmoji
+                else if (group == "creature") Config.creatureEmoji
+                else Config.indentEmoji
+
+              val nameWithLink =
+                if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+              s"$emoji $nameWithLink"
+            }
+          }.mkString("\n")
+        val listMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
+        val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
+        embedMessage = listMessage + s"\n\n$commandMessage"
       }
     } else if (boostedOption == "remove"){
-      val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim
-      if (existingNames.contains(sanitizedName)) {
-        val query = "DELETE FROM boosted_notifications WHERE userid = ? AND name = ?"
+      val filteredGroupedAndSorted = existingNames
+        .groupBy(_.boostedType)
+        .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+        .toSeq
+        .sortBy(_._1) // Sort groups by type
+        .flatMap { case (group, names) =>
+          val filteredNames = names.filterNot(bs => bs.boostedName == sanitizedName)
+
+          filteredNames.map { boosted =>
+            val emoji =
+              if (group == "boss") Config.bossEmoji
+              else if (group == "creature") Config.creatureEmoji
+              else Config.indentEmoji
+
+            val nameWithLink =
+              if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+              else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+            s"$emoji $nameWithLink"
+          }
+        }.mkString("\n")
+      if (sanitizedName == "all") {
+        var query = "DELETE FROM boosted_notifications WHERE userid = ?"
+        val preparedStatement = conn.prepareStatement(query)
+        preparedStatement.setString(1, userId)
+        preparedStatement.executeUpdate()
+        preparedStatement.close()
+
+        embedMessage = s"${Config.yesEmoji} you have disabled notifications for **all** bosses and creatures."
+      } else if (existingNames.exists(_.boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase == sanitizedName)) {
+        var query = "DELETE FROM boosted_notifications WHERE userid = ? AND LOWER(name) = LOWER(?)"
         val preparedStatement = conn.prepareStatement(query)
         preparedStatement.setString(1, userId)
         preparedStatement.setString(2, sanitizedName)
         preparedStatement.executeUpdate()
         preparedStatement.close()
 
-        embedMessage = s"${Config.yesEmoji} you removed **$sanitizedName** from the list."
+        val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
+        val commandMessage = s"${Config.yesEmoji} you removed **$sanitizedName** from the list."
+        embedMessage = listMessage + s"\n\n$commandMessage"
+
       } else {
-        embedMessage = s"${Config.noEmoji} **$sanitizedName** is not on your list."
+
+        val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
+        val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not on your list."
+        embedMessage = listMessage + s"\n\n$commandMessage"
       }
-    } else if (boostedOption == "disable"){
-      val query = "DELETE FROM boosted_notifications WHERE userid = ?"
+      //
+    } else if (boostedOption == "toggle"){
+      val existingSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+      if (existingSetting) {
+        var query = "DELETE FROM boosted_notifications WHERE userid = ?"
+        val preparedStatement = conn.prepareStatement(query)
+        preparedStatement.setString(1, userId)
+        preparedStatement.executeUpdate()
+        preparedStatement.close()
+        // WIP Message
+        embedMessage = s"${Config.letterEmoji} Your notification list is *empty*."
+      } else {
+        val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
+        val preparedStatement = conn.prepareStatement(query)
+        preparedStatement.setString(1, userId)
+        preparedStatement.setString(2, "all")
+        preparedStatement.setString(3, "all")
+        preparedStatement.executeUpdate()
+        preparedStatement.close()
+        embedMessage = s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
+      }
+      //
+    } else if (boostedOption == "disable") {
+      var query = "DELETE FROM boosted_notifications WHERE userid = ?"
       val preparedStatement = conn.prepareStatement(query)
       preparedStatement.setString(1, userId)
       preparedStatement.executeUpdate()
       preparedStatement.close()
 
-      embedMessage = s"${Config.yesEmoji} have disabled all **server save notifications**."
+      embedMessage = s"${Config.yesEmoji} you have **disabled** notifications for **all** bosses and creatures."
     }
+
     conn.close()
     replyEmbed.setDescription(embedMessage).build()
   }
