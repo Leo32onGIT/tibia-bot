@@ -479,12 +479,12 @@ object BotApp extends App with StrictLogging {
           val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
+              if (boostedBoss.toLowerCase != currentBoss.toLowerCase && boostedBoss.toLowerCase != "none") {
                 boostedMonsterUpdate(boostedBoss, "")
               }
               (
                 createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
-                boostedBoss != currentBoss && currentBoss != "None",
+                boostedBoss != currentBoss && boostedBoss.toLowerCase != "none",
                 boostedBoss
               )
 
@@ -502,12 +502,12 @@ object BotApp extends App with StrictLogging {
           val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
-              if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
+              if (boostedCreature.toLowerCase != currentCreature.toLowerCase && boostedCreature.toLowerCase != "none") {
                 boostedMonsterUpdate("", boostedCreature)
               }
               (
                 createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
-                boostedCreature != currentCreature && currentCreature != "None",
+                boostedCreature != currentCreature && boostedCreature.toLowerCase != "none",
                 boostedCreature
               )
 
