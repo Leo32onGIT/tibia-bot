@@ -463,14 +463,15 @@ object BotApp extends App with StrictLogging {
 
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    logger.info("in range")
-    val startTime: LocalTime = LocalTime.of(0, 40, 0)
-    val endTime: LocalTime = LocalTime.of(0, 55, 0)
-    val brisbaneTimeZone: ZoneId = ZoneId.of("Australia/Brisbane")
-    val currentMachineTime: LocalTime = LocalTime.now(brisbaneTimeZone)
+    val startTime = LocalDateTime.now().with(LocalTime.of(0, 55, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant()
+    val endTime = LocalDateTime.now().with(LocalTime.of(1, 55, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant()
 
+    // Current time in the machine's local time zone (New York)
+    val currentMachineTime = Instant.now()
+    logger.info("check")
     // Check if the current time in Brisbane falls within the desired range
-    if (isTimeInRange(currentMachineTime, startTime, endTime)) {
+    if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
+      logger.info("popped")
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
