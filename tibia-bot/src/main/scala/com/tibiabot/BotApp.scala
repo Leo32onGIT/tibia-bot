@@ -463,8 +463,8 @@ object BotApp extends App with StrictLogging {
 
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    val startTime = LocalDateTime.of(LocalDate.now, LocalTime.of(19, 0, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
-    val endTime = LocalDateTime.of(LocalDate.now, LocalTime.of(19, 20, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
+    val startTime = LocalDateTime.of(LocalDate.now, LocalTime.of(24, 0, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
+    val endTime = LocalDateTime.of(LocalDate.now, LocalTime.of(24, 30, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
     // Current time in the machine's local time zone (New York)
     val currentMachineTime = Instant.now()
     // Check if the current time in Brisbane falls within the desired range
