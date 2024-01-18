@@ -469,7 +469,6 @@ object BotApp extends App with StrictLogging {
     val currentMachineTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toInstant
     // Check if the current time in Brisbane falls within the desired range
     if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
-      logger.info("triggered")
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -536,11 +535,9 @@ object BotApp extends App with StrictLogging {
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName != "None") {
-                    if (boostedName == entry.boostedName || entry.boostedName == "all")
-                    {
-                      matchedNotification = true
-                    }
+                  if (boostedName == entry.boostedName || entry.boostedName == "all")
+                  {
+                    matchedNotification = true
                   }
                 }
                 if (matchedNotification) {
