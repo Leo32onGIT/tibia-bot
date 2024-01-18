@@ -465,7 +465,7 @@ object BotApp extends App with StrictLogging {
     }
     val machineTimeZone = ZoneId.systemDefault()
     val currentTimeInBrisbane = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
-    if (currentTimeInBrisbane.isAfter(LocalTime.of(2, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(3, 0))) {
+    if (currentTimeInBrisbane.isAfter(LocalTime.of(19, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(19, 45))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -481,7 +481,7 @@ object BotApp extends App with StrictLogging {
               }
               (
                 createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
-                boostedBoss != currentBoss && boostedBoss.toLowerCase != "none",
+                boostedBoss != currentBoss && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
 
@@ -504,7 +504,7 @@ object BotApp extends App with StrictLogging {
               }
               (
                 createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
-                boostedCreature != currentCreature && boostedCreature.toLowerCase != "none",
+                boostedCreature != currentCreature && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
 
