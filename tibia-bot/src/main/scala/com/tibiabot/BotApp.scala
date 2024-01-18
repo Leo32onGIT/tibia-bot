@@ -463,12 +463,14 @@ object BotApp extends App with StrictLogging {
 
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    val startTime = LocalDateTime.of(LocalDate.now, LocalTime.of(19, 05, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
-    val endTime = LocalDateTime.of(LocalDate.now, LocalTime.of(19, 30, 0)).atZone(ZoneId.of("Australia/Brisbane")).toInstant
-    // Current time in the machine's local time zone (New York)
-    val currentMachineTime = Instant.now()
+    
+    val startTime: LocalTime = LocalTime.of(0, 30, 0)
+    val endTime: LocalTime = LocalTime.of(0, 45, 0)
+    val brisbaneTimeZone: ZoneId = ZoneId.of("Australia/Brisbane")
+    val currentMachineTime: LocalTime = LocalTime.now(brisbaneTimeZone)
+
     // Check if the current time in Brisbane falls within the desired range
-    if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
+    if (isTimeInRange(currentMachineTime, startTime, endTime)) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -601,7 +603,11 @@ object BotApp extends App with StrictLogging {
   private val interval = 24.hours
 
 
-  //WIP
+  private def isTimeInRange(currentTime: LocalTime, startTime: LocalTime, endTime: LocalTime): Boolean = {
+    // Compare only the time portion, ignoring the date
+    !currentTime.isBefore(startTime) && currentTime.isBefore(endTime)
+  }
+
   private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
