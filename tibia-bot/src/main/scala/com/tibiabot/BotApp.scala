@@ -463,9 +463,9 @@ object BotApp extends App with StrictLogging {
 
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    
-    val startTime: LocalTime = LocalTime.of(0, 30, 0)
-    val endTime: LocalTime = LocalTime.of(0, 45, 0)
+    logger.info("in range")
+    val startTime: LocalTime = LocalTime.of(0, 40, 0)
+    val endTime: LocalTime = LocalTime.of(0, 55, 0)
     val brisbaneTimeZone: ZoneId = ZoneId.of("Australia/Brisbane")
     val currentMachineTime: LocalTime = LocalTime.now(brisbaneTimeZone)
 
