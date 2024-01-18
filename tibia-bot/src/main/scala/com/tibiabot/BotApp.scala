@@ -5308,7 +5308,7 @@ object BotApp extends App with StrictLogging {
     conn.close()
 
     val existingNames = boostedStampList.toList
-    existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+    existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
   }
 
   def boosted(userId: String, boostedOption: String, boostedName: String): MessageEmbed = {
@@ -5359,7 +5359,7 @@ object BotApp extends App with StrictLogging {
     replyEmbed.setColor(3092790)
     if (boostedOption == "list") { // UNFINISHED
       if (existingNames.size > 0) {
-        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
         val groupedAndSorted = existingNames
           .groupBy(_.boostedType)
           .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
@@ -5485,7 +5485,7 @@ object BotApp extends App with StrictLogging {
 
         val creatureValue: Boolean = Await.result(creatureCheck, 10.seconds)
         val monsterType = if (isBoostedBoss) "boss" else if (creatureValue) "creature" else "all"
-        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
         val newNames = existingNames :+ BoostedStamp(userId, monsterType, boostedName)
         val groupedAndSorted = newNames
           .groupBy(_.boostedType)
@@ -5517,7 +5517,7 @@ object BotApp extends App with StrictLogging {
         .toSeq
         .sortBy(_._1) // Sort groups by type
         .flatMap { case (group, names) =>
-          val filteredNames = names.filterNot(bs => bs.boostedName == sanitizedName)
+          val filteredNames = names.filterNot(bs => bs.boostedName.toLowerCase == sanitizedName)
 
           filteredNames.map { boosted =>
             val emoji =
@@ -5560,7 +5560,7 @@ object BotApp extends App with StrictLogging {
       }
       //
     } else if (boostedOption == "toggle"){
-      val existingSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName == "all")
+      val existingSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
       if (existingSetting) {
         var query = "DELETE FROM boosted_notifications WHERE userid = ?"
         val preparedStatement = conn.prepareStatement(query)
