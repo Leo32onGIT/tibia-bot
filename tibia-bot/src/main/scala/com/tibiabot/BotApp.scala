@@ -464,21 +464,8 @@ object BotApp extends App with StrictLogging {
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
     val machineTimeZone = ZoneId.systemDefault()
-    val startTime = ZonedDateTime.of(
-        LocalDate.now(),
-        LocalTime.of(1, 0, 0),
-        ZoneId.of("Australia/Brisbane")
-    ).withZoneSameInstant(machineTimeZone).toInstant()
-    val endTime = ZonedDateTime.of(
-        LocalDate.now(),
-        LocalTime.of(2, 0, 0),
-        ZoneId.of("Australia/Brisbane")
-    ).withZoneSameInstant(machineTimeZone).toInstant()
-    // Current time in the machine's local time zone
-    val currentMachineTime = Instant.now()
-    // Check if the current time in Brisbane falls within the desired range
-    if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
-      println("triggered")
+    val currentTimeInBrisbane = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
+    if (currentTimeInBrisbane.isAfter(LocalTime.of(19, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(19, 25))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -489,7 +476,7 @@ object BotApp extends App with StrictLogging {
           val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              if (boostedBoss.toLowerCase != currentBoss.toLowerCase && boostedBoss.toLowerCase != "none") {
+              if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
                 boostedMonsterUpdate(boostedBoss, "")
               }
               (
@@ -512,7 +499,7 @@ object BotApp extends App with StrictLogging {
           val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
-              if (boostedCreature.toLowerCase != currentCreature.toLowerCase && boostedCreature.toLowerCase != "none") {
+              if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
                 boostedMonsterUpdate("", boostedCreature)
               }
               (
