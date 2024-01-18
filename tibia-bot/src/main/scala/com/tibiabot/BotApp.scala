@@ -469,6 +469,7 @@ object BotApp extends App with StrictLogging {
     val currentMachineTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toInstant
     // Check if the current time in Brisbane falls within the desired range
     if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
+      logger.info("triggered")
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -479,7 +480,7 @@ object BotApp extends App with StrictLogging {
           val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              if (boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss != "None") {
+              if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
                 boostedMonsterUpdate(boostedBoss, "")
               }
               (
@@ -502,7 +503,7 @@ object BotApp extends App with StrictLogging {
           val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
-              if (boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature != "None") {
+              if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
                 boostedMonsterUpdate("", boostedCreature)
               }
               (
@@ -535,9 +536,11 @@ object BotApp extends App with StrictLogging {
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName == entry.boostedName || entry.boostedName == "all")
-                  {
-                    matchedNotification = true
+                  if (boostedName != "None") {
+                    if (boostedName == entry.boostedName || entry.boostedName == "all")
+                    {
+                      matchedNotification = true
+                    }
                   }
                 }
                 if (matchedNotification) {
