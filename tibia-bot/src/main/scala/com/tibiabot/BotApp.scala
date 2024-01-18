@@ -465,7 +465,7 @@ object BotApp extends App with StrictLogging {
     }
     val machineTimeZone = ZoneId.systemDefault()
     val currentTimeInBrisbane = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
-    if (currentTimeInBrisbane.isAfter(LocalTime.of(19, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(19, 25))) {
+    if (currentTimeInBrisbane.isAfter(LocalTime.of(2, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(3, 0))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
