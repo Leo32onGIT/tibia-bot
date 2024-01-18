@@ -478,6 +478,7 @@ object BotApp extends App with StrictLogging {
     val currentMachineTime = Instant.now()
     // Check if the current time in Brisbane falls within the desired range
     if (currentMachineTime.isAfter(startTime) && currentMachineTime.isBefore(endTime)) {
+      println("triggered")
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
