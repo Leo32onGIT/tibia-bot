@@ -448,28 +448,12 @@ object BotApp extends App with StrictLogging {
     // set activity status
     // only do this every second cycle
     if (updateOnOdd) {
-      try {
-        val randomActivity = List(
-          "Pulsera activity",
-          "people press buttons",
-          "Tibia players die",
-          "people fumble e-rings",
-          "UE combos slap",
-          "another 50k spent on twist"
-        )
-        val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("Pulsera activity")
-        jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
-      } catch {
-        case _: Throwable => logger.info("Failed to update the bot's status counts")
-      }
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
       cleanGalthenList()
-
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
-    //WIP
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
     if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
@@ -595,7 +579,6 @@ object BotApp extends App with StrictLogging {
         case _ : Throwable => logger.info("Failed to update the boosted messages")
       }
     }
-    //WIP END
   }
 
   // run hunted list cleanup every day at 6:30 PM AEST
@@ -603,9 +586,8 @@ object BotApp extends App with StrictLogging {
   private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
+  // Unused
 
-
-  //WIP
   private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"

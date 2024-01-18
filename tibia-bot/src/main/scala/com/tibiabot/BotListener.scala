@@ -114,39 +114,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val footer = if (!embed.isEmpty) Option(embed.get(0).getFooter) else None
     val tagId = footer.map(_.getText.replace("Tag: ", "")).getOrElse("")
 
-    /**
-    if (button == "galthen board") {
-      event.deferReply(true).queue()
-      //WIP
-      val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
-      satchelTimeOption match {
-        case Some(satchelTimeList) =>
-          val fullList = satchelTimeList.collect {
-            case satchel =>
-              val when = satchel.when.plusDays(30).toEpochSecond.toString()
-              val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
-              s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
-          } else {
-            embed.setColor(178877)
-            embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
-              Button.success("galthenSet", "Collected"),
-              Button.danger("galthenRemove", "Clear").asDisabled
-            ).queue()
-          }
-        // /HERE
-        case None =>
-          embed.setColor(178877)
-          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
-            Button.success("galthenSet", "Collected"),
-            Button.danger("galthenRemove", "Clear").asDisabled
-          ).queue()
-      }
-    } else
-    **/
     if (button == "galthenSet") {
       event.deferEdit().queue();
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
@@ -211,7 +178,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       replyEmbed.setDescription(responseText)
       event.getHook.sendMessageEmbeds(replyEmbed.build()).queue()
     } else if (button == "boosted add") {
-      //WIP
       val inputWindow = TextInput.create("boosted add", "Boss or Creature name", TextInputStyle.SHORT)
         .setPlaceholder("Grand Master Oberon")
         .build()
@@ -224,7 +190,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.replyModal(modal).queue()
     } else if (button == "boosted list") {
       event.deferReply(true).queue()
-      //WIP
       val allCheck = BotApp.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boosted(event.getUser.getId, "list", "")
@@ -244,7 +209,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else if (button == "boosted toggle") {
       event.deferEdit().queue()
 
-      //WIP
       val allCheck = BotApp.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boosted(event.getUser.getId, "toggle", "all")
