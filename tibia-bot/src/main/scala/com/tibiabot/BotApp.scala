@@ -130,7 +130,6 @@ object BotApp extends App with StrictLogging {
   }
 
   // Combine both futures and send the message
-  private var updateOnOdd = true
   val bossesFutures: Future[List[String]] = for {
     bosses <- bossFuture
   } yield bosses
@@ -409,7 +408,7 @@ object BotApp extends App with StrictLogging {
       new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)
         .addChoices(
           new Choice("list", "list"),
-          new Choice("clear", "clear")
+          new Choice("disable", "disable")
         )
     )
 
@@ -441,22 +440,22 @@ object BotApp extends App with StrictLogging {
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 5.minutes) {
-    if (Config.prod && updateOnOdd) {
+  actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
+    if (Config.prod) {
       updateDashboard()
     }
     // set activity status
     // only do this every second cycle
-    if (updateOnOdd) {
-      removeDeathsCache(ZonedDateTime.now())
-      removeLevelsCache(ZonedDateTime.now())
-      cleanHuntedList()
-      cleanGalthenList()
-      updateOnOdd = !updateOnOdd // Toggle the flag
-    }
+    removeDeathsCache(ZonedDateTime.now())
+    removeLevelsCache(ZonedDateTime.now())
+    cleanHuntedList()
+    cleanGalthenList()
+  }
+
+  actorSystem.scheduler.schedule(60.seconds, 1.minutes) {
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
-    if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
+    if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 15))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
