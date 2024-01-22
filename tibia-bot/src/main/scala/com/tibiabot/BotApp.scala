@@ -533,7 +533,10 @@ object BotApp extends App with StrictLogging {
                   if (user != null) {
                     try {
                       user.openPrivateChannel().queue { privateChannel =>
-                        privateChannel.sendMessageEmbeds(embeds.asJava).queue()
+                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
+                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        ).queue()
                       }
                     } catch {
                       case ex: Exception => //
