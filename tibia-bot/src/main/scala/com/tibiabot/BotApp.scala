@@ -493,7 +493,7 @@ object BotApp extends App with StrictLogging {
                 boostedMonsterUpdate("", boostedCreature)
               }
               (
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
                 boostedCreature != currentCreature && currentCreature != "None",
                 boostedCreature
               )
@@ -3237,7 +3237,7 @@ object BotApp extends App with StrictLogging {
             val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
               case Right(creatureResponse) =>
                 val boostedCreature = creatureResponse.creatures.boosted.name
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
 
               case Left(errorMessage) =>
                 val boostedCreature = "Podium_of_Tenacity"
@@ -4716,7 +4716,7 @@ object BotApp extends App with StrictLogging {
           val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
-              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
 
             case Left(errorMessage) =>
               val boostedCreature = "Podium_of_Tenacity"
