@@ -523,7 +523,7 @@ object BotApp extends App with StrictLogging {
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName == entry.boostedName || entry.boostedName == "all")
+                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all")
                   {
                     matchedNotification = true
                   }
