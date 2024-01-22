@@ -824,7 +824,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
 
-    if (toggleOption == "clear") { // "disabled"
+    if (toggleOption == "disable") { // "disabled"
       val embed = BotApp.boosted(event.getUser.getId, "disable", "")
       event.getHook.sendMessageEmbeds(embed).queue()
     } else if (toggleOption == "list") {

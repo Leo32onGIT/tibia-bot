@@ -409,7 +409,7 @@ object BotApp extends App with StrictLogging {
       new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)
         .addChoices(
           new Choice("list", "list"),
-          new Choice("clear", "clear")
+          new Choice("disable", "disable")
         )
     )
 
