@@ -5285,6 +5285,15 @@ object BotApp extends App with StrictLogging {
             }
           }.mkString("\n")
         embedMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
+        val combinedMessage = embedMessage
+        if (combinedMessage.size >= 4096) {
+          val substituteText = "\n\n*`...cannot display any more results`*"
+          val lastLineIndex = embedMessage.lastIndexOf('\n', (4090 - (substituteText.size)))
+          val truncatedMessage = embedMessage.substring(0, lastLineIndex)
+          embedMessage = truncatedMessage + substituteText
+        } else {
+          embedMessage = combinedMessage
+        }
       } else {
         embedMessage = s"${Config.letterEmoji} Your notification list is *empty*."
       }
@@ -5339,7 +5348,15 @@ object BotApp extends App with StrictLogging {
                 }.mkString("\n")
               val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
               val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
-              embedMessage = listMessage + s"\n\n$commandMessage"
+              val combinedMessage = listMessage + s"\n\n$commandMessage"
+              if (combinedMessage.size >= 4096) {
+                val substituteText = "\n\n*`...cannot display any more results`*"
+                val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+                val truncatedMessage = listMessage.substring(0, lastLineIndex)
+                embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+              } else {
+                embedMessage = combinedMessage
+              }
             } else {
               val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
               val preparedStatement = conn.prepareStatement(query)
@@ -5369,10 +5386,18 @@ object BotApp extends App with StrictLogging {
                     s"$emoji $nameWithLink"
                   }
                 }.mkString("\n")
-
               val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
               val commandMessage = s"${Config.yesEmoji} **$sanitizedName** was added."
-              embedMessage = listMessage + s"\n\n$commandMessage"
+              //WIP
+              val combinedMessage = listMessage + s"\n\n$commandMessage"
+              if (combinedMessage.size >= 4096) {
+                val substituteText = "\n\n*`...cannot display any more results`*"
+                val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+                val truncatedMessage = listMessage.substring(0, lastLineIndex)
+                embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+              } else {
+                embedMessage = combinedMessage
+              }
             }
           }
         }
@@ -5413,7 +5438,15 @@ object BotApp extends App with StrictLogging {
           }.mkString("\n")
         val listMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
         val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
-        embedMessage = listMessage + s"\n\n$commandMessage"
+        val combinedMessage = listMessage + s"\n\n$commandMessage"
+        if (combinedMessage.size >= 4096) {
+          val substituteText = "\n\n*`...cannot display any more results`*"
+          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+          val truncatedMessage = listMessage.substring(0, lastLineIndex)
+          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+        } else {
+          embedMessage = combinedMessage
+        }
       }
     } else if (boostedOption == "remove"){
       val filteredGroupedAndSorted = existingNames
@@ -5455,13 +5488,29 @@ object BotApp extends App with StrictLogging {
 
         val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
         val commandMessage = s"${Config.yesEmoji} you removed **$sanitizedName** from the list."
-        embedMessage = listMessage + s"\n\n$commandMessage"
+        val combinedMessage = listMessage + s"\n\n$commandMessage"
+        if (combinedMessage.size >= 4096) {
+          val substituteText = "\n\n*`...cannot display any more results`*"
+          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+          val truncatedMessage = listMessage.substring(0, lastLineIndex)
+          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+        } else {
+          embedMessage = combinedMessage
+        }
 
       } else {
 
         val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
         val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not on your list."
-        embedMessage = listMessage + s"\n\n$commandMessage"
+        val combinedMessage = listMessage + s"\n\n$commandMessage"
+        if (combinedMessage.size >= 4096) {
+          val substituteText = "\n\n*`...cannot display any more results`*"
+          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+          val truncatedMessage = listMessage.substring(0, lastLineIndex)
+          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+        } else {
+          embedMessage = combinedMessage
+        }
       }
       //
     } else if (boostedOption == "toggle"){
