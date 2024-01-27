@@ -92,7 +92,17 @@ class BotListener extends ListenerAdapter with StrictLogging {
          "magma" -> "magma bubble",
          "rotten final" -> "bakragore",
          "yselda" -> "megasylvan yselda",
-         "zelos" -> "king zelos"
+         "zelos" -> "king zelos",
+         "despor" -> "dragon pack",
+         "dragon hoard" -> "dragon pack",
+         "vengar" -> "dragon pack",
+         "maliz" -> "dragon pack",
+         "bruton" -> "dragon pack",
+         "greedok" -> "dragon pack",
+         "vilear" -> "dragon pack",
+         "crultor" -> "dragon pack",
+         "dragon boss" -> "dragon pack",
+         "dragon bosses" -> "dragon pack"
        )
        if (shortName.contains(inputName)) {
          inputName = shortName(inputName)
