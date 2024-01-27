@@ -452,10 +452,10 @@ object BotApp extends App with StrictLogging {
     cleanGalthenList()
   }
 
-  actorSystem.scheduler.schedule(60.seconds, 1.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 5.minutes) {
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
-    if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
+    if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
