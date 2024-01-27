@@ -81,6 +81,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     } yield unmarshalled
   }
 
+  /**
   // unused
   def getCreature(creature: String): Future[Either[String, RaceResponse]] = {
     val encodedCreature = URLEncoder.encode(creature, "UTF-8").replaceAll("\\+", "%20")
@@ -100,6 +101,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
         }
     } yield unmarshalled
   }
+  **/
 
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8").replaceAll("\\+", "%20")
