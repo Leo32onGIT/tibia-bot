@@ -1,4 +1,4 @@
-name := "tibia-bot"
+name := "violent-bot"
 version := "1.9"
 
 scalaVersion := "2.13.9"
