@@ -84,17 +84,34 @@ class BotListener extends ListenerAdapter with StrictLogging {
      val modalValues = event.getValues.asScala.toList
      modalValues.map { element =>
        val id = element.getId
+       var inputName = element.getAsString.trim.toLowerCase
+       val shortName = Map(
+         "oberon" -> "grand master oberon",
+         "scarlett" -> "scarlett etzel",
+         "scarlet" -> "scarlett etzel",
+         "timira" -> "timira the many-headed",
+         "timira the many headed" -> "timira the many-headed",
+         "timira many headed" -> "timira the many-headed",
+         "timira many-headed" -> "timira the many-headed",
+         "magma" -> "magma bubble",
+         "rotten final" -> "bakragore",
+         "yselda" -> "megasylvan yselda"
+       )
+
+       if (shortName.contains(inputName)) {
+         inputName = shortName(inputName)
+       }
        // Your code here based on the id, for example:
        if (id == "boosted add") {
          // WIP
-         val newEmbed = BotApp.boosted(user.getId, "add", element.getAsString)
+         val newEmbed = BotApp.boosted(user.getId, "add", inputName)
          event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
            Button.success("boosted add", "Add"),
            Button.danger("boosted remove", "Remove"),
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
          ).queue()
        } else if (id == "boosted remove") {
-         val newEmbed = BotApp.boosted(user.getId, "remove", element.getAsString)
+         val newEmbed = BotApp.boosted(user.getId, "remove", inputName)
          event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
            Button.success("boosted add", "Add"),
            Button.danger("boosted remove", "Remove"),
