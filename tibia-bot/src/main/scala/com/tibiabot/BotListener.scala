@@ -149,14 +149,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.deferEdit().queue()
       BotApp.delGalthen(user.getId, tagId)
       val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
-      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker for $tagDisplay has been **Disabled**."
+      responseText = s"<:satchel:1030348072577945651> cooldown tracker for $tagDisplay has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
     } else if (button == "galthenRemoveAll") {
       event.deferEdit().queue()
       BotApp.delAllGalthen(user.getId)
-      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
+      responseText = s"<:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
@@ -239,8 +239,77 @@ class BotListener extends ListenerAdapter with StrictLogging {
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
         ).queue()
       }
+    } else if (button == "galthen default") {
+      event.deferReply(true).queue()
+      val embed = new EmbedBuilder()
 
-    }  else {
+      val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
+      satchelTimeOption match {
+        //
+        case Some(satchelTimeList) if satchelTimeList.isEmpty =>
+          embed.setColor(178877)
+          embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected"),
+            Button.danger("galthenRemove", "Clear").asDisabled
+          ).queue()
+        //
+        case Some(satchelTimeList) =>
+          val tagList = satchelTimeList.collect {
+            case satchel =>
+              val when = satchel.when.plusDays(30).toEpochSecond.toString()
+              s"<:satchel:1030348072577945651> can be collected by **`${satchel.tag}`** <t:$when:R>"
+          }
+
+          val fullList = satchelTimeList.collect {
+            case satchel =>
+              val when = satchel.when.plusDays(30).toEpochSecond.toString()
+              val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+              s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
+          }
+
+          if (fullList.nonEmpty) {
+            embed.setTitle("Existing Cooldowns:")
+            val descriptionTruncate = fullList.mkString("\n")
+            if (descriptionTruncate.length > 4050) {
+              val truncatedDescription = descriptionTruncate.substring(0, 4050)
+              val lastNewLineIndex = truncatedDescription.lastIndexOf("\n")
+              val finalDescription = if (lastNewLineIndex >= 0) truncatedDescription.substring(0, lastNewLineIndex) else truncatedDescription
+              embed.setDescription(finalDescription)
+            } else {
+              embed.setDescription(descriptionTruncate)
+            }
+            embed.setColor(13773097)
+            if (fullList.size == 1){
+              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+                Button.success("galthenSet", "Collected").asDisabled,
+                Button.danger("galthenRemoveAll", "Clear")
+              ).queue()
+            } else {
+              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+                Button.secondary("galthenLock", "🔒"),
+                Button.danger("galthenRemoveAll", "Clear All").asDisabled
+              ).queue()
+            }
+          } else {
+            embed.setColor(178877)
+            embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.success("galthenSet", "Collected"),
+              Button.danger("galthenRemove", "Clear").asDisabled
+            ).queue()
+          }
+        // /HERE
+        case None =>
+          embed.setColor(178877)
+          embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected"),
+            Button.danger("galthenRemove", "Clear").asDisabled
+          ).queue()
+        //
+      }
+    } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
       if (roleType == "fullbless") {
@@ -385,16 +454,15 @@ class BotListener extends ListenerAdapter with StrictLogging {
   private def handleGalthen(event: SlashCommandInteractionEvent): Unit = {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val tagOption: String = options.getOrElse("character", "")
-    val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
     val embed = new EmbedBuilder()
 
+    val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
     satchelTimeOption match {
       //
       case Some(satchelTimeList) if satchelTimeList.isEmpty =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled
@@ -426,7 +494,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
             embed.setDescription(descriptionTruncate)
           }
           embed.setColor(13773097)
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           if (fullList.size == 1){
             event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenSet", "Collected").asDisabled,
@@ -450,8 +517,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         } else {
           embed.setColor(178877)
           if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
           event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
             Button.success("galthenSet", "Collected"),
             Button.danger("galthenRemove", "Clear").asDisabled
@@ -461,8 +527,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case None =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        embed.setDescription("Mark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled

@@ -3205,7 +3205,7 @@ object BotApp extends App with StrictLogging {
               .complete()
             adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             // create boosted board
-            val boostedChannel = guild.createTextChannel("boosted", adminCategory).complete()
+            val boostedChannel = guild.createTextChannel("extras", adminCategory).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3213,12 +3213,20 @@ object BotApp extends App with StrictLogging {
             discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
           } else {
             // admin category still exists
-            val boostedChannel = guild.createTextChannel("boosted", adminCategoryCheck).complete()
+            val boostedChannel = guild.createTextChannel("extras", adminCategoryCheck).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+
+            val galthenEmbed = new EmbedBuilder()
+            galthenEmbed.setColor(3092790)
+            galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+            galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted("<:satchel:1030348072577945651>"))
+            ).queue()
 
             // Boosted Boss
             val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -4677,7 +4685,7 @@ object BotApp extends App with StrictLogging {
             adminCategory = newAdminCategory
           }
           // create the channel
-          val newBoostedChannel = guild.createTextChannel("boosted", adminCategory).complete()
+          val newBoostedChannel = guild.createTextChannel("extras", adminCategory).complete()
 
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
@@ -4698,6 +4706,14 @@ object BotApp extends App with StrictLogging {
           boostedChannel.upsertPermissionOverride(publicRole)
             .deny(Permission.MESSAGE_SEND)
             .complete()
+
+          val galthenEmbed = new EmbedBuilder()
+          galthenEmbed.setColor(3092790)
+          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+          galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          newBoostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted("<:satchel:1030348072577945651>"))
+          ).queue()
 
           // Boosted Boss
           val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
