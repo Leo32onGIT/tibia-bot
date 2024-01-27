@@ -95,15 +95,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
          "timira many-headed" -> "timira the many-headed",
          "magma" -> "magma bubble",
          "rotten final" -> "bakragore",
-         "yselda" -> "megasylvan yselda"
+         "yselda" -> "megasylvan yselda",
+         "zelos" -> "king zelos"
        )
-
        if (shortName.contains(inputName)) {
          inputName = shortName(inputName)
        }
-       // Your code here based on the id, for example:
        if (id == "boosted add") {
-         // WIP
          val newEmbed = BotApp.boosted(user.getId, "add", inputName)
          event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
            Button.success("boosted add", "Add"),
@@ -118,7 +116,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
          ).queue()
        } else {
-         // val newEmbed = BotApp.boosted(user.getId, "remove", removeSubmit)
          // Do something else
        }
      }
