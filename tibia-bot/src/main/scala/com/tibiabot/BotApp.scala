@@ -455,7 +455,7 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.schedule(60.seconds, 1.minutes) {
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
-    if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 15))) {
+    if (currentTime.isAfter(LocalTime.of(19,0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -466,7 +466,7 @@ object BotApp extends App with StrictLogging {
           val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              if (boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss != "None") {
+              if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
                 boostedMonsterUpdate(boostedBoss, "")
               }
               (
@@ -489,7 +489,7 @@ object BotApp extends App with StrictLogging {
           val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
-              if (boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature != "None") {
+              if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
                 boostedMonsterUpdate("", boostedCreature)
               }
               (
@@ -5394,9 +5394,6 @@ object BotApp extends App with StrictLogging {
           } else {
             // Check if sanitizedName exists in boostedBossesList
             val isBoostedBoss = boostedBossesList.contains(sanitizedName)
-
-            // Check if sanitizedName is a valid creature
-            //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
             val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
             val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
             if (monsterType == "all") {
@@ -5479,14 +5476,6 @@ object BotApp extends App with StrictLogging {
         val isBoostedBoss = boostedBossesList.contains(sanitizedName)
 
         // Check if sanitizedName is a valid creature
-        /**
-        val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
-        val creatureCheck: Future[Boolean] = boostedCreature.map {
-          case Right(raceResponse) =>
-          raceResponse.creature.isDefined
-          case Left(errorMessage) => false
-        }
-        **/
         val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
         val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
         val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
