@@ -5396,15 +5396,9 @@ object BotApp extends App with StrictLogging {
             val isBoostedBoss = boostedBossesList.contains(sanitizedName)
 
             // Check if sanitizedName is a valid creature
-            val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
-            val creatureCheck: Future[Boolean] = boostedCreature.map {
-              case Right(raceResponse) =>
-              raceResponse.creature.isDefined
-              case Left(errorMessage) => false
-            }
-
-            val creatureValue: Boolean = Await.result(creatureCheck, 10.seconds)
-            val monsterType = if (isBoostedBoss) "boss" else if (creatureValue) "creature" else "all"
+            //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
+            val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
+            val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
             if (monsterType == "all") {
               val groupedAndSorted = existingNames
                 .groupBy(_.boostedType)
@@ -5485,15 +5479,16 @@ object BotApp extends App with StrictLogging {
         val isBoostedBoss = boostedBossesList.contains(sanitizedName)
 
         // Check if sanitizedName is a valid creature
+        /**
         val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
         val creatureCheck: Future[Boolean] = boostedCreature.map {
           case Right(raceResponse) =>
           raceResponse.creature.isDefined
           case Left(errorMessage) => false
         }
-
-        val creatureValue: Boolean = Await.result(creatureCheck, 10.seconds)
-        val monsterType = if (isBoostedBoss) "boss" else if (creatureValue) "creature" else "all"
+        **/
+        val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
+        val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
         val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
         val newNames = existingNames :+ BoostedStamp(userId, monsterType, boostedName)
         val groupedAndSorted = newNames
