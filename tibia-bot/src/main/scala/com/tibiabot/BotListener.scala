@@ -184,33 +184,118 @@ class BotListener extends ListenerAdapter with StrictLogging {
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
          ).queue()
        } else if (id == "galthen add") {
+
          val newEmbed = new EmbedBuilder()
          val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
          val tagDisplay = element.getAsString.trim.toLowerCase
-         val replyMessage = s"${Config.satchelEmoji} can be collected by **`$tagDisplay`** <t:$when:R>"
-         newEmbed.setDescription(replyMessage)
-         newEmbed.setColor(178877)
+         newEmbed.setColor(3092790)
          if (tagDisplay.toLowerCase == user.getName.toLowerCase) {
            BotApp.addGalthen(user.getId, ZonedDateTime.now(), "")
          } else {
            BotApp.addGalthen(user.getId, ZonedDateTime.now(), tagDisplay)
          }
-         event.getHook().editOriginalEmbeds(newEmbed.build).setComponents().queue()
+         var editedMessage = ""
+         var oneRecord = false
+         val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
+         satchelTimeOption match {
+           case Some(satchelTimeList) =>
+             val fullList = satchelTimeList.collect {
+               case satchel =>
+                 val when = satchel.when.plusDays(30).toEpochSecond.toString()
+                 val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+                 s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
+             }
+             if (fullList.nonEmpty) {
+               newEmbed.setTitle("Existing Cooldowns:")
+               if (fullList.size == 1) {
+                 oneRecord = true
+                 editedMessage = fullList.mkString
+               } else {
+                 val descriptionTruncate = fullList.mkString("\n")
+                 if (descriptionTruncate.length > 4050) {
+                   val truncatedDescription = descriptionTruncate.substring(0, 4050)
+                   val lastNewLineIndex = truncatedDescription.lastIndexOf("\n")
+                   val finalDescription = if (lastNewLineIndex >= 0) truncatedDescription.substring(0, lastNewLineIndex) else truncatedDescription
+                   //newEmbed.setDescription(finalDescription)
+                   editedMessage = finalDescription
+                 } else {
+                   //newEmbed.setDescription(descriptionTruncate)
+                   editedMessage = descriptionTruncate
+                 }
+               }
+             }
+           case None => //
+         }
+         val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **added**."
+         newEmbed.setDescription(editedMessage + replyMessage)
+         if (oneRecord) {
+           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
+               Button.danger("galthenRemoveAll", "Remove")
+             ).queue()
+         } else {
+           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
+               Button.danger("galthenButtonRem", "Remove"),
+               Button.secondary("galthenRemoveAll", "Clear All")
+             ).queue()
+         }
        } else if (id == "galthen rem") {
          val newEmbed = new EmbedBuilder()
          val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
          val tagDisplay = element.getAsString.trim.toLowerCase
-         val replyMessage = s"${Config.satchelEmoji} cooldown tracker for **`$tagDisplay`** has been **Disabled**."
-         newEmbed.setDescription(replyMessage)
-         newEmbed.setColor(178877)
+         newEmbed.setColor(3092790)
          if (tagDisplay.toLowerCase == user.getName.toLowerCase) {
            BotApp.delGalthen(user.getId, "")
          } else {
            BotApp.delGalthen(user.getId, tagDisplay)
          }
-         event.getHook().editOriginalEmbeds(newEmbed.build).setComponents().queue()
-       } else {
-         // Do something else
+         var editedMessage = ""
+         var oneRecord = false
+         val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
+         satchelTimeOption match {
+           case Some(satchelTimeList) =>
+             val fullList = satchelTimeList.collect {
+               case satchel =>
+                 val when = satchel.when.plusDays(30).toEpochSecond.toString()
+                 val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+                 s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
+             }
+             if (fullList.nonEmpty) {
+               newEmbed.setTitle("Existing Cooldowns:")
+               if (fullList.size == 1) {
+                 oneRecord = true
+                 editedMessage = fullList.mkString
+               } else {
+                 val descriptionTruncate = fullList.mkString("\n")
+                 if (descriptionTruncate.length > 4050) {
+                   val truncatedDescription = descriptionTruncate.substring(0, 4050)
+                   val lastNewLineIndex = truncatedDescription.lastIndexOf("\n")
+                   val finalDescription = if (lastNewLineIndex >= 0) truncatedDescription.substring(0, lastNewLineIndex) else truncatedDescription
+                   //newEmbed.setDescription(finalDescription)
+                   editedMessage = finalDescription
+                 } else {
+                   //newEmbed.setDescription(descriptionTruncate)
+                   editedMessage = descriptionTruncate
+                 }
+               }
+             }
+           case None => // WIP
+         }
+         val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **Disabled**."
+         newEmbed.setDescription(editedMessage + replyMessage)
+         if (oneRecord) {
+           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
+               Button.danger("galthenRemoveAll", "Remove")
+             ).queue()
+         } else {
+           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
+               Button.danger("galthenButtonRem", "Remove"),
+               Button.secondary("galthenRemoveAll", "Clear All")
+             ).queue()
+         }
        }
      }
    }
@@ -357,12 +442,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
           ).queue()
         //
         case Some(satchelTimeList) =>
-          val tagList = satchelTimeList.collect {
-            case satchel =>
-              val when = satchel.when.plusDays(30).toEpochSecond.toString()
-              s"${Config.satchelEmoji} can be collected by **`${satchel.tag}`** <t:$when:R>"
-          }
-
           val fullList = satchelTimeList.collect {
             case satchel =>
               val when = satchel.when.plusDays(30).toEpochSecond.toString()
@@ -599,6 +678,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               Button.danger("galthenRemoveAll", "Remove")
             ).queue()
           } else {
+            // multiple
             event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
               Button.danger("galthenButtonRem", "Remove"),
