@@ -440,7 +440,7 @@ object BotApp extends App with StrictLogging {
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 15.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 30.minutes) {
     if (Config.prod) {
       updateDashboard()
     }
@@ -1384,7 +1384,7 @@ object BotApp extends App with StrictLogging {
 
     // Modify the DELETE statement to include a WHERE clause with the condition for time
     val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
-    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(7, ChronoUnit.DAYS).toInstant))
+    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(180, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
     deleteStatement.close()
     conn.close()
@@ -1418,7 +1418,7 @@ object BotApp extends App with StrictLogging {
             val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
             embed.setColor(178877)
             embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            embed.setDescription(s"${Config.satchelEmoji} cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you: ```when the 30 day cooldown expires```")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")
@@ -3225,7 +3225,7 @@ object BotApp extends App with StrictLogging {
             galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
             galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
             boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted("<:satchel:1030348072577945651>"))
+              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
             ).queue()
 
             // Boosted Boss
@@ -4712,7 +4712,7 @@ object BotApp extends App with StrictLogging {
           galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
           galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           newBoostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted("<:satchel:1030348072577945651>"))
+            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
           ).queue()
 
           // Boosted Boss
@@ -4780,7 +4780,7 @@ object BotApp extends App with StrictLogging {
         // recreate admin channel and/or category
         if (adminChannel == null) {
           if (adminCategory == null) {
-            val newAdminCategory = guild.createCategory("Violent Bot Administration").complete()
+            val newAdminCategory = guild.createCategory("Violent Bot").complete()
             newAdminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)

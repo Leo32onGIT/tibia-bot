@@ -81,28 +81,6 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     } yield unmarshalled
   }
 
-  /**
-  // unused
-  def getCreature(creature: String): Future[Either[String, RaceResponse]] = {
-    val encodedCreature = URLEncoder.encode(creature, "UTF-8").replaceAll("\\+", "%20")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/creature/$encodedCreature"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[RaceResponse].map(Right(_))
-        .recover {
-          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
-            val errorMessage = s"Failed to get creature check with status: '${response.status}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-          case e @ (_: ParsingException | _: DeserializationException) =>
-            val errorMessage = s"Failed to parse creature check"
-            logger.warn(e.getMessage)
-            Left(errorMessage)
-        }
-    } yield unmarshalled
-  }
-  **/
-
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8").replaceAll("\\+", "%20")
     for {
