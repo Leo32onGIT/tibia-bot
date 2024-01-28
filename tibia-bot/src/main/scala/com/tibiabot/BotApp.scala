@@ -557,19 +557,17 @@ object BotApp extends App with StrictLogging {
                     catch {
                       case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                     }
-                    boostedChannel.sendMessageEmbeds(embeds.asJava)
-                      .setActionRow(
-                        Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                      )
-                      .queue((message: Message) => {
-                        updateBoostedMessage(guild.getId, message.getId)
-                        discordUpdateConfig(guild, "", "", "", message.getId)
-                      }, (e: Throwable) => {
-                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                      }
-                    )
+                    try {
+                      val completeMessage = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(
+                          Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        ).complete()
+                      updateBoostedMessage(guild.getId, completeMessage.getId)
+                      discordUpdateConfig(guild, "", "", "", completeMessage.getId)
+                    } catch {
+                      case _ : Throwable => logger.warn(s"Failed to send the boosted boss creature message in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                    }
                   } else {
-                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': Due to no VIEW/SEND permissions")
                   }
                 }
               }
@@ -3258,18 +3256,16 @@ object BotApp extends App with StrictLogging {
               creatureEmbed <- creatureEmbedFuture
             } yield List(bossEmbed, creatureEmbed)
 
-            combinedFutures
-              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-                .setActionRow(
-                  Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                  updateBoostedMessage(guild.getId, message.getId)
-                  discordUpdateConfig(guild, "", "", "", message.getId)
-                }, (e: Throwable) => {
+            combinedFutures.map { embeds =>
+              try {
+                val completeMessage = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))).complete()
+                updateBoostedMessage(guild.getId, completeMessage.getId)
+                discordUpdateConfig(guild, "", "", "", completeMessage.getId)
+              } catch {
+                case e: Exception =>
                   logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                })
-              )
+              }
+            }
           }
         }
       }
@@ -4745,18 +4741,16 @@ object BotApp extends App with StrictLogging {
             creatureEmbed <- creatureEmbedFuture
           } yield List(bossEmbed, creatureEmbed)
 
-          combinedFutures
-            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-              .setActionRow(
-                Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-              )
-              .queue((message: Message) => {
-                updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId)
-              }, (e: Throwable) => {
+          combinedFutures.map { embeds =>
+            try {
+              val completeMessage = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))).complete()
+              updateBoostedMessage(guild.getId, completeMessage.getId)
+              discordUpdateConfig(guild, "", "", "", completeMessage.getId)
+            } catch {
+              case e: Exception =>
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-              })
-            )
+            }
+          }
         }
         // apply required permissions to the new channel(s)
         if (channelList.nonEmpty) {
