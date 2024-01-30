@@ -677,7 +677,7 @@ object BotApp extends App with StrictLogging {
                       case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                     }
                   }
-                  val boostedMessagePost = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji)).complete()
+                  val boostedMessagePost = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))).complete()
                   discordUpdateConfig(guild, "", "", "", boostedMessagePost.getId)
                   println("end")
                 } else {
