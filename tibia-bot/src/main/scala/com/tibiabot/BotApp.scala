@@ -696,6 +696,7 @@ object BotApp extends App with StrictLogging {
     catch {
       case _ : Throwable => logger.info("Failed to update the boosted board messages")
     }
+    replyEmbed.setDescription(replyText)
     replyEmbed.build()
   }
 
