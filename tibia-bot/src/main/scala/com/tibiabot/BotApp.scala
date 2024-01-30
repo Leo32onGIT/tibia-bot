@@ -522,8 +522,7 @@ object BotApp extends App with StrictLogging {
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all")
-                  {
+                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all") {
                     matchedNotification = true
                   }
                 }
@@ -538,48 +537,44 @@ object BotApp extends App with StrictLogging {
                         ).queue()
                       }
                     } catch {
-                      case ex: Exception => //
+                      case ex: Exception => // Handle the exception appropriately
                     }
                   }
                 }
               }
 
-              jda.getGuildCache.forEach { cachedGuild =>
-                val guild = jda.getGuildById(cachedGuild.getId)
-                if (guild != null) {
-                  val discordInfo = discordRetrieveConfig(guild)
-                  val guildBoostedChannel = discordInfo("boosted_channel")
-                  if (guildBoostedChannel != "0") {
-                    val boostedChannel = guild.getTextChannelById(guildBoostedChannel)
-                    if (boostedChannel != null) {
-                      if (boostedChannel.canTalk()) {
-                        val boostedMessage = discordInfo("boosted_messageid")
-                        if (boostedMessage != "0") {
-                          try {
-                            boostedChannel.deleteMessageById(boostedMessage).queue()
-                          }
-                          catch {
-                            case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
-                          }
+              jda.getGuilds.forEach { guild =>
+                val discordInfo = discordRetrieveConfig(guild)
+                val channelId = discordInfo("boosted_channel")
+                if (channelId != "0") {
+                  val boostedChannel = guild.getTextChannelById(channelId)
+                  if (boostedChannel != null) {
+                    if (boostedChannel.canTalk()) {
+                      val boostedMessage = discordInfo("boosted_messageid")
+                      if (boostedMessage != "0") {
+                        try {
+                          boostedChannel.deleteMessageById(boostedMessage).queue()
+                        } catch {
+                          case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                         }
-                        boostedChannel.sendMessageEmbeds(embeds.asJava)
-                          .setActionRow(
-                            Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )
-                          .queue((message: Message) => {
-                            updateBoostedMessage(guild.getId, message.getId)
-                            discordUpdateConfig(guild, "", "", "", message.getId)
-                          }, (e: Throwable) => {
-                            logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                          }
-                        )
-                      } else {
-                        logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                       }
+                      boostedChannel.sendMessageEmbeds(embeds.asJava)
+                        .setActionRow(
+                          Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )
+                        .queue((message: Message) => {
+                          //updateBoostedMessage(guild.getId, message.getId)
+                          discordUpdateConfig(guild, "", "", "", message.getId)
+                        }, (e: Throwable) => {
+                          logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                        })
+                    } else {
+                      logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                     }
                   }
                 }
               }
+
             }
           }
         }
@@ -3271,7 +3266,7 @@ object BotApp extends App with StrictLogging {
                   Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                 )
                 .queue((message: Message) => {
-                  updateBoostedMessage(guild.getId, message.getId)
+                  //updateBoostedMessage(guild.getId, message.getId)
                   discordUpdateConfig(guild, "", "", "", message.getId)
                 }, (e: Throwable) => {
                   logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
@@ -4758,7 +4753,7 @@ object BotApp extends App with StrictLogging {
                 Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
               )
               .queue((message: Message) => {
-                updateBoostedMessage(guild.getId, message.getId)
+                //updateBoostedMessage(guild.getId, message.getId)
                 discordUpdateConfig(guild, "", "", "", message.getId)
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
