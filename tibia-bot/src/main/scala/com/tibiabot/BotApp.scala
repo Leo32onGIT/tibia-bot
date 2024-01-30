@@ -658,12 +658,16 @@ object BotApp extends App with StrictLogging {
 
         combinedFutures.map { boostedInfoList =>
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
+          println("embeds")
           jda.getGuilds.forEach { guild =>
             val discordInfo = discordRetrieveConfig(guild)
             val channelId = discordInfo("boosted_channel")
+            println("channel id")
             if (channelId != "0") {
               val boostedChannel = guild.getTextChannelById(channelId)
+              println("channel")
               if (boostedChannel != null) {
+                println("isnt null")
                 if (boostedChannel.canTalk()) {
                   val boostedMessage = discordInfo("boosted_messageid")
                   if (boostedMessage != "0") {
@@ -673,16 +677,9 @@ object BotApp extends App with StrictLogging {
                       case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                     }
                   }
-                  boostedChannel.sendMessageEmbeds(embeds.asJava)
-                    .setActionRow(
-                      Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                    )
-                    .queue((message: Message) => {
-                      //updateBoostedMessage(guild.getId, message.getId)
-                      discordUpdateConfig(guild, "", "", "", message.getId)
-                    }, (e: Throwable) => {
-                      logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                    })
+                  val boostedMessagePost = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji)).complete()
+                  discordUpdateConfig(guild, "", "", "", boostedMessagePost.getId)
+                  println("end")
                 } else {
                   logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                 }
