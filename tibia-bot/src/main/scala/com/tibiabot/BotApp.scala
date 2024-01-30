@@ -896,7 +896,7 @@ object BotApp extends App with StrictLogging {
     // Violent Bot Support discord
     logger.info(s"Updating Violent Bot dashboard...")
 
-    val guildCount = jda.getGuilds.asScala.toList.size
+    val guildCount = jda.getGuildCache.size
     val activeDiscordsCount: Int = worldsData.size
     val worldStreamCount: Int = discordsData.size
     val worldsTrackedCount: Int = worldsData.values.map(_.size).sum
