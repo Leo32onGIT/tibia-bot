@@ -544,32 +544,35 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              jda.getGuilds.forEach { guild =>
-                val discordInfo = discordRetrieveConfig(guild)
-                val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
-
-                if (boostedChannel != null) {
-                  if (boostedChannel.canTalk()) {
-                    // WIP
-                    try {
-                      boostedChannel.deleteMessageById(discordInfo("boosted_messageid")).queue()
-                    }
-                    catch {
-                      case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
-                    }
-                    boostedChannel.sendMessageEmbeds(embeds.asJava)
-                      .setActionRow(
-                        Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                      )
-                      .queue((message: Message) => {
-                        updateBoostedMessage(guild.getId, message.getId)
-                        discordUpdateConfig(guild, "", "", "", message.getId)
-                      }, (e: Throwable) => {
-                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+              jda.getGuildCache.forEach { cachedGuild =>
+                val guild = jda.getGuildById(cachedGuild.getId)
+                if (guild != null) {
+                  val discordInfo = discordRetrieveConfig(guild)
+                  val guildBoostedChannel = discordInfo("boosted_channel")
+                  val boostedChannel = guild.getTextChannelById(guildBoostedChannel)
+                  if (boostedChannel != null) {
+                    if (boostedChannel.canTalk()) {
+                      // WIP
+                      try {
+                        boostedChannel.deleteMessageById(discordInfo("boosted_messageid")).queue()
                       }
-                    )
-                  } else {
-                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                      catch {
+                        case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                      }
+                      boostedChannel.sendMessageEmbeds(embeds.asJava)
+                        .setActionRow(
+                          Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )
+                        .queue((message: Message) => {
+                          updateBoostedMessage(guild.getId, message.getId)
+                          discordUpdateConfig(guild, "", "", "", message.getId)
+                        }, (e: Throwable) => {
+                          logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                        }
+                      )
+                    } else {
+                      logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                    }
                   }
                 }
               }
