@@ -596,7 +596,7 @@ object BotApp extends App with StrictLogging {
   // Unused
 
 
-  private def refreshBoostedBoard(): MessageEmbed = {
+  def refreshBoostedBoard(): MessageEmbed = {
     val replyEmbed = new EmbedBuilder()
     var replyText = s":x: Failed to update the boosted board messages"
     try {
@@ -657,7 +657,6 @@ object BotApp extends App with StrictLogging {
         } yield List(bossEmbed, creatureEmbed)
 
         combinedFutures.map { boostedInfoList =>
-          // Do something if at least one of the embeds changed
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
           jda.getGuilds.forEach { guild =>
             val discordInfo = discordRetrieveConfig(guild)
