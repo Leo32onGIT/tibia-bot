@@ -713,7 +713,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(12))) {
+        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(10))) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
