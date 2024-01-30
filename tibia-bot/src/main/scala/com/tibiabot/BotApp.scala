@@ -412,6 +412,9 @@ object BotApp extends App with StrictLogging {
         )
     )
 
+  private val refreshCommand: SlashCommandData = Commands.slash("refresh", "Refresh the boosted boss and creature for all discords")
+    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
 
   // create the deaths/levels cache db
@@ -423,9 +426,9 @@ object BotApp extends App with StrictLogging {
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
       lazy val adminCommands =
         if (Config.prod)
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand, galthenCommand, boostedCommand)
         else
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else if (g.getIdLong == 912739993015947324L) {
       // they are using Pulsera Bot commands, only /galthen appears here
@@ -591,6 +594,111 @@ object BotApp extends App with StrictLogging {
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
   // Unused
+
+
+  private def refreshBoostedBoard(): MessageEmbed = {
+    val replyEmbed = new EmbedBuilder()
+    var replyText = s":x: Failed to update the boosted board messages"
+    try {
+      boostedMessages().map { boostedBossAndCreature =>
+        val currentBoss = boostedBossAndCreature.boss
+        val currentCreature = boostedBossAndCreature.creature
+
+        // Boosted Boss
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
+              boostedMonsterUpdate(boostedBoss, "")
+            }
+            (
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+              boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
+              boostedBoss
+            )
+
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            (
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?"),
+              false,
+              boostedBoss
+            )
+        }
+
+        // Boosted Creature
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
+              boostedMonsterUpdate("", boostedCreature)
+            }
+            (
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+              boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
+              boostedCreature
+            )
+
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            (
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?"),
+              false,
+              boostedCreature
+            )
+        }
+
+        // Combine both futures and send the message
+        val combinedFutures: Future[List[(MessageEmbed, Boolean, String)]] = for {
+          bossEmbed <- bossEmbedFuture
+          creatureEmbed <- creatureEmbedFuture
+        } yield List(bossEmbed, creatureEmbed)
+
+        combinedFutures.map { boostedInfoList =>
+          // Do something if at least one of the embeds changed
+          val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
+          jda.getGuilds.forEach { guild =>
+            val discordInfo = discordRetrieveConfig(guild)
+            val channelId = discordInfo("boosted_channel")
+            if (channelId != "0") {
+              val boostedChannel = guild.getTextChannelById(channelId)
+              if (boostedChannel != null) {
+                if (boostedChannel.canTalk()) {
+                  val boostedMessage = discordInfo("boosted_messageid")
+                  if (boostedMessage != "0") {
+                    try {
+                      boostedChannel.deleteMessageById(boostedMessage).queue()
+                    } catch {
+                      case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                    }
+                  }
+                  boostedChannel.sendMessageEmbeds(embeds.asJava)
+                    .setActionRow(
+                      Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                    )
+                    .queue((message: Message) => {
+                      //updateBoostedMessage(guild.getId, message.getId)
+                      discordUpdateConfig(guild, "", "", "", message.getId)
+                    }, (e: Throwable) => {
+                      logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                    })
+                } else {
+                  logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                }
+              }
+            }
+          }
+        }
+      }
+      replyText = s":gear: Boosted messages queued for deletion and new ones sent"
+    }
+    catch {
+      case _ : Throwable => logger.info("Failed to update the boosted board messages")
+    }
+    replyEmbed.build()
+  }
 
   private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"

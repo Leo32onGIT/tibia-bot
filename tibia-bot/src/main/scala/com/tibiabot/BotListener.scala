@@ -55,6 +55,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleOnlineList(event)
         case "boosted" =>
           handleBoosted(event)
+        case "refresh" =>
+          handleRefresh(event)
         case _ =>
       }
     } else {
@@ -999,6 +1001,17 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case _ =>
         val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/admin`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+
+  private def handleRefresh(event: SlashCommandInteractionEvent): Unit = {
+    if (event.getUser.getId == "313911524475535364") {
+      val embed = BotApp.refreshBoostedBoard()
+      event.getHook.sendMessageEmbeds(embed).queue()
+    } else {
+      val embedBuilder = new EmbedBuilder()
+      embedBuilder.setDescription(s":x: This command can only be run by **Violent Beams**.")
+      event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
     }
   }
 
