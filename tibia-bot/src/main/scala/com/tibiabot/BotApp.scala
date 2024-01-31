@@ -564,7 +564,7 @@ object BotApp extends App with StrictLogging {
                         }
                         boostedChannel.sendMessageEmbeds(embeds.asJava)
                           .setActionRow(
-                            Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                            Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                           )
                           .queue((message: Message) => {
                             //updateBoostedMessage(guild.getId, message.getId)
@@ -663,11 +663,9 @@ object BotApp extends App with StrictLogging {
             if (checkConfigDatabase(guild)) {
               val discordInfo = discordRetrieveConfig(guild)
               val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-              logger.info(s"guild: ${guild.getId} channel id: $channelId")
               if (channelId != "0") {
                 val boostedChannel = guild.getTextChannelById(channelId)
                 if (boostedChannel != null) {
-                  logger.info("channel found")
                   if (boostedChannel.canTalk()) {
                     val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
                     if (boostedMessage != "0") {
@@ -679,7 +677,7 @@ object BotApp extends App with StrictLogging {
                     }
                     boostedChannel.sendMessageEmbeds(embeds.asJava)
                       .setActionRow(
-                        Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                       )
                       .queue((message: Message) => {
                         //updateBoostedMessage(guild.getId, message.getId)
@@ -687,7 +685,6 @@ object BotApp extends App with StrictLogging {
                       }, (e: Throwable) => {
                         logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                       })
-                    logger.info("message sent")
                   } else {
                     logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                   }
@@ -3321,7 +3318,7 @@ object BotApp extends App with StrictLogging {
               .complete()
             adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             // create boosted board
-            val boostedChannel = guild.createTextChannel("extras", adminCategory).complete()
+            val boostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3329,7 +3326,7 @@ object BotApp extends App with StrictLogging {
             discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
           } else {
             // admin category still exists
-            val boostedChannel = guild.createTextChannel("extras", adminCategoryCheck).complete()
+            val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3377,7 +3374,7 @@ object BotApp extends App with StrictLogging {
             combinedFutures
               .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
                 .setActionRow(
-                  Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                 )
                 .queue((message: Message) => {
                   //updateBoostedMessage(guild.getId, message.getId)
@@ -3412,10 +3409,9 @@ object BotApp extends App with StrictLogging {
         val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
         val activityChannel = guild.createTextChannel("activity", newCategory).complete()
-        val notificationsChannel = guild.createTextChannel("notifications", newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, notificationsChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
         channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
@@ -3430,6 +3426,9 @@ object BotApp extends App with StrictLogging {
             .complete()
         }
         levelsChannel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
+
+        val notificationsConfig = discordRetrieveConfig(guild)
+        val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
 
         // Fullbless Role
         val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
@@ -3507,7 +3506,7 @@ object BotApp extends App with StrictLogging {
         }
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, notificationsId, "0", activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
@@ -4486,21 +4485,33 @@ object BotApp extends App with StrictLogging {
           val fullblessChannelId = worldConfigData("fullbless_channel")
           val channel: TextChannel = guild.getTextChannelById(fullblessChannelId)
           if (channel != null) {
-            val messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(botUser))
+            val messages = channel.getHistory.retrievePast(100).complete().asScala.filter { m =>
+              m.getAuthor.getId.equals(botUser) && !m.isEphemeral
+            }
             if (messages.nonEmpty) {
-              val message = messages.head
-              val roleId = worldConfigData("fullbless_role")
-              val fullblessEmbedText = s"The bot will poke <@&$roleId>\n\nIf an enemy player dies fullbless and is over level `$level`.\nAdd or remove yourself from the role using the buttons below."
-              val fullblessEmbed = new EmbedBuilder()
-              fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-              fullblessEmbed.setThumbnail(Config.aolThumbnail)
-              fullblessEmbed.setColor(3092790)
-              fullblessEmbed.setDescription(fullblessEmbedText)
-              message.editMessageEmbeds(fullblessEmbed.build())
-              .setActionRow(
-                Button.success(s"add", "Add Role"),
-                Button.danger(s"remove", "Remove Role")
-              ).queue()
+              messages.foreach { message =>
+                val messageEmbeds = message.getEmbeds
+                if (messageEmbeds != null && !messageEmbeds.isEmpty){
+                  val messageEmbed = messageEmbeds.get(0)
+                  val messageTitle = messageEmbed.getTitle
+                  if (messageTitle != null) {
+                    if (messageTitle.startsWith(s":crossed_swords: $worldFormal")) {
+                      val roleId = worldConfigData("fullbless_role")
+                      val fullblessEmbedText = s"The bot will poke <@&$roleId>\n\nIf an enemy player dies fullbless and is over level `$level`.\nAdd or remove yourself from the role using the buttons below."
+                      val fullblessEmbed = new EmbedBuilder()
+                      fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+                      fullblessEmbed.setThumbnail(Config.aolThumbnail)
+                      fullblessEmbed.setColor(3092790)
+                      fullblessEmbed.setDescription(fullblessEmbedText)
+                      message.editMessageEmbeds(fullblessEmbed.build())
+                      .setActionRow(
+                        Button.success(s"add", "Add Role"),
+                        Button.danger(s"remove", "Remove Role")
+                      ).queue()
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -4550,7 +4561,7 @@ object BotApp extends App with StrictLogging {
       val levelsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.levelsChannel))
       val deathsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.deathsChannel))
       val activityChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.activityChannel))
-      val notificationsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
+      val fullblessChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
       val onlineCombinedInfo: Option[String] = cache.flatMap(_.headOption.map(_.onlineCombined))
 
       // get admin ids
@@ -4568,13 +4579,21 @@ object BotApp extends App with StrictLogging {
       val levelsChannel = guild.getTextChannelById(levelsChannelInfo.getOrElse("0"))
       val deathsChannel = guild.getTextChannelById(deathsChannelInfo.getOrElse("0"))
       val activityChannel = guild.getTextChannelById(activityChannelInfo.getOrElse("0"))
-      val notificationsChannel = guild.getTextChannelById(notificationsChannelInfo.getOrElse("0"))
       val onlineCombinedVal = onlineCombinedInfo.getOrElse("true")
 
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
+      if (fullblessChannelInfo.getOrElse("0") != "0") {
+        val fullblessChannel = guild.getTextChannelById(fullblessChannelInfo.getOrElse("0"))
+        try {
+          fullblessChannel.delete.queue()
+        } catch {
+          case _: Throwable => //
+        }
+        worldRepairConfig(guild, worldFormal, "fullbless_channel", "0")
+      }
       // check if any of the world channels need to be recreated
-      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || notificationsChannel == null || adminChannel == null || boostedChannel == null) {
+      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || adminChannel == null || boostedChannel == null) {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
@@ -4717,79 +4736,7 @@ object BotApp extends App with StrictLogging {
             recreateActivityChannel.sendMessageEmbeds(activityEmbed.build()).queue()
           }
         }
-        if (notificationsChannel == null) {
-          val recreateFullblessChannel = guild.createTextChannel("notifications", category).complete()
-          channelList += ((recreateFullblessChannel, false))
-          worldRepairConfig(guild, worldFormal, "fullbless_channel", recreateFullblessChannel.getId)
 
-          val worldConfigData = worldRetrieveConfig(guild, world)
-          val fullblessLevel = worldConfigData("fullbless_level")
-          val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
-          val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
-
-          // post fullbless message again
-          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
-          val fullblessEmbed = new EmbedBuilder()
-          fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          fullblessEmbed.setThumbnail(Config.aolThumbnail)
-          fullblessEmbed.setColor(3092790)
-          fullblessEmbed.setDescription(fullblessEmbedText)
-          recreateFullblessChannel.sendMessageEmbeds(fullblessEmbed.build())
-            .setActionRow(
-              Button.success(s"add", "Add Role"),
-              Button.danger(s"remove", "Remove Role")
-            )
-            .queue()
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
-          // update the record in worldsData
-          if (worldsData.contains(guild.getId)) {
-            val worldsList = worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(fullblessChannel = recreateFullblessChannel.getId, fullblessRole = fullblessRole.getId)
-              } else {
-                world
-              }
-            }
-            worldsData += (guild.getId -> updatedWorldsList)
-          }
-          // post nemesis message again
-          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
-          val worldCount = worldConfig(guild)
-          val count = worldCount.length
-          val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-          val nemesisThumbnail = nemesisList(count % nemesisList.size)
-
-          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
-          val nemesisEmbed = new EmbedBuilder()
-          nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-          nemesisEmbed.setColor(3092790)
-          nemesisEmbed.setDescription(nemesisEmbedText)
-          recreateFullblessChannel.sendMessageEmbeds(nemesisEmbed.build())
-            .setActionRow(
-              Button.success("add", "Add Role"),
-              Button.danger("remove", "Remove Role")
-            )
-            .queue()
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
-
-          // update the record in worldsData
-          if (worldsData.contains(guild.getId)) {
-            val worldsList = worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(nemesisChannel = recreateFullblessChannel.getId, nemesisRole = nemesisRole.getId)
-              } else {
-                world
-              }
-            }
-            worldsData += (guild.getId -> updatedWorldsList)
-          }
-        }
         if (boostedChannel == null){
           if (adminCategory == null) {
             val newAdminCategory = guild.createCategory("Violent Bot").complete()
@@ -4801,7 +4748,7 @@ object BotApp extends App with StrictLogging {
             adminCategory = newAdminCategory
           }
           // create the channel
-          val newBoostedChannel = guild.createTextChannel("extras", adminCategory).complete()
+          val newBoostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
 
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
@@ -4864,7 +4811,7 @@ object BotApp extends App with StrictLogging {
           combinedFutures
             .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
               .setActionRow(
-                Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
               )
               .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
@@ -4873,7 +4820,76 @@ object BotApp extends App with StrictLogging {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
             )
+
+          val worldConfigData = worldRetrieveConfig(guild, world)
+          val fullblessLevel = worldConfigData("fullbless_level")
+          val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
+          val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
+
+          // post fullbless message again
+          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
+          val fullblessEmbed = new EmbedBuilder()
+          fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+          fullblessEmbed.setThumbnail(Config.aolThumbnail)
+          fullblessEmbed.setColor(3092790)
+          fullblessEmbed.setDescription(fullblessEmbedText)
+          boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
+            .setActionRow(
+              Button.success(s"add", "Add Role"),
+              Button.danger(s"remove", "Remove Role")
+            )
+            .queue()
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(fullblessChannel = "0", fullblessRole = fullblessRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
+          // post nemesis message again
+          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
+          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+          val worldCount = worldConfig(guild)
+          val count = worldCount.length
+          val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
+          val nemesisThumbnail = nemesisList(count % nemesisList.size)
+
+          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+          val nemesisEmbed = new EmbedBuilder()
+          nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+          nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+          nemesisEmbed.setColor(3092790)
+          nemesisEmbed.setDescription(nemesisEmbedText)
+          boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
+            .setActionRow(
+              Button.success("add", "Add Role"),
+              Button.danger("remove", "Remove Role")
+            )
+            .queue()
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
+
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(nemesisChannel = "0", nemesisRole = nemesisRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
         }
+
         // apply required permissions to the new channel(s)
         if (channelList.nonEmpty) {
           channelList.foreach { case (channel, webhooks) =>
@@ -4928,6 +4944,101 @@ object BotApp extends App with StrictLogging {
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       } else {
         embedBuild.setDescription(s"${Config.noEmoji} No action was taken as all channels for **$worldFormal** still exist.")
+      }
+      if (boostedChannel != null) {
+        var fullblessMessage = false
+        var nemesisMessage = false
+        val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
+          m.getAuthor.getId.equals(botUser) && !m.isEphemeral
+        }
+
+        if (messages.nonEmpty) {
+          messages.foreach { message =>
+            val messageEmbeds = message.getEmbeds
+            if (messageEmbeds != null && !messageEmbeds.isEmpty){
+              val messageEmbed = messageEmbeds.get(0)
+              val messageTitle = messageEmbed.getTitle
+              if (messageTitle != null) {
+                if (messageTitle.startsWith(s":crossed_swords: $worldFormal")) {
+                  fullblessMessage = true
+                } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $worldFormal")) {
+                  nemesisMessage = true
+                }
+              }
+            }
+          }
+        }
+        val worldConfigData = worldRetrieveConfig(guild, world)
+        if (!fullblessMessage){
+          val fullblessLevel = worldConfigData("fullbless_level")
+          val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
+          val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
+
+          // post fullbless message again
+          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
+          val fullblessEmbed = new EmbedBuilder()
+          fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+          fullblessEmbed.setThumbnail(Config.aolThumbnail)
+          fullblessEmbed.setColor(3092790)
+          fullblessEmbed.setDescription(fullblessEmbedText)
+          boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
+            .setActionRow(
+              Button.success(s"add", "Add Role"),
+              Button.danger(s"remove", "Remove Role")
+            )
+            .queue()
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(fullblessChannel = "0", fullblessRole = fullblessRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
+        }
+        if (!nemesisMessage) {
+          // post nemesis message again
+          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
+          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+          val worldCount = worldConfig(guild)
+          val count = worldCount.length
+          val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
+          val nemesisThumbnail = nemesisList(count % nemesisList.size)
+
+          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+          val nemesisEmbed = new EmbedBuilder()
+          nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+          nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+          nemesisEmbed.setColor(3092790)
+          nemesisEmbed.setDescription(nemesisEmbedText)
+          boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
+            .setActionRow(
+              Button.success("add", "Add Role"),
+              Button.danger("remove", "Remove Role")
+            )
+            .queue()
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
+
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(nemesisChannel = "0", nemesisRole = nemesisRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
+        }
       }
     } else {
       embedBuild.setDescription(s"${Config.noEmoji} You cannot run a `/repair` on **$worldFormal** because that world has not been `/setup` yet.")
@@ -5116,6 +5227,9 @@ object BotApp extends App with StrictLogging {
       val worldConfigData = worldRetrieveConfig(guild, world)
       if (worldConfigData.nonEmpty) {
         // get channel ids
+        val discordInfo = discordRetrieveConfig(guild)
+        val boostedChannelId = discordInfo("boosted_channel")
+
         val alliesChannelId = worldConfigData("allies_channel")
         val enemiesChannelId = worldConfigData("enemies_channel")
         val neutralsChannelId = worldConfigData("neutrals_channel")
@@ -5154,6 +5268,37 @@ object BotApp extends App with StrictLogging {
             nemesisRole.delete().queue()
           } catch {
             case ex: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
+        }
+
+        val boostedChannel = guild.getTextChannelById(boostedChannelId)
+        if (boostedChannel != null){
+          val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
+            m.getAuthor.getId.equals(botUser) && !m.isEphemeral
+          }
+          if (messages.nonEmpty) {
+            messages.foreach { message =>
+              val messageEmbeds = message.getEmbeds
+              if (messageEmbeds != null && !messageEmbeds.isEmpty){
+                val messageEmbed = messageEmbeds.get(0)
+                val messageTitle = messageEmbed.getTitle
+                if (messageTitle != null) {
+                  if (messageTitle.startsWith(s":crossed_swords: $world")) {
+                    try {
+                      message.delete.queue()
+                    } catch {
+                      case _: Throwable => //
+                    }
+                  } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $world")) {
+                    try {
+                      message.delete.queue()
+                    } catch {
+                      case _: Throwable => //
+                    }
+                  }
+                }
+              }
+            }
           }
         }
 
