@@ -599,6 +599,7 @@ object BotApp extends App with StrictLogging {
   def refreshBoostedBoard(): MessageEmbed = {
     val replyEmbed = new EmbedBuilder()
     var replyText = s":x: Failed to update the boosted board messages"
+    val guildsList = jda.getGuilds.asScala.toList
     try {
       boostedMessages().map { boostedBossAndCreature =>
         val currentBoss = boostedBossAndCreature.boss
@@ -659,10 +660,10 @@ object BotApp extends App with StrictLogging {
         combinedFutures.map { boostedInfoList =>
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
           println("embeds")
-          jda.getGuilds.forEach { guild =>
+          guildsList.foreach { guild =>
             val discordInfo = discordRetrieveConfig(guild)
             val channelId = discordInfo("boosted_channel")
-            println("channel id")
+            println(s"guild: ${guild.getId} channel id: $channelId")
             if (channelId != "0") {
               val boostedChannel = guild.getTextChannelById(channelId)
               println("channel")
