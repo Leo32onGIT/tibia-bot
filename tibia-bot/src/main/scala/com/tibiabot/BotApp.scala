@@ -4583,8 +4583,13 @@ object BotApp extends App with StrictLogging {
 
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
-      if (fullblessChannelInfo.getOrElse("0") != "0") {
-        val fullblessChannel = guild.getTextChannelById(fullblessChannelInfo.getOrElse("0"))
+      val fullblessChannelId = fullblessChannelInfo.getOrElse("0")
+      if (fullblessChannelId == event.getChannel.getId) {
+        embedBuild.setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
+        return embedBuild.build()
+      }
+      if (fullblessChannelId != "0") {
+        val fullblessChannel = guild.getTextChannelById(fullblessChannelId)
         try {
           fullblessChannel.delete.queue()
         } catch {
@@ -5001,6 +5006,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
+          embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
         }
         if (!nemesisMessage) {
           // post nemesis message again
@@ -5038,6 +5044,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
+          embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
         }
       }
     } else {
