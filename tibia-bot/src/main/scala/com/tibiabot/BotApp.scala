@@ -96,9 +96,7 @@ object BotApp extends App with StrictLogging {
   logger.info("JDA ready")
 
   // get the discord servers the bot is in
-  var guildsBuffer: ListBuffer[Guild] = ListBuffer.empty[Guild]
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
-  guildsBuffer ++= guilds
 
   // stream list
   private var botStreams = Map[String, Streams]()
@@ -548,7 +546,7 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              guildsBuffer.toList.foreach { guild =>
+              jda.getGuilds.forEach { guild =>
                 val discordInfo = discordRetrieveConfig(guild)
                 val channelId = discordInfo("boosted_channel")
                 if (channelId != "0") {
@@ -569,10 +567,7 @@ object BotApp extends App with StrictLogging {
                         )
                         .queue((message: Message) => {
                           //updateBoostedMessage(guild.getId, message.getId)
-                          val guildMessage = message.getGuild
-                          if (guildMessage != null) {
-                            discordUpdateConfig(guildMessage, "", "", "", message.getId)
-                          }
+                          discordUpdateConfig(guild, "", "", "", message.getId)
                         }, (e: Throwable) => {
                           logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                         })
@@ -604,6 +599,7 @@ object BotApp extends App with StrictLogging {
   def refreshBoostedBoard(): MessageEmbed = {
     val replyEmbed = new EmbedBuilder()
     var replyText = s":x: Failed to update the boosted board messages"
+    val guildsList = jda.getGuilds.asScala.toList
     try {
       boostedMessages().map { boostedBossAndCreature =>
         val currentBoss = boostedBossAndCreature.boss
@@ -664,7 +660,7 @@ object BotApp extends App with StrictLogging {
         combinedFutures.map { boostedInfoList =>
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
           println("embeds")
-          guildsBuffer.toList.foreach { guild =>
+          guildsList.foreach { guild =>
             val discordInfo = discordRetrieveConfig(guild)
             val channelId = discordInfo("boosted_channel")
             println(s"guild: ${guild.getId} channel id: $channelId")
@@ -682,19 +678,8 @@ object BotApp extends App with StrictLogging {
                       case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                     }
                   }
-                  boostedChannel.sendMessageEmbeds(embeds.asJava)
-                    .setActionRow(
-                      Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                    )
-                    .queue((message: Message) => {
-                      //updateBoostedMessage(guild.getId, message.getId)
-                      val guildMessage = message.getGuild
-                      if (guildMessage != null) {
-                        discordUpdateConfig(guildMessage, "", "", "", message.getId)
-                      }
-                    }, (e: Throwable) => {
-                      logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                    })
+                  val boostedMessagePost = boostedChannel.sendMessageEmbeds(embeds.asJava).setActionRow(Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))).complete()
+                  discordUpdateConfig(guild, "", "", "", boostedMessagePost.getId)
                   println("end")
                 } else {
                   logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
