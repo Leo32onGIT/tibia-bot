@@ -549,12 +549,12 @@ object BotApp extends App with StrictLogging {
               jda.getGuilds.forEach { guild =>
                 if (checkConfigDatabase(guild)) {
                   val discordInfo = discordRetrieveConfig(guild)
-                  val channelId = discordInfo("boosted_channel")
+                  val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
                   if (channelId != "0") {
                     val boostedChannel = guild.getTextChannelById(channelId)
                     if (boostedChannel != null) {
                       if (boostedChannel.canTalk()) {
-                        val boostedMessage = discordInfo("boosted_messageid")
+                        val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
                         if (boostedMessage != "0") {
                           try {
                             boostedChannel.deleteMessageById(boostedMessage).queue()
