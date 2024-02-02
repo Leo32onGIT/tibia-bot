@@ -3264,6 +3264,9 @@ object BotApp extends App with StrictLogging {
       val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
 
+      val worldCount = worldConfig(guild)
+      val count = worldCount.length
+
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
@@ -3451,8 +3454,6 @@ object BotApp extends App with StrictLogging {
               .queue()
 
             // Nemesis role
-            val worldCount = worldConfig(guild)
-            val count = worldCount.length
             val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
             val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
