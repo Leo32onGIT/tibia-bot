@@ -3289,7 +3289,7 @@ object BotApp extends App with StrictLogging {
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-        discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
+        discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
 
         val galthenEmbed = new EmbedBuilder()
         galthenEmbed.setColor(3092790)
@@ -3342,164 +3342,88 @@ object BotApp extends App with StrictLogging {
             })
           )
       } else {
-        val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
+        var adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
         val boostedChannelCheck = guild.getTextChannelById(discordConfig("boosted_channel"))
-        val boostedIdCheck = guild.getTextChannelById(discordConfig("boosted_messageid"))
+        if (adminCategoryCheck == null) {
+          // admin category has been deleted
+          val adminCategory = guild.createCategory("Violent Bot").complete()
+          adminCategory.upsertPermissionOverride(botRole)
+            .grant(Permission.VIEW_CHANNEL)
+            .grant(Permission.MESSAGE_SEND)
+            .complete()
+          adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, adminCategory.getId, "", "", "")
+          adminCategoryCheck = adminCategory
+        }
         if (adminChannelCheck == null) {
           // admin channel has been deleted
-          if (adminCategoryCheck == null) {
-            // admin category has been deleted
-            val adminCategory = guild.createCategory("Violent Bot").complete()
-            adminCategory.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .complete()
-            adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            // create command-log channel
-            val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId, "", "")
-          } else {
-            // admin category still exists
-            val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, "", adminChannel.getId, "", "")
-          }
+          val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+          adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, "", adminChannel.getId, "", "")
         }
         if (boostedChannelCheck == null) {
-          if (adminCategoryCheck == null) {
-            // admin category has been deleted
-            val adminCategory = guild.createCategory("Violent Bot").complete()
-            adminCategory.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .complete()
-            adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            // create boosted board
-            val boostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
+          // admin category still exists
+          val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+          boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
 
-            val galthenEmbed = new EmbedBuilder()
-            galthenEmbed.setColor(3092790)
-            galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-            galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-            ).queue()
+          val galthenEmbed = new EmbedBuilder()
+          galthenEmbed.setColor(3092790)
+          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+          galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+          ).queue()
 
-            // Boosted Boss
-            val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-            val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-              case Right(boostedResponse) =>
-                val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+          // Boosted Boss
+          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+            case Right(boostedResponse) =>
+              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
 
-              case Left(errorMessage) =>
-                val boostedBoss = "Podium_of_Vigour"
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-            }
-
-            // Boosted Creature
-            val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-            val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-              case Right(creatureResponse) =>
-                val boostedCreature = creatureResponse.creatures.boosted.name
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-              case Left(errorMessage) =>
-                val boostedCreature = "Podium_of_Tenacity"
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-            }
-
-            // Combine both futures and send the message
-            val combinedFutures: Future[List[MessageEmbed]] = for {
-              bossEmbed <- bossEmbedFuture
-              creatureEmbed <- creatureEmbedFuture
-            } yield List(bossEmbed, creatureEmbed)
-
-            combinedFutures
-              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-                .setActionRow(
-                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                  //updateBoostedMessage(guild.getId, message.getId)
-                  discordUpdateConfig(guild, "", "", "", message.getId)
-                }, (e: Throwable) => {
-                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                })
-              )
-          } else {
-            // admin category still exists
-            val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
-
-            val galthenEmbed = new EmbedBuilder()
-            galthenEmbed.setColor(3092790)
-            galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-            galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-            ).queue()
-
-            // Boosted Boss
-            val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-            val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-              case Right(boostedResponse) =>
-                val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-              case Left(errorMessage) =>
-                val boostedBoss = "Podium_of_Vigour"
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-            }
-
-            // Boosted Creature
-            val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-            val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-              case Right(creatureResponse) =>
-                val boostedCreature = creatureResponse.creatures.boosted.name
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-              case Left(errorMessage) =>
-                val boostedCreature = "Podium_of_Tenacity"
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-            }
-
-            // Combine both futures and send the message
-            val combinedFutures: Future[List[MessageEmbed]] = for {
-              bossEmbed <- bossEmbedFuture
-              creatureEmbed <- creatureEmbedFuture
-            } yield List(bossEmbed, creatureEmbed)
-
-            combinedFutures
-              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-                .setActionRow(
-                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                  //updateBoostedMessage(guild.getId, message.getId)
-                  discordUpdateConfig(guild, "", "", "", message.getId)
-                }, (e: Throwable) => {
-                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                })
-              )
+            case Left(errorMessage) =>
+              val boostedBoss = "Podium_of_Vigour"
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
           }
+
+          // Boosted Creature
+          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+            case Right(creatureResponse) =>
+              val boostedCreature = creatureResponse.creatures.boosted.name
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+            case Left(errorMessage) =>
+              val boostedCreature = "Podium_of_Tenacity"
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+          }
+
+          // Combine both futures and send the message
+          val combinedFutures: Future[List[MessageEmbed]] = for {
+            bossEmbed <- bossEmbedFuture
+            creatureEmbed <- creatureEmbedFuture
+          } yield List(bossEmbed, creatureEmbed)
+
+          combinedFutures
+            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+              .setActionRow(
+                Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+              )
+              .queue((message: Message) => {
+                //updateBoostedMessage(guild.getId, message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId)
+              }, (e: Throwable) => {
+                logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+              })
+            )
         }
       }
       // check is world has already been setup
@@ -5363,12 +5287,61 @@ object BotApp extends App with StrictLogging {
         val activityChannelId = worldConfigData("activity_channel")
         val channelIds = List(alliesChannelId, enemiesChannelId, neutralsChannelId, levelsChannelId, deathsChannelId, fullblessChannelId, nemesisChannelId, activityChannelId)
 
+        val worldCount = worldConfig(guild)
+        val count = worldCount.length
+
         // check if command is being run in one of the channels being deleted
         if (channelIds.contains(event.getChannel.getId)) {
           return new EmbedBuilder()
           .setColor(3092790)
           .setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
           .build()
+        }
+
+        val boostedChannel = guild.getTextChannelById(boostedChannelId)
+        if (boostedChannel != null){
+          if (count == 1) {
+            if (event.getChannel.getId == boostedChannelId) {
+              return new EmbedBuilder()
+              .setColor(3092790)
+              .setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
+              .build()
+            }
+            try {
+              boostedChannel.delete.queue()
+              discordUpdateConfig(guild, "", "", "0", "0")
+            } catch {
+              case _: Throwable => //
+            }
+          } else {
+            val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
+              m.getAuthor.getId.equals(botUser) && !m.isEphemeral
+            }
+            if (messages.nonEmpty) {
+              messages.foreach { message =>
+                val messageEmbeds = message.getEmbeds
+                if (messageEmbeds != null && !messageEmbeds.isEmpty){
+                  val messageEmbed = messageEmbeds.get(0)
+                  val messageTitle = messageEmbed.getTitle
+                  if (messageTitle != null) {
+                    if (messageTitle.startsWith(s":crossed_swords: $world")) {
+                      try {
+                        message.delete.queue()
+                      } catch {
+                        case _: Throwable => //
+                      }
+                    } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $world")) {
+                      try {
+                        message.delete.queue()
+                      } catch {
+                        case _: Throwable => //
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
 
         val fullblessRoleId = worldConfigData("fullbless_role")
@@ -5390,37 +5363,6 @@ object BotApp extends App with StrictLogging {
             nemesisRole.delete().queue()
           } catch {
             case ex: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
-
-        val boostedChannel = guild.getTextChannelById(boostedChannelId)
-        if (boostedChannel != null){
-          val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
-            m.getAuthor.getId.equals(botUser) && !m.isEphemeral
-          }
-          if (messages.nonEmpty) {
-            messages.foreach { message =>
-              val messageEmbeds = message.getEmbeds
-              if (messageEmbeds != null && !messageEmbeds.isEmpty){
-                val messageEmbed = messageEmbeds.get(0)
-                val messageTitle = messageEmbed.getTitle
-                if (messageTitle != null) {
-                  if (messageTitle.startsWith(s":crossed_swords: $world")) {
-                    try {
-                      message.delete.queue()
-                    } catch {
-                      case _: Throwable => //
-                    }
-                  } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $world")) {
-                    try {
-                      message.delete.queue()
-                    } catch {
-                      case _: Throwable => //
-                    }
-                  }
-                }
-              }
-            }
           }
         }
 
