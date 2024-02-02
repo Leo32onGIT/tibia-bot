@@ -3260,6 +3260,10 @@ object BotApp extends App with StrictLogging {
       val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
       val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
 
+      val nemesisRoleString = s"$world Nemesis Boss"
+      val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
+      val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
+
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
@@ -3431,7 +3435,7 @@ object BotApp extends App with StrictLogging {
         val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
 
         if (notificationsChannel != null) {
-            if (notificationsChannel.canTalk()) {
+          if (notificationsChannel.canTalk()) {
             // Fullbless Role
             val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
             val fullblessEmbed = new EmbedBuilder()
@@ -3447,9 +3451,6 @@ object BotApp extends App with StrictLogging {
               .queue()
 
             // Nemesis role
-            val nemesisRoleString = s"$world Nemesis Boss"
-            val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
-            val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
             val worldCount = worldConfig(guild)
             val count = worldCount.length
             val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
