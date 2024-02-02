@@ -3283,6 +3283,64 @@ object BotApp extends App with StrictLogging {
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
         val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
         discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, "0", "0", ZonedDateTime.now())
+
+        val boostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+        boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+        discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
+
+        val galthenEmbed = new EmbedBuilder()
+        galthenEmbed.setColor(3092790)
+        galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+        galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+          Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+        ).queue()
+
+        // Boosted Boss
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+        }
+
+        // Boosted Creature
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+        }
+
+        // Combine both futures and send the message
+        val combinedFutures: Future[List[MessageEmbed]] = for {
+          bossEmbed <- bossEmbedFuture
+          creatureEmbed <- creatureEmbedFuture
+        } yield List(bossEmbed, creatureEmbed)
+
+        combinedFutures
+          .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+            .setActionRow(
+              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+            )
+            .queue((message: Message) => {
+              //updateBoostedMessage(guild.getId, message.getId)
+              discordUpdateConfig(guild, "", "", "", message.getId)
+            }, (e: Throwable) => {
+              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+            })
+          )
       } else {
         val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
@@ -3331,6 +3389,57 @@ object BotApp extends App with StrictLogging {
             boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
             boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
             discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
+
+            val galthenEmbed = new EmbedBuilder()
+            galthenEmbed.setColor(3092790)
+            galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+            galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+              Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+            ).queue()
+
+            // Boosted Boss
+            val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+            val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+              case Right(boostedResponse) =>
+                val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+              case Left(errorMessage) =>
+                val boostedBoss = "Podium_of_Vigour"
+                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+            }
+
+            // Boosted Creature
+            val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+            val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+              case Right(creatureResponse) =>
+                val boostedCreature = creatureResponse.creatures.boosted.name
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+              case Left(errorMessage) =>
+                val boostedCreature = "Podium_of_Tenacity"
+                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+            }
+
+            // Combine both futures and send the message
+            val combinedFutures: Future[List[MessageEmbed]] = for {
+              bossEmbed <- bossEmbedFuture
+              creatureEmbed <- creatureEmbedFuture
+            } yield List(bossEmbed, creatureEmbed)
+
+            combinedFutures
+              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+                .setActionRow(
+                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                )
+                .queue((message: Message) => {
+                  //updateBoostedMessage(guild.getId, message.getId)
+                  discordUpdateConfig(guild, "", "", "", message.getId)
+                }, (e: Throwable) => {
+                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                })
+              )
           } else {
             // admin category still exists
             val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
