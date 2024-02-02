@@ -3430,41 +3430,45 @@ object BotApp extends App with StrictLogging {
         val notificationsConfig = discordRetrieveConfig(guild)
         val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
 
-        // Fullbless Role
-        val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
-        val fullblessEmbed = new EmbedBuilder()
-        fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-        fullblessEmbed.setThumbnail(Config.aolThumbnail)
-        fullblessEmbed.setColor(3092790)
-        fullblessEmbed.setDescription(fullblessEmbedText)
-        notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
-          .setActionRow(
-            Button.success(s"add", "Add Role"),
-            Button.danger(s"remove", "Remove Role")
-          )
-          .queue()
+        if (notificationsChannel != null) {
+            if (notificationsChannel.canTalk()) {
+            // Fullbless Role
+            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
+            val fullblessEmbed = new EmbedBuilder()
+            fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+            fullblessEmbed.setThumbnail(Config.aolThumbnail)
+            fullblessEmbed.setColor(3092790)
+            fullblessEmbed.setDescription(fullblessEmbedText)
+            notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
+              .setActionRow(
+                Button.success(s"add", "Add Role"),
+                Button.danger(s"remove", "Remove Role")
+              )
+              .queue()
 
-        // Nemesis role
-        val nemesisRoleString = s"$world Nemesis Boss"
-        val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
-        val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
-        val worldCount = worldConfig(guild)
-        val count = worldCount.length
-        val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-        val nemesisThumbnail = nemesisList(count % nemesisList.size)
+            // Nemesis role
+            val nemesisRoleString = s"$world Nemesis Boss"
+            val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
+            val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
+            val worldCount = worldConfig(guild)
+            val count = worldCount.length
+            val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
+            val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
-        val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
-        val nemesisEmbed = new EmbedBuilder()
-        nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-        nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-        nemesisEmbed.setColor(3092790)
-        nemesisEmbed.setDescription(nemesisEmbedText)
-        notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
-          .setActionRow(
-            Button.success("add", "Add Role"),
-            Button.danger("remove", "Remove Role")
-          )
-          .queue()
+            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+            val nemesisEmbed = new EmbedBuilder()
+            nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+            nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+            nemesisEmbed.setColor(3092790)
+            nemesisEmbed.setDescription(nemesisEmbedText)
+            notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
+              .setActionRow(
+                Button.success("add", "Add Role"),
+                Button.danger("remove", "Remove Role")
+              )
+              .queue()
+          }
+        }
 
         val alliesId = alliesChannel.getId
         val enemiesId = "0" //enemiesChannel.getId
@@ -3472,7 +3476,6 @@ object BotApp extends App with StrictLogging {
         val levelsId = levelsChannel.getId
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
-        val notificationsId = notificationsChannel.getId
         val activityId = activityChannel.getId
 
         // post initial embed in levels channel
