@@ -177,7 +177,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
             // Activity channel
             if (!blocker) {
-              val guild = BotApp.jda.getGuildById(discords.id)
+              val guild = BotApp.shardManager.getGuildById(discords.id)
               val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
               val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
               val activityTextChannel = guild.getTextChannelById(activityChannel)
@@ -598,7 +598,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               if (discordsData.contains(world)) {
                 val discordsList = discordsData(world)
                 discordsList.foreach { discords =>
-                  val guild = BotApp.jda.getGuildById(discords.id)
+                  val guild = BotApp.shardManager.getGuildById(discords.id)
                   val guildId = discords.id
 
                   // get appropriate guildIcon
@@ -736,7 +736,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     if (discordsData.contains(world)) {
       val discordsList = discordsData(world)
       discordsList.foreach { discords =>
-        val guild = BotApp.jda.getGuildById(discords.id)
+        val guild = BotApp.shardManager.getGuildById(discords.id)
         val guildId = discords.id
         val adminChannel = discords.adminChannel
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
@@ -1159,8 +1159,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
-    val guild = BotApp.jda.getGuildById(guildId)
-
+    val guild = BotApp.shardManager.getGuildById(guildId)
 
     // default online list
     val alliesList: List[String] = vocationBuffers.values

@@ -7,6 +7,7 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, Booste
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
@@ -20,6 +21,7 @@ import org.postgresql.util.PSQLException
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
+import net.dv8tion.jda.api.sharding.DefaultShardManagerBuilder
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -88,22 +90,28 @@ object BotApp extends App with StrictLogging {
   // Let the games begin
   logger.info("Starting up")
 
-  val jda = JDABuilder.createDefault(Config.token)
+  // Configure shard manager builder
+  val builder = DefaultShardManagerBuilder
+    .createDefault(Config.token)
     .addEventListeners(new BotListener())
-    .build()
+    .setShardsTotal(5)
 
-  jda.awaitReady()
-  logger.info("JDA ready")
+  // Build shard manager
+  val shardManager = builder.build()
+  println("JDA ready")
 
-  // get the discord servers the bot is in
-  private val guilds: List[Guild] = jda.getGuilds.asScala.toList
+  // Get the shards
+  val shards = shardManager.getShards.asScala.toList
+
+  // Get the discord servers the bot is in
+  val guilds: List[Guild] = shards.flatMap(_.getGuilds.asScala.toList)
 
   // stream list
   private var botStreams = Map[String, Streams]()
 
-  // get bot userID (used to stamp automated enemy detection messages)
-  val botUser = jda.getSelfUser.getId
-  private val botName = jda.getSelfUser.getName
+  // Get the bot user ID (used to stamp automated enemy detection messages)
+  val botUser: String = shardManager.getShards.get(0).getSelfUser.getId
+  private val botName: String = shardManager.getShards.get(0).getSelfUser.getName
 
   // initialize core hunted/allied list
   var customSortData: Map[String, List[CustomSort]] = Map.empty
@@ -530,50 +538,50 @@ object BotApp extends App with StrictLogging {
                   }
                 }
                 if (matchedNotification) {
-                  val user: User = jda.retrieveUserById(entry.user).complete()
-                  if (user != null) {
-                    try {
-                      user.openPrivateChannel().queue { privateChannel =>
-                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
-                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                        ).queue()
-                      }
-                    } catch {
-                      case ex: Exception => // Handle the exception appropriately
+                  try {
+                    val user: User = shardManager.retrieveUserById(entry.user).complete()
+                    user.openPrivateChannel().queue { privateChannel =>
+                      val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                      privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
+                        Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                      ).queue()
                     }
+                  } catch {
+                    case ex: Exception => logger.info(s"Failed to send Boosted notification to user: '${entry.user}'")
                   }
                 }
               }
 
-              jda.getGuilds.forEach { guild =>
-                if (checkConfigDatabase(guild)) {
-                  val discordInfo = discordRetrieveConfig(guild)
-                  val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-                  if (channelId != "0") {
-                    val boostedChannel = guild.getTextChannelById(channelId)
-                    if (boostedChannel != null) {
-                      if (boostedChannel.canTalk()) {
-                        val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                        if (boostedMessage != "0") {
-                          try {
-                            boostedChannel.deleteMessageById(boostedMessage).queue()
-                          } catch {
-                            case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+              shards.foreach { shard =>
+                shard.getGuilds.asScala.foreach { guild =>
+                  if (checkConfigDatabase(guild)) {
+                    val discordInfo = discordRetrieveConfig(guild)
+                    val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                    if (channelId != "0") {
+                      val boostedChannel = guild.getTextChannelById(channelId)
+                      if (boostedChannel != null) {
+                        if (boostedChannel.canTalk()) {
+                          val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                          if (boostedMessage != "0") {
+                            try {
+                              boostedChannel.deleteMessageById(boostedMessage).queue()
+                            } catch {
+                              case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                            }
                           }
+                          boostedChannel.sendMessageEmbeds(embeds.asJava)
+                            .setActionRow(
+                              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                            )
+                            .queue((message: Message) => {
+                              //updateBoostedMessage(guild.getId, message.getId)
+                              discordUpdateConfig(guild, "", "", "", message.getId)
+                            }, (e: Throwable) => {
+                              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                            })
+                        } else {
+                          logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                         }
-                        boostedChannel.sendMessageEmbeds(embeds.asJava)
-                          .setActionRow(
-                            Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )
-                          .queue((message: Message) => {
-                            //updateBoostedMessage(guild.getId, message.getId)
-                            discordUpdateConfig(guild, "", "", "", message.getId)
-                          }, (e: Throwable) => {
-                            logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                          })
-                      } else {
-                        logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                       }
                     }
                   }
@@ -659,34 +667,36 @@ object BotApp extends App with StrictLogging {
 
         combinedFutures.map { boostedInfoList =>
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-          jda.getGuilds.forEach { guild =>
-            if (checkConfigDatabase(guild)) {
-              val discordInfo = discordRetrieveConfig(guild)
-              val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-              if (channelId != "0") {
-                val boostedChannel = guild.getTextChannelById(channelId)
-                if (boostedChannel != null) {
-                  if (boostedChannel.canTalk()) {
-                    val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                    if (boostedMessage != "0") {
-                      try {
-                        boostedChannel.deleteMessageById(boostedMessage).queue()
-                      } catch {
-                        case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+          shards.foreach { shard =>
+            shard.getGuilds.asScala.foreach { guild =>
+              if (checkConfigDatabase(guild)) {
+                val discordInfo = discordRetrieveConfig(guild)
+                val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                if (channelId != "0") {
+                  val boostedChannel = guild.getTextChannelById(channelId)
+                  if (boostedChannel != null) {
+                    if (boostedChannel.canTalk()) {
+                      val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                      if (boostedMessage != "0") {
+                        try {
+                          boostedChannel.deleteMessageById(boostedMessage).queue()
+                        } catch {
+                          case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                        }
                       }
+                      boostedChannel.sendMessageEmbeds(embeds.asJava)
+                        .setActionRow(
+                          Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )
+                        .queue((message: Message) => {
+                          //updateBoostedMessage(guild.getId, message.getId)
+                          discordUpdateConfig(guild, "", "", "", message.getId)
+                        }, (e: Throwable) => {
+                          logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                        })
+                    } else {
+                      logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                     }
-                    boostedChannel.sendMessageEmbeds(embeds.asJava)
-                      .setActionRow(
-                        Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                      )
-                      .queue((message: Message) => {
-                        //updateBoostedMessage(guild.getId, message.getId)
-                        discordUpdateConfig(guild, "", "", "", message.getId)
-                      }, (e: Throwable) => {
-                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                      })
-                  } else {
-                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                   }
                 }
               }
@@ -1002,56 +1012,50 @@ object BotApp extends App with StrictLogging {
   **/
 
   private def updateDashboard(): Unit = {
-
-    // Violent Bot Support discord
     logger.info(s"Updating Violent Bot dashboard...")
 
-    val guildCount = jda.getGuildCache.size
+    val guildCount = shards.map(_.getGuildCache.size()).sum
     val activeDiscordsCount: Int = worldsData.size
     val worldStreamCount: Int = discordsData.size
     val worldsTrackedCount: Int = worldsData.values.map(_.size).sum
 
-    val dashboardGuild = jda.getGuildById(867319250708463628L)
-    val dashboardDiscordsTotal = dashboardGuild.getVoiceChannelById(1076431727838380032L)
-    val dashboardDiscordsActive = dashboardGuild.getVoiceChannelById(1082844559937114112L)
-    val dashboardWorldSubscriptions = dashboardGuild.getVoiceChannelById(1076432500294955098L)
-    val dashboardWorldStreams = dashboardGuild.getVoiceChannelById(1082844790439288872L)
+    val dashboardGuildId = 867319250708463628L
+    val dashboardDiscordsTotalId = 1076431727838380032L
+    val dashboardDiscordsActiveId = 1082844559937114112L
+    val dashboardWorldSubscriptionsId = 1076432500294955098L
+    val dashboardWorldStreamsId = 1082844790439288872L
 
-    // total Discord count
-    val dashboardDiscordsTotalName = dashboardDiscordsTotal.getName
-    if (dashboardDiscordsTotalName != s"Discords (Total): $guildCount") {
-      val dashboardDiscordsTotalManager = dashboardDiscordsTotal.getManager
-      dashboardDiscordsTotalManager.setName(s"Discords (Total): $guildCount").queue()
+    // Retrieve the guild from the shard
+    val guild = shardManager.getGuildById(dashboardGuildId)
+    if (guild != null) {
+      // Retrieve the voice channels from the guild
+      val dashboardDiscordsTotal = guild.getVoiceChannelById(dashboardDiscordsTotalId)
+      val dashboardDiscordsActive = guild.getVoiceChannelById(dashboardDiscordsActiveId)
+      val dashboardWorldSubscriptions = guild.getVoiceChannelById(dashboardWorldSubscriptionsId)
+      val dashboardWorldStreams = guild.getVoiceChannelById(dashboardWorldStreamsId)
+
+      // Update voice channel names
+      updateVoiceChannelName(dashboardDiscordsTotal, s"Discords (Total): $guildCount")
+      updateVoiceChannelName(dashboardDiscordsActive, s"Discords (Active): $activeDiscordsCount")
+      updateVoiceChannelName(dashboardWorldSubscriptions, s"Worlds Setup: $worldsTrackedCount")
+      updateVoiceChannelName(dashboardWorldStreams, s"World Streams: $worldStreamCount of ${worlds.size}")
     }
 
-    // active Discord count
-    val dashboardDiscordsActiveName = dashboardDiscordsActive.getName
-    if (dashboardDiscordsActiveName != s"Discords (Active): $activeDiscordsCount") {
-      val dashboardDiscordsActiveManager = dashboardDiscordsActive.getManager
-      dashboardDiscordsActiveManager.setName(s"Discords (Active): $activeDiscordsCount").queue()
-    }
-
-    // total worlds setup by users
-    val dashboardWorldSubscriptionsName = dashboardWorldSubscriptions.getName
-    if (dashboardWorldSubscriptionsName != s"Worlds Setup: $worldsTrackedCount") {
-      val dashboardWorldSubscriptionsManager = dashboardWorldSubscriptions.getManager
-      dashboardWorldSubscriptionsManager.setName(s"Worlds Setup: $worldsTrackedCount").queue()
-    }
-
-    // world streams running out of 'how many tibia worlds exist'
-    val dashboardWorldStreamsName = dashboardWorldStreams.getName
-    if (dashboardWorldStreamsName != s"World Streams: $worldStreamCount of ${worlds.size}") {
-      val dashboardWorldStreamsManager = dashboardWorldStreams.getManager
-      dashboardWorldStreamsManager.setName(s"World Streams: $worldStreamCount of ${worlds.size}").queue()
-    }
-
+    // Set presence activity
     try {
-      val worldsString = if (worldStreamCount == 1) "world" else "worlds"
-      val discordString = if (activeDiscordsCount == 1) "discord" else "discords"
-      jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, s"${worldStreamCount} $worldsString for ${activeDiscordsCount} $discordString"))
+        val worldsString = if (worldStreamCount == 1) "world" else "worlds"
+        val discordString = if (activeDiscordsCount == 1) "discord" else "discords"
+        shardManager.setActivity(Activity.of(Activity.ActivityType.WATCHING, s"${worldStreamCount} $worldsString for ${activeDiscordsCount} $discordString"))
+    } catch {
+        case _: Throwable => logger.info("Failed to update the bot's status counts")
     }
-    catch {
-      case _ : Throwable => logger.info("Failed to update the bots status counts")
+  }
+
+  // Helper method to update voice channel name
+  private def updateVoiceChannelName(voiceChannel: VoiceChannel, newName: String): Unit = {
+    if (voiceChannel != null && voiceChannel.getName != newName) {
+      val manager = voiceChannel.getManager
+      manager.setName(newName).queue()
     }
   }
 
@@ -1519,7 +1523,7 @@ object BotApp extends App with StrictLogging {
     while (resultSet.next()) {
       val userId = resultSet.getString("userid")
       val tagId = Option(resultSet.getString("tag")).getOrElse("")
-      val user: User = jda.retrieveUserById(userId).complete()
+      val user: User = shardManager.retrieveUserById(userId).complete()
       val userTimeStamp = resultSet.getTimestamp("time").toInstant()
       val cooldown = userTimeStamp.plus(30, ChronoUnit.DAYS).getEpochSecond.toString()
 
@@ -5483,7 +5487,7 @@ object BotApp extends App with StrictLogging {
   def adminLeave(event: SlashCommandInteractionEvent, guildId: String, reason: String): MessageEmbed = {
     // get guild & world information from the slash interaction
     val guildL: Long = java.lang.Long.parseLong(guildId)
-    val guild = jda.getGuildById(guildL)
+    val guild = shardManager.getGuildById(guildL)
     val discordInfo = discordRetrieveConfig(guild)
     var embedMessage = ""
 
@@ -5519,7 +5523,7 @@ object BotApp extends App with StrictLogging {
   def adminMessage(event: SlashCommandInteractionEvent, guildId: String, message: String): MessageEmbed = {
     // get guild & world information from the slash interaction
     val guildL: Long = java.lang.Long.parseLong(guildId)
-    val guild = jda.getGuildById(guildL)
+    val guild = shardManager.getGuildById(guildL)
     val discordInfo = discordRetrieveConfig(guild)
     var embedMessage = ""
 
