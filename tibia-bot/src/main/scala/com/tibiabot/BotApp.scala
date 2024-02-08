@@ -134,6 +134,7 @@ object BotApp extends App with StrictLogging {
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
+  var onlineListUpdateTime = 5
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -429,6 +430,15 @@ object BotApp extends App with StrictLogging {
         )
     )
 
+  // online list config  command
+  private val onlineListCommand: SlashCommandData = Commands.slash("onlinelist", "set the online list online update time")
+    .addOptions(
+      new OptionData(OptionType.INTEGER, "minutes", "how many minutes inbetween updates?").setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(20)
+    )
+
+
   private val refreshCommand: SlashCommandData = Commands.slash("refresh", "Refresh the boosted boss and creature for all discords")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
 
@@ -443,7 +453,7 @@ object BotApp extends App with StrictLogging {
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
       lazy val adminCommands =
         if (Config.prod)
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand, galthenCommand, boostedCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand, galthenCommand, boostedCommand, onlineListCommand)
         else
           List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()

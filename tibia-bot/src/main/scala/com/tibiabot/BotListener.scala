@@ -63,6 +63,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleBoosted(event)
         case "refresh" =>
           handleRefresh(event)
+        case "onlinelist" =>
+          handleOnlineListRefresh(event)
         case _ =>
       }
     } else {
@@ -624,8 +626,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           responseText = s"${Config.noEmoji} The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
       }
-      embed.setColor(3092790)
-      val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+      val replyEmbed = new EmbedBuilder().setDescription(responseText).setColor(3092790).build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
     }
   }
@@ -1082,6 +1083,21 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else {
       val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid option for `/boosted`.").setColor(3092790).build()
       event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+
+  private def handleOnlineListRefresh(event: SlashCommandInteractionEvent): Unit = {
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val levelOption: Int = options.get("minutes").map(_.toInt).getOrElse(5)
+    if (event.getUser.getId == "313911524475535364") {
+      BotApp.onlineListUpdateTime = levelOption
+      val embedBuilder = new EmbedBuilder()
+      embedBuilder.setDescription(s"${Config.yesEmoji} Goodluck!")
+      event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
+    } else {
+      val embedBuilder = new EmbedBuilder()
+      embedBuilder.setDescription(s":x: This command can only be run by **Violent Beams**.")
+      event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
     }
   }
 
