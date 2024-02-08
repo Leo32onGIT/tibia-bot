@@ -22,6 +22,9 @@ import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.sharding.DefaultShardManagerBuilder
+import net.dv8tion.jda.api.requests.GatewayIntent
+import net.dv8tion.jda.api.hooks.ListenerAdapter
+import net.dv8tion.jda.api.events.session.ReadyEvent
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -41,6 +44,7 @@ import java.nio.charset.StandardCharsets
 import scala.util.Random
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import java.util.concurrent.CountDownLatch
 
 object BotApp extends App with StrictLogging {
 
@@ -91,14 +95,19 @@ object BotApp extends App with StrictLogging {
   logger.info("Starting up")
 
   // Configure shard manager builder
+  val shardCount = 5
   val builder = DefaultShardManagerBuilder
     .createDefault(Config.token)
     .addEventListeners(new BotListener())
-    .setShardsTotal(5)
+    .setShardsTotal(shardCount)
 
   // Build shard manager
   val shardManager = builder.build()
-  println("JDA ready")
+
+  // Create a CountDownLatch with the number of shards
+  val latch = new CountDownLatch(shardCount)
+  latch.await()
+  logger.info("All shards are ready.")
 
   // Get the shards
   val shards = shardManager.getShards.asScala.toList

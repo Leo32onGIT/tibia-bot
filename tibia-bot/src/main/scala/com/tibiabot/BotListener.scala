@@ -18,8 +18,14 @@ import net.dv8tion.jda.api.interactions.components.ActionRow
 import scala.jdk.CollectionConverters._
 import net.dv8tion.jda.api.interactions.modals.Modal
 import net.dv8tion.jda.api.interactions.components.text.{TextInput, TextInputStyle}
+import net.dv8tion.jda.api.events.session.ReadyEvent
 
 class BotListener extends ListenerAdapter with StrictLogging {
+
+  override def onReady(event: ReadyEvent): Unit = {
+    // Decrement the latch count when a shard is ready
+    BotApp.latch.countDown()
+  }
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
