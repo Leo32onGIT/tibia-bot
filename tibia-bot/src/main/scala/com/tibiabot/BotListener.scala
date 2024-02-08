@@ -508,7 +508,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             // get role add user to it
             try {
               guild.addRoleToMember(user, role).queue()
-              responseText = s":gear: You have been added to the <@&${role.getId}> role."
+              responseText = s"${Config.yesEmoji} You have been added to the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
                 responseText = s"${Config.noEmoji} Failed to add you to the <@&${role.getId}> role."
@@ -534,7 +534,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             // remove role
             try {
               guild.removeRoleFromMember(user, role).queue()
-              responseText = s":gear: You have been removed from the <@&${role.getId}> role."
+              responseText = s"${Config.yesEmoji} You have been removed from the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
                 responseText = s"${Config.noEmoji} Failed to remove you from the <@&${role.getId}> role."
@@ -624,6 +624,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           responseText = s"${Config.noEmoji} The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
       }
+      embed.setColor(3092790)
       val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
     }
