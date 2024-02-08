@@ -432,8 +432,9 @@ object BotApp extends App with StrictLogging {
 
   // online list config  command
   private val onlineListCommand: SlashCommandData = Commands.slash("onlinelist", "set the online list online update time")
+    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(
-      new OptionData(OptionType.INTEGER, "minutes", "how many minutes inbetween updates?").setRequired(true)
+      new OptionData(OptionType.INTEGER, "minutes", "how many minutes inbetween updates").setRequired(true)
         .setMinValue(1)
         .setMaxValue(20)
     )
