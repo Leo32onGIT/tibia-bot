@@ -665,11 +665,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         if (levelsCheck) {
                           //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                          try {
-                            levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                            case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                          if (Config.newWorlds.exists(_.equalsIgnoreCase(world.toLowerCase)) && onlinePlayer.level < 20) {
+                            // ignore levels under 20 if its one of the new worlds
+                          } else {
+                            try {
+                              levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                            } catch {
+                              case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                              case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                            }
                           }
                         }
                       }
