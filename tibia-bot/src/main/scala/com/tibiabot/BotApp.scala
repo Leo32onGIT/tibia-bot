@@ -134,7 +134,7 @@ object BotApp extends App with StrictLogging {
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
-  var onlineListUpdateTime = 5
+  var onlineListUpdateTime = 3
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
