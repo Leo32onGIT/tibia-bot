@@ -61,10 +61,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleOnlineList(event)
         case "boosted" =>
           handleBoosted(event)
-        case "refresh" =>
-          handleRefresh(event)
-        case "onlinelist" =>
-          handleOnlineListRefresh(event)
         case _ =>
       }
     } else {
@@ -174,7 +170,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
          "dragon king zyrtarch" -> "soul of dragonking zyrtarch",
          "dragonking zyrtarch" -> "soul of dragonking zyrtarch",
          "dragonking" -> "soul of dragonking zyrtarch",
-         "tenebris" -> "lady tenebris"
+         "tenebris" -> "lady tenebris",
+         "ratmiral" -> "ratmiral blackwhiskers",
+         "plague seal" -> "plagirath",
+         "pumin seal" -> "tarbaz",
+         "jugg seal" -> "razzagorn",
+         "vexclaw seal" -> "shulgrax",
+         "undead seal" -> "ragiaz"
        )
        if (shortName.contains(inputName)) {
          inputName = shortName(inputName)
@@ -572,7 +574,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             // get role add user to it
             try {
               guild.addRoleToMember(user, role).queue()
-              responseText = s":gear: You have been added to the <@&${role.getId}> role."
+              responseText = s"${Config.yesEmoji} You have been added to the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
                 responseText = s"${Config.noEmoji} Failed to add you to the <@&${role.getId}> role."
@@ -598,7 +600,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             // remove role
             try {
               guild.removeRoleFromMember(user, role).queue()
-              responseText = s":gear: You have been removed from the <@&${role.getId}> role."
+              responseText = s"${Config.yesEmoji} You have been removed from the <@&${role.getId}> role."
             } catch {
               case _: Throwable =>
                 responseText = s"${Config.noEmoji} Failed to remove you from the <@&${role.getId}> role."
@@ -644,7 +646,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val tagOption: String = options.getOrElse("character", "")
     val embed = new EmbedBuilder()
-
     val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
     satchelTimeOption match {
       //
@@ -731,7 +732,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val worldOption: String = options.getOrElse("world", "")
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
-
     subCommand match {
       case "player" =>
         if (toggleOption == "add") {
@@ -813,7 +813,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
     val worldOption: String = options.getOrElse("world", "")
-
     subCommand match {
       case "player" =>
         if (toggleOption == "add") {
@@ -892,7 +891,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
     val worldOption: String = options.getOrElse("world", "")
-
     if (subcommandGroupName != null) {
       subcommandGroupName match {
         case "tag" =>
@@ -978,7 +976,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
     val levelOption: Int = options.get("level").map(_.toInt).getOrElse(8)
-
     subCommand match {
       case "levels" =>
         val embed = BotApp.minLevel(event, worldOption, levelOption, "levels")
@@ -998,34 +995,38 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val guildOption: String = options.getOrElse("guildid", "")
     val reasonOption: String = options.getOrElse("reason", "")
     val messageOption: String = options.getOrElse("message", "")
-
-    subCommand match {
-      case "leave" =>
-        val embed = BotApp.adminLeave(event, guildOption, reasonOption)
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case "message" =>
-        val embed = BotApp.adminMessage(event, guildOption, messageOption)
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case _ =>
-        val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/admin`.").build()
-        event.getHook.sendMessageEmbeds(embed).queue()
-    }
-  }
-
-  private def handleRefresh(event: SlashCommandInteractionEvent): Unit = {
+    val minutesOption: Int = options.get("minutes").map(_.toInt).getOrElse(5)
     if (event.getUser.getId == "313911524475535364") {
-      val embed = BotApp.refreshBoostedBoard()
-      event.getHook.sendMessageEmbeds(embed).queue()
+      subCommand match {
+        case "leave" =>
+          val embed = BotApp.adminLeave(event, guildOption, reasonOption)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        case "message" =>
+          val embed = BotApp.adminMessage(event, guildOption, messageOption)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        case "onlinelistrate" =>
+          BotApp.onlineListUpdateTime = minutesOption
+          val embedBuilder = new EmbedBuilder()
+          embedBuilder.setColor(3092790)
+          embedBuilder.setDescription(s"${Config.yesEmoji} You have set the online lists to update every **$minutesOption** minutes.")
+          event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
+        case "refreshboosted" =>
+          val embed = BotApp.refreshBoostedBoard()
+          event.getHook.sendMessageEmbeds(embed).queue()
+        case _ =>
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/admin`.").setColor(3092790).build()
+          event.getHook.sendMessageEmbeds(embed).queue()
+      }
     } else {
       val embedBuilder = new EmbedBuilder()
-      embedBuilder.setDescription(s":x: This command can only be run by **Violent Beams**.")
+      embedBuilder.setColor(3092790)
+      embedBuilder.setDescription(s"${Config.noEmoji} This command can only be run by **Violent Beams**.")
       event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
     }
   }
 
   private def handleExiva(event: SlashCommandInteractionEvent): Unit = {
     val subCommand = event.getInteraction.getSubcommandName
-
     subCommand match {
       case "deaths" =>
         val embed = BotApp.exivaList(event)
@@ -1040,7 +1041,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
-
     subCommand match {
       case "list" =>
         val worldOption: String = options.getOrElse("world", "")
@@ -1061,7 +1061,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val subCommand = event.getInteraction.getSubcommandName
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val toggleOption: String = options.getOrElse("option", "")
-
     if (toggleOption == "disable") { // "disabled"
       val embed = BotApp.boosted(event.getUser.getId, "disable", "")
       event.getHook.sendMessageEmbeds(embed).queue()
@@ -1086,21 +1085,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     }
   }
 
-  private def handleOnlineListRefresh(event: SlashCommandInteractionEvent): Unit = {
-    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val levelOption: Int = options.get("minutes").map(_.toInt).getOrElse(5)
-    if (event.getUser.getId == "313911524475535364") {
-      BotApp.onlineListUpdateTime = levelOption
-      val embedBuilder = new EmbedBuilder()
-      embedBuilder.setDescription(s"${Config.yesEmoji} Goodluck!")
-      event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
-    } else {
-      val embedBuilder = new EmbedBuilder()
-      embedBuilder.setDescription(s":x: This command can only be run by **Violent Beams**.")
-      event.getHook.sendMessageEmbeds(embedBuilder.build()).queue()
-    }
-  }
-
   private def handleHelp(event: SlashCommandInteractionEvent): Unit = {
     val embedBuilder = new EmbedBuilder()
     val descripText = Config.helpText
@@ -1114,7 +1098,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
   private def handleRepair(event: SlashCommandInteractionEvent): Unit = {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
-
     val embed = BotApp.repairChannel(event, worldOption)
     event.getHook.sendMessageEmbeds(embed).queue()
   }

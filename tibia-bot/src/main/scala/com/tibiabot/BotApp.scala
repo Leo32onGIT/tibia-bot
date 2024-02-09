@@ -367,7 +367,14 @@ object BotApp extends App with StrictLogging {
       .addOptions(
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
         new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
-      )
+      ),
+      new SubcommandData("onlinelistrate", "Change the online list update rate")
+      .addOptions(
+        new OptionData(OptionType.INTEGER, "minutes", "how many minutes inbetween updates?").setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(20)
+      ),
+      new SubcommandData("refreshboosted", "Refresh the boosted boss and creature for all discords")
     )
 
   // exiva command
@@ -430,19 +437,6 @@ object BotApp extends App with StrictLogging {
         )
     )
 
-  // online list config  command
-  private val onlineListCommand: SlashCommandData = Commands.slash("onlinelist", "set the online list online update time")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(
-      new OptionData(OptionType.INTEGER, "minutes", "how many minutes inbetween updates?").setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(20)
-    )
-
-
-  private val refreshCommand: SlashCommandData = Commands.slash("refresh", "Refresh the boosted boss and creature for all discords")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-
   lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
 
   // create the deaths/levels cache db
@@ -454,9 +448,9 @@ object BotApp extends App with StrictLogging {
     if (g.getIdLong == 867319250708463628L) { // Violent Bot Discord
       lazy val adminCommands =
         if (Config.prod)
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand, galthenCommand, boostedCommand, onlineListCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, galthenCommand, boostedCommand)
         else
-          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand, refreshCommand)
+          List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, adminCommand, repairCommand, onlineCombineCommand)
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else if (g.getIdLong == 912739993015947324L) {
       // they are using Pulsera Bot commands, only /galthen appears here
