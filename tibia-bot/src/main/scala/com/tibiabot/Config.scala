@@ -179,8 +179,12 @@ object Config {
     "Yonabra",
     "Yovera",
     "Zuna",
-    "Zunera"
+    "Zunera",
+    "Ulera",
+    "Yubra",
+    "Zephyra"
   )
+  // old worlds that have been merged
   val mergedWorlds = List(
     // Pulsera
     "Illusera",
@@ -223,6 +227,12 @@ object Config {
     "Nossobra",
     "Batabra"
   )
+  val newWorlds = List(
+    "Ulera",
+    "Yubra",
+    "Zephyra"
+  )
+  // list of creatures for command input validation
   val creaturesList: List[String] = List(
     "abyssal calamary",
     "acid blob",

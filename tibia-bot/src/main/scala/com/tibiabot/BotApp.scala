@@ -100,11 +100,10 @@ object BotApp extends App with StrictLogging {
     .createDefault(Config.token)
     .addEventListeners(new BotListener())
     .setShardsTotal(shardCount)
-
-  // Build shard manager
   val shardManager = builder.build()
 
   // Create a CountDownLatch with the number of shards
+  // BotListener.onReady is run when a shard is connected and ready
   val latch = new CountDownLatch(shardCount)
   latch.await()
   logger.info("All shards are ready.")
@@ -122,7 +121,10 @@ object BotApp extends App with StrictLogging {
   val botUser: String = shardManager.getShards.get(0).getSelfUser.getId
   private val botName: String = shardManager.getShards.get(0).getSelfUser.getName
 
-  // initialize core hunted/allied list
+  // This controls how often the online list updates (minutes)
+  var onlineListUpdateTime = 3
+
+  // internal caches
   var customSortData: Map[String, List[CustomSort]] = Map.empty
   var huntedPlayersData: Map[String, List[Players]] = Map.empty
   var alliedPlayersData: Map[String, List[Players]] = Map.empty
@@ -130,11 +132,9 @@ object BotApp extends App with StrictLogging {
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
   var activityData: Map[String, List[PlayerCache]] = Map.empty
   var activityCommandBlocker: Map[String, Boolean] = Map.empty
-
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
-  var onlineListUpdateTime = 3
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -469,14 +469,13 @@ object BotApp extends App with StrictLogging {
     if (Config.prod) {
       updateDashboard()
     }
-    // set activity status
-    // only do this every second cycle
     removeDeathsCache(ZonedDateTime.now())
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
     cleanGalthenList()
   }
 
+  // boosted boss/creature embed update at server save
   actorSystem.scheduler.schedule(60.seconds, 5.minutes) {
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
@@ -610,14 +609,6 @@ object BotApp extends App with StrictLogging {
       }
     }
   }
-
-  // run hunted list cleanup every day at 6:30 PM AEST
-  private val currentTime = Instant.now
-  private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
-  private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
-  private val interval = 24.hours
-  // Unused
-
 
   def refreshBoostedBoard(): MessageEmbed = {
     val replyEmbed = new EmbedBuilder()
@@ -1329,7 +1320,6 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  // V1.6 Galthen Satchel Command
   def getGalthenTable(userId: String): Option[List[SatchelStamp]] = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
@@ -5602,7 +5592,6 @@ object BotApp extends App with StrictLogging {
     s"https://tibia.fandom.com/wiki/$finalCreature"
   }
 
-  // V1.9 Boosted Command
   def createBoostedEmbed(name: String, emoji: String, wikiUrl: String, thumbnail: String, embedText: String): MessageEmbed = {
     val embed = new EmbedBuilder()
     //embed.setTitle(s"$emoji $name $emoji", wikiUrl)
