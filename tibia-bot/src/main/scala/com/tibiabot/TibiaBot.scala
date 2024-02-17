@@ -743,6 +743,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             onlineList(currentOnline.toList, guildId, alliesChannel, neutralsChannel, enemiesChannel, categoryChannel, onlineCombinedOption, world)
           //}
         }
+        Thread.sleep(2500)
       }
     }
 
