@@ -3,6 +3,7 @@ package com.tibiabot
 import akka.actor.Cancellable
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
+
 import akka.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
 import com.tibiabot.tibiadata.TibiaDataClient
@@ -10,6 +11,7 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import scala.util.Random
 
 import java.time.ZonedDateTime
 import scala.collection.immutable.ListMap
@@ -64,9 +66,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     logger.error("An exception has occurred in the TibiaBot:", e)
     Supervision.Resume
   }
-
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 60.seconds, ())
+
+  private lazy val sourceTick = Source.tick(
+    initialDelay = 2.seconds,
+    interval = randomIntervalBetween(55.seconds, 65.seconds),
+    tick = ()
+  )
+
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -140,11 +147,19 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
         // Caching attempt
         val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
+        if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(15))) {
           val cacheWorld = char.character.character.world
           val cacheFormerWorlds: List[String] = char.character.character.former_worlds.map(_.toList).getOrElse(Nil)
           BotApp.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.character.character.level.toInt.toString, char.character.character.vocation, char.character.character.last_login.getOrElse(""), ZonedDateTime.now())
           cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
+        }
+
+        // add guild to online list cache
+        currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+          if (onlinePlayer.guildName != guildName){
+            val updatedPlayer = onlinePlayer.copy(guildName = guildName)
+            currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
+          }
         }
 
         // update the guildIcon depending on the discord this would be posted to
@@ -166,14 +181,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               player.name.toLowerCase() == charName.toLowerCase() ||
               formerNamesList.exists(formerName => formerName.toLowerCase == player.name.toLowerCase())
             )
-
-            // add guild to online list cache
-            currentOnline.find(_.name == charName).foreach { onlinePlayer =>
-              if (onlinePlayer.guildName != guildName){
-                val updatedPlayer = onlinePlayer.copy(guildName = guildName)
-                currentOnline = currentOnline.filterNot(_ == onlinePlayer) + updatedPlayer
-              }
-            }
 
             // Activity channel
             if (!blocker) {
@@ -721,7 +728,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(BotApp.onlineListUpdateTime))) {
+        val baseDelay = onlineTimer.plusMinutes(BotApp.onlineListUpdateTime)
+        val randomExtraSeconds = scala.util.Random.between(0, 10) // Random number of seconds between 0 and 9
+        val delayedTime = baseDelay.plusSeconds(randomExtraSeconds)
+        if (ZonedDateTime.now().isAfter(delayedTime) ) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
@@ -1649,6 +1659,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       parsed2.replaceAll(" ", "_").capitalize
     })
     s"https://tibia.fandom.com/wiki/Special:Redirect/file/$finalCreature.gif"
+  }
+
+  private def randomIntervalBetween(min: FiniteDuration, max: FiniteDuration): FiniteDuration = {
+    val randomMillis = Random.between(min.toMillis, max.toMillis)
+    FiniteDuration(randomMillis, MILLISECONDS)
   }
 
   lazy val stream: RunnableGraph[Cancellable] =
