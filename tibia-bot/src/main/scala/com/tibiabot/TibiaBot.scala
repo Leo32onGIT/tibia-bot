@@ -98,7 +98,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
       // cache bypass for Seanera
-      if (worldResponse.world.name == "Pulsera") {
+      if (worldResponse.world.name == "Bypass") {
         // Remove existing online chars from the list...
         recentOnlineBypass.filterInPlace { i =>
           !online.exists(player => player.name == i.char)
