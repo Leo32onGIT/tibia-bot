@@ -227,11 +227,6 @@ object Config {
     "Nossobra",
     "Batabra"
   )
-  val newWorlds = List(
-    "Ulera",
-    "Yubra",
-    "Zephyra"
-  )
   // list of creatures for command input validation
   val creaturesList: List[String] = List(
     "abyssal calamary",

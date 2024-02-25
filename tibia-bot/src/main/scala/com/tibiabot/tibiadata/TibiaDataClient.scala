@@ -14,6 +14,11 @@ import java.net.URLEncoder
 import scala.concurrent.duration._
 import akka.http.scaladsl.model.HttpEntity.Strict
 import scala.util.Random
+import com.tibiabot.BotApp.characterCache
+import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.headers.{Date => DateHeader}
+import java.time.{ZonedDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import spray.json.DeserializationException
@@ -123,54 +128,46 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
-        .recover {
-          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
-            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-          case e @ (_: ParsingException | _: DeserializationException) =>
-            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-        }
-    } yield unmarshalled
-  }
-
-  def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]] = {
-    val name = input._1
-    val level = input._2
-    val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 350) {
-      // Split the name into words
-      val words = encodedName.split("%20")
-      // Append randomly generated "+" characters to the last word, limited to a maximum length of 20
-      words.lastOption.map { lastWord =>
-        val random = new Random()
-        val numPluses = math.min(random.nextInt(7), 20 - lastWord.length) // Randomly generate 0-6 "+" characters, limited to a max length of 20
-        lastWord + ("+" * numPluses)
-      }.getOrElse(encodedName)
-    } else {
-      encodedName
+    val responseFuture = Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName"))
+    responseFuture.flatMap { response =>
+      response.header[DateHeader] match {
+        case Some(dateHeader) =>
+          val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
+          val responseDate = ZonedDateTime.parse(dateHeader.date.toString, formatter)
+          characterCache.get(name) match {
+            case Some(existingDate) if responseDate.isAfter(existingDate) =>
+              characterCache += (name -> responseDate)
+              val decoded = decodeResponse(response)
+              Unmarshal(decoded).to[CharacterResponse].map(Right(_)).recover {
+                case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+                  val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+                  logger.warn(errorMessage)
+                  Left(errorMessage)
+                case e @ (_: ParsingException | _: DeserializationException) =>
+                  val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+                  logger.warn(errorMessage)
+                  Left(errorMessage)
+              }
+            case Some(_) =>
+              Future.successful(Left("Hit cache"))
+            case None =>
+              characterCache += (name -> responseDate)
+              val decoded = decodeResponse(response)
+              Unmarshal(decoded).to[CharacterResponse].map(Right(_)).recover {
+                case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+                  val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+                  logger.warn(errorMessage)
+                  Left(errorMessage)
+                case e @ (_: ParsingException | _: DeserializationException) =>
+                  val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+                  logger.warn(errorMessage)
+                  Left(errorMessage)
+              }
+          }
+        case None =>
+          Future.successful(Left("No Date header in response"))
+      }
     }
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
-        .recover {
-          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
-            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-          case e @ (_: ParsingException | _: DeserializationException) =>
-            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-        }
-    } yield unmarshalled
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {

@@ -122,7 +122,7 @@ object BotApp extends App with StrictLogging {
   private val botName: String = shardManager.getShards.get(0).getSelfUser.getName
 
   // This controls how often the online list updates (minutes)
-  var onlineListUpdateTime = 6
+  var onlineListUpdateTime = 8
 
   // internal caches
   var customSortData: Map[String, List[CustomSort]] = Map.empty
@@ -135,6 +135,7 @@ object BotApp extends App with StrictLogging {
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
+  var characterCache: Map[String, ZonedDateTime] = Map.empty
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -473,6 +474,7 @@ object BotApp extends App with StrictLogging {
     removeLevelsCache(ZonedDateTime.now())
     cleanHuntedList()
     cleanGalthenList()
+    cleanOnlineListCache(30)
   }
 
   // boosted boss/creature embed update at server save
@@ -607,6 +609,16 @@ object BotApp extends App with StrictLogging {
       catch {
         case _ : Throwable => logger.info("Failed to update the boosted messages")
       }
+    }
+  }
+
+  def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
+    val currentTime = ZonedDateTime.now()
+
+    characterCache = characterCache.filter {
+      case (_, timestamp) =>
+        val ageMinutes = timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES)
+        ageMinutes <= maxAgeMinutes
     }
   }
 

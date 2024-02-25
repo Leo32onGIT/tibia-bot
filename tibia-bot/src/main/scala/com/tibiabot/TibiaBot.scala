@@ -103,28 +103,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         !online.exists(player => player.name == i.char)
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
+      val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+      Source(charsToCheck)
+        .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+        .runWith(Sink.collection)
+        .map(_.toSet)
 
-      // cache bypass for Seanera
-      if (worldResponse.world.name == "Bypass" && Config.prod) {
-        // Remove existing online chars from the list...
-        recentOnlineBypass.filterInPlace { i =>
-          !online.exists(player => player.name == i.char)
-        }
-        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-        val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
-          (key.char, key.level.toInt)
-        }.toSet
-        Source(charsToCheck)
-          .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
-          .runWith(Sink.collection)
-          .map(_.toSet)
-      } else {
-        val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-        Source(charsToCheck)
-          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
-          .runWith(Sink.collection)
-          .map(_.toSet)
-      }
     case Left(warning) =>
       // use data from previous online list check
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
@@ -656,15 +640,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           if (levelsCheck) {
                             //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                             //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                            if (Config.newWorlds.exists(_.equalsIgnoreCase(world.toLowerCase)) && onlinePlayer.level < 20) {
-                              // ignore levels under 20 if its one of the new worlds
-                            } else {
-                              try {
-                                levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                            try {
+                              levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                            } catch {
+                              case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                              case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                             }
                           }
                         }
@@ -672,15 +652,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         if (levelsCheck) {
                           //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                          if (Config.newWorlds.exists(_.equalsIgnoreCase(world.toLowerCase)) && onlinePlayer.level < 20) {
-                            // ignore levels under 20 if its one of the new worlds
-                          } else {
-                            try {
-                              levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
-                            } catch {
-                              case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                              case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                            }
+                          try {
+                            levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                          } catch {
+                            case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                            case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                           }
                         }
                       }
