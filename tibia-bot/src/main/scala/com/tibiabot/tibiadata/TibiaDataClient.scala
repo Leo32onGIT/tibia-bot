@@ -149,6 +149,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
                   Left(errorMessage)
               }
             case Some(_) =>
+              response.discardEntityBytes()
               Future.successful(Left("Hit cache"))
             case None =>
               characterCache += (name -> responseDate)
@@ -165,6 +166,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
               }
           }
         case None =>
+          response.discardEntityBytes()
           Future.successful(Left("No Date header in response"))
       }
     }

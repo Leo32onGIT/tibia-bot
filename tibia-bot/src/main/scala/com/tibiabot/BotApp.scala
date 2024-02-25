@@ -95,7 +95,7 @@ object BotApp extends App with StrictLogging {
   logger.info("Starting up")
 
   // Configure shard manager builder
-  val shardCount = 5
+  val shardCount = 6
   val builder = DefaultShardManagerBuilder
     .createDefault(Config.token)
     .addEventListeners(new BotListener())
@@ -122,7 +122,7 @@ object BotApp extends App with StrictLogging {
   private val botName: String = shardManager.getShards.get(0).getSelfUser.getName
 
   // This controls how often the online list updates (minutes)
-  var onlineListUpdateTime = 8
+  var onlineListUpdateTime = 6
 
   // internal caches
   var customSortData: Map[String, List[CustomSort]] = Map.empty
