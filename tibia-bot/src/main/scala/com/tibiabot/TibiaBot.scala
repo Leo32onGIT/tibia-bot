@@ -89,7 +89,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         currentOnline.find(_.name == player.name) match {
           case Some(existingPlayer) =>
             val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
-            CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
+            CurrentOnline(player.name, player.level.toInt, player.vocation, existingPlayer.guildName, now, existingPlayer.duration + duration, existingPlayer.flag)
           case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
         }
       }
@@ -126,7 +126,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       case Right(char) =>
         val charName = char.character.character.name
         val guildName = char.character.character.guild.map(_.name).getOrElse("")
-
         val formerNamesList: List[String] = char.character.character.former_names.map(_.toList).getOrElse(Nil)
 
         // Caching attempt
