@@ -77,7 +77,7 @@ object BotApp extends App with StrictLogging {
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
   case class Discords(id: String, adminChannel: String, boostedChannel: String, boostedMessage: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
-  case class BoostedCache(boss: String, creature: String)
+  case class BoostedCache(boss: String, creature: String, bossChanged: String, creatureChanged: String)
   case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
@@ -478,7 +478,7 @@ object BotApp extends App with StrictLogging {
   }
 
   // boosted boss/creature embed update at server save
-  actorSystem.scheduler.schedule(60.seconds, 5.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 3.minutes) {
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime
     //if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 10))) {
     if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
@@ -486,6 +486,8 @@ object BotApp extends App with StrictLogging {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
           val currentCreature = boostedBossAndCreature.creature
+          val bossChanged = boostedBossAndCreature.bossChanged
+          val creatureChanged = boostedBossAndCreature.creatureChanged
 
           // Boosted Boss
           val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -493,7 +495,7 @@ object BotApp extends App with StrictLogging {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
               if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
-                boostedMonsterUpdate(boostedBoss, "")
+                boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
                 createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
@@ -516,7 +518,7 @@ object BotApp extends App with StrictLogging {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
               if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
-                boostedMonsterUpdate("", boostedCreature)
+                boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
                 createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
@@ -540,10 +542,10 @@ object BotApp extends App with StrictLogging {
           } yield List(bossEmbed, creatureEmbed)
 
           combinedFutures.map { boostedInfoList =>
-            if (boostedInfoList.exists(_._2)) {
+            if (bossChanged == "1" && creatureChanged == "1") {
+              boostedMonsterUpdate("", "", "0", "0")
               // Do something if at least one of the embeds changed
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-
               val notificationsList: List[BoostedStamp] = boostedAll()
               notificationsList.foreach { entry =>
                 var matchedNotification = false
@@ -636,7 +638,7 @@ object BotApp extends App with StrictLogging {
           case Right(boostedResponse) =>
             val boostedBoss = boostedResponse.boostable_bosses.boosted.name
             if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
-              boostedMonsterUpdate(boostedBoss, "")
+              boostedMonsterUpdate(boostedBoss, "", "", "")
             }
             (
               createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
@@ -659,7 +661,7 @@ object BotApp extends App with StrictLogging {
           case Right(creatureResponse) =>
             val boostedCreature = creatureResponse.creatures.boosted.name
             if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
-              boostedMonsterUpdate("", boostedCreature)
+              boostedMonsterUpdate("", boostedCreature, "", "")
             }
             (
               createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
@@ -730,7 +732,7 @@ object BotApp extends App with StrictLogging {
     replyEmbed.build()
   }
 
-  private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
+  private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
@@ -738,22 +740,26 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.createStatement()
 
-    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
 
     val results = new ListBuffer[BoostedCache]()
     while (result.next()) {
       val boss = Option(result.getString("boss")).getOrElse("None")
       val creature = Option(result.getString("creature")).getOrElse("None")
+      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
+      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
 
-      results += BoostedCache(boss, creature)
+      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
     }
     statement.close()
 
     if (results.isEmpty) {
       // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
       insertStatement.setString(1, "None") // Default value for boss
       insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.setString(3, "0")
+      insertStatement.setString(4, "0")
       insertStatement.executeUpdate()
       insertStatement.close()
     }
@@ -762,13 +768,24 @@ object BotApp extends App with StrictLogging {
     if (boss != "") {
       val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
       statement.setString(1, boss)
-
       statement.executeUpdate()
       statement.close()
     }
     if (creature != "") {
       val statement = conn.prepareStatement("UPDATE boosted_info SET creature = ?;")
       statement.setString(1, creature)
+      statement.executeUpdate()
+      statement.close()
+    }
+    if (bossChanged != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET bosschanged = ?;")
+      statement.setString(1, bossChanged)
+      statement.executeUpdate()
+      statement.close()
+    }
+    if (creatureChanged != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET creaturechanged = ?;")
+      statement.setString(1, creatureChanged)
       statement.executeUpdate()
       statement.close()
     }
@@ -794,31 +811,55 @@ object BotApp extends App with StrictLogging {
         s"""CREATE TABLE boosted_info (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |boss VARCHAR(255) NOT NULL,
-           |creature VARCHAR(255) NOT NULL
+           |bosschanged VARCHAR(255) NOT NULL,
+           |creature VARCHAR(255) NOT NULL,
+           |creaturechanged VARCHAR(255) NOT NULL
            );""".stripMargin
 
       statement.executeUpdate(createListTable)
     }
 
-    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+    // Check if the column already exists in the table
+    val bossChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'bosschanged'")
+    val bossChangedExists = bossChangedExistsQuery.next()
+    bossChangedExistsQuery.close()
 
+    // Check if the column already exists in the table
+    val creatureChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'creaturechanged'")
+    val creatureChangedExists = creatureChangedExistsQuery.next()
+    creatureChangedExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!bossChangedExists) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    // Add the column if it doesn't exist
+    if (!creatureChangedExists) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
     val results = new ListBuffer[BoostedCache]()
     while (result.next()) {
       val boss = Option(result.getString("boss")).getOrElse("None")
       val creature = Option(result.getString("creature")).getOrElse("None")
-
-      results += BoostedCache(boss, creature)
+      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
+      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
+      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
     }
 
     if (results.isEmpty) {
       // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
       insertStatement.setString(1, "None") // Default value for boss
       insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.setString(3, "0")
+      insertStatement.setString(4, "0")
       insertStatement.executeUpdate()
       insertStatement.close()
 
-      results += BoostedCache("None", "None")
+      results += BoostedCache("None", "None", "0", "0")
     }
 
     statement.close()
