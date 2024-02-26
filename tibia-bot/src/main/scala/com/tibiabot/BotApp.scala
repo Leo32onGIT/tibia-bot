@@ -615,7 +615,114 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  //WIP
+  def refreshBoostedBoard(): MessageEmbed = {
+    val replyEmbed = new EmbedBuilder()
+    var replyText = s":x: Failed to update the boosted board messages"
+    try {
+      boostedMessages().map { boostedBossAndCreature =>
+        val currentBoss = boostedBossAndCreature.boss
+        val currentCreature = boostedBossAndCreature.creature
+
+        // Boosted Boss
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
+              boostedMonsterUpdate(boostedBoss, "", "", "")
+            }
+            (
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+              boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
+              boostedBoss
+            )
+
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            (
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?"),
+              false,
+              boostedBoss
+            )
+        }
+
+        // Boosted Creature
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
+              boostedMonsterUpdate("", boostedCreature, "", "")
+            }
+            (
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+              boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
+              boostedCreature
+            )
+
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            (
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?"),
+              false,
+              boostedCreature
+            )
+        }
+
+        // Combine both futures and send the message
+        val combinedFutures: Future[List[(MessageEmbed, Boolean, String)]] = for {
+          bossEmbed <- bossEmbedFuture
+          creatureEmbed <- creatureEmbedFuture
+        } yield List(bossEmbed, creatureEmbed)
+
+        combinedFutures.map { boostedInfoList =>
+          val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
+          shards.foreach { shard =>
+            shard.getGuilds.asScala.foreach { guild =>
+              if (checkConfigDatabase(guild)) {
+                val discordInfo = discordRetrieveConfig(guild)
+                val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                if (channelId != "0") {
+                  val boostedChannel = guild.getTextChannelById(channelId)
+                  if (boostedChannel != null) {
+                    if (boostedChannel.canTalk()) {
+                      val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                      if (boostedMessage != "0") {
+                        try {
+                          boostedChannel.deleteMessageById(boostedMessage).queue()
+                        } catch {
+                          case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                        }
+                      }
+                      boostedChannel.sendMessageEmbeds(embeds.asJava)
+                        .setActionRow(
+                          Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )
+                        .queue((message: Message) => {
+                          //updateBoostedMessage(guild.getId, message.getId)
+                          discordUpdateConfig(guild, "", "", "", message.getId)
+                        }, (e: Throwable) => {
+                          logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                        })
+                    } else {
+                      logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      replyText = s":gear: Boosted messages queued for deletion and new ones sent"
+    }
+    catch {
+      case _ : Throwable => logger.info("Failed to update the boosted board messages")
+    }
+    replyEmbed.setDescription(replyText)
+    replyEmbed.build()
+  }
+
   private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
