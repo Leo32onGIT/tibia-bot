@@ -166,12 +166,12 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val name = input._1
     val level = input._2
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 250) {
+    val bypassName: String = if (level >= 400) {
       // Split the name into words
       val words = encodedName.split("%20")
+      val random = new Random()
       // Append randomly generated "+" characters to the last word, limited to a maximum length of 20
       words.lastOption.map { lastWord =>
-        val random = new Random()
         val numPluses = math.min(random.nextInt(7), 20 - lastWord.length) // Randomly generate 0-6 "+" characters, limited to a max length of 20
         lastWord + ("+" * numPluses)
       }.getOrElse(encodedName)
@@ -184,11 +184,11 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
         .recover {
           case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
-            val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+            val errorMessage = s"Failed to get character: '${bypassName.replaceAll("%20", " ")}' with status: '${response.status}'"
             logger.warn(errorMessage)
             Left(errorMessage)
           case e @ (_: ParsingException | _: DeserializationException) =>
-            val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+            val errorMessage = s"Failed to parse character: '${bypassName.replaceAll("%20", " ")}'"
             logger.warn(errorMessage)
             Left(errorMessage)
         }

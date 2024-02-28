@@ -82,7 +82,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         currentOnline.find(_.name == player.name) match {
           case Some(existingPlayer) =>
             val duration = now.toEpochSecond - existingPlayer.time.toEpochSecond
-            CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, existingPlayer.duration + duration, existingPlayer.flag)
+            CurrentOnline(player.name, player.level.toInt, player.vocation, existingPlayer.guildName, now, existingPlayer.duration + duration, existingPlayer.flag)
           case None => CurrentOnline(player.name, player.level.toInt, player.vocation, "", now, 0L, "")
         }
       }
