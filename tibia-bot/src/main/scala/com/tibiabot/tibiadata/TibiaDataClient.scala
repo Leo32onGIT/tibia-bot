@@ -179,7 +179,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
       encodedName
     }
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${encodedName}"))
+      response <- Http().singleRequest(HttpRequest(uri = s"$characterUrl${bypassName}"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CharacterResponse].map(Right(_))
         .recover {
