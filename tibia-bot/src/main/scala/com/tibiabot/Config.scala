@@ -9,7 +9,8 @@ object Config {
   val prod = false
   val verifiedDiscords = List(
     "1082484147492237515", // alpha/testing server
-    "912739993015947324"  // user
+    "912739993015947324",
+    "1176279097001918516"  // user
   )
 
   private val discord = ConfigFactory.load().getConfig("discord-config")
