@@ -464,12 +464,14 @@ object BotApp extends App with StrictLogging {
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
     val machineTimeZone = ZoneId.systemDefault()
-    val currentTimeInBrisbane = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
-    if (currentTimeInBrisbane.isAfter(LocalTime.of(19, 0)) && currentTimeInBrisbane.isBefore(LocalTime.of(19, 45))) {
+    val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
+    if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
           val currentCreature = boostedBossAndCreature.creature
+          val bossChanged = boostedBossAndCreature.bossChanged
+          val creatureChanged = boostedBossAndCreature.creatureChanged
 
           // Boosted Boss
           val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -477,11 +479,11 @@ object BotApp extends App with StrictLogging {
             case Right(boostedResponse) =>
               val boostedBoss = boostedResponse.boostable_bosses.boosted.name
               if (boostedBoss.toLowerCase != currentBoss.toLowerCase) {
-                boostedMonsterUpdate(boostedBoss, "")
+                boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
                 createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
-                boostedBoss != currentBoss && currentBoss.toLowerCase != "none",
+                boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
 
@@ -500,11 +502,11 @@ object BotApp extends App with StrictLogging {
             case Right(creatureResponse) =>
               val boostedCreature = creatureResponse.creatures.boosted.name
               if (boostedCreature.toLowerCase != currentCreature.toLowerCase) {
-                boostedMonsterUpdate("", boostedCreature)
+                boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
                 createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
-                boostedCreature != currentCreature && currentCreature.toLowerCase != "none",
+                boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
 
@@ -524,62 +526,65 @@ object BotApp extends App with StrictLogging {
           } yield List(bossEmbed, creatureEmbed)
 
           combinedFutures.map { boostedInfoList =>
-            if (boostedInfoList.exists(_._2)) {
+            if (bossChanged == "1" && creatureChanged == "1") {
+              boostedMonsterUpdate("", "", "0", "0")
               // Do something if at least one of the embeds changed
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-
               val notificationsList: List[BoostedStamp] = boostedAll()
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all")
-                  {
+                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all") {
                     matchedNotification = true
                   }
                 }
                 if (matchedNotification) {
-                  val user: User = jda.retrieveUserById(entry.user).complete()
-                  if (user != null) {
-                    try {
-                      user.openPrivateChannel().queue { privateChannel =>
-                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
-                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                        ).queue()
-                      }
-                    } catch {
-                      case ex: Exception => //
+                  try {
+                    val user: User = shardManager.retrieveUserById(entry.user).complete()
+                    user.openPrivateChannel().queue { privateChannel =>
+                      val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                      privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
+                        Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                      ).queue()
                     }
+                  } catch {
+                    case ex: Exception => logger.info(s"Failed to send Boosted notification to user: '${entry.user}'")
                   }
                 }
               }
 
-              jda.getGuilds.forEach { guild =>
-                val discordInfo = discordRetrieveConfig(guild)
-                val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
-
-                if (boostedChannel != null) {
-                  if (boostedChannel.canTalk()) {
-                    // WIP
-                    try {
-                      boostedChannel.deleteMessageById(discordInfo("boosted_messageid")).queue()
-                    }
-                    catch {
-                      case _ : Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
-                    }
-                    boostedChannel.sendMessageEmbeds(embeds.asJava)
-                      .setActionRow(
-                        Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                      )
-                      .queue((message: Message) => {
-                        updateBoostedMessage(guild.getId, message.getId)
-                        discordUpdateConfig(guild, "", "", "", message.getId)
-                      }, (e: Throwable) => {
-                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+              shards.foreach { shard =>
+                shard.getGuilds.asScala.foreach { guild =>
+                  if (checkConfigDatabase(guild)) {
+                    val discordInfo = discordRetrieveConfig(guild)
+                    val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                    if (channelId != "0") {
+                      val boostedChannel = guild.getTextChannelById(channelId)
+                      if (boostedChannel != null) {
+                        if (boostedChannel.canTalk()) {
+                          val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                          if (boostedMessage != "0") {
+                            try {
+                              boostedChannel.deleteMessageById(boostedMessage).queue()
+                            } catch {
+                              case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
+                            }
+                          }
+                          boostedChannel.sendMessageEmbeds(embeds.asJava)
+                            .setActionRow(
+                              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                            )
+                            .queue((message: Message) => {
+                              //updateBoostedMessage(guild.getId, message.getId)
+                              discordUpdateConfig(guild, "", "", "", message.getId)
+                            }, (e: Throwable) => {
+                              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                            })
+                        } else {
+                          logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                        }
                       }
-                    )
-                  } else {
-                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+                    }
                   }
                 }
               }
@@ -591,8 +596,8 @@ object BotApp extends App with StrictLogging {
         case _ : Throwable => logger.info("Failed to update the boosted messages")
       }
     }
-    //WIP END
   }
+
 
   // run hunted list cleanup every day at 6:30 PM AEST
   private val currentTime = Instant.now
