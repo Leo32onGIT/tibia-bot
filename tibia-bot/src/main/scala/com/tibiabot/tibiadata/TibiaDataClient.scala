@@ -17,6 +17,10 @@ import scala.util.Random
 import com.tibiabot.BotApp.characterCache
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import spray.json.DeserializationException
+import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.headers.{Date => DateHeader}
+import java.time.{ZonedDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 
 class TibiaDataClient extends JsonSupport with StrictLogging {
 
@@ -80,28 +84,6 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
         }
     } yield unmarshalled
   }
-
-  /**
-  // unused
-  def getCreature(creature: String): Future[Either[String, RaceResponse]] = {
-    val encodedCreature = URLEncoder.encode(creature, "UTF-8").replaceAll("\\+", "%20")
-    for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/creature/$encodedCreature"))
-      decoded = decodeResponse(response)
-      unmarshalled <- Unmarshal(decoded).to[RaceResponse].map(Right(_))
-        .recover {
-          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
-            val errorMessage = s"Failed to get creature check with status: '${response.status}'"
-            logger.warn(errorMessage)
-            Left(errorMessage)
-          case e @ (_: ParsingException | _: DeserializationException) =>
-            val errorMessage = s"Failed to parse creature check"
-            logger.warn(e.getMessage)
-            Left(errorMessage)
-        }
-    } yield unmarshalled
-  }
-  **/
 
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8").replaceAll("\\+", "%20")
@@ -193,7 +175,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     val name = input._1
     val level = input._2
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 400) {
+    val bypassName: String = if (level >= 200) {
       val random = new Random()
       // Append randomly generated "+" characters to the last word, limited to a maximum length of 20
       val numPluses = math.min(random.nextInt(7), 20 - encodedName.length) // Randomly generate 0-6 "+" characters, limited to a max length of 20
