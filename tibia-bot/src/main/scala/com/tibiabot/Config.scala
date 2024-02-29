@@ -82,6 +82,7 @@ object Config {
   val creatureEmoji: String = discord.getString("creature-emoji")
   val torchOnEmoji: String = discord.getString("torch-on-emoji")
   val torchOffEmoji: String = discord.getString("torch-off-emoji")
+  val satchelEmoji: String = discord.getString("satchel-emoji")
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
