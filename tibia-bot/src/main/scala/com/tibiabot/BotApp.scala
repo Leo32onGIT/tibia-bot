@@ -71,7 +71,7 @@ object BotApp extends App with StrictLogging {
   private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
   case class Discords(id: String, adminChannel: String, boostedChannel: String, boostedMessage: String)
   case class Players(name: String, reason: String, reasonText: String, addedBy: String)
-  case class BoostedCache(boss: String, creature: String)
+  case class BoostedCache(boss: String, creature: String, bossChanged: String, creatureChanged: String)
   case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
   case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
   case class DeathsCache(world: String, name: String, time: String)
@@ -539,8 +539,9 @@ object BotApp extends App with StrictLogging {
                   }
                 }
                 if (matchedNotification) {
+                  val user: User = jda.retrieveUserById(entry.user).complete()
+                  if (user != null) {
                   try {
-                    val user: User = shardManager.retrieveUserById(entry.user).complete()
                     user.openPrivateChannel().queue { privateChannel =>
                       val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
                       privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
@@ -553,36 +554,34 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              shards.foreach { shard =>
-                shard.getGuilds.asScala.foreach { guild =>
-                  if (checkConfigDatabase(guild)) {
-                    val discordInfo = discordRetrieveConfig(guild)
-                    val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-                    if (channelId != "0") {
-                      val boostedChannel = guild.getTextChannelById(channelId)
-                      if (boostedChannel != null) {
-                        if (boostedChannel.canTalk()) {
-                          val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                          if (boostedMessage != "0") {
-                            try {
-                              boostedChannel.deleteMessageById(boostedMessage).queue()
-                            } catch {
-                              case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
-                            }
+              jda.getGuilds.asScala.foreach { guild =>
+                if (checkConfigDatabase(guild)) {
+                  val discordInfo = discordRetrieveConfig(guild)
+                  val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                  if (channelId != "0") {
+                    val boostedChannel = guild.getTextChannelById(channelId)
+                    if (boostedChannel != null) {
+                      if (boostedChannel.canTalk()) {
+                        val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                        if (boostedMessage != "0") {
+                          try {
+                            boostedChannel.deleteMessageById(boostedMessage).queue()
+                          } catch {
+                            case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                           }
-                          boostedChannel.sendMessageEmbeds(embeds.asJava)
-                            .setActionRow(
-                              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                            )
-                            .queue((message: Message) => {
-                              //updateBoostedMessage(guild.getId, message.getId)
-                              discordUpdateConfig(guild, "", "", "", message.getId)
-                            }, (e: Throwable) => {
-                              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                            })
-                        } else {
-                          logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                         }
+                        boostedChannel.sendMessageEmbeds(embeds.asJava)
+                          .setActionRow(
+                            Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                          )
+                          .queue((message: Message) => {
+                            //updateBoostedMessage(guild.getId, message.getId)
+                            discordUpdateConfig(guild, "", "", "", message.getId)
+                          }, (e: Throwable) => {
+                            logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                          })
+                      } else {
+                        logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                       }
                     }
                   }
@@ -607,7 +606,7 @@ object BotApp extends App with StrictLogging {
 
 
   //WIP
-  private def boostedMonsterUpdate(boss: String, creature: String): Unit = {
+  private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
     val username = "postgres"
     val password = Config.postgresPassword
@@ -615,22 +614,26 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
     val statement = conn.createStatement()
 
-    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
 
     val results = new ListBuffer[BoostedCache]()
     while (result.next()) {
       val boss = Option(result.getString("boss")).getOrElse("None")
       val creature = Option(result.getString("creature")).getOrElse("None")
+      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
+      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
 
-      results += BoostedCache(boss, creature)
+      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
     }
     statement.close()
 
     if (results.isEmpty) {
       // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
       insertStatement.setString(1, "None") // Default value for boss
       insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.setString(3, "0")
+      insertStatement.setString(4, "0")
       insertStatement.executeUpdate()
       insertStatement.close()
     }
@@ -639,13 +642,24 @@ object BotApp extends App with StrictLogging {
     if (boss != "") {
       val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
       statement.setString(1, boss)
-
       statement.executeUpdate()
       statement.close()
     }
     if (creature != "") {
       val statement = conn.prepareStatement("UPDATE boosted_info SET creature = ?;")
       statement.setString(1, creature)
+      statement.executeUpdate()
+      statement.close()
+    }
+    if (bossChanged != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET bosschanged = ?;")
+      statement.setString(1, bossChanged)
+      statement.executeUpdate()
+      statement.close()
+    }
+    if (creatureChanged != "") {
+      val statement = conn.prepareStatement("UPDATE boosted_info SET creaturechanged = ?;")
+      statement.setString(1, creatureChanged)
       statement.executeUpdate()
       statement.close()
     }
@@ -671,31 +685,55 @@ object BotApp extends App with StrictLogging {
         s"""CREATE TABLE boosted_info (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |boss VARCHAR(255) NOT NULL,
-           |creature VARCHAR(255) NOT NULL
+           |bosschanged VARCHAR(255) NOT NULL,
+           |creature VARCHAR(255) NOT NULL,
+           |creaturechanged VARCHAR(255) NOT NULL
            );""".stripMargin
 
       statement.executeUpdate(createListTable)
     }
 
-    val result = statement.executeQuery(s"SELECT boss,creature FROM boosted_info;")
+    // Check if the column already exists in the table
+    val bossChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'bosschanged'")
+    val bossChangedExists = bossChangedExistsQuery.next()
+    bossChangedExistsQuery.close()
 
+    // Check if the column already exists in the table
+    val creatureChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'creaturechanged'")
+    val creatureChangedExists = creatureChangedExistsQuery.next()
+    creatureChangedExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!bossChangedExists) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    // Add the column if it doesn't exist
+    if (!creatureChangedExists) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
     val results = new ListBuffer[BoostedCache]()
     while (result.next()) {
       val boss = Option(result.getString("boss")).getOrElse("None")
       val creature = Option(result.getString("creature")).getOrElse("None")
-
-      results += BoostedCache(boss, creature)
+      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
+      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
+      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
     }
 
     if (results.isEmpty) {
       // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature) VALUES (?, ?);")
+      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
       insertStatement.setString(1, "None") // Default value for boss
       insertStatement.setString(2, "None") // Default value for creature
+      insertStatement.setString(3, "0")
+      insertStatement.setString(4, "0")
       insertStatement.executeUpdate()
       insertStatement.close()
 
-      results += BoostedCache("None", "None")
+      results += BoostedCache("None", "None", "0", "0")
     }
 
     statement.close()
