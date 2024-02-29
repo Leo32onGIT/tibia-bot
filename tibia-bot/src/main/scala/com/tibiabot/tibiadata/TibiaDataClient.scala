@@ -14,7 +14,7 @@ import java.net.URLEncoder
 import scala.concurrent.duration._
 import akka.http.scaladsl.model.HttpEntity.Strict
 import scala.util.Random
-
+import com.tibiabot.BotApp.characterCache
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import spray.json.DeserializationException
 

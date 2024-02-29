@@ -113,6 +113,7 @@ object BotApp extends App with StrictLogging {
   var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
   var activityData: Map[String, List[PlayerCache]] = Map.empty
   var activityCommandBlocker: Map[String, Boolean] = Map.empty
+  var characterCache: Map[String, ZonedDateTime] = Map.empty
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
@@ -460,7 +461,7 @@ object BotApp extends App with StrictLogging {
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
       cleanGalthenList()
-
+      cleanOnlineListCache(30)
       updateOnOdd = !updateOnOdd // Toggle the flag
     }
     val machineTimeZone = ZoneId.systemDefault()
@@ -605,6 +606,15 @@ object BotApp extends App with StrictLogging {
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
 
+  def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
+    val currentTime = ZonedDateTime.now()
+
+    characterCache = characterCache.filter {
+      case (_, timestamp) =>
+        val ageMinutes = timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES)
+        ageMinutes <= maxAgeMinutes
+    }
+  }
 
   //WIP
   private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit = {
