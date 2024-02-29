@@ -445,14 +445,13 @@ object BotApp extends App with StrictLogging {
     if (updateOnOdd) {
       try {
         val randomActivity = List(
-          "Pulsera activity",
           "people press buttons",
           "Tibia players die",
           "people fumble e-rings",
           "UE combos slap",
           "another 50k spent on twist"
         )
-        val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("Pulsera activity")
+        val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("people press buttons")
         jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
       } catch {
         case _: Throwable => logger.info("Failed to update the bot's status counts")
@@ -5121,7 +5120,7 @@ object BotApp extends App with StrictLogging {
 
     logger.info(guildId)
 
-    if (guildId == "912739993015947324") {
+    if (guildId == "912739993015947324" || guildId == "1176279097001918516") {
       // Config is shared with Pulsera Bot
       logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
     } else {
