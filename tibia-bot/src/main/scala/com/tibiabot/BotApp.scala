@@ -3070,6 +3070,13 @@ object BotApp extends App with StrictLogging {
       val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
       val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
 
+      val nemesisRoleString = s"$world Nemesis Boss"
+      val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
+      val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
+
+      val worldCount = worldConfig(guild)
+      val count = worldCount.length
+
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
@@ -3086,106 +3093,147 @@ object BotApp extends App with StrictLogging {
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
         val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
         discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, "0", "0", ZonedDateTime.now())
+
+        val boostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+        boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+        boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+        discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+
+        val galthenEmbed = new EmbedBuilder()
+        galthenEmbed.setColor(3092790)
+        galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+        galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+          Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+        ).queue()
+
+        // Boosted Boss
+        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+        val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+          case Right(boostedResponse) =>
+            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+
+          case Left(errorMessage) =>
+            val boostedBoss = "Podium_of_Vigour"
+            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
+        }
+
+        // Boosted Creature
+        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+        val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+          case Right(creatureResponse) =>
+            val boostedCreature = creatureResponse.creatures.boosted.name
+            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+          case Left(errorMessage) =>
+            val boostedCreature = "Podium_of_Tenacity"
+            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+        }
+
+        // Combine both futures and send the message
+        val combinedFutures: Future[List[MessageEmbed]] = for {
+          bossEmbed <- bossEmbedFuture
+          creatureEmbed <- creatureEmbedFuture
+        } yield List(bossEmbed, creatureEmbed)
+
+        combinedFutures
+          .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+            .setActionRow(
+              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+            )
+            .queue((message: Message) => {
+              //updateBoostedMessage(guild.getId, message.getId)
+              discordUpdateConfig(guild, "", "", "", message.getId)
+            }, (e: Throwable) => {
+              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+            })
+          )
       } else {
-        val adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
+        var adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
         val boostedChannelCheck = guild.getTextChannelById(discordConfig("boosted_channel"))
-        val boostedIdCheck = guild.getTextChannelById(discordConfig("boosted_messageid"))
+        if (adminCategoryCheck == null) {
+          // admin category has been deleted
+          val adminCategory = guild.createCategory("Violent Bot").complete()
+          adminCategory.upsertPermissionOverride(botRole)
+            .grant(Permission.VIEW_CHANNEL)
+            .grant(Permission.MESSAGE_SEND)
+            .complete()
+          adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, adminCategory.getId, "", "", "")
+          adminCategoryCheck = adminCategory
+        }
         if (adminChannelCheck == null) {
           // admin channel has been deleted
-          if (adminCategoryCheck == null) {
-            // admin category has been deleted
-            val adminCategory = guild.createCategory("Violent Bot").complete()
-            adminCategory.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .complete()
-            adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            // create command-log channel
-            val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, adminCategory.getId, adminChannel.getId, "", "")
-          } else {
-            // admin category still exists
-            val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, "", adminChannel.getId, "", "")
-          }
+          val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+          adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, "", adminChannel.getId, "", "")
         }
         if (boostedChannelCheck == null) {
-          if (adminCategoryCheck == null) {
-            // admin category has been deleted
-            val adminCategory = guild.createCategory("Violent Bot").complete()
-            adminCategory.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .complete()
-            adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            // create boosted board
-            val boostedChannel = guild.createTextChannel("boosted", adminCategory).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, adminCategory.getId, "", boostedChannel.getId, "")
-          } else {
-            // admin category still exists
-            val boostedChannel = guild.createTextChannel("boosted", adminCategoryCheck).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-            boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-            boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-            discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+          // admin category still exists
+          val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
+          boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
 
-            // Boosted Boss
-            val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-            val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-              case Right(boostedResponse) =>
-                val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+          val galthenEmbed = new EmbedBuilder()
+          galthenEmbed.setColor(3092790)
+          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+          galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+          ).queue()
 
-              case Left(errorMessage) =>
-                val boostedBoss = "Podium_of_Vigour"
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-            }
+          // Boosted Boss
+          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
+          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
+            case Right(boostedResponse) =>
+              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
 
-            // Boosted Creature
-            val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-            val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-              case Right(creatureResponse) =>
-                val boostedCreature = creatureResponse.creatures.boosted.name
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-              case Left(errorMessage) =>
-                val boostedCreature = "Podium_of_Tenacity"
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-            }
-
-            // Combine both futures and send the message
-            val combinedFutures: Future[List[MessageEmbed]] = for {
-              bossEmbed <- bossEmbedFuture
-              creatureEmbed <- creatureEmbedFuture
-            } yield List(bossEmbed, creatureEmbed)
-
-            combinedFutures
-              .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-                .setActionRow(
-                  Button.primary("boosted list", "Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                  updateBoostedMessage(guild.getId, message.getId)
-                  discordUpdateConfig(guild, "", "", "", message.getId)
-                }, (e: Throwable) => {
-                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                })
-              )
+            case Left(errorMessage) =>
+              val boostedBoss = "Podium_of_Vigour"
+              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
           }
+
+          // Boosted Creature
+          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
+          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
+            case Right(creatureResponse) =>
+              val boostedCreature = creatureResponse.creatures.boosted.name
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+
+            case Left(errorMessage) =>
+              val boostedCreature = "Podium_of_Tenacity"
+              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
+          }
+
+          // Combine both futures and send the message
+          val combinedFutures: Future[List[MessageEmbed]] = for {
+            bossEmbed <- bossEmbedFuture
+            creatureEmbed <- creatureEmbedFuture
+          } yield List(bossEmbed, creatureEmbed)
+
+          combinedFutures
+            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
+              .setActionRow(
+                Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+              )
+              .queue((message: Message) => {
+                //updateBoostedMessage(guild.getId, message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId)
+              }, (e: Throwable) => {
+                logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+              })
+            )
         }
       }
       // check is world has already been setup
@@ -3201,6 +3249,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_EMBED_LINKS)
           .grant(Permission.MESSAGE_HISTORY)
           .grant(Permission.MANAGE_CHANNEL)
+          .grant(Permission.MANAGE_WEBHOOKS)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
@@ -3210,10 +3259,9 @@ object BotApp extends App with StrictLogging {
         val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
         val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
         val activityChannel = guild.createTextChannel("activity", newCategory).complete()
-        val notificationsChannel = guild.createTextChannel("notifications", newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, notificationsChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
         channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
           channel.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
@@ -3227,42 +3275,45 @@ object BotApp extends App with StrictLogging {
             .deny(Permission.MESSAGE_SEND)
             .complete()
         }
+        levelsChannel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
 
-        // Fullbless Role
-        val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
-        val fullblessEmbed = new EmbedBuilder()
-        fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-        fullblessEmbed.setThumbnail(Config.aolThumbnail)
-        fullblessEmbed.setColor(3092790)
-        fullblessEmbed.setDescription(fullblessEmbedText)
-        notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
-          .setActionRow(
-            Button.success(s"add", "Add Role"),
-            Button.danger(s"remove", "Remove Role")
-          )
-          .queue()
+        val notificationsConfig = discordRetrieveConfig(guild)
+        val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
 
-        // Nemesis role
-        val nemesisRoleString = s"$world Nemesis Boss"
-        val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
-        val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
-        val worldCount = worldConfig(guild)
-        val count = worldCount.length
-        val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-        val nemesisThumbnail = nemesisList(count % nemesisList.size)
+        if (notificationsChannel != null) {
+          if (notificationsChannel.canTalk()) {
+            // Fullbless Role
+            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
+            val fullblessEmbed = new EmbedBuilder()
+            fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+            fullblessEmbed.setThumbnail(Config.aolThumbnail)
+            fullblessEmbed.setColor(3092790)
+            fullblessEmbed.setDescription(fullblessEmbedText)
+            notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
+              .setActionRow(
+                Button.success(s"add", "Add Role"),
+                Button.danger(s"remove", "Remove Role")
+              )
+              .queue()
 
-        val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
-        val nemesisEmbed = new EmbedBuilder()
-        nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-        nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-        nemesisEmbed.setColor(3092790)
-        nemesisEmbed.setDescription(nemesisEmbedText)
-        notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
-          .setActionRow(
-            Button.success("add", "Add Role"),
-            Button.danger("remove", "Remove Role")
-          )
-          .queue()
+            // Nemesis role
+            val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
+            val nemesisThumbnail = nemesisList(count % nemesisList.size)
+
+            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+            val nemesisEmbed = new EmbedBuilder()
+            nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+            nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+            nemesisEmbed.setColor(3092790)
+            nemesisEmbed.setDescription(nemesisEmbedText)
+            notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
+              .setActionRow(
+                Button.success("add", "Add Role"),
+                Button.danger("remove", "Remove Role")
+              )
+              .queue()
+          }
+        }
 
         val alliesId = alliesChannel.getId
         val enemiesId = "0" //enemiesChannel.getId
@@ -3270,7 +3321,6 @@ object BotApp extends App with StrictLogging {
         val levelsId = levelsChannel.getId
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
-        val notificationsId = notificationsChannel.getId
         val activityId = activityChannel.getId
 
         // post initial embed in levels channel
@@ -3304,7 +3354,7 @@ object BotApp extends App with StrictLogging {
         }
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, notificationsId, "0", activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
