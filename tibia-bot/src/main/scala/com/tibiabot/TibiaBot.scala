@@ -949,7 +949,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               // char is already on ally/hunted lis
                             } else {
                               // char is not on hunted list
-                              if (!huntedBuffer.exists(_._1 == killerName)) {
+                              if (!huntedBuffer.exists(_._1.toLowerCase() == killerName.toLowerCase())) {
                                 // add them to hunted list
                                 huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
                               }
@@ -972,8 +972,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             val commandUser = s"<@${BotApp.botUser}>"
                             val adminEmbed = new EmbedBuilder()
                             adminEmbed.setTitle(":robot: enemy automatically detected:")
-                            adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**.")
-                            adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
+                            adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
+                            adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                             adminEmbed.setColor(14397256) // orange for bot auto command
                             try {
                               adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
