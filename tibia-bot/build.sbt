@@ -1,4 +1,4 @@
-name := "pulsera-dedicated"
+name := "violent-bot-dedicated"
 version := "1.9"
 
 scalaVersion := "2.13.9"
