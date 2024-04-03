@@ -677,36 +677,34 @@ object BotApp extends App with StrictLogging {
 
         combinedFutures.map { boostedInfoList =>
           val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-          shards.foreach { shard =>
-            shard.getGuilds.asScala.foreach { guild =>
-              if (checkConfigDatabase(guild)) {
-                val discordInfo = discordRetrieveConfig(guild)
-                val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-                if (channelId != "0") {
-                  val boostedChannel = guild.getTextChannelById(channelId)
-                  if (boostedChannel != null) {
-                    if (boostedChannel.canTalk()) {
-                      val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                      if (boostedMessage != "0") {
-                        try {
-                          boostedChannel.deleteMessageById(boostedMessage).queue()
-                        } catch {
-                          case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
-                        }
+          jda.getGuilds.asScala.foreach { guild =>
+            if (checkConfigDatabase(guild)) {
+              val discordInfo = discordRetrieveConfig(guild)
+              val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+              if (channelId != "0") {
+                val boostedChannel = guild.getTextChannelById(channelId)
+                if (boostedChannel != null) {
+                  if (boostedChannel.canTalk()) {
+                    val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+                    if (boostedMessage != "0") {
+                      try {
+                        boostedChannel.deleteMessageById(boostedMessage).queue()
+                      } catch {
+                        case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                       }
-                      boostedChannel.sendMessageEmbeds(embeds.asJava)
-                        .setActionRow(
-                          Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                        )
-                        .queue((message: Message) => {
-                          //updateBoostedMessage(guild.getId, message.getId)
-                          discordUpdateConfig(guild, "", "", "", message.getId)
-                        }, (e: Throwable) => {
-                          logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                        })
-                    } else {
-                      logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                     }
+                    boostedChannel.sendMessageEmbeds(embeds.asJava)
+                      .setActionRow(
+                        Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                      )
+                      .queue((message: Message) => {
+                        //updateBoostedMessage(guild.getId, message.getId)
+                        discordUpdateConfig(guild, "", "", "", message.getId)
+                      }, (e: Throwable) => {
+                        logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                      })
+                  } else {
+                    logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
                   }
                 }
               }
