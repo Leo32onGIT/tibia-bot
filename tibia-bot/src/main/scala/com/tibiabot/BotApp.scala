@@ -422,7 +422,7 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
     // update the commands
-    if (g.getId == "912739993015947324" || g.getId == "1176279097001918516") { // premium?
+    if (g.getId == "912739993015947324" || g.getId == "1176279097001918516" || g.getId == "1224670957466161234") { // premium?
       g.updateCommands().addCommands(commands.asJava).complete()
     } else if (g.getId == "1082484147492237515") { // pulsera bot beta discord
       g.updateCommands().addCommands(commands.asJava).complete()
@@ -5120,7 +5120,7 @@ object BotApp extends App with StrictLogging {
 
     logger.info(guildId)
 
-    if (guildId == "912739993015947324" || guildId == "1176279097001918516") {
+    if (guildId == "912739993015947324" || guildId == "1176279097001918516" || guildId == "1224670957466161234") {
       // Config is shared with Pulsera Bot
       logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
     } else {
