@@ -949,7 +949,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               // char is already on ally/hunted lis
                             } else {
                               // char is not on hunted list
-                              if (!huntedBuffer.exists(_._1.toLowerCase() == killerName.toLowerCase())) {
+                              if (!huntedBuffer.exists(_._1.toLowerCase == killerName.toLowerCase)) {
                                 // add them to hunted list
                                 huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
                               }
