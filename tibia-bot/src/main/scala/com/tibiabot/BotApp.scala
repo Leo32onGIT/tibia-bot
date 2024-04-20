@@ -103,7 +103,7 @@ object BotApp extends App with StrictLogging {
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = jda.getSelfUser.getId
-  private val botName = "Gringo Bot"
+  private val botName = jda.getSelfUser.getName
 
   // initialize core hunted/allied list
   var customSortData: Map[String, List[CustomSort]] = Map.empty
@@ -3118,7 +3118,7 @@ object BotApp extends App with StrictLogging {
       // assume initial run on this server and attempt to create core databases
       createConfigDatabase(guild)
 
-      val botRole = guild.getRolesByName(botName, true).get(0)
+      val botRole = guild.getBotRole
       val fullblessRoleString = s"$world Fullbless"
       val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
       val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
