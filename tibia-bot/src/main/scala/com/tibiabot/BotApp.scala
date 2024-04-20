@@ -3302,7 +3302,6 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_EMBED_LINKS)
           .grant(Permission.MESSAGE_HISTORY)
           .grant(Permission.MANAGE_CHANNEL)
-          .grant(Permission.MANAGE_WEBHOOKS)
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
