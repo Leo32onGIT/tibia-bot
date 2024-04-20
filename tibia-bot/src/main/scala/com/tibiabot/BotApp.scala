@@ -103,7 +103,7 @@ object BotApp extends App with StrictLogging {
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = jda.getSelfUser.getId
-  private val botName = jda.getSelfUser.getName
+  private val botName = "Gringo Bot"
 
   // initialize core hunted/allied list
   var customSortData: Map[String, List[CustomSort]] = Map.empty
