@@ -3327,7 +3327,6 @@ object BotApp extends App with StrictLogging {
             .deny(Permission.MESSAGE_SEND)
             .complete()
         }
-        levelsChannel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
 
         val notificationsConfig = discordRetrieveConfig(guild)
         val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
@@ -4644,7 +4643,6 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.MESSAGE_EMBED_LINKS)
             .grant(Permission.MESSAGE_HISTORY)
             .grant(Permission.MANAGE_CHANNEL)
-            .grant(Permission.MANAGE_WEBHOOKS)
             .complete()
           newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
           category = newCategory
@@ -4945,7 +4943,7 @@ object BotApp extends App with StrictLogging {
               .deny(Permission.MESSAGE_SEND)
               .complete()
             if (webhooks) {
-              channel.upsertPermissionOverride(botRole).grant(Permission.MANAGE_WEBHOOKS).complete()
+              //
             }
           }
         }
