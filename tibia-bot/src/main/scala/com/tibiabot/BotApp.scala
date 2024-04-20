@@ -3684,7 +3684,7 @@ object BotApp extends App with StrictLogging {
         val enemiesChannel = guild.getTextChannelById(enemiesChannelInfo.getOrElse("0"))
         val neutralsChannel = guild.getTextChannelById(neutralsChannelInfo.getOrElse("0"))
 
-        val botRole = guild.getRolesByName(botName, true).get(0)
+        val botRole = guild.getBotRole
         val publicRole = guild.getPublicRole
 
         if (setting == "combine") {
@@ -4435,7 +4435,7 @@ object BotApp extends App with StrictLogging {
     }
     if (cache.isDefined) {
       // get the bots main roles
-      val botRole = guild.getRolesByName(botName, true).get(0)
+      val botRole = guild.getBotRole
       val publicRole = guild.getPublicRole
 
       // get channel Ids
