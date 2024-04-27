@@ -695,7 +695,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               } else {
 
                 // default emoji regex
-                val emojiPattern = """/<a?:.+?:\d{18}>|\\p{Extended_Pictographic}/"""
+                val emojiPattern = "/<a?:.+?:\\d{18}>|\\p{Extended_Pictographic}/gu"
                 val matched = emojiOption.matches(emojiPattern)
                 if (matched) {
                   BotApp.addOnlineListCategory(event, typeOption, nameOption, labelOption, emojiOption, embed => {
