@@ -255,38 +255,6 @@ object BotApp extends App with StrictLogging {
   // neutrals command
   private val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Configuration options for neutrals")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommandGroups(
-      new SubcommandGroupData("tag", "Manage your custom tags for neutrals")
-      .addSubcommands(
-        new SubcommandData("add", "Tag a neutral guild or player for deaths and for the combined online list")
-          .addOptions(
-            new OptionData(OptionType.STRING, "type", "Would you like to tag a guild or a player?").setRequired(true)
-              .addChoices(
-                new Choice("guild", "guild"),
-                new Choice("player", "player")
-              ),
-            new OptionData(OptionType.STRING, "name", "The name of the player or guild").setRequired(true),
-            new OptionData(OptionType.STRING, "label", "The label you want for these tags in the combined online list")
-              .setRequired(true)
-              .setMaxLength(30),
-            new OptionData(OptionType.STRING, "emoji", "The emoji you want for these tags in the combined online list").setRequired(true)
-          ),
-        new SubcommandData("remove", "Remove a tag")
-          .addOptions(
-            new OptionData(OptionType.STRING, "type", "Would you like to tag a guild or a player?").setRequired(true)
-              .addChoices(
-                new Choice("guild", "guild"),
-                new Choice("player", "player")
-              ),
-            new OptionData(OptionType.STRING, "name", "The name of the player or guild").setRequired(true)
-          ),
-        new SubcommandData("clear", "Clear all entries everything for a specific tag")
-          .addOptions(
-            new OptionData(OptionType.STRING, "label", "What tag would you like to clear?").setRequired(true)
-          ),
-        new SubcommandData("list", "Show a list all of your custom tags")
-      )
-    )
     .addSubcommands(
       new SubcommandData("levels", "Show or hide neutral levels")
         .addOptions(
