@@ -1229,7 +1229,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
 
           val combinedList = {
-            modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
+            val headerToRemove = s"### Others"
+            val hasOtherHeaders = groupedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
+            if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
+              groupedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
+            } else {
+              modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
+            }
           }
 
           // allow for custom channel names
