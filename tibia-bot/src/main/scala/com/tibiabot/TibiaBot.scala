@@ -34,7 +34,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private case class CurrentOnline(name: String, level: Int, vocation: String, guildName: String, time: ZonedDateTime, duration: Long = 0L, flag: String)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
-  private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, categoryEmoji: String, category: String, message: String)
+  private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
 
   //val guildId: String = guild.getId
 
@@ -1126,28 +1126,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case _ => Config.otherGuild // guild (not ally or hunted)
       }
 
-      // Initialize with empty strings
-      var (categoryLabel, categoryEmoji) = ("", "")
-
-      // Query customSortData for the guildId and match player.guildName within the guild's data
-      val customSortGuildMatches = customSortData.getOrElse(guildId, List())
-        .filter(entry => entry.entityType == "guild" && entry.name.toLowerCase() == player.guildName.toLowerCase())
-      if (customSortGuildMatches.nonEmpty) {
-        val matchData = customSortGuildMatches.head // Use the first match found
-        categoryLabel = matchData.label
-        categoryEmoji = matchData.emoji
-      }
-
-      // Query customSortData for the guildId and match player.name within the player's data
-      val customSortPlayerMatches = customSortData.getOrElse(guildId, List())
-        .filter(entry => entry.entityType == "player" && entry.name.toLowerCase() == player.name.toLowerCase())
-      if (customSortPlayerMatches.nonEmpty) {
-        val matchData = customSortPlayerMatches.head // Use the first match found
-        categoryLabel = matchData.label
-        categoryEmoji = matchData.emoji
-      }
-
-      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, categoryEmoji, categoryLabel, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
+      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
     }
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
@@ -1175,28 +1154,51 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val combinedTextChannel = guild.getTextChannelById(alliesChannel)
       if (combinedTextChannel != null) {
         if (combinedTextChannel.canTalk()) {
-          val groupedNeutrals: List[(String, List[String])] = vocationBuffers.values
-            .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
-            .groupBy(_.category)
-            .toList
-            .sortBy { case (category, _) => (category.isEmpty, category) }
-            .map { case (category, charSorts) =>
-              val (countOfItems, messages) = charSorts.foldLeft(0 -> List.empty[String]) {
-                case ((count, accMessages), charSort) =>
-                  count + 1 -> (accMessages :+ charSort.message)
-              }
-              val categoryHeader = if (category.isEmpty) {
-                s"### ${Config.neutral} Others ${Config.neutral}"
+
+          // neutrals grouped by Guild
+          val guildNameCounts: Map[String, Int] = vocationBuffers.values
+            .flatMap(_.map(_.guildName))
+            .groupBy(identity)
+            .view.mapValues(_.size)
+            .toMap
+
+          val updatedVocationBuffers = vocationBuffers.mapValues { charSorts =>
+            val updatedCharSorts = charSorts.map { charSort =>
+              if (charSort.guildName != "" && guildNameCounts.getOrElse(charSort.guildName, 0) < 3) {
+                charSort.copy(guildName = "")
               } else {
-                val categoryEmoji = charSorts.headOption.map(_.categoryEmoji).getOrElse("") // Use categoryEmoji from the first CharSort if available
-                s"### $categoryEmoji ${category.capitalize} $categoryEmoji"
+                charSort
               }
-              (s"$categoryHeader $countOfItems", messages)
+            }
+            updatedCharSorts
+          }
+
+          val neutralsGroupedByGuild: List[(String, List[String])] = updatedVocationBuffers.values
+            .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+            .groupBy(_.guildName)
+            .mapValues(_.map(_.message).toList)
+            .toList
+            .partition(_._1.isEmpty) match {
+              case (guildless, withGuilds) =>
+                withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
             }
 
-          val groupedNeutralsList: List[String] = groupedNeutrals.flatMap { case (categoryHeader, messages) =>
-            categoryHeader :: messages
+          val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.zipWithIndex.flatMap {
+            case ((guildName, messages), index) =>
+              if (guildName.isEmpty) {
+                s"### Others ${messages.length}" :: messages
+              } else {
+                s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+              }
           }
+
+          /**
+          val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.flatMap {
+            case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+            case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+          }
+          **/
+
           val totalCount = alliesList.size + neutralsList.size + enemiesList.size
 
           val modifiedAlliesList = if (alliesList.nonEmpty) {
@@ -1219,14 +1221,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
 
           val combinedList = {
-            val headerToRemove = s"### ${Config.neutral} Others ${Config.neutral}"
-            val hasOtherHeaders = groupedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
-
-            if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
-              groupedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
-            } else {
-              modifiedAlliesList ++ modifiedEnemiesList ++ groupedNeutralsList
-            }
+            modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
           }
 
           // allow for custom channel names
