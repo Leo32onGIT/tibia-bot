@@ -1238,7 +1238,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "online"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(combinedTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (combinedTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-$totalCount") { //WIP
               try {
@@ -1268,7 +1268,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "neutrals"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-0") {
               try {
@@ -1294,7 +1294,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "enemies"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-0") {
               try {
@@ -1314,7 +1314,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val categoryLiteral = guild.getCategoryById(categoryChannel)
       if (categoryLiteral != null){
         val onlineCategoryCounter = onlineListCategoryTimer.getOrElse(categoryChannel, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineCategoryCounter.plusMinutes(6))) {
+        if (ZonedDateTime.now().isAfter(onlineCategoryCounter.plusMinutes(15))) {
           onlineListCategoryTimer =  onlineListCategoryTimer + (categoryChannel -> ZonedDateTime.now())
           try {
             val categoryName = categoryLiteral.getName
@@ -1365,7 +1365,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "allies"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(alliesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (alliesTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-$alliesCount") {
               try {
@@ -1413,7 +1413,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "neutrals"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-$neutralsCount") {
               try {
@@ -1459,7 +1459,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             m.group(1)
           } else "enemies"
           val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
             onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
             if (channelName != s"$customName-$enemiesCount") {
               try {
