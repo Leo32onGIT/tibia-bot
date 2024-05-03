@@ -13,7 +13,7 @@ import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import scala.util.Random
 
-import java.time.ZonedDateTime
+import java.time.{Instant, ZonedDateTime, ZoneId}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
@@ -24,6 +24,7 @@ import scala.util.{Failure, Success}
 import java.time.OffsetDateTime
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import net.dv8tion.jda.api.interactions.components.buttons._
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
@@ -1087,398 +1088,425 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }.withAttributes(logAndResume)
 
   private def onlineList(onlineData: List[CurrentOnline], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, categoryChannel: String, onlineCombined: String, world: String): Unit = {
-
-    val vocationBuffers = ListMap(
-      "druid" -> ListBuffer[CharSort](),
-      "knight" -> ListBuffer[CharSort](),
-      "paladin" -> ListBuffer[CharSort](),
-      "sorcerer" -> ListBuffer[CharSort](),
-      "none" -> ListBuffer[CharSort]()
-    )
-
-    val sortedList = onlineData.sortWith(_.level > _.level)
-    sortedList.foreach { player =>
-      val voc = player.vocation.toLowerCase.split(' ').last
-      val vocationEmoji = vocEmoji(voc)
-      val durationInSec = player.duration
-      val durationInMin = durationInSec / 60
-      val durationStr = if (durationInMin >= 60) {
-        val hours = durationInMin / 60
-        val mins = durationInMin % 60
-        s"${hours}hr ${mins}min"
-      } else {
-        s"${durationInMin}min"
-      }
-      val durationString = s"`$durationStr`"
-      // get appropriate guild icon
-      val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
-      val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
-      val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
-      val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
-      val guildIcon = (player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
-        case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-        case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
-        case ("", _, _, true, _) => Config.ally // allied-players not in any guild
-        case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
-        case ("", _, _, _, true) => Config.enemy // hunted-players no guild
-        case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
-        case ("", _, _, _, _) => "" // no guild (not ally or hunted)
-        case _ => Config.otherGuild // guild (not ally or hunted)
-      }
-
-      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
-    }
-    val pattern = "^(.*?)(?:-[0-9]+)?$".r
-
     // run channel checks before updating the channels
     val guild = BotApp.shardManager.getGuildById(guildId)
+    val discordInfo = BotApp.discordRetrieveConfig(guild)
+    val lastUsedString = discordInfo("last_used")
+    if (lastUsedString == "0") {
+      val alliesTextChannel = guild.getTextChannelById(alliesChannel)
+      val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+      val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+      if (alliesTextChannel != null) {
+        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), alliesTextChannel, "disabled", guildId, guild.getName)
+        BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
+      }
+      if (neutralsTextChannel != null) {
+        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), neutralsTextChannel, "disabled", guildId, guild.getName)
+        BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
+      }
+      if (enemiesTextChannel != null) {
+        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), enemiesTextChannel, "disabled", guildId, guild.getName)
+        BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
+      }
+    } else if (lastUsedString == "1"){
+      // inactive discords
+    } else {
 
-    // default online list
-    val alliesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
-      .map(_.message)
-      .toList
+      val vocationBuffers = ListMap(
+        "druid" -> ListBuffer[CharSort](),
+        "knight" -> ListBuffer[CharSort](),
+        "paladin" -> ListBuffer[CharSort](),
+        "sorcerer" -> ListBuffer[CharSort](),
+        "none" -> ListBuffer[CharSort]()
+      )
 
-    val enemiesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
-      .map(_.message)
-      .toList
+      val sortedList = onlineData.sortWith(_.level > _.level)
+      sortedList.foreach { player =>
+        val voc = player.vocation.toLowerCase.split(' ').last
+        val vocationEmoji = vocEmoji(voc)
+        val durationInSec = player.duration
+        val durationInMin = durationInSec / 60
+        val durationStr = if (durationInMin >= 60) {
+          val hours = durationInMin / 60
+          val mins = durationInMin % 60
+          s"${hours}hr ${mins}min"
+        } else {
+          s"${durationInMin}min"
+        }
+        val durationString = s"`$durationStr`"
+        // get appropriate guild icon
+        val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
+        val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
+        val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
+        val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
+        val guildIcon = (player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
+          case (_, true, _, _, _) => Config.allyGuild // allied-guilds
+          case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
+          case ("", _, _, true, _) => Config.ally // allied-players not in any guild
+          case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
+          case ("", _, _, _, true) => Config.enemy // hunted-players no guild
+          case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
+          case ("", _, _, _, _) => "" // no guild (not ally or hunted)
+          case _ => Config.otherGuild // guild (not ally or hunted)
+        }
 
-    val neutralsList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
-      .map(_.message)
-      .toList
+        vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
+      }
+      val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
-    // combined online list into one channel
-    if (onlineCombined == "true") {
-      val combinedTextChannel = guild.getTextChannelById(alliesChannel)
-      if (combinedTextChannel != null) {
-        if (combinedTextChannel.canTalk()) {
+      // default online list
+      val alliesList: List[String] = vocationBuffers.values
+        .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+        .map(_.message)
+        .toList
 
-          // neutrals grouped by Guild
-          val guildNameCounts: Map[String, Int] = vocationBuffers.values
-            .flatMap(_.map(_.guildName))
-            .groupBy(identity)
-            .view.mapValues(_.size)
-            .toMap
+      val enemiesList: List[String] = vocationBuffers.values
+        .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+        .map(_.message)
+        .toList
 
-          val updatedVocationBuffers = vocationBuffers.mapValues { charSorts =>
-            val updatedCharSorts = charSorts.map { charSort =>
-              if (charSort.guildName != "" && guildNameCounts.getOrElse(charSort.guildName, 0) < 3) {
-                charSort.copy(guildName = "")
+      val neutralsList: List[String] = vocationBuffers.values
+        .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+        .map(_.message)
+        .toList
+
+      // active or inactive check
+      val epochMilliseconds = lastUsedString.toLong
+      val zonedDateTimeFromEpoch = Instant.ofEpochMilli(epochMilliseconds).atZone(ZoneId.systemDefault())
+      if (ZonedDateTime.now().isBefore(zonedDateTimeFromEpoch.plusDays(30))) {
+        // combined online list into one channel
+        if (onlineCombined == "true") {
+          val combinedTextChannel = guild.getTextChannelById(alliesChannel)
+          if (combinedTextChannel != null) {
+            if (combinedTextChannel.canTalk()) {
+
+              // neutrals grouped by Guild
+              val guildNameCounts: Map[String, Int] = vocationBuffers.values
+                .flatMap(_.map(_.guildName))
+                .groupBy(identity)
+                .view.mapValues(_.size)
+                .toMap
+
+              val updatedVocationBuffers = vocationBuffers.mapValues { charSorts =>
+                val updatedCharSorts = charSorts.map { charSort =>
+                  if (charSort.guildName != "" && guildNameCounts.getOrElse(charSort.guildName, 0) < 3) {
+                    charSort.copy(guildName = "")
+                  } else {
+                    charSort
+                  }
+                }
+                updatedCharSorts
+              }
+
+              val neutralsGroupedByGuild: List[(String, List[String])] = updatedVocationBuffers.values
+                .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+                .groupBy(_.guildName)
+                .mapValues(_.map(_.message).toList)
+                .toList
+                .partition(_._1.isEmpty) match {
+                  case (guildless, withGuilds) =>
+                    withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+                }
+
+              val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.zipWithIndex.flatMap {
+                case ((guildName, messages), index) =>
+                  if (guildName.isEmpty) {
+                    s"### Others ${messages.length}" :: messages
+                  } else {
+                    s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+                  }
+              }
+
+              /**
+              val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.flatMap {
+                case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+                case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+              }
+              **/
+
+              val totalCount = alliesList.size + neutralsList.size + enemiesList.size
+
+              val modifiedAlliesList = if (alliesList.nonEmpty) {
+                if (neutralsList.nonEmpty || enemiesList.nonEmpty) {
+                  List(s"### ${Config.ally} **Allies** ${Config.ally} ${alliesList.size}") ++ alliesList
+                } else {
+                  alliesList
+                }
               } else {
-                charSort
+                alliesList
+              }
+              val modifiedEnemiesList = if (enemiesList.nonEmpty) {
+                if (alliesList.nonEmpty || neutralsList.nonEmpty) {
+                  List(s"### ${Config.enemy} **Enemies** ${Config.enemy} ${enemiesList.size}") ++ enemiesList
+                } else {
+                  enemiesList
+                }
+              } else {
+                enemiesList
+              }
+
+              val combinedList = {
+                val headerToRemove = s"### Others"
+                val hasOtherHeaders = flattenedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
+                if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
+                  flattenedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
+                } else {
+                  modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
+                }
+              }
+
+              // allow for custom channel names
+              val channelName = combinedTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "online"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(combinedTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (combinedTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-$totalCount") { //WIP
+                  try {
+                    val channelManager = combinedTextChannel.getManager
+                    channelManager.setName(s"$customName-$totalCount").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+
+              if (combinedList.nonEmpty) {
+                updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
+              } else {
+                updateMultiFields(List("*Nobody is online right now.*"), combinedTextChannel, "allies", guildId, guild.getName)
               }
             }
-            updatedCharSorts
+          }
+          val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+          if (neutralsTextChannel != null) {
+            if (neutralsTextChannel.canTalk()) {
+              // allow for custom channel names
+              val channelName = neutralsTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "neutrals"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-0") {
+                  try {
+                    val channelManager = neutralsTextChannel.getManager
+                    channelManager.setName(s"$customName-0").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+              // placeholder message
+              updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
+            }
+          }
+          val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+          if (enemiesTextChannel != null) {
+            if (enemiesTextChannel.canTalk()) {
+              // allow for custom channel names
+              val channelName = enemiesTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "enemies"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-0") {
+                  try {
+                    val channelManager = enemiesTextChannel.getManager
+                    channelManager.setName(s"$customName-0").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+              // placeholder message
+              updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
+            }
           }
 
-          val neutralsGroupedByGuild: List[(String, List[String])] = updatedVocationBuffers.values
+          // add allies/enemies count to the category
+          val categoryLiteral = guild.getCategoryById(categoryChannel)
+          if (categoryLiteral != null){
+            val onlineCategoryCounter = onlineListCategoryTimer.getOrElse(categoryChannel, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+            if (ZonedDateTime.now().isAfter(onlineCategoryCounter.plusMinutes(6))) {
+              onlineListCategoryTimer =  onlineListCategoryTimer + (categoryChannel -> ZonedDateTime.now())
+              try {
+                val categoryName = categoryLiteral.getName
+                val categoryAllies = if (alliesList.size > 0) s"🤍${alliesList.size}" else ""
+                val categoryEnemies = if (enemiesList.size > 0) s"💀${enemiesList.size}" else ""
+                val categorySpacer = if (alliesList.size > 0 || enemiesList.size > 0) "・" else ""
+                if (categoryName != s"${world}$categorySpacer$categoryAllies$categoryEnemies") {
+                  val channelManager = categoryLiteral.getManager
+                  channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
+                }
+              } catch {
+                case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+              }
+            }
+          }
+        }
+        // separated online list channels
+        else {
+
+          val alliesCount = alliesList.size
+          val neutralsCount = neutralsList.size
+          val enemiesCount = enemiesList.size
+
+          // allies grouped by Guild
+          val alliesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
+            .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+            .groupBy(_.guildName)
+            .mapValues(_.map(_.message).toList)
+            .toList
+            .partition(_._1.isEmpty) match {
+               case (guildless, withGuilds) =>
+                 withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+             }
+
+          val flattenedAlliesList: List[String] = alliesGroupedByGuild.flatMap {
+            case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+            case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+          }
+
+          val alliesTextChannel = guild.getTextChannelById(alliesChannel)
+          if (alliesTextChannel != null) {
+            if (alliesTextChannel.canTalk()) {
+              // allow for custom channel names
+              val channelName = alliesTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "allies"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(alliesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (alliesTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-$alliesCount") {
+                  try {
+                    val channelManager = alliesTextChannel.getManager
+                    channelManager.setName(s"$customName-$alliesCount").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+              if (alliesList.nonEmpty) {
+                updateMultiFields(flattenedAlliesList, alliesTextChannel, "allies", guildId, guild.getName)
+              } else {
+                updateMultiFields(List("*No `allies` are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
+              }
+            }
+          }
+
+          /**
+          // neutrals grouped by Guild
+          val neutralsGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
             .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
             .groupBy(_.guildName)
             .mapValues(_.map(_.message).toList)
             .toList
             .partition(_._1.isEmpty) match {
-              case (guildless, withGuilds) =>
-                withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
-            }
+               case (guildless, withGuilds) =>
+                 withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+             }
 
-          val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.zipWithIndex.flatMap {
-            case ((guildName, messages), index) =>
-              if (guildName.isEmpty) {
-                s"### Others ${messages.length}" :: messages
-              } else {
-                s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
-              }
-          }
-
-          /**
           val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.flatMap {
             case ("", messages) => s"### No Guild  ${messages.length}" :: messages
             case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
           }
           **/
 
-          val totalCount = alliesList.size + neutralsList.size + enemiesList.size
-
-          val modifiedAlliesList = if (alliesList.nonEmpty) {
-            if (neutralsList.nonEmpty || enemiesList.nonEmpty) {
-              List(s"### ${Config.ally} **Allies** ${Config.ally} ${alliesList.size}") ++ alliesList
-            } else {
-              alliesList
-            }
-          } else {
-            alliesList
-          }
-          val modifiedEnemiesList = if (enemiesList.nonEmpty) {
-            if (alliesList.nonEmpty || neutralsList.nonEmpty) {
-              List(s"### ${Config.enemy} **Enemies** ${Config.enemy} ${enemiesList.size}") ++ enemiesList
-            } else {
-              enemiesList
-            }
-          } else {
-            enemiesList
-          }
-
-          val combinedList = {
-            val headerToRemove = s"### Others"
-            val hasOtherHeaders = flattenedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
-            if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
-              flattenedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
-            } else {
-              modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
-            }
-          }
-
-          // allow for custom channel names
-          val channelName = combinedTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "online"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(combinedTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (combinedTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-$totalCount") { //WIP
-              try {
-                val channelManager = combinedTextChannel.getManager
-                channelManager.setName(s"$customName-$totalCount").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the online list channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+          val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
+          if (neutralsTextChannel != null) {
+            if (neutralsTextChannel.canTalk()) {
+              // allow for custom channel names
+              val channelName = neutralsTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "neutrals"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-$neutralsCount") {
+                  try {
+                    val channelManager = neutralsTextChannel.getManager
+                    channelManager.setName(s"$customName-$neutralsCount").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+              if (neutralsList.nonEmpty) {
+                updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
+              } else {
+                updateMultiFields(List("*No `neutrals` are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
               }
             }
           }
 
-          if (combinedList.nonEmpty) {
-            updateMultiFields(combinedList, combinedTextChannel, "allies", guildId, guild.getName)
-          } else {
-            updateMultiFields(List("*Nobody is online right now.*"), combinedTextChannel, "allies", guildId, guild.getName)
-          }
-        }
-      }
-      val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
-      if (neutralsTextChannel != null) {
-        if (neutralsTextChannel.canTalk()) {
-          // allow for custom channel names
-          val channelName = neutralsTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "neutrals"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-0") {
-              try {
-                val channelManager = neutralsTextChannel.getManager
-                channelManager.setName(s"$customName-0").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the disabled neutral channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-              }
-            }
-          }
-          // placeholder message
-          updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
-        }
-      }
-      val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
-      if (enemiesTextChannel != null) {
-        if (enemiesTextChannel.canTalk()) {
-          // allow for custom channel names
-          val channelName = enemiesTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "enemies"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-0") {
-              try {
-                val channelManager = enemiesTextChannel.getManager
-                channelManager.setName(s"$customName-0").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the disabled enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-              }
-            }
-          }
-          // placeholder message
-          updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
-        }
-      }
+          // enemies grouped by Guild
+          val enemiesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
+            .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+            .groupBy(_.guildName)
+            .mapValues(_.map(_.message).toList)
+            .toList
+            .partition(_._1.isEmpty) match {
+               case (guildless, withGuilds) =>
+                 withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
+             }
 
-      // add allies/enemies count to the category
-      val categoryLiteral = guild.getCategoryById(categoryChannel)
-      if (categoryLiteral != null){
-        val onlineCategoryCounter = onlineListCategoryTimer.getOrElse(categoryChannel, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineCategoryCounter.plusMinutes(15))) {
-          onlineListCategoryTimer =  onlineListCategoryTimer + (categoryChannel -> ZonedDateTime.now())
-          try {
-            val categoryName = categoryLiteral.getName
-            val categoryAllies = if (alliesList.size > 0) s"🤍${alliesList.size}" else ""
-            val categoryEnemies = if (enemiesList.size > 0) s"💀${enemiesList.size}" else ""
-            val categorySpacer = if (alliesList.size > 0 || enemiesList.size > 0) "・" else ""
-            if (categoryName != s"${world}$categorySpacer$categoryAllies$categoryEnemies") {
-              val channelManager = categoryLiteral.getManager
-              channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
+          val flattenedEnemiesList: List[String] = enemiesGroupedByGuild.flatMap {
+            case ("", messages) => s"### No Guild  ${messages.length}" :: messages
+            case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
+          }
+
+          val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
+          if (enemiesTextChannel != null) {
+            if (enemiesTextChannel.canTalk()) {
+              // allow for custom channel names
+              val channelName = enemiesTextChannel.getName
+              val extractName = pattern.findFirstMatchIn(channelName)
+              val customName = if (extractName.isDefined) {
+                val m = extractName.get
+                m.group(1)
+              } else "enemies"
+              val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
+              if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(6))) {
+                onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
+                if (channelName != s"$customName-$enemiesCount") {
+                  try {
+                    val channelManager = enemiesTextChannel.getManager
+                    channelManager.setName(s"$customName-$enemiesCount").queue()
+                  } catch {
+                    case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  }
+                }
+              }
+              if (enemiesList.nonEmpty) {
+                updateMultiFields(flattenedEnemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
+              } else {
+                updateMultiFields(List("*No `enemies` are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
+              }
             }
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
           }
         }
+      } else {
+        BotApp.discordUpdateConfig(guild, "", "", "", "", "0")
       }
     }
-    // separated online list channels
-    else {
-
-      val alliesCount = alliesList.size
-      val neutralsCount = neutralsList.size
-      val enemiesCount = enemiesList.size
-
-      // allies grouped by Guild
-      val alliesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
-        .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
-        .groupBy(_.guildName)
-        .mapValues(_.map(_.message).toList)
-        .toList
-        .partition(_._1.isEmpty) match {
-           case (guildless, withGuilds) =>
-             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
-         }
-
-      val flattenedAlliesList: List[String] = alliesGroupedByGuild.flatMap {
-        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
-        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
-      }
-
-      val alliesTextChannel = guild.getTextChannelById(alliesChannel)
-      if (alliesTextChannel != null) {
-        if (alliesTextChannel.canTalk()) {
-          // allow for custom channel names
-          val channelName = alliesTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "allies"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(alliesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (alliesTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-$alliesCount") {
-              try {
-                val channelManager = alliesTextChannel.getManager
-                channelManager.setName(s"$customName-$alliesCount").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the allies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-              }
-            }
-          }
-          if (alliesList.nonEmpty) {
-            updateMultiFields(flattenedAlliesList, alliesTextChannel, "allies", guildId, guild.getName)
-          } else {
-            updateMultiFields(List("*No `allies` are online right now.*"), alliesTextChannel, "allies", guildId, guild.getName)
-          }
-        }
-      }
-
-      /**
-      // neutrals grouped by Guild
-      val neutralsGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
-        .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
-        .groupBy(_.guildName)
-        .mapValues(_.map(_.message).toList)
-        .toList
-        .partition(_._1.isEmpty) match {
-           case (guildless, withGuilds) =>
-             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
-         }
-
-      val flattenedNeutralsList: List[String] = neutralsGroupedByGuild.flatMap {
-        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
-        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
-      }
-      **/
-
-      val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
-      if (neutralsTextChannel != null) {
-        if (neutralsTextChannel.canTalk()) {
-          // allow for custom channel names
-          val channelName = neutralsTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "neutrals"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(neutralsTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (neutralsTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-$neutralsCount") {
-              try {
-                val channelManager = neutralsTextChannel.getManager
-                channelManager.setName(s"$customName-$neutralsCount").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the neutrals channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-              }
-            }
-          }
-          if (neutralsList.nonEmpty) {
-            updateMultiFields(neutralsList, neutralsTextChannel, "neutrals", guildId, guild.getName)
-          } else {
-            updateMultiFields(List("*No `neutrals` are online right now.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
-          }
-        }
-      }
-
-      // enemies grouped by Guild
-      val enemiesGroupedByGuild: List[(String, List[String])] = vocationBuffers.values
-        .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
-        .groupBy(_.guildName)
-        .mapValues(_.map(_.message).toList)
-        .toList
-        .partition(_._1.isEmpty) match {
-           case (guildless, withGuilds) =>
-             withGuilds.sortBy { case (_, messages) => -messages.length } ++ guildless
-         }
-
-      val flattenedEnemiesList: List[String] = enemiesGroupedByGuild.flatMap {
-        case ("", messages) => s"### No Guild  ${messages.length}" :: messages
-        case (guildName, messages) => s"### [$guildName](${guildUrl(guildName)}) ${messages.length}" :: messages
-      }
-
-      val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
-      if (enemiesTextChannel != null) {
-        if (enemiesTextChannel.canTalk()) {
-          // allow for custom channel names
-          val channelName = enemiesTextChannel.getName
-          val extractName = pattern.findFirstMatchIn(channelName)
-          val customName = if (extractName.isDefined) {
-            val m = extractName.get
-            m.group(1)
-          } else "enemies"
-          val onlineCategoryName = onlineListCategoryTimer.getOrElse(enemiesTextChannel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-          if (ZonedDateTime.now().isAfter(onlineCategoryName.plusMinutes(15))) {
-            onlineListCategoryTimer =  onlineListCategoryTimer + (enemiesTextChannel.getId -> ZonedDateTime.now())
-            if (channelName != s"$customName-$enemiesCount") {
-              try {
-                val channelManager = enemiesTextChannel.getManager
-                channelManager.setName(s"$customName-$enemiesCount").queue()
-              } catch {
-                case ex: Throwable => logger.info(s"Failed to rename the enemies channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-              }
-            }
-          }
-          if (enemiesList.nonEmpty) {
-            updateMultiFields(flattenedEnemiesList, enemiesTextChannel, "enemies", guildId, guild.getName)
-          } else {
-            updateMultiFields(List("*No `enemies` are online right now.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
-          }
-        }
-      }
-    }
-
   }
 
   private def updateMultiFields(values: List[String], channel: TextChannel, purgeType: String, guildId: String, guildName: String): Unit = {
@@ -1565,7 +1593,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
       else {
         // there isn't an existing message to edit, so post a new one
-        channel.sendMessageEmbeds(finalEmbed.build()).setSuppressedNotifications(true).queue()
+        if (purgeType == "disabled") {
+          finalEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+          channel.sendMessageEmbeds(finalEmbed.build()).addActionRow(
+            Button.success("reactivateOnline", "Reactivate")
+          ).setSuppressedNotifications(true).queue()
+        } else {
+          channel.sendMessageEmbeds(finalEmbed.build()).setSuppressedNotifications(true).queue()
+        }
       }
       if (currentMessage < messages.size - 1) {
         // delete extra messages

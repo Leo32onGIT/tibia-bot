@@ -560,7 +560,7 @@ object BotApp extends App with StrictLogging {
                             )
                             .queue((message: Message) => {
                               //updateBoostedMessage(guild.getId, message.getId)
-                              discordUpdateConfig(guild, "", "", "", message.getId)
+                              discordUpdateConfig(guild, "", "", "", message.getId, "")
                             }, (e: Throwable) => {
                               logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                             })
@@ -677,7 +677,7 @@ object BotApp extends App with StrictLogging {
                         )
                         .queue((message: Message) => {
                           //updateBoostedMessage(guild.getId, message.getId)
-                          discordUpdateConfig(guild, "", "", "", message.getId)
+                          discordUpdateConfig(guild, "", "", "", message.getId, "")
                         }, (e: Throwable) => {
                           logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                         })
@@ -2815,6 +2815,7 @@ object BotApp extends App with StrictLogging {
            |admin_channel VARCHAR(255) NOT NULL,
            |boosted_channel VARCHAR(255) NOT NULL,
            |boosted_messageid VARCHAR(255) NOT NULL,
+           |last_used VARCHAR(255) NOT NULL,
            |flags VARCHAR(255) NOT NULL,
            |created TIMESTAMP NOT NULL,
            |PRIMARY KEY (guild_name)
@@ -2997,6 +2998,7 @@ object BotApp extends App with StrictLogging {
     val conn = getConnection(guild)
     val statement = conn.createStatement()
 
+
     val channelExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_channel'")
     val channelExists = channelExistsQuery.next()
     channelExistsQuery.close()
@@ -3015,6 +3017,15 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_messageid VARCHAR(255) DEFAULT '0'")
     }
 
+    val lastActiveDateQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'last_used'")
+    val lastActiveDate = lastActiveDateQuery.next()
+    lastActiveDateQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!lastActiveDate) {
+      statement.execute("ALTER TABLE discord_info ADD COLUMN last_used VARCHAR(255) DEFAULT '0'")
+    }
+
     val result = statement.executeQuery(s"SELECT * FROM discord_info")
     var configMap = Map[String, String]()
     while (result.next()) {
@@ -3024,6 +3035,7 @@ object BotApp extends App with StrictLogging {
       configMap += ("admin_channel" -> result.getString("admin_channel"))
       configMap += ("boosted_channel" -> result.getString("boosted_channel"))
       configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
+      configMap += ("last_used" -> result.getString("last_used"))
       configMap += ("flags" -> result.getString("flags"))
       configMap += ("created" -> result.getString("created"))
     }
@@ -3168,22 +3180,23 @@ object BotApp extends App with StrictLogging {
 
   private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessageId: String, created: ZonedDateTime): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, boosted_channel, boosted_messageid, flags, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, boosted_channel = EXCLUDED.boosted_channel, boosted_messageid = EXCLUDED.boosted_messageid, flags = EXCLUDED.flags, created = EXCLUDED.created;")
+    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, boosted_channel, boosted_messageid, last_used, flags, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, boosted_channel = EXCLUDED.boosted_channel, boosted_messageid = EXCLUDED.boosted_messageid, last_used = EXCLUDED.last_used flags = EXCLUDED.flags, created = EXCLUDED.created;")
     statement.setString(1, guildName)
     statement.setString(2, guildOwner)
     statement.setString(3, adminCategory)
     statement.setString(4, adminChannel)
     statement.setString(5, boostedChannel)
     statement.setString(6, boostedMessageId)
-    statement.setString(7, "none")
-    statement.setTimestamp(8, Timestamp.from(created.toInstant))
+    statement.setString(7, "0")
+    statement.setString(8, "none")
+    statement.setTimestamp(9, Timestamp.from(created.toInstant))
     statement.executeUpdate()
 
     statement.close()
     conn.close()
   }
 
-  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String): Unit = {
+  def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String, lastUsed: String): Unit = {
     val conn = getConnection(guild)
     // update category if exists
     if (adminCategory != "") {
@@ -3212,6 +3225,14 @@ object BotApp extends App with StrictLogging {
       // update channel
       val statement = conn.prepareStatement("UPDATE discord_info SET boosted_messageid = ?;")
       statement.setString(1, boostedMessage)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+    if (lastUsed != "") {
+      // update channel
+      val statement = conn.prepareStatement("UPDATE discord_info SET last_used = ?;")
+      statement.setString(1, lastUsed)
       statement.executeUpdate()
       statement.close()
     }
@@ -3319,7 +3340,7 @@ object BotApp extends App with StrictLogging {
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).queue()
-        discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+        discordUpdateConfig(guild, "", "", boostedChannel.getId, "", "")
 
         val galthenEmbed = new EmbedBuilder()
         galthenEmbed.setColor(3092790)
@@ -3366,7 +3387,7 @@ object BotApp extends App with StrictLogging {
             )
             .queue((message: Message) => {
               //updateBoostedMessage(guild.getId, message.getId)
-              discordUpdateConfig(guild, "", "", "", message.getId)
+              discordUpdateConfig(guild, "", "", "", message.getId, "")
             }, (e: Throwable) => {
               logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
             })
@@ -3383,7 +3404,7 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.MESSAGE_SEND)
             .complete()
           adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-          discordUpdateConfig(guild, adminCategory.getId, "", "", "")
+          discordUpdateConfig(guild, adminCategory.getId, "", "", "", "")
           adminCategoryCheck = adminCategory
         }
         if (adminChannelCheck == null) {
@@ -3393,7 +3414,7 @@ object BotApp extends App with StrictLogging {
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-          discordUpdateConfig(guild, "", adminChannel.getId, "", "")
+          discordUpdateConfig(guild, "", adminChannel.getId, "", "", "")
         }
         if (boostedChannelCheck == null) {
           // admin category still exists
@@ -3403,7 +3424,7 @@ object BotApp extends App with StrictLogging {
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).queue()
-          discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+          discordUpdateConfig(guild, "", "", boostedChannel.getId, "", "")
 
           val galthenEmbed = new EmbedBuilder()
           galthenEmbed.setColor(3092790)
@@ -3450,7 +3471,7 @@ object BotApp extends App with StrictLogging {
               )
               .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId, "")
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
@@ -4806,7 +4827,7 @@ object BotApp extends App with StrictLogging {
                     )
                     .queue((message: Message) => {
                       //updateBoostedMessage(guild.getId, message.getId)
-                      discordUpdateConfig(guild, "", "", "", message.getId)
+                      discordUpdateConfig(guild, "", "", "", message.getId, "")
                     }, (e: Throwable) => {
                       logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                     })
@@ -4983,7 +5004,7 @@ object BotApp extends App with StrictLogging {
           newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).queue()
           boostedChannel = newBoostedChannel
           // update db & cache
-          discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "")
+          discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "", "")
           updateBoostedChannel(guild.getId, newBoostedChannel.getId)
 
           boostedChannel.upsertPermissionOverride(botRole)
@@ -5042,7 +5063,7 @@ object BotApp extends App with StrictLogging {
               )
               .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId, "")
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
@@ -5155,7 +5176,7 @@ object BotApp extends App with StrictLogging {
           newAdminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           adminChannel = newAdminChannel
           // update db & cache
-          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "")
+          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "", "")
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
         if (adminChannel != null) {
@@ -5393,7 +5414,7 @@ object BotApp extends App with StrictLogging {
             }
             try {
               boostedChannel.delete.queue()
-              discordUpdateConfig(guild, "", "", "0", "0")
+              discordUpdateConfig(guild, "", "", "0", "0", "")
             } catch {
               case _: Throwable => //
             }

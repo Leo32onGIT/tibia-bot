@@ -19,6 +19,7 @@ import scala.jdk.CollectionConverters._
 import net.dv8tion.jda.api.interactions.modals.Modal
 import net.dv8tion.jda.api.interactions.components.text.{TextInput, TextInputStyle}
 import net.dv8tion.jda.api.events.session.ReadyEvent
+import java.time.ZonedDateTime
 
 class BotListener extends ListenerAdapter with StrictLogging {
 
@@ -30,6 +31,10 @@ class BotListener extends ListenerAdapter with StrictLogging {
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     if (BotApp.startUpComplete) {
+      // write last_used for this discord
+      val epochString = ZonedDateTime.now().toEpochSecond().toString
+      BotApp.discordUpdateConfig(event.getGuild, "", "", "", "", epochString)
+
       event.getName match {
         //case "reload" =>
         //  handleReload(event)
@@ -500,6 +505,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
           ).queue()
         //
       }
+    } else if (button == "reactivateOnline") {
+      event.deferReply(true).queue()
+      val embed = new EmbedBuilder()
+      embed.setDescription("*This online list will refresh in a few minutes.*")
+      embed.setColor(3092790)
+      BotApp.discordUpdateConfig(guild, "", "", "", "", ZonedDateTime.now().toEpochSecond().toString)
+      event.getHook().editOriginalEmbeds(embed.build()).setComponents().queue();
     } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
