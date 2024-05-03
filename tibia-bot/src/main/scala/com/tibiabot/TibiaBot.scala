@@ -629,7 +629,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           false
                         } else if (showEnemiesLevels == "false" && enemyIcons.contains(guildIcon)) {
                           false
-                        } else if (onlinePlayer.level < minimumLevel) {
+                        } else if (onlinePlayer.level < minimumLevel || onlinePlayer.level < 200) { // double fix
                           false
                         } else {
                           true
