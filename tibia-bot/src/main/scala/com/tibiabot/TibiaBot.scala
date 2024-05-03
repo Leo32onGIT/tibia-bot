@@ -1091,21 +1091,21 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     // run channel checks before updating the channels
     val guild = BotApp.shardManager.getGuildById(guildId)
     val discordInfo = BotApp.discordRetrieveConfig(guild)
-    val lastUsedString = discordInfo("last_used")
+    val lastUsedString = if (discordInfo.nonEmpty) discordInfo("last_used") else "1"
     if (lastUsedString == "0") {
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (alliesTextChannel != null) {
-        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), alliesTextChannel, "disabled", guildId, guild.getName)
+        updateMultiFields(List(s"${Config.letterEmoji} This **online list** has been deactivated due to `inactivity`."), alliesTextChannel, "disabled", guildId, guild.getName)
         BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
       }
       if (neutralsTextChannel != null) {
-        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), neutralsTextChannel, "disabled", guildId, guild.getName)
+        updateMultiFields(List(s"${Config.letterEmoji} This **online list** has been deactivated due to `inactivity`."), neutralsTextChannel, "disabled", guildId, guild.getName)
         BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
       }
       if (enemiesTextChannel != null) {
-        updateMultiFields(List("This **online list** has been deactivated due to `inactivity`."), enemiesTextChannel, "disabled", guildId, guild.getName)
+        updateMultiFields(List(s"${Config.letterEmoji} This **online list** has been deactivated due to `inactivity`."), enemiesTextChannel, "disabled", guildId, guild.getName)
         BotApp.discordUpdateConfig(guild, "", "", "", "", "1")
       }
     } else if (lastUsedString == "1"){
@@ -1171,9 +1171,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         .toList
 
       // active or inactive check
-      val epochMilliseconds = lastUsedString.toLong
-      val zonedDateTimeFromEpoch = Instant.ofEpochMilli(epochMilliseconds).atZone(ZoneId.systemDefault())
-      if (ZonedDateTime.now().isBefore(zonedDateTimeFromEpoch.plusDays(30))) {
+      if (ZonedDateTime.ofInstant(Instant.ofEpochSecond(lastUsedString.toLong), ZoneId.systemDefault()).isBefore(ZonedDateTime.now().plusDays(30))) {
         // combined online list into one channel
         if (onlineCombined == "true") {
           val combinedTextChannel = guild.getTextChannelById(alliesChannel)
@@ -1584,17 +1582,24 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val finalEmbed = new EmbedBuilder()
       finalEmbed.setDescription(field)
       finalEmbed.setColor(embedColor)
-      finalEmbed.setFooter("Last updated")
-      val timestamp = OffsetDateTime.now()
-      finalEmbed.setTimestamp(timestamp)
+      if (purgeType != "disabled") {
+        finalEmbed.setFooter("Last updated")
+        val timestamp = OffsetDateTime.now()
+        finalEmbed.setTimestamp(timestamp)
+      }
       if (currentMessage < messages.size) {
         // edit the existing message
-        messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).queue()
+        if (purgeType == "disabled") {
+          messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).setActionRow(
+            Button.success("reactivateOnline", "Reactivate")
+          ).queue()
+        } else {
+          messages.get(currentMessage).editMessageEmbeds(finalEmbed.build()).queue()
+        }
       }
       else {
         // there isn't an existing message to edit, so post a new one
         if (purgeType == "disabled") {
-          finalEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
           channel.sendMessageEmbeds(finalEmbed.build()).addActionRow(
             Button.success("reactivateOnline", "Reactivate")
           ).setSuppressedNotifications(true).queue()

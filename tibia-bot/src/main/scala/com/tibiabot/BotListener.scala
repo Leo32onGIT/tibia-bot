@@ -30,10 +30,15 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
-    if (BotApp.startUpComplete) {
-      // write last_used for this discord
+
+    val discordInfo = BotApp.discordRetrieveConfig(event.getGuild)
+    if (discordInfo.nonEmpty) {
       val epochString = ZonedDateTime.now().toEpochSecond().toString
       BotApp.discordUpdateConfig(event.getGuild, "", "", "", "", epochString)
+    }
+
+    if (BotApp.startUpComplete) {
+      // write last_used for this discord
 
       event.getName match {
         //case "reload" =>
@@ -323,6 +328,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val button = event.getComponentId
     val guild = event.getGuild
     val user = event.getUser
+    val discordInfo = BotApp.discordRetrieveConfig(guild)
+    if (discordInfo.nonEmpty) {
+      val epochString = ZonedDateTime.now().toEpochSecond().toString
+      BotApp.discordUpdateConfig(guild, "", "", "", "", epochString)
+    }
+
     var responseText = s"${Config.noEmoji} An unknown error occured, please try again."
 
     val footer = if (!embed.isEmpty) Option(embed.get(0).getFooter) else None
@@ -507,11 +518,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
       }
     } else if (button == "reactivateOnline") {
       event.deferReply(true).queue()
-      val embed = new EmbedBuilder()
-      embed.setDescription("*This online list will refresh in a few minutes.*")
-      embed.setColor(3092790)
+      val newEmbed = new EmbedBuilder()
+      newEmbed.setDescription(s"${Config.yesEmoji} Your online list(s) will refresh in a few minutes.")
+      newEmbed.setColor(3092790)
       BotApp.discordUpdateConfig(guild, "", "", "", "", ZonedDateTime.now().toEpochSecond().toString)
-      event.getHook().editOriginalEmbeds(embed.build()).setComponents().queue();
+      event.getInteraction.getMessage.delete().queue()
+      event.getHook.sendMessageEmbeds(newEmbed.build()).queue()
     } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
