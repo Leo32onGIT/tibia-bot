@@ -31,10 +31,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
 
-    val discordInfo = BotApp.discordRetrieveConfig(event.getGuild)
-    if (discordInfo.nonEmpty) {
-      val epochString = ZonedDateTime.now().toEpochSecond().toString
-      BotApp.discordUpdateConfig(event.getGuild, "", "", "", "", epochString)
+    try {
+      val discordInfo = BotApp.discordRetrieveConfig(event.getGuild)
+      if (discordInfo.nonEmpty) {
+        val epochString = ZonedDateTime.now().toEpochSecond().toString
+        BotApp.discordUpdateConfig(event.getGuild, "", "", "", "", epochString)
+      }
+    } catch {
+      case e: Exception => //
     }
 
     if (BotApp.startUpComplete) {
@@ -328,10 +332,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val button = event.getComponentId
     val guild = event.getGuild
     val user = event.getUser
-    val discordInfo = BotApp.discordRetrieveConfig(guild)
-    if (discordInfo.nonEmpty) {
-      val epochString = ZonedDateTime.now().toEpochSecond().toString
-      BotApp.discordUpdateConfig(guild, "", "", "", "", epochString)
+    try {
+      val discordInfo = BotApp.discordRetrieveConfig(event.getGuild)
+      if (discordInfo.nonEmpty) {
+        val epochString = ZonedDateTime.now().toEpochSecond().toString
+        BotApp.discordUpdateConfig(event.getGuild, "", "", "", "", epochString)
+      }
+    } catch {
+      case e: Exception => //
     }
 
     var responseText = s"${Config.noEmoji} An unknown error occured, please try again."
