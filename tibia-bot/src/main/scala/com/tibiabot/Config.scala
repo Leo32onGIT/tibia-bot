@@ -188,7 +188,10 @@ object Config {
     "Zunera",
     "Victoris",
     "Oceanis",
-    "Stralis"
+    "Stralis",
+    "Yara",
+    "Vandera",
+    "Unebra"
   )
   val mergedWorlds = List(
     // Pulsera
