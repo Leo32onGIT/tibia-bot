@@ -1162,7 +1162,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val combinedTextChannel = guild.getTextChannelById(alliesChannel)
       if (combinedTextChannel != null) {
         if (combinedTextChannel.canTalk() || (!Config.prod)) {
-          
+
           // neutrals grouped by Guild
           val guildNameCounts: Map[String, Int] = vocationBuffers.values
             .flatMap(_.map(_.guildName))
@@ -1230,9 +1230,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
           val combinedList = {
             val headerToRemove = s"### Others"
-            val hasOtherHeaders = groupedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
+            val hasOtherHeaders = flattenedNeutralsList.exists(header => header.startsWith("### ") && !header.startsWith(headerToRemove))
             if (modifiedAlliesList.isEmpty && modifiedEnemiesList.isEmpty && !hasOtherHeaders) {
-              groupedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
+              flattenedNeutralsList.filterNot(header => header.startsWith(headerToRemove))
             } else {
               modifiedAlliesList ++ modifiedEnemiesList ++ flattenedNeutralsList
             }
