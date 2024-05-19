@@ -382,7 +382,7 @@ object BotApp extends App with StrictLogging {
         )
     )
 
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand)
+  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand)
 
   // create the deaths/levels cache db
   createCacheDatabase()
