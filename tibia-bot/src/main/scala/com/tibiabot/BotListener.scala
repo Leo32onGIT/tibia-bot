@@ -280,7 +280,68 @@ class BotListener extends ListenerAdapter with StrictLogging {
         ).queue()
       }
 
-    }  else {
+    } else if (button == "galthen default") {
+      event.deferReply(true).queue()
+      val embed = new EmbedBuilder()
+
+      val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.getGalthenTable(event.getUser.getId)
+      satchelTimeOption match {
+        //
+        case Some(satchelTimeList) if satchelTimeList.isEmpty =>
+          embed.setColor(3092790)
+          embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+          ).queue()
+        //
+        case Some(satchelTimeList) =>
+          val fullList = satchelTimeList.collect {
+            case satchel =>
+              val when = satchel.when.plusDays(30).toEpochSecond.toString()
+              val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+              s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
+          }
+          if (fullList.nonEmpty) {
+            embed.setTitle("Existing Cooldowns:")
+            val descriptionTruncate = fullList.mkString("\n")
+            if (descriptionTruncate.length > 4050) {
+              val truncatedDescription = descriptionTruncate.substring(0, 4050)
+              val lastNewLineIndex = truncatedDescription.lastIndexOf("\n")
+              val finalDescription = if (lastNewLineIndex >= 0) truncatedDescription.substring(0, lastNewLineIndex) else truncatedDescription
+              embed.setDescription(finalDescription)
+            } else {
+              embed.setDescription(descriptionTruncate)
+            }
+            embed.setColor(3092790)
+            if (fullList.size == 1){
+              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)), //WIP
+                Button.danger("galthenRemoveAll", "Remove")
+              ).queue()
+            } else {
+              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
+                Button.danger("galthenButtonRem", "Remove"),
+                Button.secondary("galthenRemoveAll", "Clear All")
+              ).queue()
+            }
+          } else {
+            embed.setColor(3092790)
+            embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+            ).queue()
+          }
+        // /HERE
+        case None =>
+          embed.setColor(3092790)
+          embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+          ).queue()
+        //
+      }
+    } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
       if (roleType == "fullbless") {
