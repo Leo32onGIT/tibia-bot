@@ -281,30 +281,23 @@ class BotListener extends ListenerAdapter with StrictLogging {
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
       BotApp.addGalthen(user.getId, ZonedDateTime.now(), tagId)
       val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
-      responseText = s"<:satchel:1030348072577945651> can be collected by $tagDisplay <t:$when:R>"
-      event.getHook().editOriginalComponents(ActionRow.of(
-        Button.success("galthenSet", "Collected").asDisabled,
-        Button.danger("galthenRemove", "Clear")
-      )).queue();
+      responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
       val newEmbed = new EmbedBuilder()
       newEmbed.setDescription(responseText)
-      newEmbed.setColor(9855533)
-      if (tagId != "") {
-        newEmbed.setFooter(s"Tag: ${tagId}")
-      }
-      event.getHook().editOriginalEmbeds(newEmbed.build()).queue();
+      newEmbed.setColor(178877)
+      event.getHook().editOriginalEmbeds(newEmbed.build()).setComponents().queue();
     } else if (button == "galthenRemove") {
       event.deferEdit().queue()
       BotApp.delGalthen(user.getId, tagId)
       val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
-      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker for $tagDisplay has been **Disabled**."
+      responseText = s"${Config.satchelEmoji} cooldown tracker for $tagDisplay has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
     } else if (button == "galthenRemoveAll") {
       event.deferEdit().queue()
       BotApp.delAllGalthen(user.getId)
-      responseText = s"Your <:satchel:1030348072577945651> cooldown tracker has been **Disabled**."
+      responseText = s"${Config.satchelEmoji} cooldown tracker has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
       event.getHook().editOriginalEmbeds(newEmbed).queue();
@@ -325,9 +318,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
       val when = ZonedDateTime.now().plusDays(30).toEpochSecond.toString()
       BotApp.addGalthen(user.getId, ZonedDateTime.now(), tagId)
       val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
-      responseText = s"<:satchel:1030348072577945651> can be collected by $tagDisplay <t:$when:R>"
+      responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
       event.getHook().editOriginalComponents().queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(9855533).setFooter("You will be sent a message when the cooldown expires").build()
+      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).setFooter("You will be sent a message when the cooldown expires").build()
       event.getHook().editOriginalEmbeds(newEmbed).queue()
     } else if (button == "galthenClear") { // WIP
       event.deferEdit().queue()
@@ -352,7 +345,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       replyEmbed.setDescription(responseText)
       event.getHook.sendMessageEmbeds(replyEmbed.build()).queue()
     } else if (button == "boosted add") {
-      //WIP
       val inputWindow = TextInput.create("boosted add", "Boss or Creature name", TextInputStyle.SHORT)
         .setPlaceholder("Grand Master Oberon")
         .build()
@@ -365,7 +357,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       event.replyModal(modal).queue()
     } else if (button == "boosted list") {
       event.deferReply(true).queue()
-      //WIP
       val allCheck = BotApp.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boosted(event.getUser.getId, "list", "")
@@ -385,7 +376,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else if (button == "boosted toggle") {
       event.deferEdit().queue()
 
-      //WIP
       val allCheck = BotApp.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boosted(event.getUser.getId, "toggle", "all")
@@ -402,7 +392,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
         ).queue()
       }
-
     } else if (button == "galthen default") {
       event.deferReply(true).queue()
       val embed = new EmbedBuilder()
