@@ -430,6 +430,8 @@ object BotApp extends App with StrictLogging {
       cleanGalthenList()
       cleanOnlineListCache(30)
       updateOnOdd = !updateOnOdd // Toggle the flag
+    } else {
+      updateOnOdd = true
     }
     val machineTimeZone = ZoneId.systemDefault()
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
