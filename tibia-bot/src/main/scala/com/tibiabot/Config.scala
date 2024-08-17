@@ -185,7 +185,10 @@ object Config {
     "Stralis",
     "Yara",
     "Vandera",
-    "Unebra"
+    "Unebra",
+    "Zephyra",
+    "Ulera",
+    "Yubra"
   )
   // old worlds that have been merged
   val mergedWorlds = List(
