@@ -188,7 +188,10 @@ object Config {
     "Unebra",
     "Zephyra",
     "Ulera",
-    "Yubra"
+    "Yubra",
+    "Divina",
+    "Temera",
+    "Quebra"
   )
   // old worlds that have been merged
   val mergedWorlds = List(
