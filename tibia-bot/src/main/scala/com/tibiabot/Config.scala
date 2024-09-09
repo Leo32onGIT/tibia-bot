@@ -191,7 +191,14 @@ object Config {
     "Yubra",
     "Divina",
     "Temera",
-    "Quebra"
+    "Quebra",
+    "Quidera",
+    "Fibera",
+    "Ourobra",
+    "Gladibra",
+    "Xyla",
+    "Karmeya",
+    "Malivora"
   )
   // old worlds that have been merged
   val mergedWorlds = List(
@@ -234,7 +241,28 @@ object Config {
     // Guerribra
     "Mudabra",
     "Nossobra",
-    "Batabra"
+    "Batabra",
+    // Quidera
+    "Pulsera",
+    "Axera",
+    // Fibera
+    "Kardera",
+    "Mykera",
+    // Ourobra
+    "Bombra",
+    "Utobra"
+    // Gladibra
+    "Guerribra",
+    "Ousabra",
+    // Xyla
+    "Kendria",
+    "Castela",
+    // Karmeya
+    "Damora",
+    "Nadora",
+    // Malivora
+    "Impulsa",
+    "Syrena"
   )
   // list of creatures for command input validation
   val creaturesList: List[String] = List(
