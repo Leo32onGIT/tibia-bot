@@ -641,7 +641,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                             //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                             try {
-                              //levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                              levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
                             } catch {
                               case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                               case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
@@ -653,7 +653,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           try {
-                            //levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
+                            levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
                           } catch {
                             case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
                             case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
