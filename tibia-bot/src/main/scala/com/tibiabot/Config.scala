@@ -255,7 +255,7 @@ object Config {
     "Mykera",
     // Ourobra
     "Bombra",
-    "Utobra"
+    "Utobra",
     // Gladibra
     "Guerribra",
     "Ousabra",
