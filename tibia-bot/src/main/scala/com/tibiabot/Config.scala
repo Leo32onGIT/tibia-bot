@@ -191,7 +191,20 @@ object Config {
     "Stralis",
     "Yara",
     "Vandera",
-    "Unebra"
+    "Unebra",
+    "Zephyra",
+    "Ulera",
+    "Yubra",
+    "Divina",
+    "Temera",
+    "Quebra",
+    "Quidera",
+    "Fibera",
+    "Ourobra",
+    "Gladibra",
+    "Xyla",
+    "Karmeya",
+    "Malivora"
   )
   val mergedWorlds = List(
     // Pulsera
@@ -233,7 +246,28 @@ object Config {
     // Guerribra
     "Mudabra",
     "Nossobra",
-    "Batabra"
+    "Batabra",
+    // Quidera
+    "Pulsera",
+    "Axera",
+    // Fibera
+    "Kardera",
+    "Mykera",
+    // Ourobra
+    "Bombra",
+    "Utobra"
+    // Gladibra
+    "Guerribra",
+    "Ousabra",
+    // Xyla
+    "Kendria",
+    "Castela",
+    // Karmeya
+    "Damora",
+    "Nadora",
+    // Malivora
+    "Impulsa",
+    "Syrena"
   )
   val creaturesList: List[String] = List(
     "abyssal calamary",
