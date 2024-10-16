@@ -198,7 +198,10 @@ object Config {
     "Gladibra",
     "Xyla",
     "Karmeya",
-    "Malivora"
+    "Malivora",
+    "Bravoria",
+    "Aethera",
+    "Cantabra"
   )
   // old worlds that have been merged
   val mergedWorlds = List(
