@@ -204,7 +204,10 @@ object Config {
     "Gladibra",
     "Xyla",
     "Karmeya",
-    "Malivora"
+    "Malivora",
+    "Bravoria",
+    "Aethera",
+    "Cantabra"
   )
   val mergedWorlds = List(
     // Pulsera
