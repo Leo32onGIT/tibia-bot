@@ -122,7 +122,7 @@ object BotApp extends App with StrictLogging {
   private val botName: String = shardManager.getShards.get(0).getSelfUser.getName
 
   // This controls how often the online list updates (minutes)
-  var onlineListUpdateTime = 6
+  var onlineListUpdateTime = 10
 
   // internal caches
   var customSortData: Map[String, List[CustomSort]] = Map.empty
