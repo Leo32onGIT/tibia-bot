@@ -738,6 +738,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
             }
           })
         })
+      case "clear" =>
+        val embed = BotApp.clearHunted(event)
+        event.getHook.sendMessageEmbeds(embed).queue()
       case "deaths" =>
         if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
@@ -820,6 +823,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
             }
           })
         })
+      case "clear" =>
+        val embed = BotApp.clearAllies(event)
+        event.getHook.sendMessageEmbeds(embed).queue()
       case "deaths" =>
         if (toggleOption == "show") {
           val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
