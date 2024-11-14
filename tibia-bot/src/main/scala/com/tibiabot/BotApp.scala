@@ -95,7 +95,7 @@ object BotApp extends App with StrictLogging {
   logger.info("Starting up")
 
   // Configure shard manager builder
-  val shardCount = 6
+  val shardCount = 7
   val builder = DefaultShardManagerBuilder
     .createDefault(Config.token)
     .addEventListeners(new BotListener())
@@ -191,6 +191,7 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "reason", "You can add a reason when players are added to the hunted list")
         ),
       new SubcommandData("list", "List players & guilds in the hunted list"),
+      new SubcommandData("clear", "Remove all players and guilds from the hunted list"),
       new SubcommandData("info", "Show detailed info on a hunted player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
       ),
@@ -246,6 +247,7 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "name", "The player name you want to add to the allies list").setRequired(true)
         ),
       new SubcommandData("list", "List players & guilds in the allies list"),
+      new SubcommandData("clear", "Remove all players and guilds from the allies list"),
       new SubcommandData("info", "Show detailed info on a allies player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
       ),
@@ -1280,6 +1282,84 @@ object BotApp extends App with StrictLogging {
       guildBuffer += listIsEmpty.build()
       callback(guildBuffer.toList)
     }
+  }
+
+  def clearAllies(event: SlashCommandInteractionEvent): MessageEmbed = {
+    val guild = event.getGuild
+    val listGuilds: List[Guilds] = alliedGuildsData.getOrElse(guild.getId, List.empty[Guilds])
+    val listPlayers: List[Players] = alliedPlayersData.getOrElse(guild.getId, List.empty[Players])
+    // Create Sets for faster lookups
+    val guildNamesToRemove = listGuilds.map(_.name.toLowerCase).toSet
+    val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
+    if (listGuilds.nonEmpty) {
+      // Filter out activityData in one pass by using a Set for efficient lookup
+      activityData = activityData.mapValues {
+        _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
+      }.toMap
+      // Clear alliedGuildsData once after all operations
+      alliedGuildsData = Map.empty
+      // Perform database removal in a batch operation
+      listGuilds.foreach { guildEntry =>
+        removeAllyFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
+        removeGuildActivityfromDatabase(guild, guildEntry.name.toLowerCase)
+      }
+    }
+    if (listPlayers.nonEmpty) {
+      // Efficiently update activityData by using Set lookups for player names
+      activityData = activityData + (guild.getId -> activityData.getOrElse(guild.getId, List()).filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase)))
+      // Clear alliedPlayersData once after all operations
+      alliedPlayersData = Map.empty
+      // Perform database removal in a batch operation
+      listPlayers.foreach { filterPlayer =>
+        removeAllyFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
+        removePlayerActivityfromDatabase(guild, filterPlayer.name.toLowerCase)
+      }
+    }
+    var embedText = s"${Config.yesEmoji} The allies list has been reset."
+    new EmbedBuilder()
+      .setColor(3092790)
+      .setDescription(embedText)
+      .build()
+    //
+  }
+
+  def clearHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
+    val guild = event.getGuild
+    val listGuilds: List[Guilds] = huntedGuildsData.getOrElse(guild.getId, List.empty[Guilds])
+    val listPlayers: List[Players] = huntedPlayersData.getOrElse(guild.getId, List.empty[Players])
+    // Create Sets for faster lookups
+    val guildNamesToRemove = listGuilds.map(_.name.toLowerCase).toSet
+    val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
+    if (listGuilds.nonEmpty) {
+      // Filter out activityData in one pass by using a Set for efficient lookup
+      activityData = activityData.mapValues {
+        _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
+      }.toMap
+      // Clear alliedGuildsData once after all operations
+      huntedGuildsData = Map.empty
+      // Perform database removal in a batch operation
+      listGuilds.foreach { guildEntry =>
+        removeHuntedFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
+        removeGuildActivityfromDatabase(guild, guildEntry.name.toLowerCase)
+      }
+    }
+    if (listPlayers.nonEmpty) {
+      // Efficiently update activityData by using Set lookups for player names
+      activityData = activityData + (guild.getId -> activityData.getOrElse(guild.getId, List()).filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase)))
+      // Clear alliedPlayersData once after all operations
+      huntedPlayersData = Map.empty
+      // Perform database removal in a batch operation
+      listPlayers.foreach { filterPlayer =>
+        removeHuntedFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
+        removePlayerActivityfromDatabase(guild, filterPlayer.name.toLowerCase)
+      }
+    }
+    var embedText = s"${Config.yesEmoji} The hunted list has been reset."
+    new EmbedBuilder()
+      .setColor(3092790)
+      .setDescription(embedText)
+      .build()
+    //
   }
 
   private def getListTable(world: String): List[ListCache] = {
@@ -2642,10 +2722,26 @@ object BotApp extends App with StrictLogging {
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
+     val createListTable =
+       s"""CREATE TABLE list (
+          |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          |world VARCHAR(255) NOT NULL,
+          |former_worlds VARCHAR(255),
+          |name VARCHAR(255) NOT NULL,
+          |former_names VARCHAR(1000),
+          |level VARCHAR(255) NOT NULL,
+          |guild_name VARCHAR(255),
+          |vocation VARCHAR(255) NOT NULL,
+          |last_login VARCHAR(255) NOT NULL,
+          |time VARCHAR(255) NOT NULL
+          |);""".stripMargin
+
       newStatement.executeUpdate(createDeathsTable)
       logger.info("Table 'deaths' created successfully")
       newStatement.executeUpdate(createLevelsTable)
       logger.info("Table 'levels' created successfully")
+      newStatement.executeUpdate(createListTable)
+      logger.info("Table 'list' created successfully")
       newStatement.close()
       newConn.close()
     } else {
