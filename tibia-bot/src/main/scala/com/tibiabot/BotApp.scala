@@ -460,12 +460,7 @@ object BotApp extends App with StrictLogging {
               )
 
             case Left(errorMessage) =>
-              val boostedBoss = "Podium_of_Vigour"
-              (
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?"),
-                false,
-                boostedBoss
-              )
+              throw new Exception(s"Failed to load boosted boss.")
           }
 
           // Boosted Creature
@@ -483,12 +478,7 @@ object BotApp extends App with StrictLogging {
               )
 
             case Left(errorMessage) =>
-              val boostedCreature = "Podium_of_Tenacity"
-              (
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?"),
-                false,
-                boostedCreature
-              )
+              throw new Exception(s"Failed to load boosted boss.")
           }
 
           // Combine both futures and send the message
