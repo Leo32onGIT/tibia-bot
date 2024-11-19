@@ -66,7 +66,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = if (world == "Axera" || world == "Pulsera" || world == "Victoris") Source.tick(2.seconds, 30.seconds, ()) else Source.tick(2.seconds, 50.seconds, ()) // im kinda cow-boying it here
+  private lazy val sourceTick = Source.tick(2.seconds, 50.seconds, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -96,28 +96,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         !online.exists(player => player.name == i.char)
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
+      val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+      Source(charsToCheck)
+        .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+        .runWith(Sink.collection)
+        .map(_.toSet)
 
-      // cache bypass for Seanera
-      if (world == "Deprecated") {
-        // Remove existing online chars from the list...
-        recentOnlineBypass.filterInPlace { i =>
-          !online.exists(player => player.name == i.char)
-        }
-        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-        val charsToCheck: Set[(String, Int, String)] = recentOnlineBypass.map { key =>
-          (key.char, key.level.toInt, world)
-        }.toSet
-        Source(charsToCheck)
-          .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
-          .runWith(Sink.collection)
-          .map(_.toSet)
-      } else {
-        val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-        Source(charsToCheck)
-          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
-          .runWith(Sink.collection)
-          .map(_.toSet)
-      }
     case Left(warning) =>
       // use data from previous online list check
       val charsToCheck: Set[String] = recentOnline.map(_.char).toSet

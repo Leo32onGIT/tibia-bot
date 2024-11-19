@@ -1418,7 +1418,7 @@ object BotApp extends App with StrictLogging {
             val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
             embed.setColor(178877)
             embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you when the 30 day cooldown expires.")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")
