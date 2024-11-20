@@ -288,6 +288,12 @@ object BotApp extends App with StrictLogging {
         .setMaxValue(4000)
     )
 
+  // leaderboards command
+  private val leaderboardsCommand: SlashCommandData = Commands.slash("leadboards", "Modify the level at which enemy fullblesses poke")
+    .addOptions(
+      new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+    )
+
   // minimum levels/deaths command
   private val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
@@ -4455,6 +4461,20 @@ object BotApp extends App with StrictLogging {
       embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
     }
+  }
+
+  def leaderboards(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {
+    val worldFormal = world.toLowerCase().capitalize
+    val embedBuild = new EmbedBuilder()
+
+    // Perform case-insensitive comparison
+    if (Config.worldList.map(_.toLowerCase).contains(world.toLowerCase)) {
+      //embedBuild.setDescription(s"${Config.yesEmoji} **$worldFormal** exists in the world list!")
+    } else {
+      embedBuild.setDescription(s"${Config.noEmoji} **$worldFormal** is not a valid world.")
+    }
+    embedBuild.setColor(3092790)
+    embedBuild.build()
   }
 
   def repairChannel(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {

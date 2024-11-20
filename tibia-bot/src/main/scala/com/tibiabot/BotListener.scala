@@ -55,6 +55,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
           handleOnlineList(event)
         case "boosted" =>
           handleBoosted(event)
+        case "leaderboards" =>
+          handleLeaderboards(event)
         case _ =>
       }
     } else {
@@ -1014,6 +1016,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val levelOption: Int = options.get("level").map(_.toInt).getOrElse(250)
 
     val embed = BotApp.fullblessLevel(event, worldOption, levelOption)
+    event.getHook.sendMessageEmbeds(embed).queue()
+  }
+
+  private def handleLeaderboards(event: SlashCommandInteractionEvent): Unit = {
+    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
+    val worldOption: String = options.getOrElse("world", "")
+
+    val embed = BotApp.leaderboards(event, worldOption)
     event.getHook.sendMessageEmbeds(embed).queue()
   }
 
