@@ -725,7 +725,7 @@ object BotApp extends App with StrictLogging {
 
       val guildId = guild.get.getId
 
-      if (Config.verifiedDiscords.contains(guildId)) {
+      //if (Config.verifiedDiscords.contains(guildId)) {
         // get hunted Players
         val huntedPlayers = playerConfig(guild.get, "hunted_players")
         huntedPlayersData += (guildId -> huntedPlayers)
@@ -785,13 +785,13 @@ object BotApp extends App with StrictLogging {
             botStreams = botStreams + (world.get -> botStream)
           }
         }
-      }
+      //}
     } else {
       // build guild specific data map
       guilds.foreach{g =>
 
         val guildId = g.getId
-        if (Config.verifiedDiscords.contains(guildId)) {
+        //if (Config.verifiedDiscords.contains(guildId)) {
 
           if (checkConfigDatabase(g)) {
             // get hunted Players
@@ -841,7 +841,7 @@ object BotApp extends App with StrictLogging {
               discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
             }
           }
-        }
+        //}
       }
       discordsData.foreach { case (worldName, discordsList) =>
         val botStream = new TibiaBot(worldName)
