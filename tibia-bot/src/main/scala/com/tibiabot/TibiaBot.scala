@@ -697,7 +697,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
         // update online list every 5 minutes
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(1))) {
+        if (ZonedDateTime.now().isAfter(onlineTimer.plusMinutes(2))) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
@@ -1507,7 +1507,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       var currentMessage = 0
       values.foreach { v =>
         val currentField = field + "\n" + v
-        if (currentField.length >= 4096 || (currentField.length >= 3900 && v.startsWith(s"### ["))) { // don't add field yet, there is still room
+        if (currentField.length >= 4060 || (currentField.length >= 3850 && v.startsWith(s"### ["))) { // don't add field yet, there is still room
           val interimEmbed = new EmbedBuilder()
           interimEmbed.setDescription(field)
           interimEmbed.setColor(embedColor)
