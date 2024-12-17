@@ -7,7 +7,7 @@ import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, HighscoresResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -79,6 +79,25 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
             Left(errorMessage)
           case e @ (_: ParsingException | _: DeserializationException) =>
             val errorMessage = s"Failed to parse boosted creature"
+            logger.warn(e.getMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getHighscores(world: String, page: Int): Future[Either[String, HighscoresResponse]] = {
+    val highscoresUri = s"https://api.tibiadata.com/v4/highscores/${world}/experience/all/${page.toString}"
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = highscoresUri))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[HighscoresResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get highscores with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse highscores"
             logger.warn(e.getMessage)
             Left(errorMessage)
         }

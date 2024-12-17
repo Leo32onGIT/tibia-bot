@@ -68,12 +68,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
-    if (Config.verifiedDiscords.contains(guild.getId)) {
+    //if (Config.verifiedDiscords.contains(guild.getId)) {
       guild.updateCommands().addCommands(commands.asJava).complete()
       BotApp.discordJoin(event)
-    } else {
-      guild.updateCommands().queue()
-    }
+    //} else {
+    //  guild.updateCommands().queue()
+    //}
   }
 
   override def onGuildLeave(event: GuildLeaveEvent): Unit = {
@@ -1023,8 +1023,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
 
-    val embed = BotApp.leaderboards(event, worldOption)
-    event.getHook.sendMessageEmbeds(embed).queue()
+    BotApp.leaderboards(event, worldOption, embed => {
+      event.getHook.sendMessageEmbeds(embed).queue()
+    })
   }
 
   private def handleFilter(event: SlashCommandInteractionEvent): Unit = {

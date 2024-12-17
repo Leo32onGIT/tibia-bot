@@ -3,7 +3,7 @@ package com.tibiabot
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, Members}
+import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, Members, HighscoresResponse}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
@@ -289,7 +289,7 @@ object BotApp extends App with StrictLogging {
     )
 
   // leaderboards command
-  private val leaderboardsCommand: SlashCommandData = Commands.slash("leadboards", "Modify the level at which enemy fullblesses poke")
+  private val leaderboardsCommand: SlashCommandData = Commands.slash("leaderboards", "Modify the level at which enemy fullblesses poke")
     .addOptions(
       new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
     )
@@ -4463,19 +4463,37 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def leaderboards(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+  def leaderboards(event: SlashCommandInteractionEvent, world: String, callback: MessageEmbed => Unit): Unit = {
+    val worldFormal = world.toLowerCase.capitalize
     val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(3092790)
 
-    // Perform case-insensitive comparison
-    if (Config.worldList.map(_.toLowerCase).contains(world.toLowerCase)) {
-      //embedBuild.setDescription(s"${Config.yesEmoji} **$worldFormal** exists in the world list!")
+    if (Config.worldList.exists(_.equalsIgnoreCase(world))) {
+      // Get the high scores
+      val highScores: Future[Either[String, HighscoresResponse]] = tibiaDataClient.getHighscores(worldFormal, 1)
+
+      // Handle the Future result asynchronously
+      highScores.onComplete {
+        case scala.util.Success(Right(highscoreResponse)) =>
+          val currentPage = highscoreResponse.highscores.highscore_page.current_page
+          val totalPages = highscoreResponse.highscores.highscore_page.total_pages
+          embedBuild.setDescription(s"Current page: $currentPage\nTotal pages: $totalPages.")
+          callback(embedBuild.build())
+
+        case scala.util.Success(Left(errorMessage)) =>
+          embedBuild.setDescription(s"${Config.noEmoji} Failed to fetch highscores: $errorMessage")
+          callback(embedBuild.build())
+
+        case scala.util.Failure(exception) =>
+          embedBuild.setDescription(s"${Config.noEmoji} An error occurred: ${exception.toString}")
+          callback(embedBuild.build())
+      }
     } else {
       embedBuild.setDescription(s"${Config.noEmoji} **$worldFormal** is not a valid world.")
+      callback(embedBuild.build())
     }
-    embedBuild.setColor(3092790)
-    embedBuild.build()
   }
+
 
   def repairChannel(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {
     val worldFormal = world.toLowerCase().capitalize
