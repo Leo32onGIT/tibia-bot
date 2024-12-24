@@ -18,7 +18,6 @@ Current features include:
 1. Go to: https://discord.com/developers/applications and create a **New Application**.
 2. Go to the **Bot** tab and click on **Add Bot**.
 3. Click **Reset Token** & take note of the `Token` that is generated.
-4. Scroll down and enable **Message Content Intent**.
 
 #### Custom Emojis and Poke Roles
 The bot is configured to point to emojis and roles in _my_ discord server.     
