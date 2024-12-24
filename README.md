@@ -23,8 +23,8 @@ Current features include:
 The bot is configured to point to emojis and roles in _my_ discord server.     
 You will need to change this to point to your emojis and your discord roles.
 
-1. Open the [discord.conf](https://github.com/Leo32onGIT/death-tracker/blob/seanera/death-tracker/src/main/resources/discord.conf#L11-L34) file and edit it.
-2. Point to `emoji ids` and `role ids` that exist on _your_ discord server.
+1. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/public/tibia-bot/src/main/resources/discord.conf#L17-L55) file and edit it.
+2. Point to `emoji ids` to ids that exist on _your_ discord server.
 
 #### Prepare your linux machine to host the bot
 1. Ensure `docker` is installed.
