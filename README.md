@@ -1,8 +1,9 @@
 # Violent Bot
+This branch is intended for hosting dedicated instances of Violent Bot.
+You can run this locally (free/m) or on a vps for (vps hosting cost/m)
 
 Production:
 - [Website](https://violentbot.xyz)
-- [Discord App Directory](https://discord.com/application-directory/1067774715407642624)
    
 Current features include:    
 - Online List
