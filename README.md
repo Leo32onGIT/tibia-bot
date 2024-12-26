@@ -1,6 +1,6 @@
 # Violent Bot
-This branch is intended for hosting dedicated instances of Violent Bot.
-You can run this locally (free/m) or on a vps for (vps hosting cost/m)
+This branch is intended for hosting dedicated instances of Violent Bot.    
+You can run this locally `free/m` or on a vps for `vps hosting cost/m`
 
 Production:
 - [Website](https://violentbot.xyz)
