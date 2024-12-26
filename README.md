@@ -1,5 +1,5 @@
 # Violent Bot
-This is the public facing discord bot:
+This was the public facing discord bot:
 - User -> Violent Bot#0952
 - ID -> 1067774715407642624
 
