@@ -4,6 +4,7 @@ You can run this locally `free/m` or on a vps for `vps hosting cost/m`
 
 Production:
 - [Website](https://violentbot.xyz)
+- [Discord](https://discord.gg/PNnzzs4hN3)
    
 Current features include:    
 - Online List
