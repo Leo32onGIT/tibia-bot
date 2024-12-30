@@ -5,6 +5,7 @@ This was the public facing discord bot:
 
 Production:
 - [Website](https://violentbot.xyz)
+- [Discord](https://discord.gg/PNnzzs4hN3)
 - [Discord App Directory](https://discord.com/application-directory/1067774715407642624)
    
 Current features include:    
