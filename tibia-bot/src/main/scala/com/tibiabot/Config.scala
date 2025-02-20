@@ -203,7 +203,10 @@ object Config {
     "Malivora",
     "Bravoria",
     "Aethera",
-    "Cantabra"
+    "Cantabra",
+    "Noctalia",
+    "Ignitera",
+    "Xybra"
   )
   val mergedWorlds = List(
     // Pulsera
