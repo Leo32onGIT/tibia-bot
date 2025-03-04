@@ -899,7 +899,7 @@ object BotApp extends App with StrictLogging {
             return returnEmbed
 
         }.getOrElse {
-          embedText = s":gear: The player **$subOptionValueLower** is not on the hunted list."
+          embedText = s":gear: The player **$subOptionValueLower** is not tagged with any notes."
         }
       }
     } else {
@@ -961,7 +961,7 @@ object BotApp extends App with StrictLogging {
             return returnEmbed
 
         }.getOrElse {
-          embedText = s":gear: The player **$subOptionValueLower** is not on the allied list."
+          embedText = s":gear: The player **$subOptionValueLower** is not tagged with any notes."
         }
       }
     } else {
