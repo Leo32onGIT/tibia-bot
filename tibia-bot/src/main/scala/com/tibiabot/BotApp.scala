@@ -152,7 +152,6 @@ object BotApp extends App with StrictLogging {
 
   // hunted command
   private val huntedCommand: SlashCommandData = Commands.slash("hunted", "Manage the hunted list")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
       new SubcommandData("guild", "Manage guilds in the hunted list")
       .addOptions(
@@ -209,7 +208,6 @@ object BotApp extends App with StrictLogging {
 
   // allies command
   private val alliesCommand: SlashCommandData = Commands.slash("allies", "Manage the allies list")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
       new SubcommandData("guild", "Manage guilds in the allies list")
       .addOptions(
@@ -231,7 +229,7 @@ object BotApp extends App with StrictLogging {
         ),
       new SubcommandData("list", "List players & guilds in the allies list"),
       new SubcommandData("clear", "Remove all players and guilds from the allies list"),
-      new SubcommandData("info", "Show detailed info on a allies player")
+      new SubcommandData("info", "Show detailed info on a allied player")
         .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
       ),
       new SubcommandData("levels", "Show or hide ally levels")

@@ -3,6 +3,7 @@ package com.tibiabot
 import com.tibiabot.BotApp.commands
 import com.tibiabot.BotApp.SatchelStamp
 import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
@@ -18,6 +19,7 @@ import net.dv8tion.jda.api.interactions.components.ActionRow
 import scala.jdk.CollectionConverters._
 import net.dv8tion.jda.api.interactions.modals.Modal
 import net.dv8tion.jda.api.interactions.components.text.{TextInput, TextInputStyle}
+
 
 class BotListener extends ListenerAdapter with StrictLogging {
 
@@ -772,77 +774,120 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
 
+    var authed = false
+    val user = event.getUser // Get the user who ran the command
+    val member = event.getGuild.getMember(user) // Get the member object
+
+    if (member != null && member.hasPermission(Permission.MANAGE_SERVER)) {
+      authed = true
+    }
+
     subCommand match {
       case "player" =>
-        if (toggleOption == "add") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.addHunted(event, "player", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+        if (authed) {
+          if (toggleOption == "add") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.addHunted(event, "player", nameOption, reasonOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
-        } else if (toggleOption == "remove") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.removeHunted(event, "player", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+          } else if (toggleOption == "remove") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.removeHunted(event, "player", nameOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
+          }
+        } else {
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "guild" =>
-        if (toggleOption == "add") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.addHunted(event, "guild", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+        if (authed) {
+          if (toggleOption == "add") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.addHunted(event, "guild", nameOption, reasonOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
-        } else if (toggleOption == "remove") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.removeHunted(event, "guild", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+          } else if (toggleOption == "remove") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.removeHunted(event, "guild", nameOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
+          }
+        } else {
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+          event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "list" =>
-        BotApp.listAlliesAndHuntedGuilds(event, "hunted", hunteds => {
-          val embedsJava = hunteds.asJava
-          embedsJava.forEach { embed =>
-            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
-          }
-          BotApp.listAlliesAndHuntedPlayers(event, "hunted", hunteds => {
+        if (authed) {
+          BotApp.listAlliesAndHuntedGuilds(event, "hunted", hunteds => {
             val embedsJava = hunteds.asJava
             embedsJava.forEach { embed =>
               event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
             }
+            BotApp.listAlliesAndHuntedPlayers(event, "hunted", hunteds => {
+              val embedsJava = hunteds.asJava
+              embedsJava.forEach { embed =>
+                event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
+              }
+            })
           })
-        })
+        } else {
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+          event.getHook.sendMessageEmbeds(embed).queue()
+        }
       case "clear" =>
-        val embed = BotApp.clearHunted(event)
-        event.getHook.sendMessageEmbeds(embed).queue()
+        if (authed) {
+          val embed = BotApp.clearHunted(event)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        } else {
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+          event.getHook.sendMessageEmbeds(embed).queue()
+        }
       case "deaths" =>
-        if (toggleOption == "show") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "deaths")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        }
+        if (authed) {
+          if (toggleOption == "show") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "deaths")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else if (toggleOption == "hide") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "deaths")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          }
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
+         }
       case "levels" =>
-        if (toggleOption == "show") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "levels")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "levels")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        }
+        if (authed) {
+          if (toggleOption == "show") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "enemies", "levels")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else if (toggleOption == "hide") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "enemies", "levels")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          }
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
+         }
       case "info" =>
         val embed = BotApp.infoHunted(event, "player", nameOption)
         event.getHook.sendMessageEmbeds(embed).queue()
       case "autodetect" =>
-        val embed = BotApp.detectHunted(event)
-        event.getHook.sendMessageEmbeds(embed).queue()
+        if (authed) {
+          val embed = BotApp.detectHunted(event)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
+        }
       case _ =>
         val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/hunted`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
@@ -857,70 +902,108 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val reasonOption: String = options.getOrElse("reason", "none")
     val worldOption: String = options.getOrElse("world", "")
 
+    var authed = false
+    val user = event.getUser // Get the user who ran the command
+    val member = event.getGuild.getMember(user) // Get the member object
+
+    if (member != null && member.hasPermission(Permission.MANAGE_SERVER)) {
+      authed = true
+    }
+
     subCommand match {
       case "player" =>
-        if (toggleOption == "add") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+        if (authed) {
+          if (toggleOption == "add") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
-        } else if (toggleOption == "remove") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.removeAlly(event, "player", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+          } else if (toggleOption == "remove") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.removeAlly(event, "player", nameOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
-        }
+          }
+      } else {
+         val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+         event.getHook.sendMessageEmbeds(embed).queue()
+      }
       case "guild" =>
-        if (toggleOption == "add") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+        if (authed) {
+          if (toggleOption == "add") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
-        } else if (toggleOption == "remove") {
-          BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
-          BotApp.removeAlly(event, "guild", nameOption, embed => {
-            event.getHook.sendMessageEmbeds(embed).queue(_ => {
-              BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+          } else if (toggleOption == "remove") {
+            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.removeAlly(event, "guild", nameOption, embed => {
+              event.getHook.sendMessageEmbeds(embed).queue(_ => {
+                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+              })
             })
-          })
+          }
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "list" =>
-        BotApp.listAlliesAndHuntedGuilds(event, "allies", allies => {
-          val embedsJava = allies.asJava
-          embedsJava.forEach { embed =>
-            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
-          }
-          BotApp.listAlliesAndHuntedPlayers(event, "allies", allies => {
+        if (authed) {
+          BotApp.listAlliesAndHuntedGuilds(event, "allies", allies => {
             val embedsJava = allies.asJava
             embedsJava.forEach { embed =>
               event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
             }
+            BotApp.listAlliesAndHuntedPlayers(event, "allies", allies => {
+              val embedsJava = allies.asJava
+              embedsJava.forEach { embed =>
+                event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
+              }
+            })
           })
-        })
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
+        }
       case "clear" =>
-        val embed = BotApp.clearAllies(event)
-        event.getHook.sendMessageEmbeds(embed).queue()
+        if (authed) {
+          val embed = BotApp.clearAllies(event)
+          event.getHook.sendMessageEmbeds(embed).queue()
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
+        }
       case "deaths" =>
-        if (toggleOption == "show") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "deaths")
-          event.getHook.sendMessageEmbeds(embed).queue()
+        if (authed) {
+          if (toggleOption == "show") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "deaths")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else if (toggleOption == "hide") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "deaths")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          }
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "levels" =>
-        if (toggleOption == "show") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "levels")
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } else if (toggleOption == "hide") {
-          val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "levels")
-          event.getHook.sendMessageEmbeds(embed).queue()
+        if (authed) {
+          if (toggleOption == "show") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "show", "allies", "levels")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else if (toggleOption == "hide") {
+            val embed = BotApp.deathsLevelsHideShow(event, worldOption, "hide", "allies", "levels")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          }
+        } else {
+           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You do not have permission to use this command.").build()
+           event.getHook.sendMessageEmbeds(embed).queue()
         }
       case "info" =>
         val embed = BotApp.infoAllies(event, "player", nameOption)
