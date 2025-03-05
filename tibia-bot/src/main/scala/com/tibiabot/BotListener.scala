@@ -776,9 +776,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
     var authed = false
     val user = event.getUser // Get the user who ran the command
-    val member = event.getGuild.getMember(user) // Get the member object
-
-    if (member != null && (member.hasPermission(Permission.MANAGE_SERVER) || member.hasPermission(Permission.ADMINISTRATOR))) {
+    val guild = event.getGuild
+    val member = guild.retrieveMember(user).complete()
+    if (member != null && member.hasPermission(Permission.MANAGE_SERVER)) {
       authed = true
     }
 
@@ -904,9 +904,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
     var authed = false
     val user = event.getUser // Get the user who ran the command
-    val member = event.getGuild.getMember(user) // Get the member object
-
-    if (member != null && (member.hasPermission(Permission.MANAGE_SERVER) || member.hasPermission(Permission.ADMINISTRATOR))) {
+    val guild = event.getGuild
+    val member = guild.retrieveMember(user).complete()
+    if (member != null && member.hasPermission(Permission.MANAGE_SERVER)) {
       authed = true
     }
 
