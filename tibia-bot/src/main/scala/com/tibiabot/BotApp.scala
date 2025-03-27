@@ -5653,7 +5653,7 @@ object BotApp extends App with StrictLogging {
             embedMessage = s"${Config.yesEmoji} you have enabled notifications for **all** bosses and creatures."
           } else {
             // Check if sanitizedName exists in boostedBossesList
-            val isBoostedBoss = boostedBossesList.contains(sanitizedName)
+            val isBoostedBoss = boostedBossesList.exists(_.equalsIgnoreCase(sanitizedName))
 
             // Check if sanitizedName is a valid creature
             //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
@@ -5736,7 +5736,7 @@ object BotApp extends App with StrictLogging {
         }
       } else {
         // Check if sanitizedName exists in boostedBossesList
-        val isBoostedBoss = boostedBossesList.contains(sanitizedName)
+        val isBoostedBoss = boostedBossesList.exists(_.equalsIgnoreCase(sanitizedName))
 
         // Check if sanitizedName is a valid creature
         /**
