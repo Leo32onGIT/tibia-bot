@@ -1596,6 +1596,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       case "druid" => ":snowflake:"
       case "sorcerer" => ":fire:"
       case "paladin" => ":bow_and_arrow:"
+      case "monk" => ":probing_cane:"
       case "none" => ":hatching_chick:"
       case _ => ""
     }
