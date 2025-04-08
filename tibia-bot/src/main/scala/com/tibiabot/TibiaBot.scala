@@ -1084,6 +1084,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       "knight" -> ListBuffer[CharSort](),
       "paladin" -> ListBuffer[CharSort](),
       "sorcerer" -> ListBuffer[CharSort](),
+      "monk" -> ListBuffer[CharSort](),
       "none" -> ListBuffer[CharSort]()
     )
 
@@ -1596,7 +1597,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       case "druid" => ":snowflake:"
       case "sorcerer" => ":fire:"
       case "paladin" => ":bow_and_arrow:"
-      case "monk" => ":probing_cane:"
+      case "monk" => ":chopsticks:"
       case "none" => ":hatching_chick:"
       case _ => ""
     }
