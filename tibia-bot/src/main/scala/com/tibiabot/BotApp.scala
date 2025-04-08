@@ -1484,6 +1484,7 @@ object BotApp extends App with StrictLogging {
             "knight" -> ListBuffer[(Int, String, String)](),
             "paladin" -> ListBuffer[(Int, String, String)](),
             "sorcerer" -> ListBuffer[(Int, String, String)](),
+            "monk" -> ListBuffer[(Int, String, String)](),
             "none" -> ListBuffer[(Int, String, String)]()
           )
           // Add concatenatedCacheNames to the respective vocationBuffers based on their vocations
@@ -1497,6 +1498,7 @@ object BotApp extends App with StrictLogging {
               case "druid" => ":snowflake:"
               case "sorcerer" => ":fire:"
               case "paladin" => ":bow_and_arrow:"
+              case "monk" => ":probing_cane:"
               case "none" => ":hatching_chick:"
               case _ => ""
             }
@@ -1590,6 +1592,11 @@ object BotApp extends App with StrictLogging {
             case (world, worldBuffer) =>
               world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
           }
+          // monks
+          val monksWorldLists = vocationWorldBuffers("monk").map {
+            case (world, worldBuffer) =>
+              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
+          }
           // none
           val noneWorldLists = vocationWorldBuffers("none").map {
             case (world, worldBuffer) =>
@@ -1597,7 +1604,7 @@ object BotApp extends App with StrictLogging {
           }
 
           // combine these into one list now that its ordered by level and grouped by world
-          val allPlayers = List(noneWorldLists, sorcerersWorldLists, paladinsWorldLists, knightsWorldLists, druidsWorldLists).foldLeft(Map.empty[String, List[String]]) {
+          val allPlayers = List(noneWorldLists, monksWorldLists, sorcerersWorldLists, paladinsWorldLists, knightsWorldLists, druidsWorldLists).foldLeft(Map.empty[String, List[String]]) {
             (acc, m) => m.foldLeft(acc) {
               case (map, (k, v)) => map + (k -> (v ++ map.getOrElse(k, List())))
             }
