@@ -1498,7 +1498,7 @@ object BotApp extends App with StrictLogging {
               case "druid" => ":snowflake:"
               case "sorcerer" => ":fire:"
               case "paladin" => ":bow_and_arrow:"
-              case "monk" => ":chopsticks:"
+              case "monk" => ":fist::skin-tone-3:"
               case "none" => ":hatching_chick:"
               case _ => ""
             }
