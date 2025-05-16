@@ -576,6 +576,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
         if (!recentlyDied) {
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
+            // level (i need to add logic here to batch messages control throughput a bit)
             if (onlinePlayer.level > sheetLevel) {
               val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
               // post level to each discord

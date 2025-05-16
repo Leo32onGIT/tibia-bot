@@ -6,7 +6,7 @@ import scala.jdk.CollectionConverters._
 
 object Config {
   // prod or dev environment
-  val prod = false
+  val prod = true
   val verifiedDiscords = List(
     "1082484147492237515" // alpha/testing server
   )
@@ -206,7 +206,10 @@ object Config {
     "Cantabra",
     "Noctalia",
     "Ignitera",
-    "Xybra"
+    "Xybra",
+    "Sonira",
+    "Kalimera",
+    "Luzibra"
   )
   val mergedWorlds = List(
     // Pulsera
