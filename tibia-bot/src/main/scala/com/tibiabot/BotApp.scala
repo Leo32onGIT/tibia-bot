@@ -114,6 +114,7 @@ object BotApp extends App with StrictLogging {
   var activityData: Map[String, List[PlayerCache]] = Map.empty
   var activityCommandBlocker: Map[String, Boolean] = Map.empty
   var characterCache: Map[String, ZonedDateTime] = Map.empty
+  val activityDataLock = new Object()
 
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
@@ -1048,45 +1049,52 @@ object BotApp extends App with StrictLogging {
 
   def clearAllies(event: SlashCommandInteractionEvent): MessageEmbed = {
     val guild = event.getGuild
-    val listGuilds: List[Guilds] = alliedGuildsData.getOrElse(guild.getId, List.empty[Guilds])
-    val listPlayers: List[Players] = alliedPlayersData.getOrElse(guild.getId, List.empty[Players])
+    val guildId = guild.getId
+
+    val listGuilds: List[Guilds] = alliedGuildsData.getOrElse(guildId, List.empty[Guilds])
+    val listPlayers: List[Players] = alliedPlayersData.getOrElse(guildId, List.empty[Players])
+
     // Create Sets for faster lookups
     val guildNamesToRemove = listGuilds.map(_.name.toLowerCase).toSet
     val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
+
     if (listGuilds.nonEmpty) {
-      // Filter out activityData in one pass by using a Set for efficient lookup
-      activityData = activityData.mapValues {
-        _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
-      }.toMap
-      // Clear alliedGuildsData once after all operations
-      alliedGuildsData = Map.empty
-      // Perform database removal in a batch operation
+      activityDataLock.synchronized {
+        activityData = activityData.mapValues {
+          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
+        }.toMap
+      }
+
       listGuilds.foreach { guildEntry =>
         removeAllyFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
         removeGuildActivityfromDatabase(guild, guildEntry.name.toLowerCase)
       }
     }
+
     if (listPlayers.nonEmpty) {
-      // Efficiently update activityData by using Set lookups for player names
-      activityData = activityData + (guild.getId -> activityData.getOrElse(guild.getId, List()).filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase)))
-      // Clear alliedPlayersData once after all operations
-      alliedPlayersData = Map.empty
-      // Perform database removal in a batch operation
+      activityDataLock.synchronized {
+        val updatedList = activityData.getOrElse(guildId, List.empty)
+          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
+
+        activityData = activityData.updated(guildId, updatedList)
+      }
+
       listPlayers.foreach { filterPlayer =>
         removeAllyFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
         removePlayerActivityfromDatabase(guild, filterPlayer.name.toLowerCase)
       }
     }
-    var embedText = s"${Config.yesEmoji} The allies list has been reset."
+
+    val embedText = s"${Config.yesEmoji} The allies list has been reset."
     new EmbedBuilder()
       .setColor(3092790)
       .setDescription(embedText)
       .build()
-    //
   }
 
   def clearHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
     val guild = event.getGuild
+    val guildId = guild.getId
     val listGuilds: List[Guilds] = huntedGuildsData.getOrElse(guild.getId, List.empty[Guilds])
     val listPlayers: List[Players] = huntedPlayersData.getOrElse(guild.getId, List.empty[Players])
     // Create Sets for faster lookups
@@ -1094,11 +1102,11 @@ object BotApp extends App with StrictLogging {
     val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
     if (listGuilds.nonEmpty) {
       // Filter out activityData in one pass by using a Set for efficient lookup
-      activityData = activityData.mapValues {
-        _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
-      }.toMap
-      // Clear alliedGuildsData once after all operations
-      huntedGuildsData = Map.empty
+      activityDataLock.synchronized {
+        activityData = activityData.mapValues {
+          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase(Locale.ROOT)))
+        }.toMap
+      }
       // Perform database removal in a batch operation
       listGuilds.foreach { guildEntry =>
         removeHuntedFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
@@ -1107,9 +1115,12 @@ object BotApp extends App with StrictLogging {
     }
     if (listPlayers.nonEmpty) {
       // Efficiently update activityData by using Set lookups for player names
-      activityData = activityData + (guild.getId -> activityData.getOrElse(guild.getId, List()).filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase)))
-      // Clear alliedPlayersData once after all operations
-      huntedPlayersData = Map.empty
+      activityDataLock.synchronized {
+        val updatedList = activityData.getOrElse(guildId, List.empty)
+          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase(Locale.ROOT)))
+
+        activityData = activityData.updated(guildId, updatedList)
+      }
       // Perform database removal in a batch operation
       listPlayers.foreach { filterPlayer =>
         removeHuntedFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
