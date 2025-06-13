@@ -1104,7 +1104,7 @@ object BotApp extends App with StrictLogging {
       // Filter out activityData in one pass by using a Set for efficient lookup
       activityDataLock.synchronized {
         activityData = activityData.mapValues {
-          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase(Locale.ROOT)))
+          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
         }.toMap
       }
       // Perform database removal in a batch operation
@@ -1117,7 +1117,7 @@ object BotApp extends App with StrictLogging {
       // Efficiently update activityData by using Set lookups for player names
       activityDataLock.synchronized {
         val updatedList = activityData.getOrElse(guildId, List.empty)
-          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase(Locale.ROOT)))
+          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
 
         activityData = activityData.updated(guildId, updatedList)
       }
