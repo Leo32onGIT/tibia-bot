@@ -823,7 +823,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         embedColor = 14869218 // bone white
                       }
                       embedThumbnail = creatureImageUrl("Phantasmal_Ooze")
-                      val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
+                      val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Lemon Beams
                       if (isSummon.length > 1) {
                         if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
                           val vowel = isSummon(0).take(1) match {

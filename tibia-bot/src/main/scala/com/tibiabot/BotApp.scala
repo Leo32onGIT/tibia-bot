@@ -3186,7 +3186,7 @@ object BotApp extends App with StrictLogging {
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
-        val adminCategory = guild.createCategory("Violent Bot").complete()
+        val adminCategory = guild.createCategory("Lemon Bot").complete()
         adminCategory.upsertPermissionOverride(botRole)
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
@@ -3263,7 +3263,7 @@ object BotApp extends App with StrictLogging {
         val boostedChannelCheck = guild.getTextChannelById(discordConfig("boosted_channel"))
         if (adminCategoryCheck == null) {
           // admin category has been deleted
-          val adminCategory = guild.createCategory("Violent Bot").complete()
+          val adminCategory = guild.createCategory("Lemon Bot").complete()
           adminCategory.upsertPermissionOverride(botRole)
             .grant(Permission.VIEW_CHANNEL)
             .grant(Permission.MESSAGE_SEND)
@@ -4862,7 +4862,7 @@ object BotApp extends App with StrictLogging {
 
         if (boostedChannel == null) {
           if (adminCategory == null) {
-            val newAdminCategory = guild.createCategory("Violent Bot").complete()
+            val newAdminCategory = guild.createCategory("Lemon Bot").complete()
             newAdminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
@@ -5035,7 +5035,7 @@ object BotApp extends App with StrictLogging {
         // recreate admin channel and/or category
         if (adminChannel == null) {
           if (adminCategory == null) {
-            val newAdminCategory = guild.createCategory("Violent Bot").complete()
+            val newAdminCategory = guild.createCategory("Lemon Bot").complete()
             newAdminCategory.upsertPermissionOverride(botRole)
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
@@ -5218,7 +5218,7 @@ object BotApp extends App with StrictLogging {
       if (publicChannel.canTalk() || !(Config.prod)) {
         val embedBuilder = new EmbedBuilder()
         val descripText = Config.helpText
-        embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
+        embedBuilder.setAuthor("Lemon Beams", "https://www.tibia.com/community/?subtopic=characters&name=Zandiel", "https://github.com/Leo32onGIT.png")
         embedBuilder.setDescription(descripText)
         embedBuilder.setThumbnail(Config.webHookAvatar)
         embedBuilder.setColor(14397256) // orange for bot auto command

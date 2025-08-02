@@ -1216,7 +1216,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
   private def handleHelp(event: SlashCommandInteractionEvent): Unit = {
     val embedBuilder = new EmbedBuilder()
     val descripText = Config.helpText
-    embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
+    embedBuilder.setAuthor("Lemon Beams", "https://www.tibia.com/community/?subtopic=characters&name=Zandiel", "https://github.com/Leo32onGIT.png")
     embedBuilder.setDescription(descripText)
     embedBuilder.setThumbnail(Config.webHookAvatar)
     embedBuilder.setColor(14397256) // orange for bot auto command

@@ -26,8 +26,8 @@ object Config {
     "Simply use `/setup <World Name>` to setup the bot.\n\n" +
     "**Commands & Features:**\n" +
     "All interactions with the bot are done through **[slash commands](https://support.discord.com/hc/en-us/articles/1500000368501-Slash-Commands-FAQ)**.\n" +
-    "If you type `/` and click on **Violent Bot** - you will see all the commands available to you.\n\n" +
-    "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.violentbot.xyz)"
+    "If you type `/` and click on **Lemon Bot** - you will see all the commands available to you.\n\n" +
+    "[Website](https://lemonbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Donate](http://donate.lemonbot.xyz)"
 
   // discord config
   val webHookAvatar: String = discord.getString("avatar-url")
