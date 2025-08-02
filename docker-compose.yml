@@ -3,7 +3,6 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    platform: linux/amd64,linux/arm64
     container_name: tibia-bot-postgres
     environment:
       POSTGRES_DB: tibiabot
@@ -22,9 +21,6 @@ services:
   tibia-bot:
     build:
       context: .
-      platforms:
-        - linux/amd64
-        - linux/arm64
     container_name: tibia-bot-app
     environment:
       TOKEN: ${TOKEN}
