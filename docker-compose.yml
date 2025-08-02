@@ -8,8 +8,6 @@ services:
     environment:
       TOKEN: ${TOKEN}
       DATABASE_URL: ${DATABASE_URL}
-    ports:
-      - "443:3000"
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
