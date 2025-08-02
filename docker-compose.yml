@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    platform: linux/amd64,linux/arm64
+    container_name: tibia-bot-postgres
+    environment:
+      POSTGRES_DB: tibiabot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  tibia-bot:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    container_name: tibia-bot-app
+    environment:
+      TOKEN: ${TOKEN}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tibiabot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "443:443"
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  pgdata:
+    driver: local

@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment files
+.env
+.env.local
+.env.example
+prod.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+tibia-bot/target/
+tibia-bot/project/target/
+tibia-bot/project/project/
+
+# Logs
+logs/
+*.log
+
+# Documentation
+README.md
+*.md
+
+# OS
+.DS_Store
+Thumbs.db
