@@ -50,13 +50,21 @@ USER app
 # Expose port 443 (as defined in build.sbt)
 EXPOSE 443
 
-# Set environment variables with defaults
-ENV POSTGRES_HOST=localhost
-ENV POSTGRES_PORT=5432
-ENV POSTGRES_DB=tibiabot
-ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=""
-ENV TOKEN=""
+# Accept build arguments for PostgreSQL configuration
+ARG POSTGRES_HOST=localhost
+ARG POSTGRES_PORT=5432
+ARG POSTGRES_DB=tibiabot
+ARG POSTGRES_USER=postgres
+ARG POSTGRES_PASSWORD=""
+ARG TOKEN=""
+
+# Set environment variables from build args
+ENV POSTGRES_HOST=${POSTGRES_HOST}
+ENV POSTGRES_PORT=${POSTGRES_PORT}
+ENV POSTGRES_DB=${POSTGRES_DB}
+ENV POSTGRES_USER=${POSTGRES_USER}
+ENV POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+ENV TOKEN=${TOKEN}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
