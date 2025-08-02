@@ -1,4 +1,4 @@
-name := "violent-bot-dedicated"
+name := "lemon-bot-dedicated"
 version := "1.9"
 
 scalaVersion := "2.13.9"
