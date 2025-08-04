@@ -245,12 +245,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
                           activityEmbed.setColor(playerType)
                           activityEmbed.setThumbnail(Config.nameChangeThumbnail)
-                          try {
-                            activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                            case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                          }
+                          sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
                         }
                       }
                     }
@@ -300,12 +295,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                               activityEmbed.setColor(14397256)
                               activityEmbed.setThumbnail(Config.guildLeaveThumbnail)
-                              try {
-                                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                              sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
                             }
                           }
                         } else { // Left a tracked guild, but joined a new one in the same turn
@@ -322,12 +312,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
                               activityEmbed.setColor(colorType)
                               activityEmbed.setThumbnail(thumbnailType)
-                              try {
-                                activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                              sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
                             }
                           }
                           // remove from hunted list if in allied guild
@@ -344,12 +329,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                try {
-                                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                                } catch {
-                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                  case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                                }
+                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                               }
                             }
                           }
@@ -371,12 +351,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                try {
-                                  adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                                } catch {
-                                  case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                  case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                                }
+                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                               }
                             }
                           }
@@ -408,12 +383,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              try {
-                                adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                             }
                           }
                         } else if (allyGuildCheck) {
@@ -431,12 +401,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              try {
-                                adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                              } catch {
-                                case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                                case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                              }
+                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                             }
                           }
                         }
@@ -452,12 +417,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                             activityEmbed.setColor(colorType)
                             activityEmbed.setThumbnail(thumbnailType)
-                            try {
-                              activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                            } catch {
-                              case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                              case _: Throwable => logger.info(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                            }
+                            sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
                           }
                         }
                       }
@@ -495,12 +455,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          try {
-                            adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                            case _: Throwable => logger.info(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                          }
+                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                         }
                       }
                     }
@@ -520,12 +475,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          try {
-                            adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                            case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                          }
+                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                         }
                       }
                     }
@@ -544,12 +494,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                         activityEmbed.setColor(colorType)
                         activityEmbed.setThumbnail(thumbnailType)
-                        try {
-                          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).setSuppressedNotifications(true).queue()
-                        } catch {
-                          case ex: Exception => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                          case _: Throwable => logger.error(s"Failed to send message to 'activity' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                        }
+                        sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
                       }
                     }
                   }
@@ -634,24 +579,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           if (levelsCheck) {
                             //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                             //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                            try {
-                              levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
-                            } catch {
-                              case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                              case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                            }
+                            sendMessageWithRateLimit(levelsTextChannel, message = webhookMessage)
                           }
                         }
                       } else {
                         if (levelsCheck) {
                           //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                          try {
-                            levelsTextChannel.sendMessage(webhookMessage).setSuppressedNotifications(true).queue()
-                          } catch {
-                            case ex: Exception => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                            case _: Throwable => logger.error(s"Failed to send message to 'levels' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                          }
+                          sendMessageWithRateLimit(levelsTextChannel, message = webhookMessage)
                         }
                       }
                     }
@@ -967,12 +902,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
                             adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                             adminEmbed.setColor(14397256) // orange for bot auto command
-                            try {
-                              adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                            } catch {
-                              case ex: Exception => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                              case _: Throwable => logger.error(s"Failed to send message to 'command-log' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
-                            }
+                            sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
                           }
                         }
                       }
@@ -1037,29 +967,39 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             }
             val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
             val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
-            embeds.foreach { embed =>
-              if (embed._6) { // embedCheck
+            // Process embeds with rate limiting
+            val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
+            validEmbeds.grouped(Config.batchSize).zipWithIndex.foreach { case (batch, batchIndex) =>
+              batch.zipWithIndex.foreach { case (embed, indexInBatch) =>
                 try {
-                  // nemesis and enemy fullbless ignore the level filter
-                  if (embed._2 == "nemesis") {
-                    if (guild.getRoleById(nemesisRole) != null) {
-                      deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+                  // Calculate delay for this message
+                  val messageDelay = (batchIndex * Config.batchSize + indexInBatch) * Config.messageDelayMs
+                  val additionalBatchDelay = batchIndex * Config.batchDelayMs
+                  val totalDelay = messageDelay + additionalBatchDelay
+                  
+                  // Schedule the message with delay
+                  BotApp.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
+                    // nemesis and enemy fullbless ignore the level filter
+                    if (embed._2 == "nemesis") {
+                      if (guild.getRoleById(nemesisRole) != null) {
+                        deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+                      } else {
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+                      }
+                    } else if (embed._2 == "fullbless") {
+                      // send adjusted embed for fullblesses
+                      val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+                      val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                      if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
+                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
+                      } else {
+                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
+                      }
                     } else {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
-                    }
-                  } else if (embed._2 == "fullbless") {
-                    // send adjusted embed for fullblesses
-                    val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-                    val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-                    if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                      deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
-                    } else {
-                      deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
-                    }
-                  } else {
-                    // for regular deaths check if level > /filter deaths <level>
-                    if (embed._5 >= minimumLevel) {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
+                      // for regular deaths check if level > /filter deaths <level>
+                      if (embed._5 >= minimumLevel) {
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
+                      }
                     }
                   }
                 } catch {
@@ -1636,5 +1576,60 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       getCharacterData via
       scanForDeaths via
       postToDiscordAndCleanUp to Sink.ignore
+
+  // Message queue for rate limiting
+  private case class QueuedMessage(
+    channel: TextChannel,
+    message: String,
+    embed: Option[EmbedBuilder] = None,
+    suppressNotifications: Boolean = true
+  )
+  
+  private val messageQueue = mutable.Queue[QueuedMessage]()
+  private var messageQueueProcessor: Option[Cancellable] = None
+  
+  // Initialize message queue processor
+  private def startMessageQueueProcessor(): Unit = {
+    if (messageQueueProcessor.isEmpty) {
+      messageQueueProcessor = Some(
+        BotApp.system.scheduler.scheduleWithFixedDelay(
+          initialDelay = 0.seconds,
+          delay = Config.messageDelayMs.milliseconds
+        )(() => processMessageQueue())
+      )
+    }
+  }
+  
+  private def processMessageQueue(): Unit = {
+    if (messageQueue.nonEmpty) {
+      val msg = messageQueue.dequeue()
+      try {
+        msg.embed match {
+          case Some(embed) =>
+            if (msg.message.nonEmpty) {
+              msg.channel.sendMessage(msg.message).setEmbeds(embed.build()).setSuppressedNotifications(msg.suppressNotifications).queue()
+            } else {
+              msg.channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(msg.suppressNotifications).queue()
+            }
+          case None =>
+            msg.channel.sendMessage(msg.message).setSuppressedNotifications(msg.suppressNotifications).queue()
+        }
+      } catch {
+        case ex: Exception => logger.error(s"Failed to send queued message: ${ex.getMessage}")
+        case _: Throwable => logger.error("Failed to send queued message")
+      }
+    }
+  }
+  
+  // Helper method to queue messages with rate limiting
+  private def sendMessageWithRateLimit(
+    channel: TextChannel,
+    message: String = "",
+    embed: Option[EmbedBuilder] = None,
+    suppressNotifications: Boolean = true
+  ): Unit = {
+    messageQueue.enqueue(QueuedMessage(channel, message, embed, suppressNotifications))
+    startMessageQueueProcessor()
+  }
 
 }
