@@ -978,7 +978,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val totalDelay = messageDelay + additionalBatchDelay
                   
                   // Schedule the message with delay
-                  BotApp.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
+                  mat.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
                     // nemesis and enemy fullbless ignore the level filter
                     if (embed._2 == "nemesis") {
                       if (guild.getRoleById(nemesisRole) != null) {
@@ -1592,9 +1592,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private def startMessageQueueProcessor(): Unit = {
     if (messageQueueProcessor.isEmpty) {
       messageQueueProcessor = Some(
-        BotApp.system.scheduler.scheduleWithFixedDelay(
-          initialDelay = 0.seconds,
-          delay = Config.messageDelayMs.milliseconds
+        mat.system.scheduler.scheduleWithFixedDelay(
+          0.seconds,
+          Config.messageDelayMs.milliseconds
         )(() => processMessageQueue())
       )
     }
