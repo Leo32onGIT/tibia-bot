@@ -97,6 +97,22 @@ object BotApp extends App with StrictLogging {
 
   jda.awaitReady()
   logger.info("JDA ready")
+  
+  // Initialize emoji manager
+  EmojiManager.initialize(jda)
+  logger.info("EmojiManager initialized")
+  
+  // Initialize daily scheduler for automated announcements
+  com.tibiabot.scheduler.DailyScheduler.initialize(jda)
+  logger.info("DailyScheduler initialized")
+  
+  // Setup emojis for all guilds (async)
+  import scala.concurrent.ExecutionContext.Implicits.global
+  jda.getGuilds.asScala.foreach { guild =>
+    EmojiManager.setupGuildEmojis(guild).recover {
+      case e => logger.warn(s"Failed to setup emojis for guild ${guild.getName}: ${e.getMessage}")
+    }
+  }
 
   // get the discord servers the bot is in
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
@@ -329,7 +345,8 @@ object BotApp extends App with StrictLogging {
       .addOptions(
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
         new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
-      )
+      ),
+      new SubcommandData("boosted", "Manually trigger today's daily announcement (boosted monsters, news, announcements)")
     )
 
   // exiva command

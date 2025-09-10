@@ -1359,8 +1359,37 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case "message" =>
         val embed = BotApp.adminMessage(event, guildOption, messageOption)
         event.getHook.sendMessageEmbeds(embed).queue()
+      case "boosted" =>
+        handleAdminBoosted(event)
       case _ =>
         val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$subCommand' for `/admin`.").build()
+        event.getHook.sendMessageEmbeds(embed).queue()
+    }
+  }
+  
+  private def handleAdminBoosted(event: SlashCommandInteractionEvent): Unit = {
+    val guild = event.getGuild
+    try {
+      // Trigger manual boosted announcement
+      com.tibiabot.scheduler.DailyScheduler.triggerManualAnnouncement(guild)
+      
+      val nextScheduled = com.tibiabot.scheduler.DailyScheduler.getNextAnnouncementTime
+      val embed = new EmbedBuilder()
+        .setDescription(s"${Config.yesEmoji} Manual daily announcement triggered for this guild!\n\n" +
+          s"📋 **Includes:** Boosted monsters, latest news, and announcements\n" +
+          s"📅 **Next scheduled:** <t:${nextScheduled.toEpochSecond}:F>")
+        .setColor(0x00FF00)
+        .build()
+      
+      event.getHook.sendMessageEmbeds(embed).queue()
+      
+    } catch {
+      case e: Exception =>
+        logger.error(s"Error triggering manual boosted announcement for guild ${guild.getName}: ${e.getMessage}", e)
+        val embed = new EmbedBuilder()
+          .setDescription(s"${Config.noEmoji} Failed to trigger manual boosted announcement: ${e.getMessage}")
+          .setColor(0xFF0000)
+          .build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }

@@ -7,7 +7,7 @@ import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, HighscoresResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, CreaturesResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, HighscoresResponse, NewsResponse, NewsTickerResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -43,6 +43,42 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
             Left(errorMessage)
           case e @ (_: ParsingException | _: DeserializationException) =>
             val errorMessage = s"Failed to parse world: '${encodedName.replaceAll("%20", " ")}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getWorlds(): Future[Either[String, WorldsResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/worlds"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[WorldsResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get worlds with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse worlds response"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getCreatures(): Future[Either[String, CreaturesResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/creatures"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[CreaturesResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get creatures with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse creatures response"
             logger.warn(errorMessage)
             Left(errorMessage)
         }
@@ -267,6 +303,42 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
             Left(errorMessage)
         }
     } yield (unmarshalled, name, reason, reasonText)
+  }
+
+  def getLatestNews(): Future[Either[String, NewsResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = "http://tibiadata:8080/v4/news/latest"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[NewsResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get latest news with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse latest news"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
+  }
+
+  def getNewsTicker(): Future[Either[String, NewsTickerResponse]] = {
+    for {
+      response <- Http().singleRequest(HttpRequest(uri = "http://tibiadata:8080/v4/news/newsticker"))
+      decoded = decodeResponse(response)
+      unmarshalled <- Unmarshal(decoded).to[NewsTickerResponse].map(Right(_))
+        .recover {
+          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+            val errorMessage = s"Failed to get news ticker with status: '${response.status}'"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+          case e @ (_: ParsingException | _: DeserializationException) =>
+            val errorMessage = s"Failed to parse news ticker"
+            logger.warn(errorMessage)
+            Left(errorMessage)
+        }
+    } yield unmarshalled
   }
 
   private def decodeResponse(response: HttpResponse): HttpResponse = {
