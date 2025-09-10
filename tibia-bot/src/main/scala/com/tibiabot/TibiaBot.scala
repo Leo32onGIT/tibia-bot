@@ -960,7 +960,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
               val embed = new EmbedBuilder()
                 embed.setTitle(
-                s"${vocEmoji(charDeath.char.character.character.vocation)} $charName [${charDeath.char.character.character.level}] ${vocEmoji(charDeath.char.character.character.vocation)}", //! :snowflake: Dikker (731) :snowflake:
+                s"${vocEmoji(charDeath.char.character.character.vocation)} $charName [${charDeath.death.level.toInt}] ${vocEmoji(charDeath.char.character.character.vocation)}",
                 charUrl(charName)
                 )
               embed.setDescription(embedText)
