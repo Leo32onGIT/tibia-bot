@@ -771,14 +771,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           case "u" => "an"
                           case _ => "a"
                           }
-                          killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}](${charUrl(isSummon(1))})**"
+                          val summonerLevelText = getKillerLevel(isSummon(1)).map(level => s" [$level]").getOrElse("")
+                          killerBuffer += s"$vowel ${Config.summonEmoji} **${isSummon(0)} of [${isSummon(1)}$summonerLevelText](${charUrl(isSummon(1))})**"
                           if (embedColor == 13773097) {
                             if (exivaListCheck == "true") {
                               exivaBuffer += isSummon(1)
                             }
                           }
                         } else {
-                          killerBuffer += s"**[${k.name} [${k.level.toInt}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
+                          val levelText = getKillerLevel(k.name).map(level => s" [$level]").getOrElse("")
+                          killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
                           if (embedColor == 13773097) {
                             if (exivaListCheck == "true") {
                               exivaBuffer += k.name
@@ -786,7 +788,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           }
                         }
                       } else {
-                        killerBuffer += s"**[${k.name} [${k.level.toInt}](${charUrl(k.name)})**" // summon not detected
+                        val levelText = getKillerLevel(k.name).map(level => s" [$level]").getOrElse("")
+                        killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**" // summon not detected
                         if (embedColor == 13773097) {
                           if (exivaListCheck == "true") {
                             exivaBuffer += k.name
@@ -1612,6 +1615,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private def charUrl(char: String): String = {
     val encodedString = URLEncoder.encode(char, StandardCharsets.UTF_8.toString)
     s"https://www.tibia.com/community/?name=${encodedString}"
+  }
+
+  private def getKillerLevel(killerName: String): Option[Int] = {
+    recentLevels.find(_.name.toLowerCase == killerName.toLowerCase).map(_.level)
   }
 
   private def creatureImageUrl(creature: String): String = {
