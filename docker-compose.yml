@@ -15,3 +15,34 @@ services:
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
+    networks:
+      - tibia-war-bot-network
+
+  # TibiaData API Service
+  tibiadata:
+    image: ghcr.io/tibiadata/tibiadata-api-go:latest
+    restart: unless-stopped
+    environment:
+      - TIBIADATA_HOST=0.0.0.0
+    expose:
+      - '8080'
+    networks:
+      - tibia-war-bot-network
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://localhost:8080/'
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  tibia-war-bot-network:
+    driver: bridge

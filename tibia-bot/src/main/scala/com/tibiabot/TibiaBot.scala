@@ -1651,8 +1651,37 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           logger.info(s"Successfully fetched level $level for killer $killerName from API")
           Some(level)
         case Left(error) =>
-          logger.info(s"Failed to fetch level for killer $killerName: $error")
-          None
+          if (error == "Hit cache") {
+            // Cache hit but no data available - try the getCharacterV2 method as fallback
+            logger.info(s"Hit cache for $killerName, trying fallback method...")
+            try {
+              val fallbackFuture = tibiaDataClient.getCharacterV2((killerName, 1, "Solidera")) // Dummy level/world for the bypass
+              val fallbackResult = Await.result(fallbackFuture, 10.seconds)
+              fallbackResult match {
+                case Right(charResponse) =>
+                  val level = charResponse.character.character.level.toInt
+                  val now = ZonedDateTime.now()
+                  val lastLogin = charResponse.character.character.last_login match {
+                    case Some(loginStr) => ZonedDateTime.parse(loginStr.replace(" CET", "+01:00").replace(" CEST", "+02:00"))
+                    case None => now.minusDays(30)
+                  }
+                  val newCharLevel = CharLevel(killerName, level, charResponse.character.character.vocation, lastLogin, now)
+                  recentLevels += newCharLevel
+                  logger.info(s"Successfully fetched level $level for killer $killerName via fallback method")
+                  Some(level)
+                case Left(fallbackError) =>
+                  logger.info(s"Fallback also failed for $killerName: $fallbackError")
+                  None
+              }
+            } catch {
+              case ex: Exception =>
+                logger.info(s"Fallback exception for $killerName: ${ex.getMessage}")
+                None
+            }
+          } else {
+            logger.info(s"Failed to fetch level for killer $killerName: $error")
+            None
+          }
       }
     } catch {
       case ex: Exception =>
