@@ -60,8 +60,13 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val boostableBossesFormat: RootJsonFormat[BoostableBosses] = jsonFormat2(BoostableBosses)
   implicit val boostedResponseFormat: RootJsonFormat[BoostedResponse] = jsonFormat2(BoostedResponse)
 
-  implicit val creatureListFormat: RootJsonFormat[CreatureList] = jsonFormat3(CreatureList)
+  implicit val boostedCreatureFormat: RootJsonFormat[BoostedCreature] = jsonFormat4(BoostedCreature)
+  implicit val creatureListItemFormat: RootJsonFormat[CreatureListItem] = jsonFormat4(CreatureListItem)
   implicit val creaturesFormat: RootJsonFormat[Creatures] = jsonFormat2(Creatures)
+  implicit val creaturesResponseFormat: RootJsonFormat[CreaturesResponse] = jsonFormat2(CreaturesResponse)
+
+  implicit val creatureListFormat: RootJsonFormat[CreatureList] = jsonFormat3(CreatureList)
+  implicit val creatureDataFormat: RootJsonFormat[CreatureData] = jsonFormat2(CreatureData)
   implicit val creatureResponseFormat: RootJsonFormat[CreatureResponse] = jsonFormat2(CreatureResponse)
 
   implicit val raceFormat: RootJsonFormat[Race] = jsonFormat20(Race)

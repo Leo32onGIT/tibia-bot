@@ -5,8 +5,8 @@ case class CreatureList(
     image_url: String,
     name: String
 )
-case class Creatures(
+case class CreatureData(
     boosted: BoostableBossList,
     creature_list: List[CreatureList]
 )
-case class CreatureResponse(creatures: Creatures, information: Information)
+case class CreatureResponse(creatures: CreatureData, information: Information)
