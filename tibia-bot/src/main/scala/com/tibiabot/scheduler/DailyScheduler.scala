@@ -91,9 +91,9 @@ object DailyScheduler extends StrictLogging {
    */
   private def sendBoostedAnnouncementToGuild(guild: Guild): Unit = {
     // Get guild's boosted channel configuration
-    BotApp.getDiscordConfig(guild.getId) match {
-      case Some(discordConfig) =>
-        val boostedChannelId = discordConfig.boostedChannel
+    val discordConfig = BotApp.discordRetrieveConfig(guild)
+    if (discordConfig.nonEmpty) {
+      val boostedChannelId = discordConfig("boosted_channel")
         
         if (boostedChannelId != "0" && boostedChannelId.nonEmpty) {
           val boostedChannel = guild.getTextChannelById(boostedChannelId)
@@ -107,9 +107,8 @@ object DailyScheduler extends StrictLogging {
         } else {
           logger.debug(s"No boosted channel configured for guild ${guild.getName}")
         }
-        
-      case None =>
-        logger.debug(s"No discord configuration found for guild ${guild.getName}")
+    } else {
+      logger.debug(s"No discord configuration found for guild ${guild.getName}")
     }
   }
   
@@ -194,7 +193,7 @@ object DailyScheduler extends StrictLogging {
       case Right(creatureResponse) =>
         val boostedCreature = creatureResponse.creatures.boosted
         val creatureName = boostedCreature.name
-        val creatureImageUrl = creatureResponse.creatures.boosted.image_url.getOrElse("")
+        val creatureImageUrl = creatureResponse.creatures.boosted.image_url
         
         embed.addField(
           s"${boostedCreatureEmoji} **Boosted Creature**",

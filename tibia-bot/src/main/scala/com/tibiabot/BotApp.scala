@@ -5473,7 +5473,7 @@ object BotApp extends App with StrictLogging {
     s"https://tibia.fandom.com/wiki/Special:Redirect/file/$finalCreature.gif"
   }
 
-  private def creatureWikiUrl(creature: String): String = {
+  def creatureWikiUrl(creature: String): String = {
     val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
       // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
       val rx1 = """([^\w]\w)""".r

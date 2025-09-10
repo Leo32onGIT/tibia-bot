@@ -113,8 +113,9 @@ object EmojiManager extends StrictLogging {
         throw new RuntimeException(s"Emoji file not found: $resourcePath")
       }
       
-      val fileUpload = FileUpload.fromData(inputStream, emojiInfo.filename)
-      val action = guild.createEmoji(emojiInfo.name, fileUpload)
+      val iconBytes = inputStream.readAllBytes()
+      val icon = net.dv8tion.jda.api.entities.Icon.from(iconBytes)
+      val action = guild.createEmoji(emojiInfo.name, icon)
       
       val emoji = action.complete()
       logger.info(s"Successfully uploaded emoji ${emojiInfo.name} to guild ${guild.getName}")
