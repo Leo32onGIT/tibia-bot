@@ -765,7 +765,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
       }
       val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
-    } else if (button.startsWith("death_screenshot_")) {
+    }
+    
+    if (button.startsWith("death_screenshot_")) {
       // Handle death screenshot button clicks
       val buttonParts = button.split("_")
       if (buttonParts.length >= 4) {
