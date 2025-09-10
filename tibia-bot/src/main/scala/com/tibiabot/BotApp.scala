@@ -15,6 +15,7 @@ import net.dv8tion.jda.api.interactions.commands.Command.Choice
 import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData, SubcommandGroupData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
+import net.dv8tion.jda.api.requests.GatewayIntent
 import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
 import org.postgresql.util.PSQLException
 import net.dv8tion.jda.api.entities.User
@@ -90,6 +91,7 @@ object BotApp extends App with StrictLogging {
   logger.info("Starting up")
 
   val jda = JDABuilder.createDefault(Config.token)
+    .enableIntents(GatewayIntent.MESSAGE_CONTENT)
     .addEventListeners(new BotListener())
     .build()
 

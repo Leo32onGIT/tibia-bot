@@ -18,7 +18,7 @@ import scala.collection.immutable.ListMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{Await, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
 import java.time.OffsetDateTime
@@ -1618,7 +1618,38 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private def getKillerLevel(killerName: String): Option[Int] = {
-    recentLevels.find(_.name.toLowerCase == killerName.toLowerCase).map(_.level)
+    // First check the cache
+    val cachedLevel = recentLevels.find(_.name.toLowerCase == killerName.toLowerCase).map(_.level)
+    if (cachedLevel.isDefined) {
+      return cachedLevel
+    }
+    
+    // If not in cache, try to fetch from API (blocking call - use sparingly)
+    try {
+      val characterFuture = tibiaDataClient.getCharacter(killerName)
+      val result = Await.result(characterFuture, 5.seconds)
+      result match {
+        case Right(charResponse) =>
+          val level = charResponse.character.character.level.toInt
+          // Add to cache for future use
+          val now = ZonedDateTime.now()
+          val lastLogin = charResponse.character.character.last_login match {
+            case Some(loginStr) => ZonedDateTime.parse(loginStr.replace(" CET", "+01:00").replace(" CEST", "+02:00"))
+            case None => now.minusDays(30) // Default to 30 days ago if no last login
+          }
+          val newCharLevel = CharLevel(killerName, level, charResponse.character.character.vocation, lastLogin, now)
+          recentLevels += newCharLevel
+          logger.debug(s"Fetched level $level for killer $killerName from API")
+          Some(level)
+        case Left(error) =>
+          logger.debug(s"Failed to fetch level for killer $killerName: $error")
+          None
+      }
+    } catch {
+      case _: Exception =>
+        logger.debug(s"Exception while fetching level for killer: $killerName")
+        None
+    }
   }
 
   private def creatureImageUrl(creature: String): String = {
