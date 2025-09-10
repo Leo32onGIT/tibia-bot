@@ -1520,19 +1520,28 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   if (embeds.size() > 0) {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
-                      .setImage(imageUrl)
-                      .setFooter(s"Screenshot added by ${user.getName}")
                     
                     // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
+                    val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
+                    
+                    // Update embed to show the newest screenshot
+                    val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
+                    if (latestScreenshot != null) {
+                      updatedEmbed.setImage(latestScreenshot.screenshotUrl)
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedBy} • ${screenshotCount}/${screenshotCount}")
+                    } else {
+                      updatedEmbed.setImage(imageUrl)
+                        .setFooter(s"Screenshot added by ${user.getName}")
+                    }
                     
                     val buttons = if (screenshotCount > 1) {
                       List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
-                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "◀"),
-                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"1/${screenshotCount}").asDisabled(),
-                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "▶")
+                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
+                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
+                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
                       )
                     } else {
                       List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
@@ -1600,19 +1609,28 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   if (embeds.size() > 0) {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
-                      .setImage(imageUrl)
-                      .setFooter(s"Screenshot added by ${user.getName}")
                     
                     // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
+                    val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
+                    
+                    // Update embed to show the newest screenshot
+                    val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
+                    if (latestScreenshot != null) {
+                      updatedEmbed.setImage(latestScreenshot.screenshotUrl)
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedBy} • ${screenshotCount}/${screenshotCount}")
+                    } else {
+                      updatedEmbed.setImage(imageUrl)
+                        .setFooter(s"Screenshot added by ${user.getName}")
+                    }
                     
                     val buttons = if (screenshotCount > 1) {
                       List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
-                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "◀"),
-                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"1/${screenshotCount}").asDisabled(),
-                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "▶")
+                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
+                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
+                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
                       )
                     } else {
                       List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
