@@ -21,6 +21,10 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val onlinePlayersFormat: RootJsonFormat[OnlinePlayers] = jsonFormat3(OnlinePlayers)
   implicit val worldFormat: RootJsonFormat[World] = jsonFormat16(World)
   implicit val worldResponseFormat: RootJsonFormat[WorldResponse] = jsonFormat2(WorldResponse)
+  
+  implicit val regularWorldFormat: RootJsonFormat[RegularWorld] = jsonFormat11(RegularWorld)
+  implicit val worldsFormat: RootJsonFormat[Worlds] = jsonFormat4(Worlds)
+  implicit val worldsResponseFormat: RootJsonFormat[WorldsResponse] = jsonFormat2(WorldsResponse)
 
   implicit val housesFormat: RootJsonFormat[Houses] = jsonFormat4(Houses)
   implicit val guildFormat: RootJsonFormat[Guild] = jsonFormat2(Guild)
