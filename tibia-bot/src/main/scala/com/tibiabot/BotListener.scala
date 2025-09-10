@@ -677,7 +677,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   val fallbackEmbed = new EmbedBuilder()
                     .setColor(16711680) // Red color
                     .setTitle(s"Upload Screenshot for ${charName}")
-                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes.\n\n" +
+                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
                                   s"The screenshot will be added to the death message for **${charName}**.")
                     .setFooter("You can also paste an image directly from your clipboard")
                     .build()
