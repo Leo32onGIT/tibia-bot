@@ -670,7 +670,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               privateChannel.sendMessageEmbeds(embed).queue(
                 _ => {
                   // Confirm to user that DM was sent
-                  event.reply(s"Check your DMs to upload the screenshot for **${charName}**.").setEphemeral(true).queue()
+                  event.reply(s"✅ Screenshot upload request sent to your DMs for **${charName}**.").setEphemeral(true).queue()
                 },
                 error => {
                   // Fallback if DM fails

@@ -91,7 +91,6 @@ object BotApp extends App with StrictLogging {
   logger.info("Starting up")
 
   val jda = JDABuilder.createDefault(Config.token)
-    .enableIntents(GatewayIntent.MESSAGE_CONTENT)
     .addEventListeners(new BotListener())
     .build()
 
