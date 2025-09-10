@@ -351,7 +351,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                          val originalEmbed = embeds.get(0)
                          val updatedEmbed = new EmbedBuilder(originalEmbed)
                            .setImage(screenshotUrl)
-                           .setFooter(s"Screenshot added by ${event.getUser.getEffectiveName}")
+                           .setFooter(s"Screenshot added by ${event.getUser.getName}")
                          
                          // Get existing screenshots to check if we need navigation buttons
                          val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)

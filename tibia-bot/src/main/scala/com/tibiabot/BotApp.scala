@@ -5923,6 +5923,9 @@ object BotApp extends App with StrictLogging {
 
   // Death screenshot database methods
   def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, messageId: String): Unit = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
+    val username = "postgres"
+    val password = Config.postgresPassword
     val conn = DriverManager.getConnection(url, username, password)
     try {
       // Create table if it doesn't exist
@@ -5963,6 +5966,9 @@ object BotApp extends App with StrictLogging {
   }
 
   def getDeathScreenshots(guildId: String, world: String, characterName: String, deathTime: Long): List[DeathScreenshot] = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
+    val username = "postgres"
+    val password = Config.postgresPassword
     val conn = DriverManager.getConnection(url, username, password)
     val screenshots = ListBuffer[DeathScreenshot]()
     try {
@@ -5999,6 +6005,9 @@ object BotApp extends App with StrictLogging {
   }
 
   def deleteDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, userId: String): Boolean = {
+    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
+    val username = "postgres"
+    val password = Config.postgresPassword
     val conn = DriverManager.getConnection(url, username, password)
     var deleted = false
     try {
