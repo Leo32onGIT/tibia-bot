@@ -1653,7 +1653,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val characterResponse = Await.result(tibiaDataClient.getCharacter(killerName), Duration(10, "seconds"))
         characterResponse match {
           case Right(response) =>
-            val level = response.character.character.level
+            val level = response.character.character.level.toInt
             logger.info(s"Found level $level for $killerName via TibiaData API")
             Some(level)
           case Left(error) =>
