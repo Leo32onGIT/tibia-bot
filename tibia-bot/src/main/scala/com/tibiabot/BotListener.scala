@@ -362,15 +362,26 @@ class BotListener extends ListenerAdapter with StrictLogging {
                          val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
                          val screenshotCount = screenshots.length
                          
+                         val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                          val buttons = if (screenshotCount > 1) {
-                           List(
+                           val baseButtons = List(
                              Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
                              Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_0", "◀"),
                              Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"1/${screenshotCount}").asDisabled(),
                              Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_0", "▶")
                            )
+                           if (latestScreenshot != null && latestScreenshot.addedBy == event.getUser.getId) {
+                             baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_0", "🗑️")
+                           } else {
+                             baseButtons
+                           }
                          } else {
-                           List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
+                           val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
+                           if (latestScreenshot != null && latestScreenshot.addedBy == event.getUser.getId) {
+                             baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_0", "🗑️")
+                           } else {
+                             baseButtons
+                           }
                          }
                          
                          message.editMessageEmbeds(updatedEmbed.build())
@@ -736,21 +747,112 @@ class BotListener extends ListenerAdapter with StrictLogging {
               .build()
             
             val components = if (screenshots.length > 1) {
-              List(ActionRow.of(
+              val baseButtons = List(
                 Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
                 Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
                 Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
                 Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
-              ))
+              )
+              val buttonsWithDelete = if (currentScreenshot.addedBy == event.getUser.getId) {
+                baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
+              } else {
+                baseButtons
+              }
+              List(ActionRow.of(buttonsWithDelete: _*))
             } else {
-              List(ActionRow.of(
-                Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot")
-              ))
+              val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
+              val buttonsWithDelete = if (currentScreenshot.addedBy == event.getUser.getId) {
+                baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
+              } else {
+                baseButtons
+              }
+              List(ActionRow.of(buttonsWithDelete: _*))
             }
             
             event.getHook.editOriginalEmbeds(embed).setComponents(components: _*).queue()
           }
         }
+      }
+    } else if (button.startsWith("delete_screenshot_")) {
+      event.deferEdit().queue()
+      
+      val buttonParts = button.split("_")
+      if (buttonParts.length >= 6) {
+        val charName = buttonParts(2)
+        val deathTime = buttonParts(3).toLong
+        val messageId = buttonParts(4)
+        val currentIndex = buttonParts(5).toInt
+        
+        val guild = event.getGuild
+        val user = event.getUser
+        val originalMessage = event.getMessage
+        
+        // Get current screenshots to find the URL of the screenshot to delete
+        val screenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
+        if (screenshots.nonEmpty && currentIndex < screenshots.length) {
+          val screenshotToDelete = screenshots(currentIndex)
+          
+          // Attempt to delete the screenshot
+          if (BotApp.deleteDeathScreenshot(guild.getId, guild.getName, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
+            // Successfully deleted, update the embed
+            val updatedScreenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
+            val embeds = originalMessage.getEmbeds
+            
+            if (embeds.size() > 0 && updatedScreenshots.nonEmpty) {
+              // Still have screenshots, show another one
+              val newIndex = Math.min(currentIndex, updatedScreenshots.length - 1)
+              val newCurrentScreenshot = updatedScreenshots(newIndex)
+              
+              val originalEmbed = embeds.get(0)
+              val updatedEmbed = new EmbedBuilder(originalEmbed)
+                .setImage(newCurrentScreenshot.screenshotUrl)
+                .setFooter(s"Screenshot added by ${newCurrentScreenshot.addedBy} • ${newIndex + 1}/${updatedScreenshots.length}")
+                .build()
+              
+              val components = if (updatedScreenshots.length > 1) {
+                val baseButtons = List(
+                  Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
+                  Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
+                  Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${updatedScreenshots.length}").asDisabled(),
+                  Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
+                )
+                val buttonsWithDelete = if (newCurrentScreenshot.addedBy == user.getId) {
+                  baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
+                } else {
+                  baseButtons
+                }
+                List(ActionRow.of(buttonsWithDelete: _*))
+              } else {
+                val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
+                val buttonsWithDelete = if (newCurrentScreenshot.addedBy == user.getId) {
+                  baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
+                } else {
+                  baseButtons
+                }
+                List(ActionRow.of(buttonsWithDelete: _*))
+              }
+              
+              event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(components: _*).queue()
+            } else {
+              // No more screenshots, remove image and show only add button
+              val originalEmbed = embeds.get(0)
+              val updatedEmbed = new EmbedBuilder(originalEmbed)
+                .setImage(null)
+                .setFooter(null)
+                .build()
+              
+              val addButton = List(ActionRow.of(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot")))
+              event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(addButton: _*).queue()
+            }
+          } else {
+            // Failed to delete - not the author or other error
+            event.getHook.sendMessage("❌ You can only delete screenshots you uploaded.").setEphemeral(true).queue()
+          }
+        } else {
+          event.getHook.sendMessage("❌ Screenshot not found.").setEphemeral(true).queue()
+        }
+      } else {
+        event.getHook.sendMessage("❌ Invalid button format.").setEphemeral(true).queue()
       }
     } else {
       event.deferReply(true).queue()
@@ -1539,14 +1641,24 @@ class BotListener extends ListenerAdapter with StrictLogging {
                     }
                     
                     val buttons = if (screenshotCount > 1) {
-                      List(
+                      val baseButtons = List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
                         Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
                         Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
                         Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
                       )
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
                     } else {
-                      List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                      val baseButtons = List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
                     }
                     
                     message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
@@ -1628,14 +1740,24 @@ class BotListener extends ListenerAdapter with StrictLogging {
                     }
                     
                     val buttons = if (screenshotCount > 1) {
-                      List(
+                      val baseButtons = List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
                         Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
                         Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
                         Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
                       )
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
                     } else {
-                      List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                      val baseButtons = List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
                     }
                     
                     message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
