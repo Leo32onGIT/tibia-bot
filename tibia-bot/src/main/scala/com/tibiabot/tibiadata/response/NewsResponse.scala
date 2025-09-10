@@ -11,17 +11,12 @@ case class NewsEntry(
   url: String
 )
 
-case class NewsInfo(
-  api_version: Int,
-  timestamp: String
-)
-
 case class NewsData(
   news: List[NewsEntry]
 )
 
 case class NewsResponse(
-  information: NewsInfo,
+  information: Information,
   news: NewsData
 )
 
@@ -36,6 +31,6 @@ case class NewsTickerData(
 )
 
 case class NewsTickerResponse(
-  information: NewsInfo,
+  information: Information,
   newstickers: NewsTickerData
 )
