@@ -1529,6 +1529,87 @@ class BotListener extends ListenerAdapter with StrictLogging {
         case None =>
           // No pending screenshot request for this user
       }
+      }
+    }
+  }
+
+  private def handlePrivateMessage(event: MessageReceivedEvent): Unit = {
+    val user = event.getAuthor
+    
+    // Check if this user has a pending screenshot request for any guild
+    val userPendingScreenshots = pendingScreenshots.filter(_._1.startsWith(user.getId + "_")).toMap
+    
+    if (userPendingScreenshots.nonEmpty) {
+      // Check if message has attachments
+      val attachments = event.getMessage.getAttachments.asScala
+      val imageAttachments = attachments.filter { attachment =>
+        val fileName = attachment.getFileName.toLowerCase
+        fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || 
+        fileName.endsWith(".gif") || fileName.endsWith(".webp")
+      }
+      
+      if (imageAttachments.nonEmpty) {
+        val attachment = imageAttachments.head
+        val imageUrl = attachment.getUrl
+        
+        // Process all pending screenshots for this user (in case they have multiple)
+        userPendingScreenshots.foreach { case (pendingKey, pending) =>
+          // Remove the pending request
+          pendingScreenshots.remove(pendingKey)
+          
+          try {
+            // Store the screenshot in database
+            BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, pending.messageId)
+            
+            // Update the original death message with the screenshot
+            val guild = event.getJDA.getGuildById(pending.guildId)
+            if (guild != null) {
+              val channel = guild.getTextChannelById(pending.channelId)
+              if (channel != null) {
+                channel.retrieveMessageById(pending.messageId).queue(message => {
+                  val embeds = message.getEmbeds
+                  if (embeds.size() > 0) {
+                    val originalEmbed = embeds.get(0)
+                    val updatedEmbed = new EmbedBuilder(originalEmbed)
+                      .setImage(imageUrl)
+                      .setFooter(s"Screenshot added by ${user.getName}")
+                    
+                    // Get existing screenshots to check if we need navigation buttons
+                    val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
+                    val screenshotCount = screenshots.length
+                    
+                    val buttons = if (screenshotCount > 1) {
+                      List(
+                        Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
+                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "◀"),
+                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"1/${screenshotCount}").asDisabled(),
+                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_0", "▶")
+                      )
+                    } else {
+                      List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                    }
+                    
+                    message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
+                    
+                    logger.info(s"Screenshot uploaded successfully via DM for ${pending.charName} death at ${pending.deathTime} in guild ${guild.getName}")
+                  }
+                })
+              }
+            }
+            
+            // Send confirmation DM to user
+            event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **${pending.charName}** in **${if (guild != null) guild.getName else "Unknown Guild"}**!").queue()
+            
+          } catch {
+            case e: Exception =>
+              logger.error(s"Failed to store screenshot from DM: ${e.getMessage}", e)
+              event.getChannel.sendMessage(s"${Config.noEmoji} Failed to upload screenshot. Please try again.").queue()
+          }
+        }
+      } else {
+        // User sent a DM but no image attachment
+        event.getChannel.sendMessage("Please upload an image file (PNG, JPG, GIF, WebP) or paste an image from your clipboard.").queue()
+      }
     }
   }
 
