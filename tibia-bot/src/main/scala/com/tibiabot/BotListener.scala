@@ -1528,7 +1528,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           }
         case None =>
           // No pending screenshot request for this user
-      }
+        }
       }
     }
   }
