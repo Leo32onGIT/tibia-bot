@@ -657,15 +657,35 @@ class BotListener extends ListenerAdapter with StrictLogging {
             val pendingKey = s"${event.getUser.getId}_${guild.getId}"
             pendingScreenshots.put(pendingKey, PendingScreenshot(charName, deathTime, messageId, guild.getId, world, event.getUser.getId, event.getChannel.getId))
             
-            val embed = new EmbedBuilder()
-              .setColor(3092790)
-              .setTitle(s"Upload Screenshot for ${charName}")
-              .setDescription(s"Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes.\n\n" +
-                            s"The screenshot will be added to the death message for **${charName}**.")
-              .setFooter("You can also paste an image directly from your clipboard")
-              .build()
-            
-            event.reply("").addEmbeds(embed).setEphemeral(true).queue()
+            // Send DM to user
+            event.getUser.openPrivateChannel().queue(privateChannel => {
+              val embed = new EmbedBuilder()
+                .setColor(3092790)
+                .setTitle(s"Upload Screenshot for ${charName}")
+                .setDescription(s"Please upload an image file (PNG, JPG, GIF, WebP) to this DM within the next 5 minutes.\n\n" +
+                              s"The screenshot will be added to the death message for **${charName}** in **${guild.getName}**.")
+                .setFooter("You can also paste an image directly from your clipboard")
+                .build()
+              
+              privateChannel.sendMessageEmbeds(embed).queue(
+                _ => {
+                  // Confirm to user that DM was sent
+                  event.reply(s"${Config.yesEmoji} Check your DMs to upload the screenshot for **${charName}**.").setEphemeral(true).queue()
+                },
+                error => {
+                  // Fallback if DM fails
+                  val fallbackEmbed = new EmbedBuilder()
+                    .setColor(16711680) // Red color
+                    .setTitle(s"Upload Screenshot for ${charName}")
+                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes.\n\n" +
+                                  s"The screenshot will be added to the death message for **${charName}**.")
+                    .setFooter("You can also paste an image directly from your clipboard")
+                    .build()
+                  
+                  event.reply("").addEmbeds(fallbackEmbed).setEphemeral(true).queue()
+                }
+              )
+            })
             
             // Set a timeout to remove the pending request after 5 minutes
             scala.concurrent.ExecutionContext.global.execute(() => {
@@ -1427,8 +1447,16 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   override def onMessageReceived(event: MessageReceivedEvent): Unit = {
-    // Only process messages from guilds (not DMs) and ignore bot messages
-    if (event.isFromGuild && !event.getAuthor.isBot) {
+    // Ignore bot messages
+    if (!event.getAuthor.isBot) {
+      // Handle DM messages for screenshot uploads
+      if (!event.isFromGuild) {
+        handlePrivateMessage(event)
+        return
+      }
+      
+      // Handle guild messages for screenshot uploads
+      if (event.isFromGuild) {
       val guild = event.getGuild
       val user = event.getAuthor
       val pendingKey = s"${user.getId}_${guild.getId}"

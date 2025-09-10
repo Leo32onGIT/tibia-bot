@@ -1618,16 +1618,21 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   }
 
   private def getKillerLevel(killerName: String): Option[Int] = {
+    logger.info(s"getKillerLevel called for: $killerName")
+    
     // First check the cache
     val cachedLevel = recentLevels.find(_.name.toLowerCase == killerName.toLowerCase).map(_.level)
     if (cachedLevel.isDefined) {
+      logger.info(s"Found cached level ${cachedLevel.get} for $killerName")
       return cachedLevel
     }
+    
+    logger.info(s"No cached level for $killerName, fetching from API...")
     
     // If not in cache, try to fetch from API (blocking call - use sparingly)
     try {
       val characterFuture = tibiaDataClient.getCharacter(killerName)
-      val result = Await.result(characterFuture, 5.seconds)
+      val result = Await.result(characterFuture, 10.seconds)  // Increased timeout
       result match {
         case Right(charResponse) =>
           val level = charResponse.character.character.level.toInt
@@ -1639,15 +1644,15 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
           val newCharLevel = CharLevel(killerName, level, charResponse.character.character.vocation, lastLogin, now)
           recentLevels += newCharLevel
-          logger.debug(s"Fetched level $level for killer $killerName from API")
+          logger.info(s"Successfully fetched level $level for killer $killerName from API")
           Some(level)
         case Left(error) =>
-          logger.debug(s"Failed to fetch level for killer $killerName: $error")
+          logger.info(s"Failed to fetch level for killer $killerName: $error")
           None
       }
     } catch {
-      case _: Exception =>
-        logger.debug(s"Exception while fetching level for killer: $killerName")
+      case ex: Exception =>
+        logger.info(s"Exception while fetching level for killer $killerName: ${ex.getMessage}")
         None
     }
   }
