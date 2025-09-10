@@ -35,6 +35,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
   private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
+  private case class OnlineListEntry(name: String, level: Int, lastUpdated: ZonedDateTime)
 
   //val guildId: String = guild.getId
 
@@ -43,6 +44,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val recentOnline = mutable.Set.empty[CharKey]
   private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
+  
+  // Dedicated online list table for killer level lookups - updated every 5 minutes
+  private var onlineListTable = mutable.Map.empty[String, OnlineListEntry]
 
   // initialize cached deaths/levels from database
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
@@ -54,6 +58,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
+  private var onlineListTableUpdateTimer: ZonedDateTime = ZonedDateTime.now().minusMinutes(10) // Start immediately
   // ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
   private val tibiaDataClient = new TibiaDataClient()
@@ -92,6 +97,17 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       // Add online data to sets
       currentOnline.clear()
       currentOnline.addAll(onlineWithVocLvlAndDuration)
+      
+      // Update online list table every 5 minutes for killer level lookups
+      if (now.isAfter(onlineListTableUpdateTimer.plusMinutes(5))) {
+        logger.info(s"Updating online list table for world: $world with ${onlineWithVocLvlAndDuration.size} players")
+        onlineListTable.clear()
+        onlineWithVocLvlAndDuration.foreach { player =>
+          onlineListTable.put(player.name.toLowerCase, OnlineListEntry(player.name, player.level, now))
+        }
+        onlineListTableUpdateTimer = now
+        logger.info(s"Online list table updated with ${onlineListTable.size} entries")
+      }
 
       // Remove existing online chars from the list...
       recentOnline.filterInPlace { i =>
@@ -1624,69 +1640,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private def getKillerLevel(killerName: String): Option[Int] = {
     logger.info(s"getKillerLevel called for: $killerName")
     
-    // First check the cache
-    val cachedLevel = recentLevels.find(_.name.toLowerCase == killerName.toLowerCase).map(_.level)
-    if (cachedLevel.isDefined) {
-      logger.info(s"Found cached level ${cachedLevel.get} for $killerName")
-      return cachedLevel
-    }
-    
-    logger.info(s"No cached level for $killerName, fetching from API...")
-    
-    // If not in cache, try to fetch from API (blocking call - use sparingly)
-    try {
-      val characterFuture = tibiaDataClient.getCharacter(killerName)
-      val result = Await.result(characterFuture, 10.seconds)  // Increased timeout
-      result match {
-        case Right(charResponse) =>
-          val level = charResponse.character.character.level.toInt
-          // Add to cache for future use
-          val now = ZonedDateTime.now()
-          val lastLogin = charResponse.character.character.last_login match {
-            case Some(loginStr) => ZonedDateTime.parse(loginStr.replace(" CET", "+01:00").replace(" CEST", "+02:00"))
-            case None => now.minusDays(30) // Default to 30 days ago if no last login
-          }
-          val newCharLevel = CharLevel(killerName, level, charResponse.character.character.vocation, lastLogin, now)
-          recentLevels += newCharLevel
-          logger.info(s"Successfully fetched level $level for killer $killerName from API")
-          Some(level)
-        case Left(error) =>
-          if (error == "Hit cache") {
-            // Cache hit but no data available - try the getCharacterV2 method as fallback
-            logger.info(s"Hit cache for $killerName, trying fallback method...")
-            try {
-              val fallbackFuture = tibiaDataClient.getCharacterV2((killerName, 1, "Solidera")) // Dummy level/world for the bypass
-              val fallbackResult = Await.result(fallbackFuture, 10.seconds)
-              fallbackResult match {
-                case Right(charResponse) =>
-                  val level = charResponse.character.character.level.toInt
-                  val now = ZonedDateTime.now()
-                  val lastLogin = charResponse.character.character.last_login match {
-                    case Some(loginStr) => ZonedDateTime.parse(loginStr.replace(" CET", "+01:00").replace(" CEST", "+02:00"))
-                    case None => now.minusDays(30)
-                  }
-                  val newCharLevel = CharLevel(killerName, level, charResponse.character.character.vocation, lastLogin, now)
-                  recentLevels += newCharLevel
-                  logger.info(s"Successfully fetched level $level for killer $killerName via fallback method")
-                  Some(level)
-                case Left(fallbackError) =>
-                  logger.info(s"Fallback also failed for $killerName: $fallbackError")
-                  None
-              }
-            } catch {
-              case ex: Exception =>
-                logger.info(s"Fallback exception for $killerName: ${ex.getMessage}")
-                None
-            }
-          } else {
-            logger.info(s"Failed to fetch level for killer $killerName: $error")
-            None
-          }
-      }
-    } catch {
-      case ex: Exception =>
-        logger.info(s"Exception while fetching level for killer $killerName: ${ex.getMessage}")
-        None
+    // Check the dedicated online list table for the killer
+    val onlineLevel = onlineListTable.get(killerName.toLowerCase).map(_.level)
+    if (onlineLevel.isDefined) {
+      logger.info(s"Found level ${onlineLevel.get} for $killerName in online list table")
+      onlineLevel
+    } else {
+      logger.info(s"$killerName not found in online list table - killer may be offline")
+      None
     }
   }
 
