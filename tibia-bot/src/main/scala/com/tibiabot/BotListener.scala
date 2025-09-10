@@ -1644,9 +1644,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
           userPendingScreenshots.keys.foreach(pendingScreenshots.remove)
           
           if (cancelledCount == 1) {
-            event.getChannel.sendMessage(s"${Config.yesEmoji} Your pending upload has been cancelled.").queue()
+            event.getChannel.sendMessage(s"Your pending upload has been cancelled.").queue()
           } else if (cancelledCount > 1) {
-            event.getChannel.sendMessage(s"${Config.yesEmoji} ${cancelledCount} pending uploads have been cancelled.").queue()
+            event.getChannel.sendMessage(s"${cancelledCount} pending uploads have been cancelled.").queue()
           }
           
           logger.info(s"User ${user.getName} (${user.getId}) cancelled ${cancelledCount} pending uploads via DM")
