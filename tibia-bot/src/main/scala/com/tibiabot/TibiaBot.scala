@@ -10,6 +10,8 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.interactions.components.ActionRow
+import net.dv8tion.jda.api.interactions.components.buttons.Button
 
 import java.time.ZonedDateTime
 import scala.collection.immutable.ListMap
@@ -966,7 +968,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               embed.setColor(embedColor)
 
               // return embed + poke
-              (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck)
+              (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond)
             }
             val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
             val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
@@ -982,26 +984,81 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   
                   // Schedule the message with delay
                   mat.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
+                    // Create screenshot button
+                    val screenshotButton = Button.secondary(
+                      s"death_screenshot_${embed._3}_${embed._7}_placeholder", 
+                      "Add Screenshot"
+                    )
+                    val actionRow = ActionRow.of(screenshotButton)
+                    
                     // nemesis and enemy fullbless ignore the level filter
                     if (embed._2 == "nemesis") {
                       if (guild.getRoleById(nemesisRole) != null) {
-                        deathsTextChannel.sendMessage(s"<@&$nemesisRole>").setEmbeds(embed._1.build()).queue()
+                        deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
+                          .setEmbeds(embed._1.build())
+                          .setComponents(actionRow)
+                          .queue(message => {
+                            // Update button with actual message ID
+                            val updatedButton = Button.secondary(
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              "Add Screenshot"
+                            )
+                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                          })
                       } else {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build()).queue()
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .setComponents(actionRow)
+                          .queue(message => {
+                            // Update button with actual message ID
+                            val updatedButton = Button.secondary(
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              "Add Screenshot"
+                            )
+                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                          })
                       }
                     } else if (embed._2 == "fullbless") {
                       // send adjusted embed for fullblesses
                       val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
                       val adjustedEmbed = embed._1.setDescription(adjustedMessage)
                       if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>").setEmbeds(adjustedEmbed.build()).queue()
+                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
+                          .setEmbeds(adjustedEmbed.build())
+                          .setComponents(actionRow)
+                          .queue(message => {
+                            // Update button with actual message ID
+                            val updatedButton = Button.secondary(
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              "Add Screenshot"
+                            )
+                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                          })
                       } else {
-                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build()).queue()
+                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                          .setComponents(actionRow)
+                          .queue(message => {
+                            // Update button with actual message ID
+                            val updatedButton = Button.secondary(
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              "Add Screenshot"
+                            )
+                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                          })
                       }
                     } else {
                       // for regular deaths check if level > /filter deaths <level>
                       if (embed._5 >= minimumLevel) {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build()).setSuppressedNotifications(true).queue()
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .setComponents(actionRow)
+                          .setSuppressedNotifications(true)
+                          .queue(message => {
+                            // Update button with actual message ID
+                            val updatedButton = Button.secondary(
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              "Add Screenshot"
+                            )
+                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                          })
                       }
                     }
                   }

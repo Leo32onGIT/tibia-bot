@@ -1,7 +1,7 @@
 package com.tibiabot
 
 import com.tibiabot.BotApp.commands
-import com.tibiabot.BotApp.SatchelStamp
+import com.tibiabot.BotApp.{SatchelStamp, worldsData}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
@@ -309,6 +309,106 @@ class BotListener extends ListenerAdapter with StrictLogging {
                Button.danger("galthenButtonRem", "Remove"),
                Button.secondary("galthenRemoveAll", "Clear All")
              ).queue()
+         }
+       }
+     }
+     
+     // Handle death screenshot modal submissions
+     if (event.getModalId.startsWith("death_modal_")) {
+       val modalParts = event.getModalId.split("_")
+       if (modalParts.length >= 5) {
+         val charName = modalParts(2)
+         val deathTime = modalParts(3).toLong
+         val messageId = modalParts(4)
+         
+         val screenshotUrl = modalValues.find(_.getId == "screenshot_url").map(_.getAsString.trim).getOrElse("")
+         
+         if (screenshotUrl.nonEmpty) {
+           // Validate URL format (basic validation)
+           val validUrlPattern = """^https?://.*\.(png|jpg|jpeg|gif|webp)$""".r.unanchored
+           val isValidImageUrl = validUrlPattern.pattern.matcher(screenshotUrl.toLowerCase).matches() ||
+                               screenshotUrl.contains("imgur.com") || 
+                               screenshotUrl.contains("discord.com/attachments/") ||
+                               screenshotUrl.contains("cdn.discordapp.com/attachments/")
+           
+           if (isValidImageUrl) {
+             // Get world from guild configuration
+             val guild = event.getGuild
+             val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
+             
+             worldOpt match {
+               case Some(world) =>
+                 try {
+                   // Store the screenshot in database
+                   BotApp.storeDeathScreenshot(guild.getId, world, charName, deathTime, screenshotUrl, event.getUser.getId, messageId)
+                   
+                   // Update the original message with the screenshot
+                   val channel = guild.getTextChannelById(event.getChannel.getId)
+                   if (channel != null) {
+                     channel.retrieveMessageById(messageId).queue(message => {
+                       val embeds = message.getEmbeds
+                       if (embeds.size() > 0) {
+                         val originalEmbed = embeds.get(0)
+                         val updatedEmbed = new EmbedBuilder(originalEmbed)
+                           .setImage(screenshotUrl)
+                           .setFooter(s"Screenshot added by ${event.getUser.getEffectiveName}")
+                         
+                         // Get existing screenshots to check if we need navigation buttons
+                         val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
+                         val screenshotCount = screenshots.length
+                         
+                         val buttons = if (screenshotCount > 1) {
+                           List(
+                             Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
+                             Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_0", "◀"),
+                             Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"1/${screenshotCount}").asDisabled(),
+                             Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_0", "▶")
+                           )
+                         } else {
+                           List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
+                         }
+                         
+                         message.editMessageEmbeds(updatedEmbed.build())
+                           .setComponents(ActionRow.of(buttons.asJava))
+                           .queue()
+                       }
+                     })
+                   }
+                   
+                   val successEmbed = new EmbedBuilder()
+                     .setDescription(s"${Config.yesEmoji} Screenshot added successfully!")
+                     .setColor(36941)
+                     .build()
+                   event.getHook.sendMessageEmbeds(successEmbed).setEphemeral(true).queue()
+                 } catch {
+                   case ex: Exception =>
+                     logger.error(s"Failed to store death screenshot: ${ex.getMessage}")
+                     val errorEmbed = new EmbedBuilder()
+                       .setDescription(s"${Config.noEmoji} Failed to save screenshot. Please try again.")
+                       .setColor(13631488)
+                       .build()
+                     event.getHook.sendMessageEmbeds(errorEmbed).setEphemeral(true).queue()
+                 }
+               case None =>
+                 val errorEmbed = new EmbedBuilder()
+                   .setDescription(s"${Config.noEmoji} Could not determine world for this guild.")
+                   .setColor(13631488)
+                   .build()
+                 event.getHook.sendMessageEmbeds(errorEmbed).setEphemeral(true).queue()
+             }
+           } else {
+             val errorEmbed = new EmbedBuilder()
+               .setDescription(s"${Config.noEmoji} Please provide a valid image URL (PNG, JPG, GIF, WEBP) from a supported host.")
+               .setColor(13631488)
+               .build()
+             event.getHook.sendMessageEmbeds(errorEmbed).setEphemeral(true).queue()
+           }
+         } else {
+           val errorEmbed = new EmbedBuilder()
+             .setDescription(s"${Config.noEmoji} Please provide a screenshot URL.")
+             .setColor(13631488)
+             .build()
+           event.getHook.sendMessageEmbeds(errorEmbed).setEphemeral(true).queue()
          }
        }
      }
@@ -665,6 +765,89 @@ class BotListener extends ListenerAdapter with StrictLogging {
       }
       val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
+    } else if (button.startsWith("death_screenshot_")) {
+      // Handle death screenshot button clicks
+      val buttonParts = button.split("_")
+      if (buttonParts.length >= 4) {
+        val charName = buttonParts(2)
+        val deathTime = buttonParts(3).toLong
+        val messageId = buttonParts(4)
+        
+        // Get world from guild configuration
+        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
+        
+        worldOpt match {
+          case Some(world) =>
+            val inputWindow = TextInput.create("screenshot_url", "Screenshot URL", TextInputStyle.PARAGRAPH)
+              .setPlaceholder("https://imgur.com/example.png or https://cdn.discordapp.com/attachments/...")
+              .setMaxLength(500)
+              .build()
+            
+            val modal = Modal.create(s"death_modal_${charName}_${deathTime}_${messageId}", s"Add Screenshot for ${charName}")
+              .addComponents(ActionRow.of(inputWindow))
+              .build()
+            
+            event.replyModal(modal).queue()
+          case None =>
+            responseText = s"${Config.noEmoji} Could not determine world for this guild."
+            val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+            event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
+        }
+      } else {
+        responseText = s"${Config.noEmoji} Invalid button format."
+        val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+        event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
+      }
+    } else if (button.startsWith("prev_screenshot_") || button.startsWith("next_screenshot_")) {
+      event.deferEdit().queue()
+      
+      val buttonParts = button.split("_")
+      if (buttonParts.length >= 6) {
+        val charName = buttonParts(2)
+        val deathTime = buttonParts(3).toLong
+        val messageId = buttonParts(4)
+        val currentIndex = buttonParts(5).toInt
+        
+        // Get world from guild configuration
+        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
+        
+        worldOpt match {
+          case Some(world) =>
+            val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
+            
+            if (screenshots.nonEmpty) {
+              val isNext = button.startsWith("next_screenshot_")
+              val newIndex = if (isNext) {
+                if (currentIndex + 1 >= screenshots.length) 0 else currentIndex + 1
+              } else {
+                if (currentIndex - 1 < 0) screenshots.length - 1 else currentIndex - 1
+              }
+              
+              val currentScreenshot = screenshots(newIndex)
+              val originalEmbeds = event.getInteraction.getMessage.getEmbeds
+              
+              if (originalEmbeds.size() > 0) {
+                val originalEmbed = originalEmbeds.get(0)
+                val updatedEmbed = new EmbedBuilder(originalEmbed)
+                  .setImage(currentScreenshot.screenshotUrl)
+                  .setFooter(s"Screenshot added by ${currentScreenshot.addedBy}")
+                
+                val buttons = List(
+                  Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
+                  Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
+                  Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
+                  Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
+                )
+                
+                event.getHook.editOriginalEmbeds(updatedEmbed.build())
+                  .setComponents(ActionRow.of(buttons.asJava))
+                  .queue()
+              }
+            }
+          case None =>
+            // Handle error - could not get world
+        }
+      }
     }
   }
 

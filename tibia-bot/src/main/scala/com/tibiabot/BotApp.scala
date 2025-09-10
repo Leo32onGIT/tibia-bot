@@ -79,6 +79,7 @@ object BotApp extends App with StrictLogging {
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
   case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
   case class BoostedStamp(user: String, boostedType: String, boostedName: String)
+  case class DeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedAt: ZonedDateTime, messageId: String)
   case class CustomSort(entityType: String, name: String, label: String, emoji: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
@@ -5919,4 +5920,122 @@ object BotApp extends App with StrictLogging {
     }
   }
   **/
+
+  // Death screenshot database methods
+  def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, messageId: String): Unit = {
+    val conn = DriverManager.getConnection(url, username, password)
+    try {
+      // Create table if it doesn't exist
+      val createTableStatement = conn.createStatement()
+      createTableStatement.execute(
+        s"""CREATE TABLE IF NOT EXISTS death_screenshots (
+           |    guild_id VARCHAR(100) NOT NULL,
+           |    world VARCHAR(50) NOT NULL,
+           |    character_name VARCHAR(255) NOT NULL,
+           |    death_time BIGINT NOT NULL,
+           |    screenshot_url TEXT NOT NULL,
+           |    added_by VARCHAR(100) NOT NULL,
+           |    added_at TIMESTAMP NOT NULL,
+           |    message_id VARCHAR(100) NOT NULL,
+           |    PRIMARY KEY (guild_id, world, character_name, death_time, screenshot_url)
+           |)""".stripMargin)
+      createTableStatement.close()
+
+      // Insert screenshot
+      val insertStatement = conn.prepareStatement(
+        "INSERT INTO death_screenshots (guild_id, world, character_name, death_time, screenshot_url, added_by, added_at, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+      insertStatement.setString(1, guildId)
+      insertStatement.setString(2, world)
+      insertStatement.setString(3, characterName)
+      insertStatement.setLong(4, deathTime)
+      insertStatement.setString(5, screenshotUrl)
+      insertStatement.setString(6, addedBy)
+      insertStatement.setTimestamp(7, Timestamp.from(Instant.now()))
+      insertStatement.setString(8, messageId)
+      insertStatement.executeUpdate()
+      insertStatement.close()
+    } catch {
+      case ex: Exception => logger.error(s"Failed to store death screenshot: ${ex.getMessage}")
+    } finally {
+      conn.close()
+    }
+  }
+
+  def getDeathScreenshots(guildId: String, world: String, characterName: String, deathTime: Long): List[DeathScreenshot] = {
+    val conn = DriverManager.getConnection(url, username, password)
+    val screenshots = ListBuffer[DeathScreenshot]()
+    try {
+      val selectStatement = conn.prepareStatement(
+        "SELECT * FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? ORDER BY added_at ASC"
+      )
+      selectStatement.setString(1, guildId)
+      selectStatement.setString(2, world)
+      selectStatement.setString(3, characterName)
+      selectStatement.setLong(4, deathTime)
+      val resultSet = selectStatement.executeQuery()
+      
+      while (resultSet.next()) {
+        screenshots += DeathScreenshot(
+          guildId = resultSet.getString("guild_id"),
+          world = resultSet.getString("world"),
+          characterName = resultSet.getString("character_name"),
+          deathTime = resultSet.getLong("death_time"),
+          screenshotUrl = resultSet.getString("screenshot_url"),
+          addedBy = resultSet.getString("added_by"),
+          addedAt = ZonedDateTime.ofInstant(resultSet.getTimestamp("added_at").toInstant, ZoneOffset.UTC),
+          messageId = resultSet.getString("message_id")
+        )
+      }
+      resultSet.close()
+      selectStatement.close()
+    } catch {
+      case ex: Exception => 
+        logger.error(s"Failed to get death screenshots: ${ex.getMessage}")
+    } finally {
+      conn.close()
+    }
+    screenshots.toList
+  }
+
+  def deleteDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, userId: String): Boolean = {
+    val conn = DriverManager.getConnection(url, username, password)
+    var deleted = false
+    try {
+      // First check if the user is the one who added the screenshot or is an admin
+      val checkStatement = conn.prepareStatement(
+        "SELECT added_by FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
+      )
+      checkStatement.setString(1, guildId)
+      checkStatement.setString(2, world)
+      checkStatement.setString(3, characterName)
+      checkStatement.setLong(4, deathTime)
+      checkStatement.setString(5, screenshotUrl)
+      val resultSet = checkStatement.executeQuery()
+      
+      if (resultSet.next()) {
+        val addedBy = resultSet.getString("added_by")
+        if (addedBy == userId) { // User can delete their own screenshots
+          val deleteStatement = conn.prepareStatement(
+            "DELETE FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
+          )
+          deleteStatement.setString(1, guildId)
+          deleteStatement.setString(2, world)
+          deleteStatement.setString(3, characterName)
+          deleteStatement.setLong(4, deathTime)
+          deleteStatement.setString(5, screenshotUrl)
+          val rowsDeleted = deleteStatement.executeUpdate()
+          deleted = rowsDeleted > 0
+          deleteStatement.close()
+        }
+      }
+      resultSet.close()
+      checkStatement.close()
+    } catch {
+      case ex: Exception => logger.error(s"Failed to delete death screenshot: ${ex.getMessage}")
+    } finally {
+      conn.close()
+    }
+    deleted
+  }
 }
