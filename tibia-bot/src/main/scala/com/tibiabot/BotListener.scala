@@ -1483,8 +1483,10 @@ class BotListener extends ListenerAdapter with StrictLogging {
                     
                     message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
                     
-                    // React to the user's message to confirm
-                    event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue()
+                    // React to the user's message to confirm, then delete it
+                    event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue(_ => {
+                      event.getMessage.delete().queue()
+                    })
                     
                     logger.info(s"Screenshot uploaded successfully for ${pending.charName} death at ${pending.deathTime}")
                   }
