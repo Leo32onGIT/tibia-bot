@@ -1457,12 +1457,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
       
       // Handle guild messages for screenshot uploads
       if (event.isFromGuild) {
-      val guild = event.getGuild
-      val user = event.getAuthor
-      val pendingKey = s"${user.getId}_${guild.getId}"
-      
-      // Check if this user has a pending screenshot request
-      pendingScreenshots.get(pendingKey) match {
+        val guild = event.getGuild
+        val user = event.getAuthor
+        val pendingKey = s"${user.getId}_${guild.getId}"
+        
+        // Check if this user has a pending screenshot request
+        pendingScreenshots.get(pendingKey) match {
         case Some(pending) =>
           // Check if message has attachments
           val attachments = event.getMessage.getAttachments.asScala
