@@ -727,22 +727,24 @@ class BotListener extends ListenerAdapter with StrictLogging {
             }
             
             val currentScreenshot = screenshots(newIndex)
-            val embed = new EmbedBuilder()
-              .setTitle(s"Screenshot for ${charName}")
+            
+            // Preserve the original death message embed and just update the image
+            val originalEmbed = event.getMessage.getEmbeds.get(0)
+            val embed = new EmbedBuilder(originalEmbed)
               .setImage(currentScreenshot.screenshotUrl)
-              .setFooter(s"Added by ${currentScreenshot.addedBy} • ${newIndex + 1}/${screenshots.length}")
-              .setColor(java.awt.Color.BLUE.getRGB)
+              .setFooter(s"Screenshot added by ${currentScreenshot.addedBy} • ${newIndex + 1}/${screenshots.length}")
               .build()
             
             val components = if (screenshots.length > 1) {
               List(ActionRow.of(
-                Button.secondary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀ Previous"),
-                Button.secondary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "Next ▶"),
-                Button.danger(s"delete_screenshot_${charName}_${deathTime}_${currentScreenshot.screenshotUrl}_${messageId}", "🗑️ Delete")
+                Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
+                Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
+                Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
+                Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
               ))
             } else {
               List(ActionRow.of(
-                Button.danger(s"delete_screenshot_${charName}_${deathTime}_${currentScreenshot.screenshotUrl}_${messageId}", "🗑️ Delete")
+                Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot")
               ))
             }
             
