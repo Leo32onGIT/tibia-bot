@@ -661,7 +661,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
               .setColor(3092790)
               .setTitle(s"Upload Screenshot for ${charName}")
               .setDescription(s"Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes.\n\n" +
-                            s"The screenshot will be added to the death message for **${charName}** who died at level ${deathTime}.")
+                            s"The screenshot will be added to the death message for **${charName}**.")
               .setFooter("You can also paste an image directly from your clipboard")
               .build()
             
