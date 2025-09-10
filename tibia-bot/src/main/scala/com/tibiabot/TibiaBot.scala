@@ -1646,8 +1646,25 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       logger.info(s"Found level ${onlineLevel.get} for $killerName in online list table")
       onlineLevel
     } else {
-      logger.info(s"$killerName not found in online list table - killer may be offline")
-      None
+      logger.info(s"$killerName not found in online list table - killer may be offline, trying TibiaData API")
+      
+      // Fallback to TibiaData API
+      try {
+        val characterResponse = Await.result(tibiaDataClient.getCharacter(killerName), Duration(10, "seconds"))
+        characterResponse match {
+          case Right(response) =>
+            val level = response.character.character.level
+            logger.info(s"Found level $level for $killerName via TibiaData API")
+            Some(level)
+          case Left(error) =>
+            logger.warn(s"Failed to get character $killerName from TibiaData API: $error")
+            None
+        }
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Exception when calling TibiaData API for $killerName: ${ex.getMessage}")
+          None
+      }
     }
   }
 
