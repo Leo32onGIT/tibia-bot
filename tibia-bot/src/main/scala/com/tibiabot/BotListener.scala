@@ -635,6 +635,86 @@ class BotListener extends ListenerAdapter with StrictLogging {
           ).queue()
         //
       }
+    } else if (button.startsWith("death_screenshot_")) {
+      // Handle death screenshot button clicks
+      val buttonParts = button.split("_")
+      if (buttonParts.length >= 4) {
+        val charName = buttonParts(2)
+        val deathTime = buttonParts(3).toLong
+        val messageId = buttonParts(4)
+        
+        // Get world from guild configuration
+        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
+        
+        worldOpt match {
+          case Some(world) =>
+            val inputWindow = TextInput.create("screenshot_url", "Screenshot URL", TextInputStyle.PARAGRAPH)
+              .setPlaceholder("https://imgur.com/example.png or https://cdn.discordapp.com/attachments/...")
+              .setMaxLength(500)
+              .build()
+            
+            val modal = Modal.create(s"death_modal_${charName}_${deathTime}_${messageId}", s"Add Screenshot for ${charName}")
+              .addComponents(ActionRow.of(inputWindow))
+              .build()
+            
+            event.replyModal(modal).queue()
+          case None =>
+            responseText = s"${Config.noEmoji} Could not determine world for this guild."
+            val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+            event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
+        }
+      } else {
+        responseText = s"${Config.noEmoji} Invalid button format."
+        val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
+        event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
+      }
+    } else if (button.startsWith("prev_screenshot_") || button.startsWith("next_screenshot_")) {
+      event.deferEdit().queue()
+      
+      val buttonParts = button.split("_")
+      if (buttonParts.length >= 6) {
+        val charName = buttonParts(2)
+        val deathTime = buttonParts(3).toLong
+        val messageId = buttonParts(4)
+        val currentIndex = buttonParts(5).toInt
+        
+        // Get world from guild configuration
+        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
+        
+        worldOpt.foreach { world =>
+          val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
+          
+          if (screenshots.nonEmpty) {
+            val newIndex = if (button.startsWith("prev_")) {
+              if (currentIndex > 0) currentIndex - 1 else screenshots.length - 1
+            } else {
+              if (currentIndex < screenshots.length - 1) currentIndex + 1 else 0
+            }
+            
+            val currentScreenshot = screenshots(newIndex)
+            val embed = new EmbedBuilder()
+              .setTitle(s"Screenshot for ${charName}")
+              .setImage(currentScreenshot.screenshotUrl)
+              .setFooter(s"Added by ${currentScreenshot.addedBy} • ${newIndex + 1}/${screenshots.length}")
+              .setColor(java.awt.Color.BLUE.getRGB)
+              .build()
+            
+            val components = if (screenshots.length > 1) {
+              List(ActionRow.of(
+                Button.secondary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀ Previous"),
+                Button.secondary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "Next ▶"),
+                Button.danger(s"delete_screenshot_${charName}_${deathTime}_${currentScreenshot.screenshotUrl}_${messageId}", "🗑️ Delete")
+              ))
+            } else {
+              List(ActionRow.of(
+                Button.danger(s"delete_screenshot_${charName}_${deathTime}_${currentScreenshot.screenshotUrl}_${messageId}", "🗑️ Delete")
+              ))
+            }
+            
+            event.getHook.editOriginalEmbeds(embed).setComponents(components: _*).queue()
+          }
+        }
+      }
     } else {
       event.deferReply(true).queue()
       val roleType = if (title.contains(":crossed_swords:")) "fullbless" else if (title.contains(s"${Config.nemesisEmoji}")) "nemesis" else ""
@@ -765,91 +845,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       }
       val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
-    }
-    
-    if (button.startsWith("death_screenshot_")) {
-      // Handle death screenshot button clicks
-      val buttonParts = button.split("_")
-      if (buttonParts.length >= 4) {
-        val charName = buttonParts(2)
-        val deathTime = buttonParts(3).toLong
-        val messageId = buttonParts(4)
-        
-        // Get world from guild configuration
-        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
-        
-        worldOpt match {
-          case Some(world) =>
-            val inputWindow = TextInput.create("screenshot_url", "Screenshot URL", TextInputStyle.PARAGRAPH)
-              .setPlaceholder("https://imgur.com/example.png or https://cdn.discordapp.com/attachments/...")
-              .setMaxLength(500)
-              .build()
-            
-            val modal = Modal.create(s"death_modal_${charName}_${deathTime}_${messageId}", s"Add Screenshot for ${charName}")
-              .addComponents(ActionRow.of(inputWindow))
-              .build()
-            
-            event.replyModal(modal).queue()
-          case None =>
-            responseText = s"${Config.noEmoji} Could not determine world for this guild."
-            val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-            event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
-        }
-      } else {
-        responseText = s"${Config.noEmoji} Invalid button format."
-        val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-        event.reply("").addEmbeds(replyEmbed).setEphemeral(true).queue()
-      }
-    } else if (button.startsWith("prev_screenshot_") || button.startsWith("next_screenshot_")) {
-      event.deferEdit().queue()
-      
-      val buttonParts = button.split("_")
-      if (buttonParts.length >= 6) {
-        val charName = buttonParts(2)
-        val deathTime = buttonParts(3).toLong
-        val messageId = buttonParts(4)
-        val currentIndex = buttonParts(5).toInt
-        
-        // Get world from guild configuration
-        val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
-        
-        worldOpt match {
-          case Some(world) =>
-            val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
-            
-            if (screenshots.nonEmpty) {
-              val isNext = button.startsWith("next_screenshot_")
-              val newIndex = if (isNext) {
-                if (currentIndex + 1 >= screenshots.length) 0 else currentIndex + 1
-              } else {
-                if (currentIndex - 1 < 0) screenshots.length - 1 else currentIndex - 1
-              }
-              
-              val currentScreenshot = screenshots(newIndex)
-              val originalEmbeds = event.getInteraction.getMessage.getEmbeds
-              
-              if (originalEmbeds.size() > 0) {
-                val originalEmbed = originalEmbeds.get(0)
-                val updatedEmbed = new EmbedBuilder(originalEmbed)
-                  .setImage(currentScreenshot.screenshotUrl)
-                  .setFooter(s"Screenshot added by ${currentScreenshot.addedBy}")
-                
-                val buttons = List(
-                  Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
-                  Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
-                  Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
-                  Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
-                )
-                
-                event.getHook.editOriginalEmbeds(updatedEmbed.build())
-                  .setComponents(ActionRow.of(buttons.asJava))
-                  .queue()
-              }
-            }
-          case None =>
-            // Handle error - could not get world
-        }
-      }
     }
   }
 

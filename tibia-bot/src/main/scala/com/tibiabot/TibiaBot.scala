@@ -687,7 +687,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val killerBuffer = ListBuffer[String]()
               val exivaBuffer = ListBuffer[String]()
               var exivaList = ""
-              val killerList = charDeath.death.killers // get all killers
+              val killerList = charDeath.death.killers // get all killers //[{name: "lemon bot", level: 250, vocation}]
 
               // guild rank and name
               val guildName = charDeath.char.character.character.guild.map(_.name).getOrElse("")
@@ -778,7 +778,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             }
                           }
                         } else {
-                          killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
+                          killerBuffer += s"**[${k.name} [${k.level.toInt}](${charUrl(k.name)})**" // player with " of " in the name e.g: Knight of Flame
                           if (embedColor == 13773097) {
                             if (exivaListCheck == "true") {
                               exivaBuffer += k.name
@@ -786,7 +786,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           }
                         }
                       } else {
-                        killerBuffer += s"**[${k.name}](${charUrl(k.name)})**" // summon not detected
+                        killerBuffer += s"**[${k.name} [${k.level.toInt}](${charUrl(k.name)})**" // summon not detected
                         if (embedColor == 13773097) {
                           if (exivaListCheck == "true") {
                             exivaBuffer += k.name
@@ -960,7 +960,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               }
               val embed = new EmbedBuilder()
                 embed.setTitle(
-                s"${vocEmoji(charDeath.char.character.character.vocation)} $charName [${charDeath.death.level.toInt}] ${vocEmoji(charDeath.char.character.character.vocation)}",
+                s"${vocEmoji(charDeath.char.character.character.vocation)} $charName ${vocEmoji(charDeath.char.character.character.vocation)}",
                 charUrl(charName)
                 )
               embed.setDescription(embedText)
