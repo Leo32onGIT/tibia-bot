@@ -407,15 +407,15 @@ object BotApp extends App with StrictLogging {
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 2.minutes) {
+  actorSystem.scheduler.schedule(60.seconds, 30.seconds) {
     // set activity status
     // only do this every second cycle
-    if (updateOnOdd) {
+    if (updateOnOdd >= 10) {
       try {
         val randomActivity = List(
-          "people press buttons",
+          "number go up",
           "Tibia players die",
-          "people fumble e-rings",
+          "some kid red skull",
           "UE combos slap",
           "another 50k spent on twist"
         )
@@ -429,9 +429,9 @@ object BotApp extends App with StrictLogging {
       cleanHuntedList()
       cleanGalthenList()
       cleanOnlineListCache(30)
-      updateOnOdd = !updateOnOdd // Toggle the flag
+      updateOnOdd = 0 // Toggle the flag
     } else {
-      updateOnOdd = true
+      updateOnOdd += 1
     }
     val machineTimeZone = ZoneId.systemDefault()
     val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
@@ -557,7 +557,6 @@ object BotApp extends App with StrictLogging {
       }
     }
   }
-
 
   // run hunted list cleanup every day at 6:30 PM AEST
   private val currentTime = Instant.now
