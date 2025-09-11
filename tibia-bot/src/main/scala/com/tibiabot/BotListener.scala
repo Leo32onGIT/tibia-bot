@@ -674,14 +674,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 .setColor(3092790)
                 .setTitle(s"Upload Screenshot for ${charName}")
                 .setDescription(s"Please upload an image file (PNG, JPG, GIF, Webp) to this DM within the next 5 minutes.\n\n" +
-                              s"The screenshot will be added to the death message for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})** in **${guild.getName}**.")
+                              s"The screenshot will be added to the death message for **[${charName}](${BotApp.charUrl(charName)})** in **${guild.getName}**.")
                 .setFooter("You can also paste an image directly from your clipboard")
                 .build()
 
               privateChannel.sendMessageEmbeds(embed).queue(
                 _ => {
                   // Confirm to user that DM was sent
-                  event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})**.").setEphemeral(true).queue()
+                  event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](${BotApp.charUrl(charName)})**.").setEphemeral(true).queue()
                 },
                 error => {
                   // Fallback if DM fails
@@ -689,7 +689,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                     .setColor(16711680) // Red color
                     .setTitle(s"Upload Screenshot for ${charName}")
                     .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, Webp) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
-                                  s"The screenshot will be added to the death message for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})**.")
+                                  s"The screenshot will be added to the death message for **[${charName}](${BotApp.charUrl(charName)})**.")
                     .setFooter("You can also paste an image directly from your clipboard")
                     .build()
 
@@ -1769,7 +1769,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             }
 
             // Send confirmation DM to user
-            event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **[${pending.charName}](https://www.tibia.com/community/?subtopic=characters&name=${pending.charName})**.").queue()
+            event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **[${pending.charName}](${BotApp.charUrl(pending.charName)})**.").queue()
 
           } catch {
             case e: Exception =>
