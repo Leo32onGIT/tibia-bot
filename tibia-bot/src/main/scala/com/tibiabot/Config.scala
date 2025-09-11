@@ -18,6 +18,7 @@ object Config {
   val token: String = discord.getString("token")
   val postgresHost: String = discord.getString("postgres-host")
   val postgresPassword: String = discord.getString("postgres-password")
+  val tibiadataApi: String = discord.getString("localapi-host")
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
