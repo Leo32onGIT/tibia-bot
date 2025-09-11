@@ -1654,7 +1654,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           logger.info(s"User ${user.getName} (${user.getId}) cancelled ${cancelledCount} pending uploads via DM")
         } else {
           // User sent a DM but no image attachment and not a cancel command
-          event.getChannel.sendMessage("Please upload an image file (PNG, JPG, GIF, WebP) or paste an image from your clipboard.\nType 'cancel' to cancel any pending upload requests.").queue()
+          event.getChannel.sendMessage("Please upload an image file (PNG, JPG, GIF, WebP) or paste an image from your clipboard.\nType `cancel` to cancel any pending upload requests.").queue()
         }
       }
     } else {
@@ -1662,17 +1662,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       val messageContent = event.getMessage.getContentRaw.toLowerCase.trim
       if (messageContent.contains("cancel")) {
         event.getChannel.sendMessage("You don't have any pending uploads to cancel.").queue()
-      } else if (messageContent.contains("help")) {
-        event.getChannel.sendMessage(
-          "**Tibia Bot Help**\n\n" +
-          "When you're asked to provide a screenshot for a death/kill, send the image here as a DM.\n" +
-          "Type 'cancel' to cancel any pending upload requests.\n\n" +
-          "**Supported formats:** PNG, JPG, JPEG, GIF, WebP"
-        ).queue()
-      } else {
-        event.getChannel.sendMessage("Hi! I can help you upload screenshots for death/kill reports.\nType 'help' for more information or 'cancel' to cancel pending uploads.").queue()
       }
     }
   }
-
 }
