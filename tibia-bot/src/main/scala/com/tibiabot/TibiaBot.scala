@@ -347,7 +347,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                               }
                             }
                           }
@@ -369,7 +369,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                                 adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                               }
                             }
                           }
@@ -401,7 +401,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                             }
                           }
                         } else if (allyGuildCheck) {
@@ -419,7 +419,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                             }
                           }
                         }
@@ -473,7 +473,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                         }
                       }
                     }
@@ -493,7 +493,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                         }
                       }
                     }
@@ -703,7 +703,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val killerBuffer = ListBuffer[String]()
               val exivaBuffer = ListBuffer[String]()
               var exivaList = ""
-              val killerList = charDeath.death.killers // get all killers //[{name: "lemon bot", level: 250, vocation}]
+              val killerList = charDeath.death.killers // get all killers
 
               // guild rank and name
               val guildName = charDeath.char.character.character.guild.map(_.name).getOrElse("")
@@ -934,7 +934,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
                             adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                             adminEmbed.setColor(14397256) // orange for bot auto command
-                            sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = false)
+                            sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
                           }
                         }
                       }
