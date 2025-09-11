@@ -68,7 +68,7 @@ ENV TOKEN=${TOKEN}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD pgrep -f "lemon-bot-dedicated" || exit 1
+    CMD pgrep -f "violent-bot-dedicated" || exit 1
 
 # Run the application
-CMD ["./bin/lemon-bot-dedicated"]
+CMD ["./bin/violent-bot-dedicated"]
