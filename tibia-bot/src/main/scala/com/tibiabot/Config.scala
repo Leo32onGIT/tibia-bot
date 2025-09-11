@@ -48,8 +48,8 @@ object Config {
     Try(discord.getString(key)).getOrElse("❓")
   }
 
-  // Emoji accessor methods that use EmojiManager when possible, fallback to discord.conf
-  val nemesisEmoji: String = discord.getString("nemesis-emoji")
+  // Emojis
+ val nemesisEmoji: String = discord.getString("nemesis-emoji")
  val archfoeEmoji: String = discord.getString("archfoe-emoji")
  val baneEmoji: String = discord.getString("bane-emoji")
  val summonEmoji: String = discord.getString("summon-emoji")

@@ -9,35 +9,22 @@ import scala.util.{Failure, Success, Try}
 import java.time.ZonedDateTime
 
 object CreatureManager extends StrictLogging {
-  
+
   implicit private val executionContext: ExecutionContextExecutor = scala.concurrent.ExecutionContext.global
-  
+
   private val tibiaDataClient = new TibiaDataClient()
   private var cachedCreatureList: Option[List[String]] = None
   private var lastFetchTime: Option[ZonedDateTime] = None
   private val cacheValidityHours = 24 // Cache creatures for 24 hours (they don't change frequently)
-  
+
+  // Creatures endpoint on TibiaData Api uses pluralization, race is unconventional name
+  // Can't be used yet, needs work
+
   // Fallback static creature list in case API fails (truncated for brevity)
   private val fallbackCreatureList = List(
-    "abyssal calamary", "acid blob", "acolyte of darkness", "acolyte of the cult", "adept of the cult",
-    "adult goanna", "adventurer", "afflicted strider", "aggressive chicken", "agrestic chicken",
-    "albino dragon", "amazon", "ancient lion knight", "ancient scarab", "ancient ugly monster",
-    "angry adventurer", "angry demon", "angry plant", "animated clomp", "animated cyclops",
-    "animated feather", "animated guzzlemaw", "animated moohtant", "animated mummy",
-    "animated ogre brute", "animated ogre savage", "animated ogre shaman", "animated rotworm",
-    "animated skunk", "animated snowman", "animated sword", "arachnophobica", "arctic faun",
-    "armadile", "askarak demon", "askarak lord", "askarak prince", "assassin", "azure frog",
-    "badger", "baleful bunny", "bandit", "bane bringer", "bane of light", "banshee",
-    "barbarian bloodwalker", "barbarian brutetamer", "barbarian headsplitter", "barbarian skullhunter",
-    "barkless devotee", "barkless fanatic", "bashmu", "bat", "bear", "behemoth", "bellicose orger",
-    "berrypest", "berserker chicken", "betrayed wraith", "biting book", "black cobra", "black sheep",
-    "black sphinx acolyte", "blazing fire elemental", "blemished spawn", "blightwalker",
-    "blistering fire elemental", "bloated man-maggot", "blood beast", "blood crab", "blood hand",
-    "blood priest", "bloom of doom", "blue djinn", "boar man", "boar", "bog frog", "bog raider",
-    "bonebeast", "bonelord", "bonny bunny", "bony sea devil", "boogy", "bound astral power",
-    "brachiodemon", "brain squid", "braindeath", "branchy crawler", "breach brood", "bride of night"
+    "abyssal calamary", "acid blob"
   )
-  
+
   def getCreaturesList(): List[String] = {
     if (isCacheValid()) {
       logger.debug("Using cached creature list")
@@ -47,13 +34,13 @@ object CreatureManager extends StrictLogging {
       refreshCreatureList()
     }
   }
-  
+
   private def isCacheValid(): Boolean = {
     cachedCreatureList.isDefined && lastFetchTime.exists { fetchTime =>
       ZonedDateTime.now().isBefore(fetchTime.plusHours(cacheValidityHours))
     }
   }
-  
+
   private def refreshCreatureList(): List[String] = {
     Try {
       val creaturesResponse = Await.result(tibiaDataClient.getCreatures(), Duration(30, "seconds"))
@@ -76,7 +63,7 @@ object CreatureManager extends StrictLogging {
         cachedCreatureList.getOrElse(fallbackCreatureList)
     }
   }
-  
+
   def refreshCreatureListAsync(): Future[List[String]] = {
     logger.info("Starting async refresh of creature list")
     tibiaDataClient.getCreatures().map {

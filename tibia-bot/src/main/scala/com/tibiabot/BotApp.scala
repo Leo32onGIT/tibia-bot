@@ -97,24 +97,6 @@ object BotApp extends App with StrictLogging {
   jda.awaitReady()
   logger.info("JDA ready")
 
-  // Initialize emoji manager
-  /**
-  EmojiManager.initialize(jda)
-  logger.info("EmojiManager initialized")
-
-  // Setup emojis for all guilds (async)
-  import scala.concurrent.ExecutionContext.Implicits.global
-  jda.getGuilds.asScala.foreach { guild =>
-    EmojiManager.setupGuildEmojis(guild).recover {
-      case e => logger.warn(s"Failed to setup emojis for guild ${guild.getName}: ${e.getMessage}")
-    }
-  }
-  **/
-
-  // Initialize daily scheduler for automated announcements
-  com.tibiabot.scheduler.DailyScheduler.initialize(jda)
-  logger.info("DailyScheduler initialized")
-
   // get the discord servers the bot is in
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
 
