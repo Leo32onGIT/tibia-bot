@@ -44,7 +44,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val recentOnline = mutable.Set.empty[CharKey]
   private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
-  
+
   // Dedicated online list table for killer level lookups - updated every 5 minutes
   private var onlineListTable = mutable.Map.empty[String, OnlineListEntry]
 
@@ -97,7 +97,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       // Add online data to sets
       currentOnline.clear()
       currentOnline.addAll(onlineWithVocLvlAndDuration)
-      
+
       // Update online list table every 5 minutes for killer level lookups
       if (now.isAfter(onlineListTableUpdateTimer.plusMinutes(5))) {
         logger.info(s"Updating online list table for world: $world with ${onlineWithVocLvlAndDuration.size} players")
@@ -777,7 +777,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       }
                       embedThumbnail = creatureImageUrl("Phantasmal_Ooze")
                       logger.info(s"Processing killer name: '${k.name}' (player: ${k.player}, summon: '${k.summon}')")
-                      val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Lemon Beams
+                      val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
                       logger.info(s"Split result: ${isSummon.toList} (length: ${isSummon.length})")
                       if (isSummon.length > 1) {
                         logger.info(s"Split detected - Part 0: '${isSummon(0)}', Part 1: '${isSummon(1)}'")
@@ -1004,16 +1004,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   val messageDelay = (batchIndex * Config.batchSize + indexInBatch) * Config.messageDelayMs
                   val additionalBatchDelay = batchIndex * Config.batchDelayMs
                   val totalDelay = messageDelay + additionalBatchDelay
-                  
+
                   // Schedule the message with delay
                   mat.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
                     // Create screenshot button
                     val screenshotButton = Button.secondary(
-                      s"death_screenshot_${embed._3}_${embed._7}_placeholder", 
+                      s"death_screenshot_${embed._3}_${embed._7}_placeholder",
                       "Add Screenshot"
                     )
                     val actionRow = ActionRow.of(screenshotButton)
-                    
+
                     // nemesis and enemy fullbless ignore the level filter
                     if (embed._2 == "nemesis") {
                       if (guild.getRoleById(nemesisRole) != null) {
@@ -1023,7 +1023,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue(message => {
                             // Update button with actual message ID
                             val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
                               "Add Screenshot"
                             )
                             message.editMessageComponents(ActionRow.of(updatedButton)).queue()
@@ -1034,7 +1034,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue(message => {
                             // Update button with actual message ID
                             val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
                               "Add Screenshot"
                             )
                             message.editMessageComponents(ActionRow.of(updatedButton)).queue()
@@ -1051,7 +1051,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue(message => {
                             // Update button with actual message ID
                             val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
                               "Add Screenshot"
                             )
                             message.editMessageComponents(ActionRow.of(updatedButton)).queue()
@@ -1062,7 +1062,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue(message => {
                             // Update button with actual message ID
                             val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
                               "Add Screenshot"
                             )
                             message.editMessageComponents(ActionRow.of(updatedButton)).queue()
@@ -1077,7 +1077,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue(message => {
                             // Update button with actual message ID
                             val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}", 
+                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
                               "Add Screenshot"
                             )
                             message.editMessageComponents(ActionRow.of(updatedButton)).queue()
@@ -1639,7 +1639,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
   private def getKillerLevel(killerName: String): Option[Int] = {
     logger.info(s"getKillerLevel called for: $killerName")
-    
+
     // Check the dedicated online list table for the killer
     val onlineLevel = onlineListTable.get(killerName.toLowerCase).map(_.level)
     if (onlineLevel.isDefined) {
@@ -1647,7 +1647,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       onlineLevel
     } else {
       logger.info(s"$killerName not found in online list table - killer may be offline, trying TibiaData API")
-      
+
       // Fallback to TibiaData API
       try {
         val characterResponse = Await.result(tibiaDataClient.getCharacter(killerName), Duration(10, "seconds"))
@@ -1698,10 +1698,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     embed: Option[EmbedBuilder] = None,
     suppressNotifications: Boolean = true
   )
-  
+
   private val messageQueue = mutable.Queue[QueuedMessage]()
   private var messageQueueProcessor: Option[Cancellable] = None
-  
+
   // Initialize message queue processor
   private def startMessageQueueProcessor(): Unit = {
     if (messageQueueProcessor.isEmpty) {
@@ -1713,7 +1713,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       )
     }
   }
-  
+
   private def processMessageQueue(): Unit = {
     if (messageQueue.nonEmpty) {
       val msg = messageQueue.dequeue()
@@ -1734,7 +1734,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
     }
   }
-  
+
   // Helper method to queue messages with rate limiting
   private def sendMessageWithRateLimit(
     channel: TextChannel,
