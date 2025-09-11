@@ -134,7 +134,8 @@ object BotApp extends App with StrictLogging {
   }
 
   // Combine both futures and send the message
-  private var updateOnOdd = true
+  private var updateOnOdd = 0
+
   val bossesFutures: Future[List[String]] = for {
     bosses <- bossFuture
   } yield bosses
