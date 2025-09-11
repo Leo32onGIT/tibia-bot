@@ -642,19 +642,11 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
                 Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
               )
-              val buttonsWithDelete = if (currentScreenshot.addedBy == event.getUser.getId) {
-                baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              } else {
-                baseButtons
-              }
+              val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
               List(ActionRow.of(buttonsWithDelete: _*))
             } else {
               val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
-              val buttonsWithDelete = if (currentScreenshot.addedBy == event.getUser.getId) {
-                baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              } else {
-                baseButtons
-              }
+              val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
               List(ActionRow.of(buttonsWithDelete: _*))
             }
 
@@ -705,19 +697,11 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${updatedScreenshots.length}").asDisabled(),
                   Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
                 )
-                val buttonsWithDelete = if (newCurrentScreenshot.addedBy == user.getId) {
-                  baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                } else {
-                  baseButtons
-                }
+                val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
                 List(ActionRow.of(buttonsWithDelete: _*))
               } else {
                 val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
-                val buttonsWithDelete = if (newCurrentScreenshot.addedBy == user.getId) {
-                  baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                } else {
-                  baseButtons
-                }
+                val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
                 List(ActionRow.of(buttonsWithDelete: _*))
               }
 
