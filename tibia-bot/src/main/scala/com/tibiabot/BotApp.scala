@@ -80,7 +80,7 @@ object BotApp extends App with StrictLogging {
   case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
   case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
   case class BoostedStamp(user: String, boostedType: String, boostedName: String)
-  case class DeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedAt: ZonedDateTime, messageId: String)
+  case class DeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, addedAt: ZonedDateTime, messageId: String)
   case class CustomSort(entityType: String, name: String, label: String, emoji: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
@@ -5922,7 +5922,7 @@ object BotApp extends App with StrictLogging {
   }
 
   // Death screenshot database methods
-  def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, messageId: String): Unit = {
+  def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, messageId: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
     val username = "postgres"
     val password = Config.postgresPassword
@@ -5938,6 +5938,7 @@ object BotApp extends App with StrictLogging {
            |    death_time BIGINT NOT NULL,
            |    screenshot_url TEXT NOT NULL,
            |    added_by VARCHAR(100) NOT NULL,
+           |    added_name VARCHAR(100) NOT NULL,
            |    added_at TIMESTAMP NOT NULL,
            |    message_id VARCHAR(100) NOT NULL,
            |    PRIMARY KEY (guild_id, world, character_name, death_time, screenshot_url)
@@ -5946,7 +5947,7 @@ object BotApp extends App with StrictLogging {
 
       // Insert screenshot
       val insertStatement = conn.prepareStatement(
-        "INSERT INTO death_screenshots (guild_id, world, character_name, death_time, screenshot_url, added_by, added_at, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO death_screenshots (guild_id, world, character_name, death_time, screenshot_url, added_by, added_name, added_at, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       insertStatement.setString(1, guildId)
       insertStatement.setString(2, world)
@@ -5954,8 +5955,9 @@ object BotApp extends App with StrictLogging {
       insertStatement.setLong(4, deathTime)
       insertStatement.setString(5, screenshotUrl)
       insertStatement.setString(6, addedBy)
-      insertStatement.setTimestamp(7, Timestamp.from(Instant.now()))
-      insertStatement.setString(8, messageId)
+      insertStatement.setString(7, addedName)
+      insertStatement.setTimestamp(8, Timestamp.from(Instant.now()))
+      insertStatement.setString(9, messageId)
       insertStatement.executeUpdate()
       insertStatement.close()
     } catch {
@@ -5973,12 +5975,11 @@ object BotApp extends App with StrictLogging {
     val screenshots = ListBuffer[DeathScreenshot]()
     try {
       val selectStatement = conn.prepareStatement(
-        "SELECT * FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? ORDER BY added_at ASC"
+        "SELECT * FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? ORDER BY added_at ASC"
       )
       selectStatement.setString(1, guildId)
-      selectStatement.setString(2, world)
-      selectStatement.setString(3, characterName)
-      selectStatement.setLong(4, deathTime)
+      selectStatement.setString(2, characterName)
+      selectStatement.setLong(3, deathTime)
       val resultSet = selectStatement.executeQuery()
 
       while (resultSet.next()) {
@@ -5989,6 +5990,7 @@ object BotApp extends App with StrictLogging {
           deathTime = resultSet.getLong("death_time"),
           screenshotUrl = resultSet.getString("screenshot_url"),
           addedBy = resultSet.getString("added_by"),
+          addedName = resultSet.getString("added_name"),
           addedAt = ZonedDateTime.ofInstant(resultSet.getTimestamp("added_at").toInstant, ZoneOffset.UTC),
           messageId = resultSet.getString("message_id")
         )
@@ -6010,29 +6012,30 @@ object BotApp extends App with StrictLogging {
     val password = Config.postgresPassword
     val conn = DriverManager.getConnection(url, username, password)
     var deleted = false
+    val guild = jda.getGuildById(guildId)
+    val member = guild.getMemberById(userId)
+    val admin = member != null && member.hasPermission(Permission.MANAGE_SERVER)
     try {
       // First check if the user is the one who added the screenshot or is an admin
       val checkStatement = conn.prepareStatement(
-        "SELECT added_by FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
+        "SELECT added_by FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
       )
       checkStatement.setString(1, guildId)
-      checkStatement.setString(2, world)
-      checkStatement.setString(3, characterName)
-      checkStatement.setLong(4, deathTime)
-      checkStatement.setString(5, screenshotUrl)
+      checkStatement.setString(2, characterName)
+      checkStatement.setLong(3, deathTime)
+      checkStatement.setString(4, screenshotUrl)
       val resultSet = checkStatement.executeQuery()
 
       if (resultSet.next()) {
         val addedBy = resultSet.getString("added_by")
-        if (addedBy == userId) { // User can delete their own screenshots
+        if (addedBy == userId || admin) { // User can delete their own screenshots
           val deleteStatement = conn.prepareStatement(
-            "DELETE FROM death_screenshots WHERE guild_id = ? AND world = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
+            "DELETE FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
           )
           deleteStatement.setString(1, guildId)
-          deleteStatement.setString(2, world)
-          deleteStatement.setString(3, characterName)
-          deleteStatement.setLong(4, deathTime)
-          deleteStatement.setString(5, screenshotUrl)
+          deleteStatement.setString(2, characterName)
+          deleteStatement.setLong(3, deathTime)
+          deleteStatement.setString(4, screenshotUrl)
           val rowsDeleted = deleteStatement.executeUpdate()
           deleted = rowsDeleted > 0
           deleteStatement.close()

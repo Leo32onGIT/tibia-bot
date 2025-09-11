@@ -25,7 +25,7 @@ import scala.collection.mutable
 case class PendingScreenshot(charName: String, deathTime: Long, messageId: String, guildId: String, world: String, userId: String, channelId: String)
 
 class BotListener extends ListenerAdapter with StrictLogging {
-  
+
   private val pendingScreenshots = mutable.Map[String, PendingScreenshot]()
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
@@ -317,7 +317,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
          }
        }
      }
-     
+
      // Death screenshot modal handling removed - now using file uploads
      if (false && event.getModalId.startsWith("death_modal_")) {
        val modalParts = event.getModalId.split("_")
@@ -325,28 +325,28 @@ class BotListener extends ListenerAdapter with StrictLogging {
          val charName = modalParts(2)
          val deathTime = modalParts(3).toLong
          val messageId = modalParts(4)
-         
+
          val screenshotUrl = modalValues.find(_.getId == "screenshot_url").map(_.getAsString.trim).getOrElse("")
-         
+
          if (screenshotUrl.nonEmpty) {
            // Validate URL format (basic validation)
            val validUrlPattern = """^https?://.*\.(png|jpg|jpeg|gif|webp)$""".r.unanchored
            val isValidImageUrl = validUrlPattern.pattern.matcher(screenshotUrl.toLowerCase).matches() ||
-                               screenshotUrl.contains("imgur.com") || 
+                               screenshotUrl.contains("imgur.com") ||
                                screenshotUrl.contains("discord.com/attachments/") ||
                                screenshotUrl.contains("cdn.discordapp.com/attachments/")
-           
+
            if (isValidImageUrl) {
              // Get world from guild configuration
              val guild = event.getGuild
              val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
-             
+
              worldOpt match {
                case Some(world) =>
                  try {
                    // Store the screenshot in database
-                   BotApp.storeDeathScreenshot(guild.getId, world, charName, deathTime, screenshotUrl, event.getUser.getId, messageId)
-                   
+                   BotApp.storeDeathScreenshot(guild.getId, world, charName, deathTime, screenshotUrl, event.getUser.getId, event.getUser.getName, messageId)
+
                    // Update the original message with the screenshot
                    val channel = guild.getTextChannelById(event.getChannel.getId)
                    if (channel != null) {
@@ -357,11 +357,11 @@ class BotListener extends ListenerAdapter with StrictLogging {
                          val updatedEmbed = new EmbedBuilder(originalEmbed)
                            .setImage(screenshotUrl)
                            .setFooter(s"Screenshot added by ${event.getUser.getName}")
-                         
+
                          // Get existing screenshots to check if we need navigation buttons
                          val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
                          val screenshotCount = screenshots.length
-                         
+
                          val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                          val buttons = if (screenshotCount > 1) {
                            val baseButtons = List(
@@ -383,14 +383,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
                              baseButtons
                            }
                          }
-                         
+
                          message.editMessageEmbeds(updatedEmbed.build())
                            .setComponents(ActionRow.of(buttons.asJava))
                            .queue()
                        }
                      })
                    }
-                   
+
                    val successEmbed = new EmbedBuilder()
                      .setDescription(s"${Config.yesEmoji} Screenshot added successfully!")
                      .setColor(36941)
@@ -658,52 +658,52 @@ class BotListener extends ListenerAdapter with StrictLogging {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
         val messageId = buttonParts(4)
-        
+
         // Get world from guild configuration
         val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
-        
+
         worldOpt match {
           case Some(world) =>
             // Store pending screenshot request
             val pendingKey = s"${event.getUser.getId}_${guild.getId}"
             pendingScreenshots.put(pendingKey, PendingScreenshot(charName, deathTime, messageId, guild.getId, world, event.getUser.getId, event.getChannel.getId))
-            
+
             // Send DM to user
             event.getUser.openPrivateChannel().queue(privateChannel => {
               val embed = new EmbedBuilder()
                 .setColor(3092790)
                 .setTitle(s"Upload Screenshot for ${charName}")
-                .setDescription(s"Please upload an image file (PNG, JPG, GIF, WebP) to this DM within the next 5 minutes.\n\n" +
-                              s"The screenshot will be added to the death message for **${charName}** in **${guild.getName}**.")
+                .setDescription(s"Please upload an image file (PNG, JPG, GIF, Webp) to this DM within the next 5 minutes.\n\n" +
+                              s"The screenshot will be added to the death message for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})** in **${guild.getName}**.")
                 .setFooter("You can also paste an image directly from your clipboard")
                 .build()
-              
+
               privateChannel.sendMessageEmbeds(embed).queue(
                 _ => {
                   // Confirm to user that DM was sent
-                  event.reply(s"✅ Screenshot upload request sent to your DMs for **${charName}**.").setEphemeral(true).queue()
+                  event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})**.").setEphemeral(true).queue()
                 },
                 error => {
                   // Fallback if DM fails
                   val fallbackEmbed = new EmbedBuilder()
                     .setColor(16711680) // Red color
                     .setTitle(s"Upload Screenshot for ${charName}")
-                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, WebP) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
-                                  s"The screenshot will be added to the death message for **${charName}**.")
+                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, Webp) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
+                                  s"The screenshot will be added to the death message for **[${charName}](https://www.tibia.com/community/?subtopic=characters&name=${charName})**.")
                     .setFooter("You can also paste an image directly from your clipboard")
                     .build()
-                  
+
                   event.reply("").addEmbeds(fallbackEmbed).setEphemeral(true).queue()
                 }
               )
             })
-            
+
             // Set a timeout to remove the pending request after 5 minutes
             scala.concurrent.ExecutionContext.global.execute(() => {
               Thread.sleep(300000) // 5 minutes
               pendingScreenshots.remove(pendingKey)
             })
-            
+
           case None =>
             responseText = s"${Config.noEmoji} Could not determine world for this guild."
             val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
@@ -716,36 +716,36 @@ class BotListener extends ListenerAdapter with StrictLogging {
       }
     } else if (button.startsWith("prev_screenshot_") || button.startsWith("next_screenshot_")) {
       event.deferEdit().queue()
-      
+
       val buttonParts = button.split("_")
       if (buttonParts.length >= 6) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
         val messageId = buttonParts(4)
         val currentIndex = buttonParts(5).toInt
-        
+
         // Get world from guild configuration
         val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
-        
+
         worldOpt.foreach { world =>
           val screenshots = BotApp.getDeathScreenshots(guild.getId, world, charName, deathTime)
-          
+
           if (screenshots.nonEmpty) {
             val newIndex = if (button.startsWith("prev_")) {
               if (currentIndex > 0) currentIndex - 1 else screenshots.length - 1
             } else {
               if (currentIndex < screenshots.length - 1) currentIndex + 1 else 0
             }
-            
+
             val currentScreenshot = screenshots(newIndex)
-            
+
             // Preserve the original death message embed and just update the image
             val originalEmbed = event.getMessage.getEmbeds.get(0)
             val embed = new EmbedBuilder(originalEmbed)
               .setImage(currentScreenshot.screenshotUrl)
-              .setFooter(s"Screenshot added by ${currentScreenshot.addedBy} • ${newIndex + 1}/${screenshots.length}")
+              .setFooter(s"Screenshot added by ${currentScreenshot.addedName} • ${newIndex + 1}/${screenshots.length}")
               .build()
-            
+
             val components = if (screenshots.length > 1) {
               val baseButtons = List(
                 Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
@@ -768,47 +768,47 @@ class BotListener extends ListenerAdapter with StrictLogging {
               }
               List(ActionRow.of(buttonsWithDelete: _*))
             }
-            
+
             event.getHook.editOriginalEmbeds(embed).setComponents(components: _*).queue()
           }
         }
       }
     } else if (button.startsWith("delete_screenshot_")) {
       event.deferEdit().queue()
-      
+
       val buttonParts = button.split("_")
       if (buttonParts.length >= 6) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
         val messageId = buttonParts(4)
         val currentIndex = buttonParts(5).toInt
-        
+
         val guild = event.getGuild
         val user = event.getUser
         val originalMessage = event.getMessage
-        
+
         // Get current screenshots to find the URL of the screenshot to delete
         val screenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
         if (screenshots.nonEmpty && currentIndex < screenshots.length) {
           val screenshotToDelete = screenshots(currentIndex)
-          
+
           // Attempt to delete the screenshot
           if (BotApp.deleteDeathScreenshot(guild.getId, guild.getName, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
             // Successfully deleted, update the embed
             val updatedScreenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
             val embeds = originalMessage.getEmbeds
-            
+
             if (embeds.size() > 0 && updatedScreenshots.nonEmpty) {
               // Still have screenshots, show another one
               val newIndex = Math.min(currentIndex, updatedScreenshots.length - 1)
               val newCurrentScreenshot = updatedScreenshots(newIndex)
-              
+
               val originalEmbed = embeds.get(0)
               val updatedEmbed = new EmbedBuilder(originalEmbed)
                 .setImage(newCurrentScreenshot.screenshotUrl)
-                .setFooter(s"Screenshot added by ${newCurrentScreenshot.addedBy} • ${newIndex + 1}/${updatedScreenshots.length}")
+                .setFooter(s"Screenshot added by ${newCurrentScreenshot.addedName} • ${newIndex + 1}/${updatedScreenshots.length}")
                 .build()
-              
+
               val components = if (updatedScreenshots.length > 1) {
                 val baseButtons = List(
                   Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
@@ -831,7 +831,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 }
                 List(ActionRow.of(buttonsWithDelete: _*))
               }
-              
+
               event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(components: _*).queue()
             } else {
               // No more screenshots, remove image and show only add button
@@ -840,19 +840,19 @@ class BotListener extends ListenerAdapter with StrictLogging {
                 .setImage(null)
                 .setFooter(null)
                 .build()
-              
+
               val addButton = List(ActionRow.of(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot")))
               event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(addButton: _*).queue()
             }
           } else {
             // Failed to delete - not the author or other error
-            event.getHook.sendMessage("❌ You can only delete screenshots you uploaded.").setEphemeral(true).queue()
+            event.getHook.sendMessage(s"${Config.noEmoji} You can only delete screenshots you uploaded.").setEphemeral(true).queue()
           }
         } else {
-          event.getHook.sendMessage("❌ Screenshot not found.").setEphemeral(true).queue()
+          event.getHook.sendMessage(s"${Config.noEmoji} Screenshot not found.").setEphemeral(true).queue()
         }
       } else {
-        event.getHook.sendMessage("❌ Invalid button format.").setEphemeral(true).queue()
+        event.getHook.sendMessage(s"${Config.noEmoji} Invalid button format.").setEphemeral(true).queue()
       }
     } else {
       event.deferReply(true).queue()
@@ -1470,13 +1470,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
-  
+
   private def handleAdminBoosted(event: SlashCommandInteractionEvent): Unit = {
     val guild = event.getGuild
     try {
       // Trigger manual boosted announcement
       com.tibiabot.scheduler.DailyScheduler.triggerManualAnnouncement(guild)
-      
+
       val nextScheduled = com.tibiabot.scheduler.DailyScheduler.getNextAnnouncementTime
       val embed = new EmbedBuilder()
         .setDescription(s"${Config.yesEmoji} Manual daily announcement triggered for this guild!\n\n" +
@@ -1484,9 +1484,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
           s"📅 **Next scheduled:** <t:${nextScheduled.toEpochSecond}:F>")
         .setColor(0x00FF00)
         .build()
-      
+
       event.getHook.sendMessageEmbeds(embed).queue()
-      
+
     } catch {
       case e: Exception =>
         logger.error(s"Error triggering manual boosted announcement for guild ${guild.getName}: ${e.getMessage}", e)
@@ -1587,13 +1587,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
         handlePrivateMessage(event)
         return
       }
-      
+
       // Handle guild messages for screenshot uploads
       if (event.isFromGuild) {
         val guild = event.getGuild
         val user = event.getAuthor
         val pendingKey = s"${user.getId}_${guild.getId}"
-        
+
         // Check if this user has a pending screenshot request
         pendingScreenshots.get(pendingKey) match {
         case Some(pending) =>
@@ -1601,21 +1601,21 @@ class BotListener extends ListenerAdapter with StrictLogging {
           val attachments = event.getMessage.getAttachments.asScala
           val imageAttachments = attachments.filter { attachment =>
             val fileName = attachment.getFileName.toLowerCase
-            fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || 
+            fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") ||
             fileName.endsWith(".gif") || fileName.endsWith(".webp")
           }
-          
+
           if (imageAttachments.nonEmpty) {
             val attachment = imageAttachments.head
             val imageUrl = attachment.getUrl
-            
+
             // Remove the pending request
             pendingScreenshots.remove(pendingKey)
-            
+
             try {
               // Store the screenshot in database
-              BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, pending.messageId)
-              
+              BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, user.getName, pending.messageId)
+
               // Update the original death message with the screenshot
               val channel = guild.getTextChannelById(pending.channelId)
               if (channel != null) {
@@ -1624,22 +1624,22 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   if (embeds.size() > 0) {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
-                    
+
                     // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
                     val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
-                    
+
                     // Update embed to show the newest screenshot
                     val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                     if (latestScreenshot != null) {
                       updatedEmbed.setImage(latestScreenshot.screenshotUrl)
-                        .setFooter(s"Screenshot added by ${latestScreenshot.addedBy} • ${screenshotCount}/${screenshotCount}")
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedName} • ${screenshotCount}/${screenshotCount}")
                     } else {
                       updatedEmbed.setImage(imageUrl)
                         .setFooter(s"Screenshot added by ${user.getName}")
                     }
-                    
+
                     val buttons = if (screenshotCount > 1) {
                       val baseButtons = List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
@@ -1660,14 +1660,14 @@ class BotListener extends ListenerAdapter with StrictLogging {
                         baseButtons
                       }
                     }
-                    
+
                     message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
-                    
+
                     // React to the user's message to confirm, then delete it
                     event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue(_ => {
                       event.getMessage.delete().queue()
                     })
-                    
+
                     logger.info(s"Screenshot uploaded successfully for ${pending.charName} death at ${pending.deathTime}")
                   }
                 })
@@ -1687,32 +1687,32 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   private def handlePrivateMessage(event: MessageReceivedEvent): Unit = {
     val user = event.getAuthor
-    
+
     // Check if this user has a pending screenshot request for any guild
     val userPendingScreenshots = pendingScreenshots.filter(_._1.startsWith(user.getId + "_")).toMap
-    
+
     if (userPendingScreenshots.nonEmpty) {
       // Check if message has attachments
       val attachments = event.getMessage.getAttachments.asScala
       val imageAttachments = attachments.filter { attachment =>
         val fileName = attachment.getFileName.toLowerCase
-        fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || 
+        fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") ||
         fileName.endsWith(".gif") || fileName.endsWith(".webp")
       }
-      
+
       if (imageAttachments.nonEmpty) {
         val attachment = imageAttachments.head
         val imageUrl = attachment.getUrl
-        
+
         // Process all pending screenshots for this user (in case they have multiple)
         userPendingScreenshots.foreach { case (pendingKey, pending) =>
           // Remove the pending request
           pendingScreenshots.remove(pendingKey)
-          
+
           try {
             // Store the screenshot in database
-            BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, pending.messageId)
-            
+            BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, user.getName, pending.messageId)
+
             // Update the original death message with the screenshot
             val guild = event.getJDA.getGuildById(pending.guildId)
             if (guild != null) {
@@ -1723,22 +1723,22 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   if (embeds.size() > 0) {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
-                    
+
                     // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
                     val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
-                    
+
                     // Update embed to show the newest screenshot
                     val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                     if (latestScreenshot != null) {
                       updatedEmbed.setImage(latestScreenshot.screenshotUrl)
-                        .setFooter(s"Screenshot added by ${latestScreenshot.addedBy} • ${screenshotCount}/${screenshotCount}")
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedName} • ${screenshotCount}/${screenshotCount}")
                     } else {
                       updatedEmbed.setImage(imageUrl)
                         .setFooter(s"Screenshot added by ${user.getName}")
                     }
-                    
+
                     val buttons = if (screenshotCount > 1) {
                       val baseButtons = List(
                         Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
@@ -1759,18 +1759,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
                         baseButtons
                       }
                     }
-                    
+
                     message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
-                    
+
                     logger.info(s"Screenshot uploaded successfully via DM for ${pending.charName} death at ${pending.deathTime} in guild ${guild.getName}")
                   }
                 })
               }
             }
-            
+
             // Send confirmation DM to user
-            event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **${pending.charName}** in **${if (guild != null) guild.getName else "Unknown Guild"}**!").queue()
-            
+            event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **[${pending.charName}](https://www.tibia.com/community/?subtopic=characters&name=${pending.charName})**.").queue()
+
           } catch {
             case e: Exception =>
               logger.error(s"Failed to store screenshot from DM: ${e.getMessage}", e)
@@ -1784,13 +1784,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
           // Cancel all pending uploads for this user
           val cancelledCount = userPendingScreenshots.size
           userPendingScreenshots.keys.foreach(pendingScreenshots.remove)
-          
+
           if (cancelledCount == 1) {
             event.getChannel.sendMessage(s"Your pending upload has been cancelled.").queue()
           } else if (cancelledCount > 1) {
             event.getChannel.sendMessage(s"${cancelledCount} pending uploads have been cancelled.").queue()
           }
-          
+
           logger.info(s"User ${user.getName} (${user.getId}) cancelled ${cancelledCount} pending uploads via DM")
         } else {
           // User sent a DM but no image attachment and not a cancel command

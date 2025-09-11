@@ -714,6 +714,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               // guild
               // does player have guild?
               var guildIcon = Config.otherGuild
+              var huntedGuilds = false
               if (guildName != "") {
                 // if untracked neutral guild show grey
                 if (embedColor == 3092790) {
@@ -728,9 +729,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 if (allyGuilds) {
                   embedColor = 13773097 // bright red
                   guildIcon = Config.allyGuild
+                  notablePoke = "screenshot"
                 }
                 // is player in hunted guild
-                val huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+                huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
                 if (huntedGuilds) {
                   embedColor = 36941 // bright green
                   if (context == "Died") {
@@ -749,6 +751,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
               if (allyPlayers) {
                 embedColor = 13773097 // bright red
+                notablePoke = "screenshot"
               }
               // hunted player
               val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
@@ -771,7 +774,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   if (k.player) {
                     if (k.name != charName) { // ignore 'self' entries on deathlist
                       context = "Killed"
-                      notablePoke = "" // reset poke as its not a fullbless
+                      if (huntedPlayers || huntedGuilds) {
+                        notablePoke = "screenshot"
+                      } else {
+                        notablePoke = "" // reset poke as its not a fullbless
+                      }
                       if (embedColor == 3092790 || embedColor == 4540237) {
                         embedColor = 14869218 // bone white
                       }
@@ -1019,26 +1026,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       if (guild.getRoleById(nemesisRole) != null) {
                         deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
                           .setEmbeds(embed._1.build())
-                          .setComponents(actionRow)
-                          .queue(message => {
-                            // Update button with actual message ID
-                            val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                              "Add Screenshot"
-                            )
-                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                          })
+                          .queue()
                       } else {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .setComponents(actionRow)
-                          .queue(message => {
-                            // Update button with actual message ID
-                            val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                              "Add Screenshot"
-                            )
-                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                          })
+                          .queue()
                       }
                     } else if (embed._2 == "fullbless") {
                       // send adjusted embed for fullblesses
@@ -1047,41 +1038,28 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
                         deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
                           .setEmbeds(adjustedEmbed.build())
-                          .setComponents(actionRow)
-                          .queue(message => {
-                            // Update button with actual message ID
-                            val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                              "Add Screenshot"
-                            )
-                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                          })
+                          .queue()
                       } else {
                         deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                          .setComponents(actionRow)
-                          .queue(message => {
-                            // Update button with actual message ID
-                            val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                              "Add Screenshot"
-                            )
-                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                          })
+                          .queue()
                       }
+                    } else if (embed._2 == "screenshot") {
+                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                        .setComponents(actionRow)
+                        .queue(message => {
+                          // Update button with actual message ID
+                          val updatedButton = Button.secondary(
+                            s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
+                            "Add Screenshot"
+                          )
+                          message.editMessageComponents(ActionRow.of(updatedButton)).queue()
+                        })
                     } else {
                       // for regular deaths check if level > /filter deaths <level>
                       if (embed._5 >= minimumLevel) {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .setComponents(actionRow)
                           .setSuppressedNotifications(true)
-                          .queue(message => {
-                            // Update button with actual message ID
-                            val updatedButton = Button.secondary(
-                              s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                              "Add Screenshot"
-                            )
-                            message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                          })
+                          .queue()
                       }
                     }
                   }
