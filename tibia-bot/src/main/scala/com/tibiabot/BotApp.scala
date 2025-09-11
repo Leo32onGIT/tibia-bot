@@ -3193,7 +3193,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
           .complete()
-        adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+        adminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
         // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
