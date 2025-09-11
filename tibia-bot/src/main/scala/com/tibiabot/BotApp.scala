@@ -328,8 +328,7 @@ object BotApp extends App with StrictLogging {
       .addOptions(
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
         new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
-      ),
-      new SubcommandData("boosted", "Manually trigger today's daily announcement (boosted monsters, news, announcements)")
+      )
     )
 
   // exiva command
