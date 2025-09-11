@@ -27,13 +27,13 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   implicit private val system: ActorSystem = ActorSystem()
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
-  private val characterUrl = "https://api.tibiadata.com/v4/character/"
-  private val guildUrl = "https://api.tibiadata.com/v4/guild/"
+  private val characterUrl = s"${Config.tibiadataApi}/v4/character/"
+  private val guildUrl = s"${Config.tibiadataApi}/v4/guild/"
 
   def getWorld(world: String): Future[Either[String, WorldResponse]] = {
     val encodedName = URLEncoder.encode(world, "UTF-8").replaceAll("\\+", "%20")
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/world/$encodedName"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/world/$encodedName"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[WorldResponse].map(Right(_))
         .recover {
@@ -51,7 +51,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getWorlds(): Future[Either[String, WorldsResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/worlds"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/worlds"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[WorldsResponse].map(Right(_))
         .recover {
@@ -69,7 +69,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getCreatures(): Future[Either[String, CreaturesResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/creatures"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/creatures"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CreaturesResponse].map(Right(_))
         .recover {
