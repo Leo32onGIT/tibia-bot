@@ -5994,7 +5994,7 @@ object BotApp extends App with StrictLogging {
     val conn = DriverManager.getConnection(url, username, password)
     var deleted = false
     val guild = jda.getGuildById(guildId)
-    val member = jda.retrieveMemberById(memberId).complete()
+    val member = guild.retrieveMemberById(userId).complete()
     val admin = member != null && (member.hasPermission(Permission.MANAGE_SERVER) || member.hasPermission(Permission.MESSAGE_MANAGE))
     try {
       // First check if the user is the one who added the screenshot or is an admin
