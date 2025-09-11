@@ -27,13 +27,13 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   implicit private val system: ActorSystem = ActorSystem()
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
-  private val characterUrl = "http://tibiadata:8080/v4/character/"
-  private val guildUrl = "http://tibiadata:8080/v4/guild/"
+  private val characterUrl = "https://api.tibiadata.com/v4/character/"
+  private val guildUrl = "https://api.tibiadata.com/v4/guild/"
 
   def getWorld(world: String): Future[Either[String, WorldResponse]] = {
     val encodedName = URLEncoder.encode(world, "UTF-8").replaceAll("\\+", "%20")
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/world/$encodedName"))
+      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/world/$encodedName"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[WorldResponse].map(Right(_))
         .recover {
@@ -51,7 +51,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getWorlds(): Future[Either[String, WorldsResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/worlds"))
+      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/worlds"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[WorldsResponse].map(Right(_))
         .recover {
@@ -69,7 +69,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getCreatures(): Future[Either[String, CreaturesResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/creatures"))
+      response <- Http().singleRequest(HttpRequest(uri = s"https://api.tibiadata.com/v4/creatures"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CreaturesResponse].map(Right(_))
         .recover {
@@ -87,7 +87,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getBoostedBoss(): Future[Either[String, BoostedResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/boostablebosses"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/boostablebosses"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[BoostedResponse].map(Right(_))
         .recover {
@@ -105,7 +105,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getBoostedCreature(): Future[Either[String, CreatureResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = s"http://tibiadata:8080/v4/creatures"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/creatures"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[CreatureResponse].map(Right(_))
         .recover {
@@ -122,7 +122,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
   }
 
   def getHighscores(world: String, page: Int): Future[Either[String, HighscoresResponse]] = {
-    val highscoresUri = s"http://tibiadata:8080/v4/highscores/${world}/experience/all/${page.toString}"
+    val highscoresUri = s"${Config.tibiadataApi}/v4/highscores/${world}/experience/all/${page.toString}"
     for {
       response <- Http().singleRequest(HttpRequest(uri = highscoresUri))
       decoded = decodeResponse(response)
@@ -307,7 +307,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getLatestNews(): Future[Either[String, NewsResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = "http://tibiadata:8080/v4/news/latest"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/news/latest"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[NewsResponse].map(Right(_))
         .recover {
@@ -325,7 +325,7 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
 
   def getNewsTicker(): Future[Either[String, NewsTickerResponse]] = {
     for {
-      response <- Http().singleRequest(HttpRequest(uri = "http://tibiadata:8080/v4/news/newsticker"))
+      response <- Http().singleRequest(HttpRequest(uri = s"${Config.tibiadataApi}/v4/news/newsticker"))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[NewsTickerResponse].map(Right(_))
         .recover {
