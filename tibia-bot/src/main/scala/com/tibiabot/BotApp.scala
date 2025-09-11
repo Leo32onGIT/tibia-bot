@@ -4869,7 +4869,7 @@ object BotApp extends App with StrictLogging {
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
-            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
             adminCategory = newAdminCategory
           }
           // create the channel
@@ -4878,7 +4878,7 @@ object BotApp extends App with StrictLogging {
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
-          newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
           boostedChannel = newBoostedChannel
           // update db & cache
           discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "")
@@ -5042,7 +5042,7 @@ object BotApp extends App with StrictLogging {
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
-            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
             adminCategory = newAdminCategory
           }
           // create the channel
