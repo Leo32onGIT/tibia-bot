@@ -96,15 +96,12 @@ object BotApp extends App with StrictLogging {
 
   jda.awaitReady()
   logger.info("JDA ready")
-  
+
   // Initialize emoji manager
+  /**
   EmojiManager.initialize(jda)
   logger.info("EmojiManager initialized")
-  
-  // Initialize daily scheduler for automated announcements
-  com.tibiabot.scheduler.DailyScheduler.initialize(jda)
-  logger.info("DailyScheduler initialized")
-  
+
   // Setup emojis for all guilds (async)
   import scala.concurrent.ExecutionContext.Implicits.global
   jda.getGuilds.asScala.foreach { guild =>
@@ -112,6 +109,11 @@ object BotApp extends App with StrictLogging {
       case e => logger.warn(s"Failed to setup emojis for guild ${guild.getName}: ${e.getMessage}")
     }
   }
+  **/
+
+  // Initialize daily scheduler for automated announcements
+  com.tibiabot.scheduler.DailyScheduler.initialize(jda)
+  logger.info("DailyScheduler initialized")
 
   // get the discord servers the bot is in
   private val guilds: List[Guild] = jda.getGuilds.asScala.toList
@@ -5919,26 +5921,6 @@ object BotApp extends App with StrictLogging {
     replyEmbed.setDescription(embedMessage).build()
   }
 
-  /**
-  def discordChannelMessageEmbed(guild: Guild, channel: Option[TextChannel], title: String, description: String, thumbnail: String, colour: Int): Unit = {
-    channel.foreach { actualChannel =>
-      if (actualChannel.canTalk) {
-        try {
-          val messageEmbed = new EmbedBuilder()
-          messageEmbed.setTitle(title)
-          messageEmbed.setDescription(description)
-          messageEmbed.setThumbnail(thumbnail)
-          messageEmbed.setColor(colour)
-          actualChannel.sendMessageEmbeds(messageEmbed.build()).queue()
-        } catch {
-          case ex: Throwable =>
-            logger.info(s"Failed to send message:\nGuild ID: '${guild.getId}' Guild Name: '${guild.getName}' Channel ID: '${actualChannel.getId}' Channel Name: '${actualChannel.getName}':\n${ex.getMessage}")
-        }
-      }
-    }
-  }
-  **/
-
   // Death screenshot database methods
   def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, messageId: String): Unit = {
     val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
@@ -5998,7 +5980,7 @@ object BotApp extends App with StrictLogging {
       selectStatement.setString(3, characterName)
       selectStatement.setLong(4, deathTime)
       val resultSet = selectStatement.executeQuery()
-      
+
       while (resultSet.next()) {
         screenshots += DeathScreenshot(
           guildId = resultSet.getString("guild_id"),
@@ -6014,7 +5996,7 @@ object BotApp extends App with StrictLogging {
       resultSet.close()
       selectStatement.close()
     } catch {
-      case ex: Exception => 
+      case ex: Exception =>
         logger.error(s"Failed to get death screenshots: ${ex.getMessage}")
     } finally {
       conn.close()
@@ -6039,7 +6021,7 @@ object BotApp extends App with StrictLogging {
       checkStatement.setLong(4, deathTime)
       checkStatement.setString(5, screenshotUrl)
       val resultSet = checkStatement.executeQuery()
-      
+
       if (resultSet.next()) {
         val addedBy = resultSet.getString("added_by")
         if (addedBy == userId) { // User can delete their own screenshots
