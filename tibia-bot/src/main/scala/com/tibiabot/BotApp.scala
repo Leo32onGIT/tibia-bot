@@ -3206,7 +3206,7 @@ object BotApp extends App with StrictLogging {
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
-        boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+        boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
 
         val galthenEmbed = new EmbedBuilder()
