@@ -657,7 +657,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       if (buttonParts.length >= 4) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
-        val messageId = buttonParts(4)
+        val messageId = event.getInteraction.getMessage.getId
 
         // Get world from guild configuration
         val worldOpt = worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
@@ -721,7 +721,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       if (buttonParts.length >= 6) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
-        val messageId = buttonParts(4)
+        val messageId = event.getInteraction.getMessage.getId
         val currentIndex = buttonParts(5).toInt
 
         // Get world from guild configuration
@@ -780,7 +780,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       if (buttonParts.length >= 6) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
-        val messageId = buttonParts(4)
+        val messageId = event.getInteraction.getMessage.getId
         val currentIndex = buttonParts(5).toInt
 
         val guild = event.getGuild

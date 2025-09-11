@@ -1046,14 +1046,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     } else if (embed._2 == "screenshot") {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .setComponents(actionRow)
-                        .queue(message => {
-                          // Update button with actual message ID
-                          val updatedButton = Button.secondary(
-                            s"death_screenshot_${embed._3}_${embed._7}_${message.getId}",
-                            "Add Screenshot"
-                          )
-                          message.editMessageComponents(ActionRow.of(updatedButton)).queue()
-                        })
+                        .queue()
                     } else {
                       // for regular deaths check if level > /filter deaths <level>
                       if (embed._5 >= minimumLevel) {
