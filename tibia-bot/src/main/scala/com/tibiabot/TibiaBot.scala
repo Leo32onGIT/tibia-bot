@@ -715,6 +715,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               // does player have guild?
               var guildIcon = Config.otherGuild
               var huntedGuilds = false
+              var allyGuilds = false
               if (guildName != "") {
                 // if untracked neutral guild show grey
                 if (embedColor == 3092790) {
@@ -729,7 +730,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 if (allyGuilds) {
                   embedColor = 13773097 // bright red
                   guildIcon = Config.allyGuild
-                  notablePoke = "screenshot"
                 }
                 // is player in hunted guild
                 huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
@@ -751,7 +751,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
               val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
               if (allyPlayers) {
                 embedColor = 13773097 // bright red
-                notablePoke = "screenshot"
               }
               // hunted player
               val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charName.toLowerCase())
@@ -774,7 +773,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   if (k.player) {
                     if (k.name != charName) { // ignore 'self' entries on deathlist
                       context = "Killed"
-                      if (huntedPlayers || huntedGuilds) {
+                      if (huntedPlayers || huntedGuilds || allyPlayers || allyGuilds) {
                         notablePoke = "screenshot"
                       } else {
                         notablePoke = "" // reset poke as its not a fullbless
@@ -783,12 +782,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         embedColor = 14869218 // bone white
                       }
                       embedThumbnail = creatureImageUrl("Phantasmal_Ooze")
-                      logger.info(s"Processing killer name: '${k.name}' (player: ${k.player}, summon: '${k.summon}')")
                       val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
-                      logger.info(s"Split result: ${isSummon.toList} (length: ${isSummon.length})")
                       if (isSummon.length > 1) {
-                        logger.info(s"Split detected - Part 0: '${isSummon(0)}', Part 1: '${isSummon(1)}'")
-                        logger.info(s"First part contains uppercase: ${isSummon(0).exists(_.isUpper)}")
                         if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
                           val vowel = isSummon(0).take(1) match {
                           case "a" => "an"
