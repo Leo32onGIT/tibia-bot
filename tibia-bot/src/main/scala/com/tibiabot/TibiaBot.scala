@@ -1616,7 +1616,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
       // Fallback to TibiaData API
       try {
-        val characterResponse = Await.result(tibiaDataClient.getCharacter(killerName), Duration(10, "seconds"))
+        val characterResponse = Await.result(tibiaDataClient.getKillerFallback(killerName), Duration(10, "seconds"))
         characterResponse match {
           case Right(response) =>
             val level = response.character.character.level.toInt

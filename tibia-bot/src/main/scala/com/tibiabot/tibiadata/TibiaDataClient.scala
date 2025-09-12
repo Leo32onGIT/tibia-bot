@@ -226,6 +226,32 @@ class TibiaDataClient extends JsonSupport with StrictLogging {
     }
   }
 
+  def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
+    val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
+    val responseFuture = Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName"))
+    responseFuture.flatMap { response =>
+      response.header[DateHeader] match {
+        case Some(dateHeader) =>
+          val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
+          val responseDate = ZonedDateTime.parse(dateHeader.date.toString, formatter)
+          val decoded = decodeResponse(response)
+          Unmarshal(decoded).to[CharacterResponse].map(Right(_)).recover {
+            case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+              val errorMessage = s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'"
+              logger.warn(errorMessage)
+              Left(errorMessage)
+            case e @ (_: ParsingException | _: DeserializationException) =>
+              val errorMessage = s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"
+              logger.warn(errorMessage)
+              Left(errorMessage)
+          }
+        case None =>
+          response.discardEntityBytes()
+          Future.successful(Left("No Date header in response"))
+      }
+    }
+  }
+
   def getCharacterV2(input: (String, Int, String)): Future[Either[String, CharacterResponse]] = {
     val name = input._1
     val level = input._2
