@@ -726,7 +726,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   embedColor = 14397256 // yellow
                 }
                 // is player an ally
-                val allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
+                allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
                 if (allyGuilds) {
                   embedColor = 13773097 // bright red
                   guildIcon = Config.allyGuild
