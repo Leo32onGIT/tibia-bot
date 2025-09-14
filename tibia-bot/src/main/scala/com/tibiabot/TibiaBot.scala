@@ -114,19 +114,44 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         !online.exists(player => player.name == i.char)
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
-      val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-      Source(charsToCheck)
-        .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
-        .runWith(Sink.collection)
-        .map(_.toSet)
 
+      // cache bypass for Seanera
+      if (worldResponse.world.name == "Quidera") {
+        // Remove existing online chars from the list...
+        recentOnlineBypass.filterInPlace { i =>
+          !online.exists(player => player.name == i.char)
+        }
+        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
+        val charsToCheck: Set[(String, Int)] = recentOnlineBypass.map { key =>
+          (key.char, key.level.toInt)
+        }.toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacterV2)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      } else {
+        val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      }
     case Left(warning) =>
-      // use data from previous online list check
-      val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
-      Source(charsToCheck)
-        .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
-        .runWith(Sink.collection)
-        .map(_.toSet)
+      if (world == "Quidera") {
+        // use data from previous online list check
+        val charsToCheck: Set[String] = recentOnlineBypass.map(_.char).toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      } else {
+        // use data from previous online list check
+        val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
+        Source(charsToCheck)
+          .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
+          .runWith(Sink.collection)
+          .map(_.toSet)
+      }
   }.withAttributes(logAndResume)
 
   private lazy val scanForDeaths = Flow[Set[Either[String, CharacterResponse]]].mapAsync(1) { characterResponses =>
