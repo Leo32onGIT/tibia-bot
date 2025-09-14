@@ -137,7 +137,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           .map(_.toSet)
       }
     case Left(warning) =>
-      if (world == "Quidera") {
+      if (world == "Quidera" || world == "Runera") {
         // use data from previous online list check
         val charsToCheck: Set[String] = recentOnlineBypass.map(_.char).toSet
         Source(charsToCheck)
