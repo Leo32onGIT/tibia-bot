@@ -5448,13 +5448,14 @@ object BotApp extends App with StrictLogging {
   def adminInfo(event: SlashCommandInteractionEvent, callback: List[MessageEmbed] => Unit): Unit = {
     val allGuilds = jda.getGuilds.asScala.toList
     val allGuildsCleaned: List[String] = allGuilds.map(guild => s"**${guild.getName}** - `${guild.getId}`")
+    logger.info(allGuildsCleaned.toString)
     // build the embed
     val embedBuffer = ListBuffer[MessageEmbed]()
     var field = ""
     var isFirstEmbed = true
     allGuildsCleaned.foreach { v =>
       val currentField = field + "\n" + v
-      if (currentField.length <= 4096) { // don't add field yet, there is still room
+      if (currentField.length <= 4000) { // don't add field yet, there is still room
         field = currentField
       } else { // it's full, add the field
         val interimEmbed = new EmbedBuilder()
