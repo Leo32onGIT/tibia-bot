@@ -5454,7 +5454,7 @@ object BotApp extends App with StrictLogging {
     var field = ""
     allGuildsCleaned.foreach { v =>
       val currentField = field + "\n" + v
-      if (currentField.length <= 4000) { // don't add field yet, there is still room
+      if (currentField.length <= 3000) { // don't add field yet, there is still room
         field = currentField
       } else { // it's full, add the field
         val interimEmbed = new EmbedBuilder()

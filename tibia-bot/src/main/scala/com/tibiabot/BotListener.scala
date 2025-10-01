@@ -1340,7 +1340,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         BotApp.adminInfo(event, embeds => {
           val embedsJava = embeds.asJava
           embedsJava.forEach { embed =>
-            event.getHook.sendMessageEmbeds(embed).queue()
+            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
           }
         })
       case _ =>
