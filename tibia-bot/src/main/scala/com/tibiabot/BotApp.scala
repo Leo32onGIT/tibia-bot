@@ -5452,7 +5452,6 @@ object BotApp extends App with StrictLogging {
     // build the embed
     val embedBuffer = ListBuffer[MessageEmbed]()
     var field = ""
-    var isFirstEmbed = true
     allGuildsCleaned.foreach { v =>
       val currentField = field + "\n" + v
       if (currentField.length <= 4000) { // don't add field yet, there is still room
@@ -5460,18 +5459,12 @@ object BotApp extends App with StrictLogging {
       } else { // it's full, add the field
         val interimEmbed = new EmbedBuilder()
         interimEmbed.setDescription(field)
-        if (isFirstEmbed) {
-          isFirstEmbed = false
-        }
         embedBuffer += interimEmbed.build()
         field = v
       }
     }
     val finalEmbed = new EmbedBuilder()
     finalEmbed.setDescription(field)
-    if (isFirstEmbed) {
-      isFirstEmbed = false
-    }
     embedBuffer += finalEmbed.build()
     callback(embedBuffer.toList)
   }
