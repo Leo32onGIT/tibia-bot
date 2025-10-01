@@ -325,6 +325,7 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
         new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
       ),
+      new SubcommandData("info", "get discord info"),
       new SubcommandData("message", "Send a message to a specific discord")
       .addOptions(
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
@@ -399,8 +400,13 @@ object BotApp extends App with StrictLogging {
 
   // initialize the database
   guilds.foreach{g =>
-    // update the commands
-    g.updateCommands().addCommands(commands.asJava).complete()
+    if (g.getIdLong == 867319250708463628L || g.getIdLong == 1082484147492237515L) { // Violent Bot Discords
+      val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand, adminCommand)
+      g.updateCommands().addCommands(adminCommands.asJava).complete()
+    } else {
+      // update the commands
+      g.updateCommands().addCommands(commands.asJava).complete()
+    }
   }
 
   // Start all world streams
@@ -5437,6 +5443,36 @@ object BotApp extends App with StrictLogging {
     .setColor(3092790)
     .setDescription(embedMessage)
     .build()
+  }
+
+  def adminInfo(event: SlashCommandInteractionEvent, callback: List[MessageEmbed] => Unit): Unit = {
+    val allGuilds = jda.getGuilds.asScala.toList
+    val allGuildsCleaned: List[String] = allGuilds.map(guild => s"**${guild.getName}** - `${guild.getId}`")
+    // build the embed
+    val embedBuffer = ListBuffer[MessageEmbed]()
+    var field = ""
+    var isFirstEmbed = true
+    allGuildsCleaned.foreach { v =>
+      val currentField = field + "\n" + v
+      if (currentField.length <= 4096) { // don't add field yet, there is still room
+        field = currentField
+      } else { // it's full, add the field
+        val interimEmbed = new EmbedBuilder()
+        interimEmbed.setDescription(field)
+        if (isFirstEmbed) {
+          isFirstEmbed = false
+        }
+        embedBuffer += interimEmbed.build()
+        field = v
+      }
+    }
+    val finalEmbed = new EmbedBuilder()
+    finalEmbed.setDescription(field)
+    if (isFirstEmbed) {
+      isFirstEmbed = false
+    }
+    embedBuffer += finalEmbed.build()
+    callback(embedBuffer.toList)
   }
 
   private def creatureImageUrl(creature: String): String = {
