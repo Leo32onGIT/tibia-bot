@@ -9,30 +9,30 @@ import scala.util.{Failure, Success, Try}
 import java.time.ZonedDateTime
 
 object WorldManager extends StrictLogging {
-  
+
   implicit private val executionContext: ExecutionContextExecutor = scala.concurrent.ExecutionContext.global
-  
+
   private val tibiaDataClient = new TibiaDataClient()
   private var cachedWorldList: Option[List[String]] = None
   private var lastFetchTime: Option[ZonedDateTime] = None
   private val cacheValidityHours = 24 // Cache worlds for 24 hours
-  
+
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(
-    "Ambra", "Antica", "Astera", "Axera", "Belobra", "Bombra", "Bona", "Calmera", "Castela", 
-    "Celebra", "Celesta", "Collabra", "Damora", "Descubra", "Dia", "Epoca", "Esmera", "Etebra", 
-    "Ferobra", "Firmera", "Flamera", "Gentebra", "Gladera", "Gravitera", "Guerribra", "Harmonia", 
-    "Havera", "Honbra", "Impulsa", "Inabra", "Issobra", "Jacabra", "Jadebra", "Jaguna", "Kalibra", 
-    "Kardera", "Kendria", "Lobera", "Luminera", "Lutabra", "Menera", "Monza", "Mykera", "Nadora", 
-    "Nefera", "Nevia", "Ombra", "Obscubra", "Ousabra", "Pacera", "Peloria", "Premia", "Pulsera", 
-    "Quelibra", "Quintera", "Rasteibra", "Refugia", "Retalia", "Runera", "Secura", "Serdebra", 
-    "Solidera", "Syrena", "Talera", "Thyria", "Tornabra", "Ustebra", "Utobra", "Venebra", "Vitera", 
-    "Vunira", "Wadira", "Wildera", "Wintera", "Yonabra", "Yovera", "Zuna", "Zunera", "Victoris", 
-    "Oceanis", "Stralis", "Yara", "Vandera", "Unebra", "Zephyra", "Ulera", "Yubra", "Divina", 
-    "Temera", "Quebra", "Quidera", "Fibera", "Ourobra", "Gladibra", "Xyla", "Karmeya", "Malivora", 
-    "Bravoria", "Aethera", "Cantabra", "Noctalia", "Ignitera", "Xybra", "Sonira", "Kalimera", "Luzibra"
+    "Ambra", "Antica", "Astera", "Axera", "Belobra", "Bombra", "Bona", "Calmera", "Castela",
+    "Celebra", "Celesta", "Collabra", "Damora", "Descubra", "Dia", "Epoca", "Esmera", "Etebra",
+    "Ferobra", "Firmera", "Flamera", "Gentebra", "Gladera", "Gravitera", "Guerribra", "Harmonia",
+    "Havera", "Honbra", "Impulsa", "Inabra", "Issobra", "Jacabra", "Jadebra", "Jaguna", "Kalibra",
+    "Kardera", "Kendria", "Lobera", "Luminera", "Lutabra", "Menera", "Monza", "Mykera", "Nadora",
+    "Nefera", "Nevia", "Ombra", "Obscubra", "Ousabra", "Pacera", "Peloria", "Premia", "Pulsera",
+    "Quelibra", "Quintera", "Rasteibra", "Refugia", "Retalia", "Runera", "Secura", "Serdebra",
+    "Solidera", "Syrena", "Talera", "Thyria", "Tornabra", "Ustebra", "Utobra", "Venebra", "Vitera",
+    "Vunira", "Wadira", "Wildera", "Wintera", "Yonabra", "Yovera", "Zuna", "Zunera", "Victoris",
+    "Oceanis", "Stralis", "Yara", "Vandera", "Unebra", "Zephyra", "Ulera", "Yubra", "Divina",
+    "Temera", "Quebra", "Quidera", "Fibera", "Ourobra", "Gladibra", "Xyla", "Karmeya", "Malivora",
+    "Bravoria", "Aethera", "Cantabra", "Noctalia", "Ignitera", "Xybra", "Sonira", "Kalimera", "Luzibra", "Idyllia", "Hostera", "Dracobra"
   )
-  
+
   def getWorldList(): List[String] = {
     if (isCacheValid()) {
       logger.debug("Using cached world list")
@@ -42,13 +42,13 @@ object WorldManager extends StrictLogging {
       refreshWorldList()
     }
   }
-  
+
   private def isCacheValid(): Boolean = {
     cachedWorldList.isDefined && lastFetchTime.exists { fetchTime =>
       ZonedDateTime.now().isBefore(fetchTime.plusHours(cacheValidityHours))
     }
   }
-  
+
   private def refreshWorldList(): List[String] = {
     Try {
       val worldsResponse = Await.result(tibiaDataClient.getWorlds(), Duration(30, "seconds"))
@@ -70,7 +70,7 @@ object WorldManager extends StrictLogging {
         cachedWorldList.getOrElse(fallbackWorldList)
     }
   }
-  
+
   def refreshWorldListAsync(): Future[List[String]] = {
     logger.info("Starting async refresh of world list")
     tibiaDataClient.getWorlds().map {
