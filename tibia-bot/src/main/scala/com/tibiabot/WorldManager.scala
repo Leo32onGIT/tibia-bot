@@ -19,18 +19,19 @@ object WorldManager extends StrictLogging {
 
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(
-    "Ambra", "Antica", "Astera", "Axera", "Belobra", "Bombra", "Bona", "Calmera", "Castela",
-    "Celebra", "Celesta", "Collabra", "Damora", "Descubra", "Dia", "Epoca", "Esmera", "Etebra",
-    "Ferobra", "Firmera", "Flamera", "Gentebra", "Gladera", "Gravitera", "Guerribra", "Harmonia",
-    "Havera", "Honbra", "Impulsa", "Inabra", "Issobra", "Jacabra", "Jadebra", "Jaguna", "Kalibra",
+    "Antica", "Astera", "Axera", "Belobra", "Bombra", "Bona", "Calmera", "Castela",
+    "Celebra", "Celesta", "Collabra", "Damora", "Descubra", "Dia", "Epoca", "Etebra",
+    "Ferobra", "Firmera", "Gentebra", "Gladera", "Guerribra", "Harmonia",
+    "Havera", "Honbra", "Impulsa", "Inabra", "Issobra", "Jadebra", "Kalibra",
     "Kardera", "Kendria", "Lobera", "Luminera", "Lutabra", "Menera", "Monza", "Mykera", "Nadora",
-    "Nefera", "Nevia", "Ombra", "Obscubra", "Ousabra", "Pacera", "Peloria", "Premia", "Pulsera",
-    "Quelibra", "Quintera", "Rasteibra", "Refugia", "Retalia", "Runera", "Secura", "Serdebra",
-    "Solidera", "Syrena", "Talera", "Thyria", "Tornabra", "Ustebra", "Utobra", "Venebra", "Vitera",
-    "Vunira", "Wadira", "Wildera", "Wintera", "Yonabra", "Yovera", "Zuna", "Zunera", "Victoris",
-    "Oceanis", "Stralis", "Yara", "Vandera", "Unebra", "Zephyra", "Ulera", "Yubra", "Divina",
-    "Temera", "Quebra", "Quidera", "Fibera", "Ourobra", "Gladibra", "Xyla", "Karmeya", "Malivora",
-    "Bravoria", "Aethera", "Cantabra", "Noctalia", "Ignitera", "Xybra", "Sonira", "Kalimera", "Luzibra", "Idyllia", "Hostera", "Dracobra"
+    "Nefera", "Nevia", "Ombra", "Ousabra", "Pacera", "Peloria", "Premia", "Pulsera",
+    "Quelibra", "Quintera", "Rasteibra", "Refugia", "Retalia", "Secura", "Serdebra",
+    "Solidera", "Syrena", "Talera", "Thyria", "Tornabra", "Ustebra", "Utobra", "Venebra",
+    "Vunira", "Wintera", "Yonabra", "Yovera", "Zuna", "Zunera", "Victoris",
+    "Oceanis", "Stralis", "Unebra", "Yubra",
+    "Quidera", "Ourobra", "Gladibra", "Xyla", "Karmeya",
+    "Bravoria", "Aethera", "Cantabra", "Noctalia", "Ignitera", "Xybra", "Sonira", "Kalimera", "Luzibra",
+    "Idyllia", "Hostera", "Dracobra", "Xymera", "Blumera", "Monstera", "Tempestera", "Terribra", "Sombra", "Eclipta", "Kalanta", "Citra"
   )
 
   def getWorldList(): List[String] = {

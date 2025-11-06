@@ -176,7 +176,37 @@ object Config {
     "Nadora",
     // Malivora
     "Impulsa",
-    "Syrena"
+    "Syrena",
+    //Xymera
+    "Vandera",
+    "Runera",
+    //Blumera
+    "Ulera",
+    "Vitera",
+    "Esmera",
+    //Monstera
+    "Wildera",
+    "Gravitera",
+    //Tempestera
+    "Flamera",
+    "Temera",
+    "Fibera",
+    //Terribra
+    "Jacabra",
+    "Obscubra",
+    //Sombra
+    "Quebra",
+    "Ambra",
+    //Eclipta
+    "Divina",
+    "Malivora",
+    //Kalanta
+    "Zephyra",
+    "Wadira",
+    //Citra
+    "Yara",
+    "Jaguna"
+
   )
   // creatures - dynamically fetched from TibiaData API
   val creaturesList: List[String] = List(
