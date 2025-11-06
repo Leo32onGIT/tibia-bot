@@ -48,6 +48,7 @@ You will need to change this to point to your emojis and your discord roles.
 > TOKEN=XXXXXXXXXXXXXXXXXXXXXX   
 > POSTGRES_HOST=sqlhost
 > POSTGRES_PASSWORD=XXXXXXXXXX
+> TIBIADATA_HOST=https://api.tibiadata.com/
 > ```
 5. Create the docker volume for the postgres database:    
 `docker volume create --name pgdata`
