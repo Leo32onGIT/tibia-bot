@@ -6,6 +6,7 @@ scalaVersion := "2.13.9"
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
 dockerExposedPorts += 443
+dockerBaseImage := "eclipse-temurin:8-jre"
 
 val AkkaHttpVersion = "10.5.0"
 
