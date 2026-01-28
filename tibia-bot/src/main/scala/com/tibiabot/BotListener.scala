@@ -344,8 +344,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
               s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
           } else {
             embed.setColor(178877)
-            embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            embed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
             event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenSet", "Collected"),
               Button.danger("galthenRemove", "Clear").asDisabled
@@ -354,8 +354,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         // /HERE
         case None =>
           embed.setColor(178877)
-          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          embed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you: ```when the 30 day cooldown expires```")
+          embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
             Button.success("galthenSet", "Collected"),
             Button.danger("galthenRemove", "Clear").asDisabled
@@ -751,7 +751,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
                   try {
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -777,7 +777,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to remove user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
                   try {
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -813,7 +813,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to add user $commandPlayer to the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
                   try {
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -839,7 +839,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s"${Config.noEmoji} a player interaction has failed:")
                   adminEmbed.setDescription(s"Failed to remove user $commandPlayer from the <@&${role.getId}> role.\n\n:speech_balloon: *Ensure the role <@&${role.getId}> is `below` <@${BotApp.botUser}> on the roles list, or the bot cannot interact with it.*")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Warning_Sign.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Warning_Sign.gif")
                   adminEmbed.setColor(3092790) // orange for bot auto command
                   try {
                     adminTextChannel.sendMessageEmbeds(adminEmbed.build()).queue()
@@ -880,8 +880,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case Some(satchelTimeList) if satchelTimeList.isEmpty =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
-        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        embed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
+        embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled
@@ -913,7 +913,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
             embed.setDescription(descriptionTruncate)
           }
           embed.setColor(13773097)
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           if (fullList.size == 1){
             event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenSet", "Collected").asDisabled,
@@ -937,8 +937,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         } else {
           embed.setColor(178877)
           if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-          embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
-          embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          embed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
+          embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
             Button.success("galthenSet", "Collected"),
             Button.danger("galthenRemove", "Clear").asDisabled
@@ -948,8 +948,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case None =>
         embed.setColor(178877)
         if (tagOption.nonEmpty) embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
-        embed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
-        embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        embed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nMark the <:satchel:1030348072577945651> as **Collected** and I will message you when the 30 day cooldown expires.")
+        embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
           Button.success("galthenSet", "Collected"),
           Button.danger("galthenRemove", "Clear").asDisabled

@@ -879,7 +879,7 @@ object BotApp extends App with StrictLogging {
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted guild details:")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Tibiapedia.gif")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
             embed.setColor(3092790)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
@@ -901,7 +901,7 @@ object BotApp extends App with StrictLogging {
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted player details:")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Tibiapedia.gif")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
             embed.setColor(3092790)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
@@ -941,7 +941,7 @@ object BotApp extends App with StrictLogging {
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied guild details:")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Tibiapedia.gif")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
             embed.setColor(3092790)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
@@ -963,7 +963,7 @@ object BotApp extends App with StrictLogging {
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied player details:")
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Tibiapedia.gif")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
             embed.setColor(3092790)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
@@ -990,7 +990,7 @@ object BotApp extends App with StrictLogging {
     val listGuilds: List[Guilds] = if (arg == "allies") alliedGuildsData.getOrElse(guild.getId, List.empty[Guilds]).map(g => g)
       else if (arg == "hunted") huntedGuildsData.getOrElse(guild.getId, List.empty[Guilds]).map(g => g)
       else List.empty
-    val guildThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
+    val guildThumbnail = if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
     val guildBuffer = ListBuffer[MessageEmbed]()
     if (listGuilds.nonEmpty) {
       // run api against guild
@@ -1421,7 +1421,7 @@ object BotApp extends App with StrictLogging {
             if (tagId.nonEmpty) embed.setFooter(s"Tag: ${tagId.toLowerCase}")
             val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
             embed.setColor(178877)
-            embed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
             embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you when the 30 day cooldown expires.")
             privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
               Button.success("galthenRemind", "Collected"),
@@ -1469,7 +1469,7 @@ object BotApp extends App with StrictLogging {
     val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else List.empty
-    val embedThumbnail = if (arg == "allies") "https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
+    val embedThumbnail = if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif" else if (arg == "hunted") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif" else ""
     val playerBuffer = ListBuffer[MessageEmbed]()
     if (listPlayers.nonEmpty) {
 
@@ -1773,7 +1773,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -1828,7 +1828,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -1896,7 +1896,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -1960,7 +1960,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -2049,7 +2049,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -2113,7 +2113,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Stone_Coffin.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -2179,7 +2179,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -2226,7 +2226,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Angel_Statue.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -3217,8 +3217,8 @@ object BotApp extends App with StrictLogging {
 
         val galthenEmbed = new EmbedBuilder()
         galthenEmbed.setColor(3092790)
-        galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-        galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+        galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+        galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
         boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
           Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
         ).queue()
@@ -3300,8 +3300,8 @@ object BotApp extends App with StrictLogging {
 
           val galthenEmbed = new EmbedBuilder()
           galthenEmbed.setColor(3092790)
-          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-          galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+          galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
             Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
           ).queue()
@@ -3415,7 +3415,7 @@ object BotApp extends App with StrictLogging {
             val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
             val nemesisEmbed = new EmbedBuilder()
             nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-            nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+            nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
             nemesisEmbed.setColor(3092790)
             nemesisEmbed.setDescription(nemesisEmbedText)
             notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
@@ -3440,7 +3440,7 @@ object BotApp extends App with StrictLogging {
         if (levelsTextChannel != null) {
           val levelsEmbed = new EmbedBuilder()
           levelsEmbed.setDescription(s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
-          levelsEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          levelsEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
           levelsEmbed.setColor(3092790)
           levelsTextChannel.sendMessageEmbeds(levelsEmbed.build()).queue()
         }
@@ -3450,7 +3450,7 @@ object BotApp extends App with StrictLogging {
         if (deathsTextChannel != null) {
           val deathsEmbed = new EmbedBuilder()
           deathsEmbed.setDescription(s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
-          deathsEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          deathsEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
           deathsEmbed.setColor(3092790)
           deathsTextChannel.sendMessageEmbeds(deathsEmbed.build()).queue()
         }
@@ -3460,7 +3460,7 @@ object BotApp extends App with StrictLogging {
         if (activityTextChannel != null) {
           val activityEmbed = new EmbedBuilder()
           activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
-          activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+          activityEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
           activityEmbed.setColor(3092790)
           activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
         }
@@ -3520,7 +3520,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -3627,7 +3627,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+            adminEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -3679,7 +3679,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Find_Person.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Find_Person.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -3998,7 +3998,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer")
-            adminEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+            adminEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -4109,7 +4109,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -4158,7 +4158,7 @@ object BotApp extends App with StrictLogging {
                   val adminEmbed = new EmbedBuilder()
                   adminEmbed.setTitle(s":gear: a command was run:")
                   adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe")
-                  adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
                   adminEmbed.setColor(3092790)
                   adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
                 }
@@ -4231,7 +4231,7 @@ object BotApp extends App with StrictLogging {
               val adminEmbed = new EmbedBuilder()
               adminEmbed.setTitle(s":gear: a command was run:")
               adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom tagging.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+              adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
               adminEmbed.setColor(3092790)
               adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
             }
@@ -4254,7 +4254,7 @@ object BotApp extends App with StrictLogging {
               val adminEmbed = new EmbedBuilder()
               adminEmbed.setTitle(s":gear: a command was run:")
               adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom tagging.")
-              adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+              adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
               adminEmbed.setColor(3092790)
               adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
             }
@@ -4308,7 +4308,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> cleared everyone from the tag **$labelLower**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Library_Ticket.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -4463,7 +4463,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -4644,7 +4644,7 @@ object BotApp extends App with StrictLogging {
             val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
             val nemesisEmbed = new EmbedBuilder()
             nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+            nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
             nemesisEmbed.setColor(3092790)
             nemesisEmbed.setDescription(nemesisEmbedText)
             boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
@@ -4862,7 +4862,7 @@ object BotApp extends App with StrictLogging {
           if (recreateActivityChannel != null) {
             val activityEmbed = new EmbedBuilder()
             activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
-            activityEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Sign_(Library).gif")
+            activityEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
             activityEmbed.setColor(3092790)
             recreateActivityChannel.sendMessageEmbeds(activityEmbed.build()).queue()
           }
@@ -4903,8 +4903,8 @@ object BotApp extends App with StrictLogging {
 
           val galthenEmbed = new EmbedBuilder()
           galthenEmbed.setColor(3092790)
-          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://tibia.fandom.com/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-          galthenEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+          galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
           boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
             Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
           ).queue()
@@ -4995,7 +4995,7 @@ object BotApp extends App with StrictLogging {
           val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
           val nemesisEmbed = new EmbedBuilder()
           nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          nemesisEmbed.setThumbnail(s"https://tibia.fandom.com/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
+          nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
           nemesisEmbed.setColor(3092790)
           nemesisEmbed.setDescription(nemesisEmbedText)
           boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
@@ -5067,7 +5067,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Hammer.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -5129,7 +5129,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s":gear: a command was run:")
             adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Royal_Fanfare.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           }
@@ -5390,7 +5390,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
             adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Abacus.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           } catch {
@@ -5426,7 +5426,7 @@ object BotApp extends App with StrictLogging {
             val adminEmbed = new EmbedBuilder()
             adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
             adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
-            adminEmbed.setThumbnail("https://tibia.fandom.com/wiki/Special:Redirect/file/Letter.gif")
+            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
             adminEmbed.setColor(3092790)
             adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
           } catch {
@@ -5482,7 +5482,7 @@ object BotApp extends App with StrictLogging {
       // Replace spaces with underscores and make sure the first letter is capitalised
       parsed2.replaceAll(" ", "_").capitalize
     })
-    s"https://tibia.fandom.com/wiki/Special:Redirect/file/$finalCreature.gif"
+    s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$finalCreature.gif"
   }
 
   def creatureWikiUrl(creature: String): String = {
@@ -5498,7 +5498,7 @@ object BotApp extends App with StrictLogging {
       // Replace spaces with underscores and make sure the first letter is capitalised
       parsed2.replaceAll(" ", "_").capitalize
     })
-    s"https://tibia.fandom.com/wiki/$finalCreature"
+    s"https://www.tibiawiki.com.br/wiki/$finalCreature"
   }
 
   // V1.9 Boosted Command

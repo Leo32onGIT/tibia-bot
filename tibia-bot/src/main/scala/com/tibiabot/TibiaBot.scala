@@ -1672,7 +1672,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       // Replace spaces with underscores and make sure the first letter is capitalised
       parsed2.replaceAll(" ", "_").capitalize
     })
-    s"https://tibia.fandom.com/wiki/Special:Redirect/file/$finalCreature.gif"
+    s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$finalCreature.gif"
   }
 
   lazy val stream: RunnableGraph[Cancellable] =
