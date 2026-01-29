@@ -1133,7 +1133,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case _ => Config.otherGuild // guild (not ally or hunted)
       }
       val masslogIcon =
-        if (durationInSec < 600 && (huntedGuildCheck || huntedPlayerCheck))
+        if (durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck))
          " :zap:"
        else
          ""
