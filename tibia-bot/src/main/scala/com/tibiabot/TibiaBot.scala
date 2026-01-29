@@ -806,7 +806,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       if (embedColor == 3092790 || embedColor == 4540237) {
                         embedColor = 14869218 // bone white
                       }
-                      embedThumbnail = creatureImageUrl("Galthen's_Chestplate")
+                      embedThumbnail = s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Chestplate.gif"
                       val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
                       if (isSummon.length > 1) {
                         if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
