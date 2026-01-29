@@ -1116,11 +1116,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       } else {
         s"${durationInMin}min"
       }
-      val durationString =
-      if (durationInSec < 600)
-        s"`$durationStr` :zap:"
-      else
-        s"`$durationStr`"
+      val durationString = s"`$durationStr`"
       // get appropriate guild icon
       val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
       val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
@@ -1136,8 +1132,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case ("", _, _, _, _) => "" // no guild (not ally or hunted)
         case _ => Config.otherGuild // guild (not ally or hunted)
       }
-
-      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}")
+      val masslogIcon =
+        if (durationInSec < 600 && (huntedGuildCheck || huntedPlayerCheck))
+         " :zap:"
+       else
+         ""
+      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}")
     }
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
