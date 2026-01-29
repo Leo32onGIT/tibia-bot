@@ -1116,7 +1116,11 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       } else {
         s"${durationInMin}min"
       }
-      val durationString = s"`$durationStr`"
+      val durationString =
+      if (durationInSec < 600)
+        s"`$durationStr` :zap:"
+      else
+        s"`$durationStr`"
       // get appropriate guild icon
       val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
       val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
