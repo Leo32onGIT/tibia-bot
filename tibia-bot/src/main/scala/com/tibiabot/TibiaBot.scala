@@ -1135,7 +1135,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val masslogIcon =
         if (durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck))
          " :zap:"
-       else
+        else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck))
+         " :zzz:"
+        else
          ""
       vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}")
     }
