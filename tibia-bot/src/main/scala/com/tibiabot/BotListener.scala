@@ -1336,7 +1336,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       case "message" =>
         val embed = BotApp.adminMessage(event, guildOption, messageOption)
         event.getHook.sendMessageEmbeds(embed).queue()
-      case "info" =>
+      case "worldlist" =>
         try {
           WorldManager.getWorldList()
           val embed = new EmbedBuilder()
