@@ -326,6 +326,7 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
       ),
       new SubcommandData("info", "get discord info"),
+      new SubcommandData("worldlist", "get discord info"),
       new SubcommandData("message", "Send a message to a specific discord")
       .addOptions(
         new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),

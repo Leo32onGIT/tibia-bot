@@ -31,7 +31,7 @@ object WorldManager extends StrictLogging {
     "Oceanis", "Stralis", "Unebra", "Yubra",
     "Quidera", "Ourobra", "Gladibra", "Xyla", "Karmeya",
     "Bravoria", "Aethera", "Cantabra", "Noctalia", "Ignitera", "Xybra", "Sonira", "Kalimera", "Luzibra",
-    "Idyllia", "Hostera", "Dracobra", "Xymera", "Blumera", "Monstera", "Tempestera", "Terribra", "Sombra", "Eclipta", "Kalanta", "Citra"
+    "Idyllia", "Hostera", "Dracobra", "Xymera", "Blumera", "Monstera", "Tempestera", "Terribra", "Sombra", "Eclipta", "Kalanta", "Citra", "Kanda", "Opulera", "Ignibra"
   )
 
   def getWorldList(): List[String] = {
