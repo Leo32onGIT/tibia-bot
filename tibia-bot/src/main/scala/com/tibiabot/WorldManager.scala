@@ -15,7 +15,6 @@ object WorldManager extends StrictLogging {
   private val tibiaDataClient = new TibiaDataClient()
   private var cachedWorldList: Option[List[String]] = None
   private var lastFetchTime: Option[ZonedDateTime] = None
-  private val cacheValidityHours = 1
 
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(

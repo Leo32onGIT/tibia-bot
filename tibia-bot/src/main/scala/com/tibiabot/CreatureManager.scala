@@ -15,7 +15,6 @@ object CreatureManager extends StrictLogging {
   private val tibiaDataClient = new TibiaDataClient()
   private var cachedCreatureList: Option[List[String]] = None
   private var lastFetchTime: Option[ZonedDateTime] = None
-  private val cacheValidityHours = 24 // Cache creatures for 24 hours (they don't change frequently)
 
   // Creatures endpoint on TibiaData Api uses pluralization, race is unconventional name
   // Can't be used yet, needs work
@@ -26,19 +25,8 @@ object CreatureManager extends StrictLogging {
   )
 
   def getCreaturesList(): List[String] = {
-    if (isCacheValid()) {
-      logger.debug("Using cached creature list")
-      cachedCreatureList.getOrElse(fallbackCreatureList)
-    } else {
-      logger.info("Cache expired or empty, fetching fresh creature list from API")
-      refreshCreatureList()
-    }
-  }
-
-  private def isCacheValid(): Boolean = {
-    cachedCreatureList.isDefined && lastFetchTime.exists { fetchTime =>
-      ZonedDateTime.now().isBefore(fetchTime.plusHours(cacheValidityHours))
-    }
+    logger.info("Cache expired or empty, fetching fresh creature list from API")
+    refreshCreatureList()
   }
 
   private def refreshCreatureList(): List[String] = {
@@ -60,25 +48,6 @@ object CreatureManager extends StrictLogging {
       case Success(creatures) => creatures
       case Failure(exception) =>
         logger.error(s"Exception while fetching creatures from API: ${exception.getMessage}, using fallback list")
-        cachedCreatureList.getOrElse(fallbackCreatureList)
-    }
-  }
-
-  def refreshCreatureListAsync(): Future[List[String]] = {
-    logger.info("Starting async refresh of creature list")
-    tibiaDataClient.getCreatures().map {
-      case Right(response) =>
-        val creatureNames = response.creatures.creature_list.map(_.name.toLowerCase).sorted
-        cachedCreatureList = Some(creatureNames)
-        lastFetchTime = Some(ZonedDateTime.now())
-        logger.info(s"Successfully refreshed creature list with ${creatureNames.length} creatures")
-        creatureNames
-      case Left(error) =>
-        logger.warn(s"Failed to refresh creatures from API: $error, keeping current cache")
-        cachedCreatureList.getOrElse(fallbackCreatureList)
-    }.recover {
-      case exception =>
-        logger.error(s"Exception during async creature refresh: ${exception.getMessage}, keeping current cache")
         cachedCreatureList.getOrElse(fallbackCreatureList)
     }
   }
