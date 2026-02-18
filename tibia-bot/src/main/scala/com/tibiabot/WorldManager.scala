@@ -15,7 +15,7 @@ object WorldManager extends StrictLogging {
   private val tibiaDataClient = new TibiaDataClient()
   private var cachedWorldList: Option[List[String]] = None
   private var lastFetchTime: Option[ZonedDateTime] = None
-  private val cacheValidityHours = 24 // Cache worlds for 24 hours
+  private val cacheValidityHours = 1
 
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(
@@ -35,19 +35,8 @@ object WorldManager extends StrictLogging {
   )
 
   def getWorldList(): List[String] = {
-    if (isCacheValid()) {
-      logger.debug("Using cached world list")
-      cachedWorldList.getOrElse(fallbackWorldList)
-    } else {
-      logger.info("Cache expired or empty, fetching fresh world list from API")
-      refreshWorldList()
-    }
-  }
-
-  private def isCacheValid(): Boolean = {
-    cachedWorldList.isDefined && lastFetchTime.exists { fetchTime =>
-      ZonedDateTime.now().isBefore(fetchTime.plusHours(cacheValidityHours))
-    }
+    logger.info("Fetching world list from TibiaData API...")
+    refreshWorldList()
   }
 
   private def refreshWorldList(): List[String] = {
@@ -68,25 +57,6 @@ object WorldManager extends StrictLogging {
       case Success(worlds) => worlds
       case Failure(exception) =>
         logger.error(s"Exception while fetching worlds from API: ${exception.getMessage}, using fallback list")
-        cachedWorldList.getOrElse(fallbackWorldList)
-    }
-  }
-
-  def refreshWorldListAsync(): Future[List[String]] = {
-    logger.info("Starting async refresh of world list")
-    tibiaDataClient.getWorlds().map {
-      case Right(response) =>
-        val worldNames = response.worlds.regular_worlds.map(_.name).sorted
-        cachedWorldList = Some(worldNames)
-        lastFetchTime = Some(ZonedDateTime.now())
-        logger.info(s"Successfully refreshed world list with ${worldNames.length} worlds")
-        worldNames
-      case Left(error) =>
-        logger.warn(s"Failed to refresh worlds from API: $error, keeping current cache")
-        cachedWorldList.getOrElse(fallbackWorldList)
-    }.recover {
-      case exception =>
-        logger.error(s"Exception during async world refresh: ${exception.getMessage}, keeping current cache")
         cachedWorldList.getOrElse(fallbackWorldList)
     }
   }
