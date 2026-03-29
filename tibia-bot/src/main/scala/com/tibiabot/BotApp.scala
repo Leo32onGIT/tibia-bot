@@ -441,9 +441,10 @@ object BotApp extends App with StrictLogging {
     } else {
       updateOnOdd += 1
     }
+    // Updating boosted creature/boss at server save
     val machineTimeZone = ZoneId.systemDefault()
-    val currentTime = ZonedDateTime.now(ZoneId.of("Australia/Brisbane")).toLocalTime()
-    if (currentTime.isAfter(LocalTime.of(19, 0)) && currentTime.isBefore(LocalTime.of(19, 45))) {
+    val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
+    if (currentTime.isAfter(LocalTime.of(10, 0)) && currentTime.isBefore(LocalTime.of(10, 45))) {
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -566,9 +567,9 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  // run hunted list cleanup every day at 6:30 PM AEST
+  // run hunted list cleanup every day at 10:30AM CET
   private val currentTime = Instant.now
-  private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(18, 30, 0)).atZone(ZoneId.of("Australia/Sydney")).toInstant
+  private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(10, 30, 0)).atZone(ZoneId.of("Europe/Berlin")).toInstant
   private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
   private val interval = 24.hours
 
