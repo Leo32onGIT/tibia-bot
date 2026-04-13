@@ -5472,6 +5472,24 @@ object BotApp extends App with StrictLogging {
   }
 
   private def creatureImageUrl(creature: String): String = {
+
+    // override wiki images here
+    if (creature == "pvp") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif"
+    } else if (creature == "suicide") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ghost_Smoke_Effect.gif"
+    } else if (creature == "holy") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Holy_Effect.gif"
+    } else if (creature == "death") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Death_Effect.gif"
+    } else if (creature == "ice") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ice_Explosion_Effect.gif"
+    } else if (creature == "drowning") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Reaper_Effect.gif"
+    } else if (creature == "life drain") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Red_Sparkles_Effect.gif"
+    }
+
     val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
       // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
       val rx1 = """([^\w]\w)""".r

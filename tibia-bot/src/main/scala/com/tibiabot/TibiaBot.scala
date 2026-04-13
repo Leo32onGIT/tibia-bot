@@ -806,7 +806,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       if (embedColor == 3092790 || embedColor == 4540237) {
                         embedColor = 14869218 // bone white
                       }
-                      embedThumbnail = s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Chestplate.gif"
+                      embedThumbnail = s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif"
                       val isSummon = k.name.split(" of ", 2) // e.g: fire elemental of Violent Beams
                       if (isSummon.length > 1) {
                         if (!isSummon(0).exists(_.isUpper)) { // summons will be lowercase, a player with " of " in their name will have a capital letter
@@ -974,7 +974,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
               // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
               if (killerText == "") {
-                  embedThumbnail = creatureImageUrl("Red_Skull")
+                  embedThumbnail = s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ghost_Smoke_Effect.gif"
                   killerText = s"""`suicide`"""
               }
 
