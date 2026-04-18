@@ -5472,32 +5472,37 @@ object BotApp extends App with StrictLogging {
   }
 
   private def creatureImageUrl(creature: String): String = {
-    val key = creature.toLowerCase
 
-    val overrides = Map(
-      "pvp" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif",
-      "suicide" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ghost_Smoke_Effect.gif",
-      "fire" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Fire.gif",
-      "holy" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Holy_Effect.gif",
-      "death" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Death_Effect.gif",
-      "ice" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ice_Explosion_Effect.gif",
-      "drowning" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Reaper_Effect.gif",
-      "life drain" -> "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Red_Sparkles_Effect.gif"
-    )
+    // override wiki images here
+    if (creature == "pvp") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif"
+    } else if (creature == "suicide") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ghost_Smoke_Effect.gif"
+    } else if (creature == "holy") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Holy_Effect.gif"
+    } else if (creature == "death") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Death_Effect.gif"
+    } else if (creature == "ice") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ice_Explosion_Effect.gif"
+    } else if (creature == "drowning") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Reaper_Effect.gif"
+    } else if (creature == "life drain") {
+      return "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Red_Sparkles_Effect.gif"
+    }
 
-    overrides.getOrElse(key, {
-      val mapped = Config.creatureUrlMappings.getOrElse(key, {
-        val rx1 = """([^\w]\w)""".r
-        val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
+    val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
+      // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
+      val rx1 = """([^\w]\w)""".r
+      val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
 
-        val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
-        val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
+      // Lowercase the articles, prepositions etc., e.g. "The Voice of Ruin"
+      val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
+      val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
 
-        parsed2.replaceAll(" ", "_")
-      })
-
-      s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$mapped.gif"
+      // Replace spaces with underscores and make sure the first letter is capitalised
+      parsed2.replaceAll(" ", "_").capitalize
     })
+    s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$finalCreature.gif"
   }
 
   def creatureWikiUrl(creature: String): String = {
