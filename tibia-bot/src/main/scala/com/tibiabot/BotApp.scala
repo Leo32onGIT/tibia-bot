@@ -2948,6 +2948,17 @@ object BotApp extends App with StrictLogging {
     }
 
     // Check if the column already exists in the table
+    val allyPkExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'allypk_role'")
+    val allyPkExists = allyPkExistsQuery.next()
+    allyPkExistsQuery.close()
+
+    // Add the allyPk if it doesn't exist
+    if (!allyPkExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN allypk_role VARCHAR(255) DEFAULT '0'")
+    }
+
+
+    // Check if the column already exists in the table
     val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
     val activityExists = activityExistsQuery.next()
     activityExistsQuery.close()
@@ -2967,7 +2978,7 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -2980,9 +2991,9 @@ object BotApp extends App with StrictLogging {
       val category = Option(result.getString("category")).getOrElse(null)
       val fullblessRole = Option(result.getString("fullbless_role")).getOrElse(null)
       val nemesisRole = Option(result.getString("nemesis_role")).getOrElse(null)
+      val allyPkRole = Option(result.getString("allypk_role")).getOrElse(null)
       val fullblessChannel = Option(result.getString("fullbless_channel")).getOrElse(null)
       val nemesisChannel = Option(result.getString("nemesis_channel")).getOrElse(null)
-
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
       val showNeutralLevels = Option(result.getString("show_neutral_levels")).getOrElse("true")
       val showNeutralDeaths = Option(result.getString("show_neutral_deaths")).getOrElse("true")
@@ -2999,7 +3010,7 @@ object BotApp extends App with StrictLogging {
 
       // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
       if (!Config.mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
       }
     }
 
