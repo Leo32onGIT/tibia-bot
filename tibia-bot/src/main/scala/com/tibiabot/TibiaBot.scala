@@ -800,7 +800,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                     if (k.name != charName) { // ignore 'self' entries on deathlist
                       context = "Killed"
                       if (allyPlayers || allyGuilds) {
-                        notablePoke "allypk"
+                        notablePoke = "allypk"
                       } else if (huntedPlayers || huntedGuilds) {
                         notablePoke = "screenshot"
                       } else {
