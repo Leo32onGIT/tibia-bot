@@ -3032,7 +3032,7 @@ object BotApp extends App with StrictLogging {
     statement.setString(7, category)
     statement.setString(8, fullblessRole)
     statement.setString(9, nemesisRole)
-    statement.setString(10, allypkRole)
+    statement.setString(10, allyPkRole)
     statement.setString(11, fullblessChannel)
     statement.setString(12, nemesisChannel)
     statement.setInt(13, 250)
