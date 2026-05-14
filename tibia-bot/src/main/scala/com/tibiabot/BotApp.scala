@@ -3056,21 +3056,22 @@ object BotApp extends App with StrictLogging {
     statement.setString(31, category)
     statement.setString(32, fullblessRole)
     statement.setString(33, nemesisRole)
-    statement.setString(34, fullblessChannel)
-    statement.setString(35, nemesisChannel)
-    statement.setInt(36, 250)
-    statement.setString(37, "true")
+    statement.setString(34, allyPkRole)
+    statement.setString(35, fullblessChannel)
+    statement.setString(36, nemesisChannel)
+    statement.setInt(37, 250)
     statement.setString(38, "true")
     statement.setString(39, "true")
     statement.setString(40, "true")
     statement.setString(41, "true")
     statement.setString(42, "true")
-    statement.setString(43, "on")
-    statement.setInt(44, 8)
+    statement.setString(43, "true")
+    statement.setString(44, "on")
     statement.setInt(45, 8)
-    statement.setString(46, "false")
-    statement.setString(47, activityChannel)
-    statement.setString(48, "true")
+    statement.setInt(46, 8)
+    statement.setString(47, "false")
+    statement.setString(48, activityChannel)
+    statement.setString(49, "true")
     statement.executeUpdate()
 
     statement.close()
@@ -3205,9 +3206,9 @@ object BotApp extends App with StrictLogging {
       val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
 
-      val allyPkRoleString = s"$world Hunted is Skulled"
+      val allyPkRoleString = s"$world Ally Killed"
       val allyPkCheck = guild.getRolesByName(allyPkRoleString, true)
-      val allyPkRole = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkRoleString).setColor(new Color(175, 0, 0)).complete()
+      val allyPkRole = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkRoleString).setColor(new Color(220, 0, 0)).complete()
 
       val worldCount = worldConfig(guild)
       val count = worldCount.length
@@ -3416,11 +3417,12 @@ object BotApp extends App with StrictLogging {
         if (notificationsChannel != null) {
           if (notificationsChannel.canTalk()) {
             // Fullbless Role
-            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `250`.\nAdd or remove yourself from the role using the buttons below."
+            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `250`."
             val fullblessEmbed = new EmbedBuilder()
             fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
             fullblessEmbed.setThumbnail(Config.aolThumbnail)
             fullblessEmbed.setColor(3092790)
+            fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
               .setActionRow(
@@ -3433,11 +3435,12 @@ object BotApp extends App with StrictLogging {
             val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
             val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
-            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
             val nemesisEmbed = new EmbedBuilder()
             nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
             nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
             nemesisEmbed.setColor(3092790)
+            nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             nemesisEmbed.setDescription(nemesisEmbedText)
             notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
               .setActionRow(
@@ -3445,7 +3448,22 @@ object BotApp extends App with StrictLogging {
                 Button.danger("remove", "Remove Role")
               )
               .queue()
-          }
+
+            // Hunted is Skulled role
+            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
+            val allyPkEmbed = new EmbedBuilder()
+            allyPkEmbed.setTitle(s"${Config.hazardEmoji} $world ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+            allyPkEmbed.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
+            allyPkEmbed.setColor(3092790)
+            allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
+            allyPkEmbed.setDescription(allyPkEmbedText)
+            notificationsChannel.sendMessageEmbeds(allyPkEmbed.build())
+              .setActionRow(
+                Button.success(s"add", "Add Role"),
+                Button.danger(s"remove", "Remove Role")
+              )
+              .queue()
+            }
         }
 
         val alliesId = alliesChannel.getId
@@ -4465,11 +4483,12 @@ object BotApp extends App with StrictLogging {
             if (messages.nonEmpty) {
               val message = messages.head
               val roleId = worldConfigData("fullbless_role")
-              val fullblessEmbedText = s"The bot will poke <@&$roleId>\n\nIf an enemy player dies fullbless and is over level `$level`.\nAdd or remove yourself from the role using the buttons below."
+              val fullblessEmbedText = s"The bot will poke <@&$roleId>\nIf an enemy player dies fullbless and is over level `$level`."
               val fullblessEmbed = new EmbedBuilder()
               fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
               fullblessEmbed.setThumbnail(Config.aolThumbnail)
               fullblessEmbed.setColor(3092790)
+              fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
               fullblessEmbed.setDescription(fullblessEmbedText)
               message.editMessageEmbeds(fullblessEmbed.build())
               .setActionRow(
@@ -4629,11 +4648,12 @@ object BotApp extends App with StrictLogging {
             val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
 
             // post fullbless message again
-            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
+            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`."
             val fullblessEmbed = new EmbedBuilder()
             fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
             fullblessEmbed.setThumbnail(Config.aolThumbnail)
             fullblessEmbed.setColor(3092790)
+            fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
               .setActionRow(
@@ -4659,15 +4679,16 @@ object BotApp extends App with StrictLogging {
           if (!allyPkMessage) {
             // post nemesis message again
             val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Hunted is Skulled").setColor(new Color(175, 0, 0)).complete() else allyPkRoleCheck
+            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
             val worldCount = worldConfig(guild)
             val count = worldCount.length
 
-            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\n\nIf an ally dies to a hunted player."
+            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
             val allyPkEmbed = new EmbedBuilder()
             allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            allyPkEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/coffin.gif")
+            allyPkEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             allyPkEmbed.setColor(3092790)
+            allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             allyPkEmbed.setDescription(allyPkEmbedText)
             boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
               .setActionRow(
@@ -4700,11 +4721,12 @@ object BotApp extends App with StrictLogging {
             val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
             val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
-            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
             val nemesisEmbed = new EmbedBuilder()
             nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
             nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
             nemesisEmbed.setColor(3092790)
+            nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             nemesisEmbed.setDescription(nemesisEmbedText)
             boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
               .setActionRow(
@@ -5017,11 +5039,12 @@ object BotApp extends App with StrictLogging {
           val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
 
           // post fullbless message again
-          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\n\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`.\nAdd or remove yourself from the role using the buttons below."
+          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`."
           val fullblessEmbed = new EmbedBuilder()
           fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
           fullblessEmbed.setThumbnail(Config.aolThumbnail)
           fullblessEmbed.setColor(3092790)
+          fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           fullblessEmbed.setDescription(fullblessEmbedText)
           boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
             .setActionRow(
@@ -5052,11 +5075,12 @@ object BotApp extends App with StrictLogging {
           val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
           val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
-          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\n\nIf anyone dies to a rare boss (so you can go steal it).\nAdd or remove yourself from the role using the buttons below."
+          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
           val nemesisEmbed = new EmbedBuilder()
           nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
           nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
           nemesisEmbed.setColor(3092790)
+          nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           nemesisEmbed.setDescription(nemesisEmbedText)
           boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
             .setActionRow(
@@ -5082,15 +5106,14 @@ object BotApp extends App with StrictLogging {
 
           // post hunted is skulled message again
           val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Hunted is Skulled").setColor(new Color(175, 0, 0)).complete() else allyPkRoleCheck
-          val worldCount = worldConfig(guild)
-          val count = worldCount.length
+          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
 
-          val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\n\nIf an ally dies to a hunted player."
+          val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
           val allyPkEmbed = new EmbedBuilder()
           allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          allyPkEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/coffin.gif")
+          allyPkEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
           allyPkEmbed.setColor(3092790)
+          allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           allyPkEmbed.setDescription(allyPkEmbedText)
           boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
             .setActionRow(
