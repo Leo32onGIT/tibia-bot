@@ -706,7 +706,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
         val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
         val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
-        val allyHelpRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
+        val allyHelpRole = worldData.headOption.map(_.allyPkRole).getOrElse("0")
         val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
         /**
@@ -1055,13 +1055,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue()
                       }
                     } else if (embed._2 == "allypk") {
-                      val adjustedEmbed = embed._1.setDescription(embed._4)
                       if (guild.getRoleById(allyHelpRole) != null) { // a way to poke when allies get pked
                         deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
-                          .setEmbeds(adjustedEmbed.build())
+                          .setEmbeds(embed._1.build())
                           .queue()
                       } else {
-                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
                           .queue()
                       }
                     } else if (embed._2 == "fullbless") {
