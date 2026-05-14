@@ -2765,6 +2765,7 @@ object BotApp extends App with StrictLogging {
             |category VARCHAR(255) NOT NULL,
             |fullbless_role VARCHAR(255) NOT NULL,
             |nemesis_role VARCHAR(255) NOT NULL,
+            |allypk_role VARCHAR(255) NOT NULL,
             |fullbless_channel VARCHAR(255) NOT NULL,
             |nemesis_channel VARCHAR(255) NOT NULL,
             |fullbless_level INT NOT NULL,
