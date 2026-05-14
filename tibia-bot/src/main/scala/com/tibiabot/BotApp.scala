@@ -3206,7 +3206,7 @@ object BotApp extends App with StrictLogging {
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
 
       val allyPkRoleString = s"$world Hunted is Skulled"
-      val allyPkCheck = guild.getRolesByName(allyPkString, true)
+      val allyPkCheck = guild.getRolesByName(allyPkRoleString, true)
       val allyPk = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkString).setColor(new Color(175, 0, 0)).complete()
 
       val worldCount = worldConfig(guild)
