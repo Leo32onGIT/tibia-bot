@@ -855,7 +855,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
           responseText = s"${Config.noEmoji} The role you are trying to add/remove yourself from has been deleted, please notify a discord mod for this server."
         }
       } else if (roleType == "allypk") {
-        val world = title.replace(s"${Config.allypkEmoji}", "").trim()
+        val world = title.replace(s"${Config.hazardEmoji}", "").trim()
         val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
         val role = guild.getRoleById(worldConfigData("allypk_role"))
         if (role != null) {
