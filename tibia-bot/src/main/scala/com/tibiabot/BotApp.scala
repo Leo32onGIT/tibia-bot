@@ -52,6 +52,7 @@ object BotApp extends App with StrictLogging {
     category: String,
     fullblessRole: String,
     nemesisRole: String,
+    allyPkRole: String,
     fullblessChannel: String,
     nemesisChannel: String,
     fullblessLevel: Int,
@@ -3006,9 +3007,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
+  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -3019,44 +3020,45 @@ object BotApp extends App with StrictLogging {
     statement.setString(7, category)
     statement.setString(8, fullblessRole)
     statement.setString(9, nemesisRole)
-    statement.setString(10, fullblessChannel)
-    statement.setString(11, nemesisChannel)
-    statement.setInt(12, 250)
-    statement.setString(13, "true")
+    statement.setString(10, allypkRole)
+    statement.setString(11, fullblessChannel)
+    statement.setString(12, nemesisChannel)
+    statement.setInt(13, 250)
     statement.setString(14, "true")
     statement.setString(15, "true")
     statement.setString(16, "true")
     statement.setString(17, "true")
     statement.setString(18, "true")
-    statement.setString(19, "on")
-    statement.setInt(20, 8)
+    statement.setString(19, "true")
+    statement.setString(20, "on")
     statement.setInt(21, 8)
-    statement.setString(22, "false")
-    statement.setString(23, activityChannel)
-    statement.setString(24, "true")
-    statement.setString(25, alliesChannel)
-    statement.setString(26, enemiesChannel)
-    statement.setString(27, neutralsChannels)
-    statement.setString(28, levelsChannel)
-    statement.setString(29, deathsChannel)
-    statement.setString(30, category)
-    statement.setString(31, fullblessRole)
-    statement.setString(32, nemesisRole)
-    statement.setString(33, fullblessChannel)
-    statement.setString(34, nemesisChannel)
-    statement.setInt(35, 250)
-    statement.setString(36, "true")
+    statement.setInt(22, 8)
+    statement.setString(23, "false")
+    statement.setString(24, activityChannel)
+    statement.setString(25, "true")
+    statement.setString(26, alliesChannel)
+    statement.setString(27, enemiesChannel)
+    statement.setString(28, neutralsChannels)
+    statement.setString(29, levelsChannel)
+    statement.setString(30, deathsChannel)
+    statement.setString(31, category)
+    statement.setString(32, fullblessRole)
+    statement.setString(33, nemesisRole)
+    statement.setString(34, fullblessChannel)
+    statement.setString(35, nemesisChannel)
+    statement.setInt(36, 250)
     statement.setString(37, "true")
     statement.setString(38, "true")
     statement.setString(39, "true")
     statement.setString(40, "true")
     statement.setString(41, "true")
-    statement.setString(42, "on")
-    statement.setInt(43, 8)
+    statement.setString(42, "true")
+    statement.setString(43, "on")
     statement.setInt(44, 8)
-    statement.setString(45, "false")
-    statement.setString(46, activityChannel)
-    statement.setString(47, "true")
+    statement.setInt(45, 8)
+    statement.setString(46, "false")
+    statement.setString(47, activityChannel)
+    statement.setString(48, "true")
     statement.executeUpdate()
 
     statement.close()
@@ -3134,6 +3136,7 @@ object BotApp extends App with StrictLogging {
           configMap += ("category" -> result.getString("category"))
           configMap += ("fullbless_role" -> result.getString("fullbless_role"))
           configMap += ("nemesis_role" -> result.getString("nemesis_role"))
+          configMap += ("allypk_role" -> result.getString("allypk_role"))
           configMap += ("fullbless_channel" -> result.getString("fullbless_channel"))
           configMap += ("nemesis_channel" -> result.getString("nemesis_channel"))
           configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
@@ -3189,6 +3192,10 @@ object BotApp extends App with StrictLogging {
       val nemesisRoleString = s"$world Nemesis Boss"
       val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
+
+      val allyPkRoleString = s"$world Hunted is Skulled"
+      val allyPkCheck = guild.getRolesByName(allyPkString, true)
+      val allyPk = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkString).setColor(new Color(175, 0, 0)).complete()
 
       val worldCount = worldConfig(guild)
       val count = worldCount.length
@@ -3468,7 +3475,7 @@ object BotApp extends App with StrictLogging {
         }
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, "0", "0", activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
@@ -4580,6 +4587,7 @@ object BotApp extends App with StrictLogging {
         if (boostedChannel.canTalk()) {
           var fullblessMessage = false
           var nemesisMessage = false
+          var allyPkMessage = false
           val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
             m.getAuthor.getId.equals(botUser) && !m.isEphemeral
           }
@@ -4595,6 +4603,8 @@ object BotApp extends App with StrictLogging {
                     fullblessMessage = true
                   } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $worldFormal")) {
                     nemesisMessage = true
+                  } else if (messageTitle.startsWith(s"${Config.hazardEmoji} $worldFormal")) {
+                    allyPkMessage = true
                   }
                 }
               }
@@ -4627,6 +4637,41 @@ object BotApp extends App with StrictLogging {
               val updatedWorldsList = worldsList.map { world =>
                 if (world.name.toLowerCase == worldFormal.toLowerCase) {
                   world.copy(fullblessChannel = "0", fullblessRole = fullblessRole.getId)
+                } else {
+                  world
+                }
+              }
+              worldsData += (guild.getId -> updatedWorldsList)
+            }
+          }
+          if (!allyPkMessage) {
+            // post nemesis message again
+            val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Hunted is Skulled").setColor(new Color(175, 0, 0)).complete() else allyPkRoleCheck
+            val worldCount = worldConfig(guild)
+            val count = worldCount.length
+
+            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\n\nIf an ally dies to a hunted player."
+            val allyPkEmbed = new EmbedBuilder()
+            allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+            allyPkEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/coffin.gif")
+            allyPkEmbed.setColor(3092790)
+            allyPkEmbed.setDescription(allyPkEmbedText)
+            boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
+              .setActionRow(
+                Button.success("add", "Add Role"),
+                Button.danger("remove", "Remove Role")
+              )
+              .queue()
+            // Update role id if it changed
+            worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
+
+            // update the record in worldsData
+            if (worldsData.contains(guild.getId)) {
+              val worldsList = worldsData(guild.getId)
+              val updatedWorldsList = worldsList.map { world =>
+                if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                  world.copy(allyPkRole = allyPkRole.getId)
                 } else {
                   world
                 }
@@ -4986,6 +5031,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
+
           // post nemesis message again
           val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
           val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
@@ -5021,6 +5067,41 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
+
+          // post hunted is skulled message again
+          val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Hunted is Skulled").setColor(new Color(175, 0, 0)).complete() else allyPkRoleCheck
+          val worldCount = worldConfig(guild)
+          val count = worldCount.length
+
+          val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\n\nIf an ally dies to a hunted player."
+          val allyPkEmbed = new EmbedBuilder()
+          allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
+          allyPkEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/coffin.gif")
+          allyPkEmbed.setColor(3092790)
+          allyPkEmbed.setDescription(allyPkEmbedText)
+          boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
+            .setActionRow(
+              Button.success("add", "Add Role"),
+              Button.danger("remove", "Remove Role")
+            )
+            .queue()
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
+
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(allyPkRole = allyPkRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
+
         }
 
         // apply required permissions to the new channel(s)

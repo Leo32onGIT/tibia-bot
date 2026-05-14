@@ -706,6 +706,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
         val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
         val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
+        val allyHelpRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
         val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
         /**
@@ -798,7 +799,9 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   if (k.player) {
                     if (k.name != charName) { // ignore 'self' entries on deathlist
                       context = "Killed"
-                      if (huntedPlayers || huntedGuilds || allyPlayers || allyGuilds) {
+                      if (allyPlayers || allyGuilds) {
+                        notablePoke "allypk"
+                      } else if (huntedPlayers || huntedGuilds) {
                         notablePoke = "screenshot"
                       } else {
                         notablePoke = "" // reset poke as its not a fullbless
@@ -1049,6 +1052,16 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           .queue()
                       } else {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .queue()
+                      }
+                    } else if (embed._2 == "allypk") {
+                      val adjustedEmbed = embed._1.setDescription(embed._4)
+                      if (guild.getRoleById(allyHelpRole) != null) { // a way to poke when allies get pked
+                        deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
+                          .setEmbeds(adjustedEmbed.build())
+                          .queue()
+                      } else {
+                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
                           .queue()
                       }
                     } else if (embed._2 == "fullbless") {
