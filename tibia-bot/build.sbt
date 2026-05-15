@@ -27,5 +27,9 @@ libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.15"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
 libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.3.18"
+libraryDependencies += "org.jsoup" % "jsoup" % "1.17.2"
+libraryDependencies += "io.circe" %% "circe-core" % "0.14.10"
+libraryDependencies += "io.circe" %% "circe-parser" % "0.14.10"
 
 resolvers += "jitpack" at "https://jitpack.io"

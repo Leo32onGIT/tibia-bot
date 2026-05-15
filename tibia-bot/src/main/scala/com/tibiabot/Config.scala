@@ -88,6 +88,7 @@ object Config {
  val torchOnEmoji: String = discord.getString("torch-on-emoji")
  val torchOffEmoji: String = discord.getString("torch-off-emoji")
  val satchelEmoji: String = discord.getString("satchel-emoji")
+ val dreamScarEmoji: String = discord.getString("dreamscar-emoji")
   // Rate limiting configuration
   val messageDelayMs: Int = discord.getInt("message-delay-ms")
   val batchSize: Int = discord.getInt("batch-size")

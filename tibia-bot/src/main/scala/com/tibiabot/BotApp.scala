@@ -24,7 +24,7 @@ import net.dv8tion.jda.api.entities.Message
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
-import java.time.{Instant, ZoneOffset, ZonedDateTime}
+import java.time.{Instant, ZoneOffset, ZonedDateTime, DayOfWeek}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
@@ -40,6 +40,12 @@ import java.nio.charset.StandardCharsets
 import scala.util.Random
 import scala.concurrent.Await
 import scala.concurrent.duration._
+
+import sttp.client3._
+import org.jsoup.Jsoup
+import scala.jdk.CollectionConverters._
+import io.circe.parser._
+import io.circe.HCursor
 
 object BotApp extends App with StrictLogging {
 
@@ -83,6 +89,7 @@ object BotApp extends App with StrictLogging {
   case class BoostedStamp(user: String, boostedType: String, boostedName: String)
   case class DeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, addedAt: ZonedDateTime, messageId: String)
   case class CustomSort(entityType: String, name: String, label: String, emoji: String)
+  case class BossEntry(world: String, boss: String)
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
@@ -122,6 +129,17 @@ object BotApp extends App with StrictLogging {
   var worldsData: Map[String, List[Worlds]] = Map.empty
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
+
+  val bossCycle = Vector(
+    "Plagueroot",
+    "Malofur Mangrinder",
+    "Maxxenius",
+    "Alptramun",
+    "Izcandar the Banished"
+  )
+  val indexOfBoss: Map[String, Int] = bossCycle.zipWithIndex.toMap
+  var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
+  var dreamScarLastCheck: String = System.currentTimeMillis().toString
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -446,6 +464,15 @@ object BotApp extends App with StrictLogging {
     val machineTimeZone = ZoneId.systemDefault()
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
     if (currentTime.isAfter(LocalTime.of(10, 0)) && currentTime.isBefore(LocalTime.of(10, 45))) {
+      try{
+        if (System.currentTimeMillis() - dreamScarLastCheck.toLong > 1L * 60 * 60 * 1000) {
+          dreamScarLastCheck = System.currentTimeMillis().toString
+          dreamScar = shiftAllBossesUp(dreamScar)
+        }
+      }
+      catch {
+        case _ : Throwable => logger.info("Failed to get Dream Boss info from wiki")
+      }
       try {
         boostedMessages().map { boostedBossAndCreature =>
           val currentBoss = boostedBossAndCreature.boss
@@ -529,6 +556,7 @@ object BotApp extends App with StrictLogging {
                 if (checkConfigDatabase(guild)) {
                   val discordInfo = discordRetrieveConfig(guild)
                   val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+                  val lastWorld = if (discordInfo.nonEmpty) discordInfo("last_world") else "Antica"
                   if (channelId != "0") {
                     val boostedChannel = guild.getTextChannelById(channelId)
                     if (boostedChannel != null) {
@@ -541,13 +569,38 @@ object BotApp extends App with StrictLogging {
                             case _: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':")
                           }
                         }
-                        boostedChannel.sendMessageEmbeds(embeds.asJava)
+
+                        val dreamScarDaily = dreamScar.getOrElse(lastWorld, "World not found")
+                        val rashidLocation =
+                          Map(
+                            DayOfWeek.MONDAY    -> "Svargrond",
+                            DayOfWeek.TUESDAY   -> "Liberty Bay",
+                            DayOfWeek.WEDNESDAY -> "Port Hope",
+                            DayOfWeek.THURSDAY  -> "Ankrahmun",
+                            DayOfWeek.FRIDAY    -> "Darashia",
+                            DayOfWeek.SATURDAY  -> "Edron",
+                            DayOfWeek.SUNDAY    -> "Carlin"
+                          ).getOrElse(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek, "Unknown")
+
+                        val rashidEmbed = new EmbedBuilder()
+                        rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+                        rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+                        rashidEmbed.setColor(3092790)
+
+                        val dreamScarEmbed = new EmbedBuilder()
+                        dreamScarEmbed.setDescription(s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+                        dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
+                        dreamScarEmbed.setColor(3092790)
+
+                        val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ List(rashidEmbed.build(), dreamScarEmbed.build())
+
+                        boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
                           .setActionRow(
                             Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                           )
                           .queue((message: Message) => {
                             //updateBoostedMessage(guild.getId, message.getId)
-                            discordUpdateConfig(guild, "", "", "", message.getId)
+                            discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
                           }, (e: Throwable) => {
                             logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
                           })
@@ -2905,6 +2958,15 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_channel VARCHAR(255) DEFAULT '0'")
     }
 
+    val lastWorldExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'last_world'")
+    val lastWorldExists = lastWorldExistsQuery.next()
+    lastWorldExistsQuery.close()
+
+    // Add the column if it doesn't exist
+    if (!lastWorldExists) {
+      statement.execute("ALTER TABLE discord_info ADD COLUMN last_world VARCHAR(255) DEFAULT '0'")
+    }
+
     val messageExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_messageid'")
     val messageExists = messageExistsQuery.next()
     messageExistsQuery.close()
@@ -2923,6 +2985,7 @@ object BotApp extends App with StrictLogging {
       configMap += ("admin_channel" -> result.getString("admin_channel"))
       configMap += ("boosted_channel" -> result.getString("boosted_channel"))
       configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
+      configMap += ("last_world" -> result.getString("last_world"))
       configMap += ("flags" -> result.getString("flags"))
       configMap += ("created" -> result.getString("created"))
     }
@@ -3095,7 +3158,7 @@ object BotApp extends App with StrictLogging {
     conn.close()
   }
 
-  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String): Unit = {
+  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String, lastWorld: String): Unit = {
     val conn = getConnection(guild)
     // update category if exists
     if (adminCategory != "") {
@@ -3124,6 +3187,14 @@ object BotApp extends App with StrictLogging {
       // update channel
       val statement = conn.prepareStatement("UPDATE discord_info SET boosted_messageid = ?;")
       statement.setString(1, boostedMessage)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+    if (lastWorld != "") {
+      // update channel
+      val statement = conn.prepareStatement("UPDATE discord_info SET last_world = ?;")
+      statement.setString(1, lastWorld)
       statement.executeUpdate()
       statement.close()
     }
@@ -3235,7 +3306,7 @@ object BotApp extends App with StrictLogging {
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
-        discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+        discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
         val galthenEmbed = new EmbedBuilder()
         galthenEmbed.setColor(3092790)
@@ -3275,18 +3346,74 @@ object BotApp extends App with StrictLogging {
           creatureEmbed <- creatureEmbedFuture
         } yield List(bossEmbed, creatureEmbed)
 
-        combinedFutures
-          .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-            .setActionRow(
-              Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+        combinedFutures.map { embeds =>
+
+          val dreamScarDaily =
+            dreamScar.getOrElse(world, "World not found")
+
+          val rashidLocation =
+            Map(
+              DayOfWeek.MONDAY    -> "Svargrond",
+              DayOfWeek.TUESDAY   -> "Liberty Bay",
+              DayOfWeek.WEDNESDAY -> "Port Hope",
+              DayOfWeek.THURSDAY  -> "Ankrahmun",
+              DayOfWeek.FRIDAY    -> "Darashia",
+              DayOfWeek.SATURDAY  -> "Edron",
+              DayOfWeek.SUNDAY    -> "Carlin"
+            ).getOrElse(
+              ZonedDateTime
+                .now(ZoneId.of("Europe/Berlin"))
+                .minusHours(10)
+                .getDayOfWeek,
+              "Unknown"
             )
-            .queue((message: Message) => {
-              //updateBoostedMessage(guild.getId, message.getId)
-              discordUpdateConfig(guild, "", "", "", message.getId)
-            }, (e: Throwable) => {
-              logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-            })
-          )
+
+          val rashidEmbed = new EmbedBuilder()
+            .setDescription(
+              s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
+            )
+            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+            .setColor(3092790)
+            .build()
+
+          val dreamScarEmbed = new EmbedBuilder()
+            .setDescription(
+              s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+            )
+            .setThumbnail(creatureImageUrl(dreamScarDaily))
+            .setColor(3092790)
+            .build()
+
+          val addRashidDreamScarEmbeds: List[MessageEmbed] =
+            embeds ++ List(rashidEmbed, dreamScarEmbed)
+
+          boostedChannel
+            .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+            .setActionRow(
+              Button.primary(
+                "boosted list",
+                "Server Save Notifications"
+              ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+            )
+            .queue(
+              (message: Message) => {
+                discordUpdateConfig(
+                  guild,
+                  "",
+                  "",
+                  "",
+                  message.getId,
+                  world
+                )
+              },
+              (e: Throwable) => {
+                logger.warn(
+                  s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':",
+                  e
+                )
+              }
+            )
+        }
       } else {
         var adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
@@ -3299,7 +3426,7 @@ object BotApp extends App with StrictLogging {
             .grant(Permission.MESSAGE_SEND)
             .complete()
           adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-          discordUpdateConfig(guild, adminCategory.getId, "", "", "")
+          discordUpdateConfig(guild, adminCategory.getId, "", "", "", world)
           adminCategoryCheck = adminCategory
         }
         if (adminChannelCheck == null) {
@@ -3309,7 +3436,7 @@ object BotApp extends App with StrictLogging {
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-          discordUpdateConfig(guild, "", adminChannel.getId, "", "")
+          discordUpdateConfig(guild, "", adminChannel.getId, "", "", world)
         }
         if (boostedChannelCheck == null) {
           // admin category still exists
@@ -3318,7 +3445,7 @@ object BotApp extends App with StrictLogging {
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
-          discordUpdateConfig(guild, "", "", boostedChannel.getId, "")
+          discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
           val galthenEmbed = new EmbedBuilder()
           galthenEmbed.setColor(3092790)
@@ -3365,7 +3492,7 @@ object BotApp extends App with StrictLogging {
               )
               .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId, world)
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
@@ -3416,51 +3543,20 @@ object BotApp extends App with StrictLogging {
 
         if (notificationsChannel != null) {
           if (notificationsChannel.canTalk()) {
+
             // Fullbless Role
-            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `250`."
             val fullblessEmbed = new EmbedBuilder()
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
             fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-            fullblessEmbed.setThumbnail(Config.aolThumbnail)
+            fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
             fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
               .setActionRow(
-                Button.success(s"add", "Add Role"),
-                Button.danger(s"remove", "Remove Role")
-              )
-              .queue()
-
-            // Nemesis role
-            val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-            val nemesisThumbnail = nemesisList(count % nemesisList.size)
-
-            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
-            val nemesisEmbed = new EmbedBuilder()
-            nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $world ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-            nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-            nemesisEmbed.setColor(3092790)
-            nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            nemesisEmbed.setDescription(nemesisEmbedText)
-            notificationsChannel.sendMessageEmbeds(nemesisEmbed.build())
-              .setActionRow(
-                Button.success("add", "Add Role"),
-                Button.danger("remove", "Remove Role")
-              )
-              .queue()
-
-            // Hunted is Skulled role
-            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
-            val allyPkEmbed = new EmbedBuilder()
-            allyPkEmbed.setTitle(s"${Config.hazardEmoji} $world ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-            allyPkEmbed.setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-            allyPkEmbed.setColor(3092790)
-            allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            allyPkEmbed.setDescription(allyPkEmbedText)
-            notificationsChannel.sendMessageEmbeds(allyPkEmbed.build())
-              .setActionRow(
-                Button.success(s"add", "Add Role"),
-                Button.danger(s"remove", "Remove Role")
+                Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
+                Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
+                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
               )
               .queue()
             }
@@ -4482,19 +4578,25 @@ object BotApp extends App with StrictLogging {
             val messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(botUser))
             if (messages.nonEmpty) {
               val message = messages.head
-              val roleId = worldConfigData("fullbless_role")
-              val fullblessEmbedText = s"The bot will poke <@&$roleId>\nIf an enemy player dies fullbless and is over level `$level`."
+              val fullblessRole = worldConfigData("fullbless_role")
+              val nemesisRole = worldConfigData("nemesis_role")
+              val allyPkRole = worldConfigData("allypk_role")
+
+              // Fullbless Role
               val fullblessEmbed = new EmbedBuilder()
+              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked"
               fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-              fullblessEmbed.setThumbnail(Config.aolThumbnail)
+              fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
               fullblessEmbed.setColor(3092790)
               fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
               fullblessEmbed.setDescription(fullblessEmbedText)
               message.editMessageEmbeds(fullblessEmbed.build())
-              .setActionRow(
-                Button.success(s"add", "Add Role"),
-                Button.danger(s"remove", "Remove Role")
-              ).queue()
+                .setActionRow(
+                  Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
+                  Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
+                  Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
+                )
+                .queue()
             }
           }
         }
@@ -4646,21 +4748,28 @@ object BotApp extends App with StrictLogging {
             val fullblessLevel = worldConfigData("fullbless_level")
             val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
             val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
+            val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
+            val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+            val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
 
-            // post fullbless message again
-            val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`."
+
+            // Fullbless Role
             val fullblessEmbed = new EmbedBuilder()
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
             fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            fullblessEmbed.setThumbnail(Config.aolThumbnail)
+            fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
             fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
               .setActionRow(
-                Button.success(s"add", "Add Role"),
-                Button.danger(s"remove", "Remove Role")
+                Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
+                Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
+                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
               )
               .queue()
+
             // Update role id if it changed
             worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
             // update the record in worldsData
@@ -4676,6 +4785,7 @@ object BotApp extends App with StrictLogging {
               worldsData += (guild.getId -> updatedWorldsList)
             }
           }
+          /**
           if (!allyPkMessage) {
             // post nemesis message again
             val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
@@ -4750,6 +4860,7 @@ object BotApp extends App with StrictLogging {
               worldsData += (guild.getId -> updatedWorldsList)
             }
           }
+          **/
           if (boostedMessage != "0") {
             val boostedMessageAction = boostedChannel.retrieveMessageById(boostedMessage)
             try {
@@ -4786,19 +4897,63 @@ object BotApp extends App with StrictLogging {
                   creatureEmbed <- creatureEmbedFuture
                 } yield List(bossEmbed, creatureEmbed)
 
-                combinedFutures
-                  .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-                    .setActionRow(
-                      Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                combinedFutures.map { embeds =>
+                  val dreamScarDaily = dreamScar.getOrElse(worldFormal, "World not found")
+                  val rashidLocation =
+                    Map(
+                      DayOfWeek.MONDAY    -> "Svargrond",
+                      DayOfWeek.TUESDAY   -> "Liberty Bay",
+                      DayOfWeek.WEDNESDAY -> "Port Hope",
+                      DayOfWeek.THURSDAY  -> "Ankrahmun",
+                      DayOfWeek.FRIDAY    -> "Darashia",
+                      DayOfWeek.SATURDAY  -> "Edron",
+                      DayOfWeek.SUNDAY    -> "Carlin"
+                    ).getOrElse(
+                      ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
+                        .minusHours(10)
+                        .getDayOfWeek,
+                      "Unknown"
                     )
-                    .queue((message: Message) => {
-                      //updateBoostedMessage(guild.getId, message.getId)
-                      discordUpdateConfig(guild, "", "", "", message.getId)
-                    }, (e: Throwable) => {
-                      logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                    })
-                  )
-                embedBuild.setDescription(s"${Config.yesEmoji} The missing boosted boss/creature embed has been re-created.")
+
+                  val rashidEmbed = new EmbedBuilder()
+                    .setDescription(
+                      s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
+                    )
+                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+                    .setColor(3092790)
+                    .build()
+
+                  val dreamScarEmbed = new EmbedBuilder()
+                    .setDescription(
+                      s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+                    )
+                    .setThumbnail(creatureImageUrl(dreamScarDaily))
+                    .setColor(3092790)
+                    .build()
+
+                  val finalEmbeds =
+                    embeds ++ List(rashidEmbed, dreamScarEmbed)
+
+                  boostedChannel
+                    .sendMessageEmbeds(finalEmbeds.asJava)
+                    .setActionRow(
+                      Button.primary(
+                        "boosted list",
+                        "Server Save Notifications"
+                      ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                    )
+                    .queue(
+                      (message: Message) => {
+                        discordUpdateConfig(guild, "", "", "", message.getId, worldFormal)
+                      },
+                      (e: Throwable) => {
+                        logger.warn(
+                          s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':",
+                          e
+                        )
+                      }
+                    )
+                }
             }
           }
         } else {
@@ -4968,7 +5123,7 @@ object BotApp extends App with StrictLogging {
           newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
           boostedChannel = newBoostedChannel
           // update db & cache
-          discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "")
+          discordUpdateConfig(guild, adminCategory.getId, "", newBoostedChannel.getId, "", worldFormal)
           updateBoostedChannel(guild.getId, newBoostedChannel.getId)
 
           boostedChannel.upsertPermissionOverride(botRole)
@@ -5027,7 +5182,7 @@ object BotApp extends App with StrictLogging {
               )
               .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId)
+                discordUpdateConfig(guild, "", "", "", message.getId, worldFormal)
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
@@ -5037,19 +5192,24 @@ object BotApp extends App with StrictLogging {
           val fullblessLevel = worldConfigData("fullbless_level")
           val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
           val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
+          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
+          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+          val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
 
-          // post fullbless message again
-          val fullblessEmbedText = s"The bot will poke <@&${fullblessRole.getId}>\nIf an enemy player dies fullbless and is over level `${fullblessLevel}`."
+          // Fullbless Role
           val fullblessEmbed = new EmbedBuilder()
+          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
           fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          fullblessEmbed.setThumbnail(Config.aolThumbnail)
+          fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
           fullblessEmbed.setColor(3092790)
           fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           fullblessEmbed.setDescription(fullblessEmbedText)
           boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
             .setActionRow(
-              Button.success(s"add", "Add Role"),
-              Button.danger(s"remove", "Remove Role")
+              Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
+              Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
+              Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
             )
             .queue()
           // Update role id if it changed
@@ -5066,7 +5226,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-
+          /**
           // post nemesis message again
           val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
           val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
@@ -5088,6 +5248,7 @@ object BotApp extends App with StrictLogging {
               Button.danger("remove", "Remove Role")
             )
             .queue()
+          **/
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
 
@@ -5103,7 +5264,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-
+          /**
           // post hunted is skulled message again
           val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
           val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
@@ -5121,6 +5282,7 @@ object BotApp extends App with StrictLogging {
               Button.danger("remove", "Remove Role")
             )
             .queue()
+
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
 
@@ -5136,7 +5298,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-
+          **/
         }
 
         // apply required permissions to the new channel(s)
@@ -5177,7 +5339,7 @@ object BotApp extends App with StrictLogging {
           newAdminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           adminChannel = newAdminChannel
           // update db & cache
-          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "")
+          discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "", worldFormal)
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
         if (adminChannel != null) {
@@ -6193,4 +6355,62 @@ object BotApp extends App with StrictLogging {
     }
     deleted
   }
+
+  def fetchDreamScarBosses(): List[BossEntry] = {
+    val backend = HttpURLConnectionBackend()
+    val apiUrl =
+      "https://tibia.fandom.com/api.php" +
+        "?action=parse" +
+        "&page=Dream_Scar/Boss_of_the_Day" +
+        "&prop=text" +
+        "&format=json"
+    val response = basicRequest
+      .get(uri"$apiUrl")
+      .header("User-Agent", "Mozilla/5.0")
+      .send(backend)
+    val jsonStr = response.body.getOrElse(
+      throw new RuntimeException("Empty response from API")
+    )
+    // Parse JSON
+    val parsed = parse(jsonStr).getOrElse(
+      throw new RuntimeException("Invalid JSON from API")
+    )
+    val html = parsed.hcursor
+      .downField("parse")
+      .downField("text")
+      .downField("*")
+      .as[String]
+      .getOrElse(
+        throw new RuntimeException("Could not extract HTML from API response")
+      )
+    // Parse HTML table
+    val doc = Jsoup.parse(html)
+    val table = doc.select("table.wikitable").first()
+    if (table == null) return Nil
+    table.select("tr")
+      .asScala
+      .drop(1)
+      .flatMap { row =>
+        val cols = row.select("td").asScala
+        if (cols.size >= 2) {
+          Some(BossEntry(cols(0).text().trim, cols(1).text().trim))
+        } else None
+      }
+      .toList
+  }
+
+  def shiftAllBossesUp(current: Map[String, String]): Map[String, String] = {
+    current.map { case (world, boss) =>
+
+      val nextBoss = indexOfBoss.get(boss) match {
+        case Some(idx) =>
+          bossCycle((idx + 1) % bossCycle.length)
+        case None =>
+          boss // fallback: keep unchanged
+      }
+
+      world -> nextBoss
+    }
+  }
+
 }
