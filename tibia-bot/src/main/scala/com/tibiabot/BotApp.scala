@@ -130,6 +130,7 @@ object BotApp extends App with StrictLogging {
   var discordsData: Map[String, List[Discords]] = Map.empty
   var worlds: List[String] = Config.worldList
 
+  // https://tibia.fandom.com/wiki/Template:Dream_Scar_Boss/Offsets
   val bossCycle = Vector(
     "Plagueroot",
     "Malofur Mangrinder",
@@ -6001,6 +6002,7 @@ object BotApp extends App with StrictLogging {
 
             // Check if sanitizedName is a valid creature
             //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
+
             val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
             val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
             if (monsterType == "all") {
@@ -6397,6 +6399,70 @@ object BotApp extends App with StrictLogging {
         } else None
       }
       .toList
+  }
+
+  def fetchCreatureNames(): List[String] = {
+
+    val backend = HttpURLConnectionBackend()
+
+    val apiUrl =
+      "https://tibia.fandom.com/api.php" +
+        "?action=parse" +
+        "&page=List_of_Creatures_(Ordered)" +
+        "&prop=text" +
+        "&format=json"
+
+    val response =
+      basicRequest
+        .get(uri"$apiUrl")
+        .header("User-Agent", "Mozilla/5.0")
+        .send(backend)
+
+    val jsonStr = response.body.getOrElse(
+      throw new RuntimeException("Empty API response")
+    )
+
+    val parsed = parse(jsonStr).getOrElse(
+      throw new RuntimeException("Invalid JSON")
+    )
+
+    val html =
+      parsed.hcursor
+        .downField("parse")
+        .downField("text")
+        .downField("*")
+        .as[String]
+        .getOrElse(
+          throw new RuntimeException("Could not extract HTML")
+        )
+
+    val doc = Jsoup.parse(html)
+
+    // grab all creature links
+    val creatures =
+      doc.select("a")
+        .asScala
+        .flatMap { link =>
+
+          val href = link.attr("href")
+          val text = link.text().trim
+
+          // creature pages are /wiki/Creature_Name
+          if (
+            href.startsWith("/wiki/") &&
+            text.nonEmpty &&
+            !text.contains(":") &&
+            !href.contains("List_of_Creatures")
+          ) {
+            Some(text)
+          } else {
+            None
+          }
+        }
+        .distinct
+        .toList
+
+    creatures
   }
 
   def shiftAllBossesUp(current: Map[String, String]): Map[String, String] = {

@@ -728,9 +728,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
       } else {
         event.getHook.sendMessage(s"${Config.noEmoji} Invalid button format.").setEphemeral(true).queue()
       }
-    }
-    // This is replacing val roleType below for merged server save notifications embed
-      else if (button == "fullbless") {
+    } else if (button == "fullbless") {
         event.deferReply(true).queue()
         val world = title.replace(":crossed_swords:", "").trim()
         val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
