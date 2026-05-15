@@ -346,6 +346,7 @@ object BotApp extends App with StrictLogging {
         new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
       ),
       new SubcommandData("info", "get discord info"),
+      new SubcommandData("dreamscar", "resync dreamscar wiki info"),
       new SubcommandData("worldlist", "get discord info"),
       new SubcommandData("message", "Send a message to a specific discord")
       .addOptions(
@@ -5683,6 +5684,16 @@ object BotApp extends App with StrictLogging {
     }
 
     guild.leave().queue()
+    // embed reply
+    new EmbedBuilder()
+    .setColor(3092790)
+    .setDescription(embedMessage)
+    .build()
+  }
+
+  def adminDreamScar(event: SlashCommandInteractionEvent): MessageEmbed = {
+    dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
+    var embedMessage = s":gear: The dreamcourts bosses for each world have been resynced."
     // embed reply
     new EmbedBuilder()
     .setColor(3092790)
