@@ -1,5 +1,5 @@
 name := "violent-bot-dedicated"
-version := "1.9"
+version := "2.2"
 
 scalaVersion := "2.13.9"
 
