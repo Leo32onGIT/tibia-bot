@@ -1369,6 +1369,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
 
       // add allies/enemies count to the category
+      val masslogIcon = if (masslogCategory) s"⚡" else ""
       val categoryLiteral = guild.getCategoryById(categoryChannel)
       if (categoryLiteral != null){
         val onlineCategoryCounter = onlineListCategoryTimer.getOrElse(categoryChannel, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
@@ -1381,7 +1382,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val categorySpacer = if (alliesList.size > 0 || enemiesList.size > 0) "・" else ""
             if (categoryName != s"${world}$categorySpacer$categoryAllies$categoryEnemies") {
               val channelManager = categoryLiteral.getManager
-              channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
+              channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies$masslogIcon").queue()
             }
           } catch {
             case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
