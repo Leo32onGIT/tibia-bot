@@ -4774,6 +4774,8 @@ object BotApp extends App with StrictLogging {
 
             // Update role id if it changed
             worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
+            worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
+            worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
               val worldsList = worldsData(guild.getId)
