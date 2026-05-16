@@ -1116,43 +1116,75 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     )
 
     val sortedList = onlineData.sortWith(_.level > _.level)
+
+    var zapCount = 0
+
     sortedList.foreach { player =>
       val voc = player.vocation.toLowerCase.split(' ').last
       val vocationEmoji = vocEmoji(voc)
+
       val durationInSec = player.duration
       val durationInMin = durationInSec / 60
-      val durationStr = if (durationInMin >= 60) {
-        val hours = durationInMin / 60
-        val mins = durationInMin % 60
-        s"${hours}hr ${mins}min"
-      } else {
-        s"${durationInMin}min"
-      }
+
+      val durationStr =
+        if (durationInMin >= 60) {
+          val hours = durationInMin / 60
+          val mins = durationInMin % 60
+          s"${hours}hr ${mins}min"
+        } else {
+          s"${durationInMin}min"
+        }
+
       val durationString = s"`$durationStr`"
-      // get appropriate guild icon
-      val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
-      val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.guildName.toLowerCase())
-      val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
-      val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == player.name.toLowerCase())
+
+      val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List())
+        .exists(_.name.equalsIgnoreCase(player.guildName))
+
+      val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List())
+        .exists(_.name.equalsIgnoreCase(player.guildName))
+
+      val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List())
+        .exists(_.name.equalsIgnoreCase(player.name))
+
+      val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List())
+        .exists(_.name.equalsIgnoreCase(player.name))
+
       val guildIcon = (player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
-        case (_, true, _, _, _) => Config.allyGuild // allied-guilds
-        case (_, _, true, _, _) => Config.enemyGuild // hunted-guilds
-        case ("", _, _, true, _) => Config.ally // allied-players not in any guild
-        case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}" // allied-players but in neutral guild
-        case ("", _, _, _, true) => Config.enemy // hunted-players no guild
-        case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}" // hunted-players but in neutral guild
-        case ("", _, _, _, _) => "" // no guild (not ally or hunted)
-        case _ => Config.otherGuild // guild (not ally or hunted)
+        case (_, true, _, _, _) => Config.allyGuild
+        case (_, _, true, _, _) => Config.enemyGuild
+        case ("", _, _, true, _) => Config.ally
+        case (_, _, _, true, _) => s"${Config.otherGuild}${Config.ally}"
+        case ("", _, _, _, true) => Config.enemy
+        case (_, _, _, _, true) => s"${Config.otherGuild}${Config.enemy}"
+        case ("", _, _, _, _) => ""
+        case _ => Config.otherGuild
       }
+
+      val justLogged =
+        durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck)
+
       val masslogIcon =
-        if (durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck))
-         " :zap:"
+        if (justLogged) " :zap:"
         else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck))
-         " :zzz:"
+          " :zzz:"
         else
-         ""
-      vocationBuffers(voc) += CharSort(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck, voc, player.level.toInt, s"$vocationEmoji **${player.level.toString}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}")
+          ""
+
+      if (justLogged) zapCount += 1
+
+      vocationBuffers(voc) += CharSort(
+        player.guildName,
+        allyGuildCheck,
+        huntedGuildCheck,
+        allyPlayerCheck,
+        huntedPlayerCheck,
+        voc,
+        player.level.toInt,
+        s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
+      )
     }
+
+    val masslogCategory: Boolean = zapCount > 5
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
@@ -1363,6 +1395,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val alliesCount = alliesList.size
       val neutralsCount = neutralsList.size
       val enemiesCount = enemiesList.size
+      val masslogIcon = if (masslogCategory) s"⚡" else ""
 
       // add allies/enemies count to the category
       val categoryLiteral = guild.getCategoryById(categoryChannel)
@@ -1377,7 +1410,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
             val categorySpacer = if (alliesList.size > 0 || enemiesList.size > 0) "・" else ""
             if (categoryName != s"${world}$categorySpacer$categoryAllies$categoryEnemies") {
               val channelManager = categoryLiteral.getManager
-              channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies").queue()
+              channelManager.setName(s"${world}$categorySpacer$categoryAllies$categoryEnemies$masslogIcon").queue()
             }
           } catch {
             case ex: Throwable => logger.info(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
