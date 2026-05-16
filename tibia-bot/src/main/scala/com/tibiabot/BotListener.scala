@@ -541,6 +541,83 @@ class BotListener extends ListenerAdapter with StrictLogging {
           ).queue()
         //
       }
+    } else if (button == "fullbless") {
+        event.deferReply(true).queue()
+        val world = title.replace(":crossed_swords:", "").trim()
+        val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+        val role = guild.getRoleById(worldConfigData("fullbless_role"))
+        if (role != null) {
+          guild.retrieveMemberById(user.getId).queue { member =>
+            val hasRole = member.getRoles.contains(role)
+            val action =
+              if (hasRole) guild.removeRoleFromMember(member, role)
+              else guild.addRoleToMember(member, role)
+
+            action.queue(
+              _ => {
+                val msg =
+                  if (hasRole)
+                    s":gear: You have been removed from the <@&${role.getId}> role."
+                  else
+                    s":gear: You have been added to the <@&${role.getId}> role."
+
+                event.getHook.sendMessageEmbeds(new EmbedBuilder().setDescription(msg).build()).queue()
+              },
+              _ => ()
+            )
+          }
+        }
+    } else if (button == "nemesis") {
+      event.deferReply(true).queue()
+      val world = title.replace(":crossed_swords:", "").trim()
+      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+      val role = guild.getRoleById(worldConfigData("nemesis_role"))
+      if (role != null) {
+        guild.retrieveMemberById(user.getId).queue { member =>
+          val hasRole = member.getRoles.contains(role)
+          val action =
+            if (hasRole) guild.removeRoleFromMember(member, role)
+            else guild.addRoleToMember(member, role)
+
+          action.queue(
+            _ => {
+              val msg =
+                if (hasRole)
+                  s":gear: You have been removed from the <@&${role.getId}> role."
+                else
+                  s":gear: You have been added to the <@&${role.getId}> role."
+
+              event.getHook.sendMessageEmbeds(new EmbedBuilder().setDescription(msg).build()).queue()
+            },
+            _ => ()
+          )
+        }
+      }
+    } else if (button == "allypk") {
+      event.deferReply(true).queue()
+      val world = title.replace(":crossed_swords:", "").trim
+      val role = guild.getRoleById(BotApp.worldRetrieveConfig(guild, world)("allypk_role"))
+      if (role != null) {
+        guild.retrieveMemberById(user.getId).queue { member =>
+          val hasRole = member.getRoles.contains(role)
+          val action =
+            if (hasRole) guild.removeRoleFromMember(member, role)
+            else guild.addRoleToMember(member, role)
+
+          action.queue(
+            _ => {
+              val msg =
+                if (hasRole)
+                  s":gear: You have been removed from the <@&${role.getId}> role."
+                else
+                  s":gear: You have been added to the <@&${role.getId}> role."
+
+              event.getHook.sendMessageEmbeds(new EmbedBuilder().setDescription(msg).build()).queue()
+            },
+            _ => ()
+          )
+        }
+      }
     } else if (button.startsWith("death_screenshot_")) {
       // Handle death screenshot button clicks
       val buttonParts = button.split("_")
@@ -727,63 +804,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
         }
       } else {
         event.getHook.sendMessage(s"${Config.noEmoji} Invalid button format.").setEphemeral(true).queue()
-      }
-    } else if (button == "fullbless") {
-        event.deferReply(true).queue()
-        val world = title.replace(":crossed_swords:", "").trim()
-        val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-        val role = guild.getRoleById(worldConfigData("fullbless_role"))
-        if (role != null) {
-          val member = guild.getMember(user)
-          if (member != null) {
-            if (member.getRoles.contains(role)) {
-              guild.removeRoleFromMember(member, role).queue()
-              responseText = s":gear: You have been removed from the <@&${role.getId}> role."
-            } else {
-              guild.addRoleToMember(member, role).queue()
-              responseText = s":gear: You have been added to the <@&${role.getId}> role."
-            }
-            val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-            event.getHook.sendMessageEmbeds(replyEmbed).queue()
-          }
-        }
-    } else if (button == "nemesis") {
-      event.deferReply(true).queue()
-      val world = title.replace(":crossed_swords:", "").trim()
-      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-      val role = guild.getRoleById(worldConfigData("nemesis_role"))
-      if (role != null) {
-        val member = guild.getMember(user)
-        if (member != null) {
-          if (member.getRoles.contains(role)) {
-            guild.removeRoleFromMember(member, role).queue()
-            responseText = s":gear: You have been removed from the <@&${role.getId}> role."
-          } else {
-            guild.addRoleToMember(member, role).queue()
-            responseText = s":gear: You have been added to the <@&${role.getId}> role."
-          }
-          val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-          event.getHook.sendMessageEmbeds(replyEmbed).queue()
-        }
-      }
-    } else if (button == "allypk") {
-      event.deferReply(true).queue()
-      val world = title.replace(":crossed_swords:", "").trim()
-      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-      val role = guild.getRoleById(worldConfigData("allypk_role"))
-      if (role != null) {
-        val member = guild.getMember(user)
-        if (member != null) {
-          if (member.getRoles.contains(role)) {
-            guild.removeRoleFromMember(member, role).queue()
-            responseText = s":gear: You have been removed from the <@&${role.getId}> role."
-          } else {
-            guild.addRoleToMember(member, role).queue()
-            responseText = s":gear: You have been added to the <@&${role.getId}> role."
-          }
-          val replyEmbed = new EmbedBuilder().setDescription(responseText).build()
-          event.getHook.sendMessageEmbeds(replyEmbed).queue()
-        }
       }
     } else {
       event.deferReply(true).queue()
