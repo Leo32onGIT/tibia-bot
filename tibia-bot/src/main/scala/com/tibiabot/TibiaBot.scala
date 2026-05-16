@@ -24,6 +24,8 @@ import scala.util.{Failure, Success}
 import java.time.OffsetDateTime
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.{LocalTime, ZoneId}
+import java.util.concurrent.ConcurrentHashMap
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
@@ -44,6 +46,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val recentOnline = mutable.Set.empty[CharKey]
   private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
+  val masspokeCooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
 
   // Dedicated online list table for killer level lookups - updated every 5 minutes
   private var onlineListTable = mutable.Map.empty[String, OnlineListEntry]
@@ -1116,16 +1119,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     )
 
     val sortedList = onlineData.sortWith(_.level > _.level)
-
     var zapCount = 0
-
     sortedList.foreach { player =>
       val voc = player.vocation.toLowerCase.split(' ').last
       val vocationEmoji = vocEmoji(voc)
-
       val durationInSec = player.duration
       val durationInMin = durationInSec / 60
-
       val durationStr =
         if (durationInMin >= 60) {
           val hours = durationInMin / 60
@@ -1136,19 +1135,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         }
 
       val durationString = s"`$durationStr`"
-
       val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List())
         .exists(_.name.equalsIgnoreCase(player.guildName))
-
       val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List())
         .exists(_.name.equalsIgnoreCase(player.guildName))
-
       val allyPlayerCheck = alliedPlayersData.getOrElse(guildId, List())
         .exists(_.name.equalsIgnoreCase(player.name))
-
       val huntedPlayerCheck = huntedPlayersData.getOrElse(guildId, List())
         .exists(_.name.equalsIgnoreCase(player.name))
-
       val guildIcon = (player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck) match {
         case (_, true, _, _, _) => Config.allyGuild
         case (_, _, true, _, _) => Config.enemyGuild
@@ -1160,48 +1154,58 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case _ => Config.otherGuild
       }
 
-      val justLogged =
-        durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck)
-
-      val masslogIcon =
-        if (justLogged) " :zap:"
-        else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck))
-          " :zzz:"
-        else
-          ""
-
+      val justLogged = durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck)
+      val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
-
-      vocationBuffers(voc) += CharSort(
-        player.guildName,
-        allyGuildCheck,
-        huntedGuildCheck,
-        allyPlayerCheck,
-        huntedPlayerCheck,
-        voc,
-        player.level.toInt,
-        s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
+      vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
       )
     }
-
-    val masslogCategory: Boolean = zapCount > 5
-    val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
 
+    val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
+    val channelId = activityChannel
+    val now = ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
+    val lastPokedAt = masspokeCooldowns.get(channelId)
+    val isOnCooldown =
+      Option(lastPokedAt)
+        .exists(_.isAfter(now.minusMinutes(30)))
+
+    // Masslog mention
+    val masslogCategory: Boolean = zapCount > 5 // 5 people masslogged
+    if (masslogCategory && !isOnCooldown) {
+      // get Activity channel
+      val activityTextChannel = guild.getTextChannelById(activityChannel)
+      if (activityTextChannel != null) {
+        if (activityTextChannel.canTalk()) {
+          val activityEmbed = new EmbedBuilder()
+          activityEmbed.setDescription(s":zap: **${zapCount} enemies** just logged in.")
+          activityEmbed.setColor(14397256)
+          //activityEmbed.setThumbnail(
+          //  "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/masslogthumbnail.png"
+          //)
+          sendMessageWithRateLimit(
+            activityTextChannel,
+            message = "<@1504513416881115267>",
+            embed = Some(activityEmbed)
+          )
+          masspokeCooldowns.put(channelId, now)
+        }
+      }
+    }
+    val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // default online list
     val alliesList: List[String] = vocationBuffers.values
       .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
       .map(_.message)
       .toList
-
     val enemiesList: List[String] = vocationBuffers.values
       .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
       .map(_.message)
       .toList
-
     val neutralsList: List[String] = vocationBuffers.values
       .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
       .map(_.message)
@@ -1389,10 +1393,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           }
         }
       }
-    }
-    // separated online list channels
-    else {
-
+    } else {
+      // separated online list channels
       val alliesCount = alliesList.size
       val neutralsCount = neutralsList.size
       val enemiesCount = enemiesList.size
