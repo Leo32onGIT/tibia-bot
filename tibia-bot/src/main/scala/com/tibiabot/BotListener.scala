@@ -596,7 +596,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
     } else if (button == "allypk") {
       event.deferReply(true).queue()
       val world = title.replace(":crossed_swords:", "").trim
-      val role = guild.getRoleById(BotApp.worldRetrieveConfig(guild, world)("allypk_role"))
+      val role = guild.getRoleById(worldConfigData("allypk_role"))
       if (role != null) {
         guild.retrieveMemberById(user.getId).queue { member =>
           val hasRole = member.getRoles.contains(role)
