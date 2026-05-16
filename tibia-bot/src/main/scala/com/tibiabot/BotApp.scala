@@ -3275,11 +3275,11 @@ object BotApp extends App with StrictLogging {
       val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
       val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
 
-      val nemesisRoleString = s"$world Nemesis Boss"
+      val nemesisRoleString = s"$world Rare Boss"
       val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
       val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
 
-      val allyPkRoleString = s"$world Ally Killed"
+      val allyPkRoleString = s"$world PVP"
       val allyPkCheck = guild.getRolesByName(allyPkRoleString, true)
       val allyPkRole = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkRoleString).setColor(new Color(220, 0, 0)).complete()
 
@@ -4751,9 +4751,9 @@ object BotApp extends App with StrictLogging {
             val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
             val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
             val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-            val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+            val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
             val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
+            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
 
 
             // Fullbless Role
@@ -5197,9 +5197,9 @@ object BotApp extends App with StrictLogging {
           val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
           val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
           val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
+          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
           val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
+          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
 
           // Fullbless Role
           val fullblessEmbed = new EmbedBuilder()
