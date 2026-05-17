@@ -3627,7 +3627,7 @@ object BotApp extends App with StrictLogging {
         // update the database
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
-        s":gear: The channels for **$world** have been configured successfully."
+        s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*"
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
@@ -5189,7 +5189,7 @@ object BotApp extends App with StrictLogging {
           val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
           val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
           val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-          val masslogRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+          val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
           val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
 
           // Fullbless Role
