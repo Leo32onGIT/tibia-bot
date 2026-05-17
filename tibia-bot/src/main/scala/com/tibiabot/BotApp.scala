@@ -3315,7 +3315,7 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_SEND)
           .complete()
         adminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
-        val adminChannel = guild.createTextChannel("command-log", adminCategory).complete()
+        val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategory).complete()
         // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
@@ -3323,7 +3323,7 @@ object BotApp extends App with StrictLogging {
         val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
         discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, "0", "0", ZonedDateTime.now())
 
-        val boostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
+        val boostedChannel = guild.createTextChannel("👑・ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴs", adminCategory).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3453,7 +3453,7 @@ object BotApp extends App with StrictLogging {
         }
         if (adminChannelCheck == null) {
           // admin channel has been deleted
-          val adminChannel = guild.createTextChannel("command-log", adminCategoryCheck).complete()
+          val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategoryCheck).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3462,7 +3462,7 @@ object BotApp extends App with StrictLogging {
         }
         if (boostedChannelCheck == null) {
           // admin category still exists
-          val boostedChannel = guild.createTextChannel("notifications", adminCategoryCheck).complete()
+          val boostedChannel = guild.createTextChannel("👑・ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴs", adminCategoryCheck).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3537,12 +3537,12 @@ object BotApp extends App with StrictLogging {
           .complete()
         newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
         // create the channels
-        val alliesChannel = guild.createTextChannel("online", newCategory).complete()
+        val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
         //val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
         //val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
-        val levelsChannel = guild.createTextChannel("levels", newCategory).complete()
-        val deathsChannel = guild.createTextChannel("deaths", newCategory).complete()
-        val activityChannel = guild.createTextChannel("activity", newCategory).complete()
+        val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
+        val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
+        val activityChannel = guild.createTextChannel("📝・ᴀᴄᴛɪᴠɪᴛʏ", newCategory).complete()
 
         val publicRole = guild.getPublicRole
         val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
@@ -4061,7 +4061,7 @@ object BotApp extends App with StrictLogging {
             }
 
             // create the channels underneath the new/existing category
-            val recreateAlliesChannel = guild.createTextChannel("allies", category).complete()
+            val recreateAlliesChannel = guild.createTextChannel("🤍・ᴀʟʟɪᴇs", category).complete()
             channelList += ((recreateAlliesChannel, false))
             worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
             // update the record in worldsData
@@ -4079,7 +4079,7 @@ object BotApp extends App with StrictLogging {
             disclaimer += s"\n- *The channel <#${recreateAlliesChannel.getId}> has been recreated (you may want to move it).*"
 
             if (enemiesChannel == null) {
-              val recreateEnemiesChannel = guild.createTextChannel("enemies", category).complete()
+              val recreateEnemiesChannel = guild.createTextChannel("☠️・ᴇɴᴇᴍɪᴇs", category).complete()
               channelList += ((recreateEnemiesChannel, false))
               worldRepairConfig(guild, worldFormal, "enemies_channel", recreateEnemiesChannel.getId)
               // update the record in worldsData
@@ -4098,7 +4098,7 @@ object BotApp extends App with StrictLogging {
             }
 
             if (neutralsChannel == null) {
-              val recreateNeutralsChannel = guild.createTextChannel("neutrals", category).complete()
+              val recreateNeutralsChannel = guild.createTextChannel("📈・ɴᴇᴜᴛʀᴀʟs", category).complete()
               channelList += ((recreateNeutralsChannel, false))
               worldRepairConfig(guild, worldFormal, "neutrals_channel", recreateNeutralsChannel.getId)
               // update the record in worldsData
@@ -4985,7 +4985,7 @@ object BotApp extends App with StrictLogging {
         val channelList = ListBuffer[(TextChannel, Boolean)]()
         // create the channels underneath the new/existing category
         if (alliesChannel == null) {
-          val alliesName = if (onlineCombinedVal == "false") "allies" else "online"
+          val alliesName = if (onlineCombinedVal == "false") "🤍・ᴀʟʟɪᴇs" else "📈・ᴏɴʟɪɴᴇ"
           val recreateAlliesChannel = guild.createTextChannel(s"$alliesName", category).complete()
           channelList += ((recreateAlliesChannel, false))
           worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
@@ -5003,7 +5003,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (enemiesChannel == null && onlineCombinedVal == "false") {
-          val recreateEnemiesChannel = guild.createTextChannel("enemies", category).complete()
+          val recreateEnemiesChannel = guild.createTextChannel("☠️・ᴇɴᴇᴍɪᴇs", category).complete()
           channelList += ((recreateEnemiesChannel, false))
           worldRepairConfig(guild, worldFormal, "enemies_channel", recreateEnemiesChannel.getId)
           // update the record in worldsData
@@ -5020,7 +5020,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (neutralsChannel == null && onlineCombinedVal == "false") {
-          val recreateNeutralsChannel = guild.createTextChannel("neutrals", category).complete()
+          val recreateNeutralsChannel = guild.createTextChannel("📈・ɴᴇᴜᴛʀᴀʟs", category).complete()
           channelList += ((recreateNeutralsChannel, false))
           worldRepairConfig(guild, worldFormal, "neutrals_channel", recreateNeutralsChannel.getId)
           // update the record in worldsData
@@ -5037,7 +5037,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (levelsChannel == null) {
-          val recreateLevelsChannel = guild.createTextChannel("levels", category).complete()
+          val recreateLevelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", category).complete()
           channelList += ((recreateLevelsChannel, true))
           worldRepairConfig(guild, worldFormal, "levels_channel", recreateLevelsChannel.getId)
           // update the record in worldsData
@@ -5054,7 +5054,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (deathsChannel == null) {
-          val recreateDeathsChannel = guild.createTextChannel("deaths", category).complete()
+          val recreateDeathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", category).complete()
           channelList += ((recreateDeathsChannel, false))
           worldRepairConfig(guild, worldFormal, "deaths_channel", recreateDeathsChannel.getId)
           // update the record in worldsData
@@ -5071,7 +5071,7 @@ object BotApp extends App with StrictLogging {
           }
         }
         if (activityChannel == null) {
-          val recreateActivityChannel = guild.createTextChannel("activity", category).complete()
+          val recreateActivityChannel = guild.createTextChannel("📝・ᴀᴄᴛɪᴠɪᴛʏ", category).complete()
           channelList += ((recreateActivityChannel, false))
           worldRepairConfig(guild, worldFormal, "activity_channel", recreateActivityChannel.getId)
           // update the record in worldsData
@@ -5107,7 +5107,7 @@ object BotApp extends App with StrictLogging {
             adminCategory = newAdminCategory
           }
           // create the channel
-          val newBoostedChannel = guild.createTextChannel("notifications", adminCategory).complete()
+          val newBoostedChannel = guild.createTextChannel("👑・ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴs", adminCategory).complete()
 
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
@@ -5301,7 +5301,7 @@ object BotApp extends App with StrictLogging {
             adminCategory = newAdminCategory
           }
           // create the channel
-          val newAdminChannel = guild.createTextChannel("command-log", adminCategory).complete()
+          val newAdminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategory).complete()
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newAdminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           newAdminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
