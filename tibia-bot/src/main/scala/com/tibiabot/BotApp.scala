@@ -59,6 +59,7 @@ object BotApp extends App with StrictLogging {
     fullblessRole: String,
     nemesisRole: String,
     allyPkRole: String,
+    masslogRole: String,
     fullblessChannel: String,
     nemesisChannel: String,
     fullblessLevel: Int,
@@ -433,6 +434,7 @@ object BotApp extends App with StrictLogging {
 
   // Start all world streams
   var startUpComplete = false
+  val startTime = Instant.now()
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
@@ -2821,6 +2823,7 @@ object BotApp extends App with StrictLogging {
             |fullbless_role VARCHAR(255) NOT NULL,
             |nemesis_role VARCHAR(255) NOT NULL,
             |allypk_role VARCHAR(255) NOT NULL,
+            |masslog_role VARCHAR(255) NOT NULL,
             |fullbless_channel VARCHAR(255) NOT NULL,
             |nemesis_channel VARCHAR(255) NOT NULL,
             |fullbless_level INT NOT NULL,
@@ -3022,6 +3025,15 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE worlds ADD COLUMN allypk_role VARCHAR(255) DEFAULT '0'")
     }
 
+    // Check if the column already exists in the table
+    val masslogExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'masslog_role'")
+    val masslogExists = masslogExistsQuery.next()
+    masslogExistsQuery.close()
+
+    // Add the allyPk if it doesn't exist
+    if (!masslogExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN masslog_role VARCHAR(255) DEFAULT '0'")
+    }
 
     // Check if the column already exists in the table
     val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
@@ -3043,7 +3055,7 @@ object BotApp extends App with StrictLogging {
       statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -3057,6 +3069,7 @@ object BotApp extends App with StrictLogging {
       val fullblessRole = Option(result.getString("fullbless_role")).getOrElse(null)
       val nemesisRole = Option(result.getString("nemesis_role")).getOrElse(null)
       val allyPkRole = Option(result.getString("allypk_role")).getOrElse(null)
+      val masslogRole = Option(result.getString("masslog_role")).getOrElse(null)
       val fullblessChannel = Option(result.getString("fullbless_channel")).getOrElse(null)
       val nemesisChannel = Option(result.getString("nemesis_channel")).getOrElse(null)
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
@@ -3075,7 +3088,7 @@ object BotApp extends App with StrictLogging {
 
       // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
       if (!Config.mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
       }
     }
 
@@ -3084,9 +3097,9 @@ object BotApp extends App with StrictLogging {
     results.toList
   }
 
-  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
+  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
     val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, masslog_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, masslog_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
     val formalQuery = world.toLowerCase().capitalize
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -3098,45 +3111,47 @@ object BotApp extends App with StrictLogging {
     statement.setString(8, fullblessRole)
     statement.setString(9, nemesisRole)
     statement.setString(10, allyPkRole)
-    statement.setString(11, fullblessChannel)
-    statement.setString(12, nemesisChannel)
-    statement.setInt(13, 250)
-    statement.setString(14, "true")
+    statement.setString(11, masslogRole)
+    statement.setString(12, fullblessChannel)
+    statement.setString(13, nemesisChannel)
+    statement.setInt(14, 250)
     statement.setString(15, "true")
     statement.setString(16, "true")
     statement.setString(17, "true")
     statement.setString(18, "true")
     statement.setString(19, "true")
-    statement.setString(20, "on")
-    statement.setInt(21, 8)
+    statement.setString(20, "true")
+    statement.setString(21, "on")
     statement.setInt(22, 8)
-    statement.setString(23, "false")
-    statement.setString(24, activityChannel)
-    statement.setString(25, "true")
-    statement.setString(26, alliesChannel)
-    statement.setString(27, enemiesChannel)
-    statement.setString(28, neutralsChannels)
-    statement.setString(29, levelsChannel)
-    statement.setString(30, deathsChannel)
-    statement.setString(31, category)
-    statement.setString(32, fullblessRole)
-    statement.setString(33, nemesisRole)
-    statement.setString(34, allyPkRole)
-    statement.setString(35, fullblessChannel)
-    statement.setString(36, nemesisChannel)
-    statement.setInt(37, 250)
-    statement.setString(38, "true")
-    statement.setString(39, "true")
+    statement.setInt(23, 8)
+    statement.setString(24, "false")
+    statement.setString(25, activityChannel)
+    statement.setString(26, "true")
+    statement.setString(27, alliesChannel)
+    statement.setString(28, enemiesChannel)
+    statement.setString(29, neutralsChannels)
+    statement.setString(30, levelsChannel)
+    statement.setString(31, deathsChannel)
+    statement.setString(32, category)
+    statement.setString(33, fullblessRole)
+    statement.setString(34, nemesisRole)
+    statement.setString(35, allyPkRole)
+    statement.setString(36, masslogRole)
+    statement.setString(37, fullblessChannel)
+    statement.setString(38, nemesisChannel)
+    statement.setInt(39, 250)
     statement.setString(40, "true")
     statement.setString(41, "true")
     statement.setString(42, "true")
     statement.setString(43, "true")
-    statement.setString(44, "on")
-    statement.setInt(45, 8)
-    statement.setInt(46, 8)
-    statement.setString(47, "false")
-    statement.setString(48, activityChannel)
-    statement.setString(49, "true")
+    statement.setString(44, "true")
+    statement.setString(45, "true")
+    statement.setString(46, "on")
+    statement.setInt(47, 8)
+    statement.setInt(48, 8)
+    statement.setString(49, "false")
+    statement.setString(50, activityChannel)
+    statement.setString(51, "true")
     statement.executeUpdate()
 
     statement.close()
@@ -3223,6 +3238,7 @@ object BotApp extends App with StrictLogging {
           configMap += ("fullbless_role" -> result.getString("fullbless_role"))
           configMap += ("nemesis_role" -> result.getString("nemesis_role"))
           configMap += ("allypk_role" -> result.getString("allypk_role"))
+          configMap += ("masslog_role" -> result.getString("masslog_role"))
           configMap += ("fullbless_channel" -> result.getString("fullbless_channel"))
           configMap += ("nemesis_channel" -> result.getString("nemesis_channel"))
           configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
@@ -3282,6 +3298,10 @@ object BotApp extends App with StrictLogging {
       val allyPkRoleString = s"$world PVP"
       val allyPkCheck = guild.getRolesByName(allyPkRoleString, true)
       val allyPkRole = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkRoleString).setColor(new Color(220, 0, 0)).complete()
+
+      val masslogRoleString = s"$world Masslog"
+      val masslogCheck = guild.getRolesByName(masslogRoleString, true)
+      val masslogRole = if (!masslogCheck.isEmpty) masslogCheck.get(0) else guild.createRole().setName(masslogRoleString).setColor(new Color(219, 175, 72)).complete()
 
       val worldCount = worldConfig(guild)
       val count = worldCount.length
@@ -3548,7 +3568,7 @@ object BotApp extends App with StrictLogging {
 
             // Fullbless Role
             val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on that world"
             fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
             fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
@@ -3558,7 +3578,8 @@ object BotApp extends App with StrictLogging {
               .setActionRow(
                 Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
                 Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
+                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
+                Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
               )
               .queue()
             }
@@ -3603,7 +3624,7 @@ object BotApp extends App with StrictLogging {
         }
 
         // update the database
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, "0", "0", activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
         s":gear: The channels for **$world** have been configured successfully."
       } else {
@@ -4583,10 +4604,11 @@ object BotApp extends App with StrictLogging {
               val fullblessRole = worldConfigData("fullbless_role")
               val nemesisRole = worldConfigData("nemesis_role")
               val allyPkRole = worldConfigData("allypk_role")
+              val masslogRole = worldConfigData("masslog_role")
 
               // Fullbless Role
               val fullblessEmbed = new EmbedBuilder()
-              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked"
+              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole}> If enemies masslog on that world"
               fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
               fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
               fullblessEmbed.setColor(3092790)
@@ -4596,7 +4618,8 @@ object BotApp extends App with StrictLogging {
                 .setActionRow(
                   Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
                   Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                  Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
+                  Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
+                  Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
                 )
                 .queue()
             }
@@ -4754,11 +4777,12 @@ object BotApp extends App with StrictLogging {
             val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
             val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
             val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-
+            val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
+            val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
 
             // Fullbless Role
             val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on that world"
             fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
             fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
@@ -4768,7 +4792,8 @@ object BotApp extends App with StrictLogging {
               .setActionRow(
                 Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
                 Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
+                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
+                Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
               )
               .queue()
 
@@ -4776,6 +4801,8 @@ object BotApp extends App with StrictLogging {
             worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
             worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
             worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
+            worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
+
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
               val worldsList = worldsData(guild.getId)
@@ -4788,69 +4815,6 @@ object BotApp extends App with StrictLogging {
               }
               worldsData += (guild.getId -> updatedWorldsList)
             }
-          }
-          /**
-          if (!allyPkMessage) {
-            // post nemesis message again
-            val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-            val worldCount = worldConfig(guild)
-            val count = worldCount.length
-
-            val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
-            val allyPkEmbed = new EmbedBuilder()
-            allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            allyPkEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-            allyPkEmbed.setColor(3092790)
-            allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            allyPkEmbed.setDescription(allyPkEmbedText)
-            boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
-              .setActionRow(
-                Button.success("add", "Add Role"),
-                Button.danger("remove", "Remove Role")
-              )
-              .queue()
-            // Update role id if it changed
-            worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
-
-            // update the record in worldsData
-            if (worldsData.contains(guild.getId)) {
-              val worldsList = worldsData(guild.getId)
-              val updatedWorldsList = worldsList.map { world =>
-                if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(allyPkRole = allyPkRole.getId)
-                } else {
-                  world
-                }
-              }
-              worldsData += (guild.getId -> updatedWorldsList)
-            }
-          }
-          if (!nemesisMessage) {
-            // post nemesis message again
-            val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-            val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
-            val worldCount = worldConfig(guild)
-            val count = worldCount.length
-            val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-            val nemesisThumbnail = nemesisList(count % nemesisList.size)
-
-            val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
-            val nemesisEmbed = new EmbedBuilder()
-            nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-            nemesisEmbed.setColor(3092790)
-            nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            nemesisEmbed.setDescription(nemesisEmbedText)
-            boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
-              .setActionRow(
-                Button.success("add", "Add Role"),
-                Button.danger("remove", "Remove Role")
-              )
-              .queue()
-            // Update role id if it changed
-            worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
-
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
               val worldsList = worldsData(guild.getId)
@@ -4863,8 +4827,32 @@ object BotApp extends App with StrictLogging {
               }
               worldsData += (guild.getId -> updatedWorldsList)
             }
+            // update the record in worldsData
+            if (worldsData.contains(guild.getId)) {
+              val worldsList = worldsData(guild.getId)
+              val updatedWorldsList = worldsList.map { world =>
+                if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                  world.copy(allyPkRole = allyPkRole.getId)
+                } else {
+                  world
+                }
+              }
+              worldsData += (guild.getId -> updatedWorldsList)
+            }
+            // update the record in worldsData
+            if (worldsData.contains(guild.getId)) {
+              val worldsList = worldsData(guild.getId)
+              val updatedWorldsList = worldsList.map { world =>
+                if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                  world.copy(masslogRole = masslogRole.getId)
+                } else {
+                  world
+                }
+              }
+              worldsData += (guild.getId -> updatedWorldsList)
+            }
+            embedBuild.setDescription(s"${Config.yesEmoji} Missing notification message was recreated.")
           }
-          **/
           if (boostedMessage != "0") {
             val boostedMessageAction = boostedChannel.retrieveMessageById(boostedMessage)
             try {
@@ -5200,10 +5188,12 @@ object BotApp extends App with StrictLogging {
           val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
           val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
           val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
+          val masslogRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
+          val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
 
           // Fullbless Role
           val fullblessEmbed = new EmbedBuilder()
-          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked"
+          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on that world"
           fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
           fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
           fullblessEmbed.setColor(3092790)
@@ -5213,7 +5203,8 @@ object BotApp extends App with StrictLogging {
             .setActionRow(
               Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
               Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-              Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}"))
+              Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
+              Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
             )
             .queue()
           // Update role id if it changed
@@ -5230,29 +5221,7 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-          /**
-          // post nemesis message again
-          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Nemesis Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
-          val worldCount = worldConfig(guild)
-          val count = worldCount.length
-          val nemesisList = List("Zarabustor", "Midnight_Panther", "Yeti", "Shlorg", "White_Pale", "Furyosa", "Jesse_the_Wicked", "The_Welter", "Tyrn", "Zushuka")
-          val nemesisThumbnail = nemesisList(count % nemesisList.size)
 
-          val nemesisEmbedText = s"The bot will poke <@&${nemesisRole.getId}>\nIf anyone dies to a rare boss (so you can go steal it)."
-          val nemesisEmbed = new EmbedBuilder()
-          nemesisEmbed.setTitle(s"${Config.nemesisEmoji} $worldFormal ${Config.nemesisEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          nemesisEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$nemesisThumbnail.gif")
-          nemesisEmbed.setColor(3092790)
-          nemesisEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-          nemesisEmbed.setDescription(nemesisEmbedText)
-          boostedChannel.sendMessageEmbeds(nemesisEmbed.build())
-            .setActionRow(
-              Button.success("add", "Add Role"),
-              Button.danger("remove", "Remove Role")
-            )
-            .queue()
-          **/
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
 
@@ -5268,25 +5237,6 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-          /**
-          // post hunted is skulled message again
-          val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal Ally Killed").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-
-          val allyPkEmbedText = s"The bot will poke <@&${allyPkRole.getId}>\nIf an **Ally** gets pked by an **Enemy**."
-          val allyPkEmbed = new EmbedBuilder()
-          allyPkEmbed.setTitle(s"${Config.hazardEmoji} $worldFormal ${Config.hazardEmoji}", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          allyPkEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-          allyPkEmbed.setColor(3092790)
-          allyPkEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-          allyPkEmbed.setDescription(allyPkEmbedText)
-          boostedChannel.sendMessageEmbeds(allyPkEmbed.build())
-            .setActionRow(
-              Button.success("add", "Add Role"),
-              Button.danger("remove", "Remove Role")
-            )
-            .queue()
-
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
 
@@ -5302,7 +5252,22 @@ object BotApp extends App with StrictLogging {
             }
             worldsData += (guild.getId -> updatedWorldsList)
           }
-          **/
+
+          // Update role id if it changed
+          worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
+
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(masslogRole = masslogRole.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
         }
 
         // apply required permissions to the new channel(s)
@@ -5575,9 +5540,13 @@ object BotApp extends App with StrictLogging {
 
         val fullblessRoleId = worldConfigData("fullbless_role")
         val nemesisRoleId = worldConfigData("nemesis_role")
+        val allyPkRoleId = worldConfigData("allypk_role")
+        val masslogRoleId = worldConfigData("masslog_role")
 
         val fullblessRole = guild.getRoleById(nemesisRoleId)
         val nemesisRole = guild.getRoleById(fullblessRoleId)
+        val allyPkRole = guild.getRoleById(allyPkRoleId)
+        val masslogRole = guild.getRoleById(masslogRoleId)
 
         if (fullblessRole != null) {
           try {
@@ -5592,6 +5561,22 @@ object BotApp extends App with StrictLogging {
             nemesisRole.delete().queue()
           } catch {
             case ex: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
+        }
+
+        if (allyPkRole != null) {
+          try {
+            allyPkRole.delete().queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${allyPkRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
+          }
+        }
+
+        if (masslogRole != null) {
+          try {
+            masslogRole.delete().queue()
+          } catch {
+            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${masslogRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
           }
         }
 

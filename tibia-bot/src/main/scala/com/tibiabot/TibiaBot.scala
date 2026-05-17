@@ -26,6 +26,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.{LocalTime, ZoneId}
 import java.util.concurrent.ConcurrentHashMap
+import java.time.Instant
 
 //noinspection FieldFromDelayedInit
 class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
@@ -710,6 +711,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
         val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
         val allyHelpRole = worldData.headOption.map(_.allyPkRole).getOrElse("0")
+        val masslogRole = worldData.headOption.map(_.masslogRole).getOrElse("0")
         val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
         val deathsTextChannel = guild.getTextChannelById(deathsChannel)
         /**
@@ -1154,6 +1156,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case _ => Config.otherGuild
       }
 
+      // Masslog: only shows characters :zap: if they have only been logged in under 900 seconds (15 minutes)
       val justLogged = durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck)
       val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
@@ -1163,38 +1166,6 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
     // run channel checks before updating the channels
     val guild = BotApp.jda.getGuildById(guildId)
-
-    val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-    val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
-    val channelId = activityChannel
-    val now = ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
-    val lastPokedAt = masspokeCooldowns.get(channelId)
-    val isOnCooldown =
-      Option(lastPokedAt)
-        .exists(_.isAfter(now.minusMinutes(30)))
-
-    // Masslog mention
-    val masslogCategory: Boolean = zapCount > 5 // 5 people masslogged
-    if (masslogCategory && !isOnCooldown) {
-      // get Activity channel
-      val activityTextChannel = guild.getTextChannelById(activityChannel)
-      if (activityTextChannel != null) {
-        if (activityTextChannel.canTalk()) {
-          val activityEmbed = new EmbedBuilder()
-          activityEmbed.setDescription(s":zap: **${zapCount} enemies** just logged in.")
-          activityEmbed.setColor(14397256)
-          //activityEmbed.setThumbnail(
-          //  "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/masslogthumbnail.png"
-          //)
-          sendMessageWithRateLimit(
-            activityTextChannel,
-            message = "<@1504513416881115267>",
-            embed = Some(activityEmbed)
-          )
-          masspokeCooldowns.put(channelId, now)
-        }
-      }
-    }
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // default online list
@@ -1210,6 +1181,82 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
       .map(_.message)
       .toList
+
+    // Masslog mention
+    val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
+    val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
+    val channelId = activityChannel
+    val lastPokedAt = masspokeCooldowns.get(channelId)
+
+    // Masslog cooldown
+    val now = ZonedDateTime.now()
+    val cutoff = now.minusMinutes(30)
+    val recentStart = BotApp.startTime.atZone(now.getZone).isAfter(cutoff)
+    val recentPoke  = Option(lastPokedAt).exists(_.isAfter(cutoff))
+    val isOnCooldown = recentStart || recentPoke
+
+    // Masslog formula
+    val enemyCount = enemiesList.size
+
+    // val sensitivity = //make user configurable
+    val sensitivity = 2
+
+    // convert sensitivity into a multiplier adjustment
+    val sensitivityModifier = sensitivity match {
+      case 0 => 1.20 // stricter
+      case 1 => 1.10
+      case 2 => 1.00 // default
+      case 3 => 0.90
+      case 4 => 0.80 // very sensitive
+    }
+
+    // base percentages
+    val basePercentage =
+      enemyCount match {
+        case n if n <= 5  => 0.60
+        case n if n <= 10 => 0.55
+        case n if n <= 20 => 0.40
+        case _            => 0.32
+      }
+
+    // adjusted percentage
+    val adjustedPercentage = basePercentage * sensitivityModifier
+
+    // final required zap count
+    // Masslog minimum of 3
+    val requiredZapCount = math.max(3, math.ceil(enemyCount * adjustedPercentage).toInt)
+
+    val masslogCategory = zapCount >= requiredZapCount
+    if (masslogCategory && !isOnCooldown) {
+      // get Activity channel
+      val activityTextChannel = guild.getTextChannelById(activityChannel)
+      if (activityTextChannel != null) {
+        if (activityTextChannel.canTalk()) {
+          val activityEmbed = new EmbedBuilder()
+          activityEmbed.setDescription(s":zap: **${zapCount} enemies** have logged in recently.")
+          activityEmbed.setColor(14397256)
+          //activityEmbed.setThumbnail(
+          //  "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/masslogthumbnail.png"
+          //)
+          //)
+          val masslogRole = worldData.headOption.map(_.masslogRole).getOrElse("0")
+          if (masslogRole == "0") {
+            sendMessageWithRateLimit(
+              activityTextChannel,
+              embed = Some(activityEmbed)
+            )
+            masspokeCooldowns.put(channelId, now)
+          } else {
+            sendMessageWithRateLimit(
+              activityTextChannel,
+              message = s"<@&${masslogRole}>",
+              embed = Some(activityEmbed)
+            )
+            masspokeCooldowns.put(channelId, now)
+          }
+        }
+      }
+    }
 
     // combined online list into one channel
     if (onlineCombined == "true") {
@@ -1373,7 +1420,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       }
 
       // add allies/enemies count to the category
-      val masslogIcon = if (masslogCategory) s"⚡" else ""
+      val now = Instant.now()
+      val cutoff = now.minusSeconds(30 * 60)
+      val recentStart = BotApp.startTime.isAfter(cutoff)
+      val masslogIcon = if (masslogCategory && !recentStart) s"⚡" else ""
       val categoryLiteral = guild.getCategoryById(categoryChannel)
       if (categoryLiteral != null){
         val onlineCategoryCounter = onlineListCategoryTimer.getOrElse(categoryChannel, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
@@ -1398,7 +1448,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val alliesCount = alliesList.size
       val neutralsCount = neutralsList.size
       val enemiesCount = enemiesList.size
-      val masslogIcon = if (masslogCategory) s"⚡" else ""
+      val now = Instant.now()
+      val cutoff = now.minusSeconds(30 * 60)
+      val recentStart = BotApp.startTime.isAfter(cutoff)
+      val masslogIcon = if (masslogCategory && !recentStart) s"⚡" else ""
 
       // add allies/enemies count to the category
       val categoryLiteral = guild.getCategoryById(categoryChannel)

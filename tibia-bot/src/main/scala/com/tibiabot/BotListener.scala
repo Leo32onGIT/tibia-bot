@@ -619,6 +619,32 @@ class BotListener extends ListenerAdapter with StrictLogging {
           )
         }
       }
+    } else if (button == "masslog") {
+      event.deferReply(true).queue()
+      val world = title.replace(":crossed_swords:", "").trim
+      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
+      val role = guild.getRoleById(worldConfigData("masslog_role"))
+      if (role != null) {
+        guild.retrieveMemberById(user.getId).queue { member =>
+          val hasRole = member.getRoles.contains(role)
+          val action =
+            if (hasRole) guild.removeRoleFromMember(member, role)
+            else guild.addRoleToMember(member, role)
+
+          action.queue(
+            _ => {
+              val msg =
+                if (hasRole)
+                  s":gear: You have been removed from the <@&${role.getId}> role."
+                else
+                  s":gear: You have been added to the <@&${role.getId}> role."
+
+              event.getHook.sendMessageEmbeds(new EmbedBuilder().setDescription(msg).build()).queue()
+            },
+            _ => ()
+          )
+        }
+      }
     } else if (button.startsWith("death_screenshot_")) {
       // Handle death screenshot button clicks
       val buttonParts = button.split("_")
