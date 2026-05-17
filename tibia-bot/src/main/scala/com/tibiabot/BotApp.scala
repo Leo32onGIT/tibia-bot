@@ -3568,7 +3568,7 @@ object BotApp extends App with StrictLogging {
 
             // Fullbless Role
             val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on this world"
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$world**"
             fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
             fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
@@ -4608,7 +4608,7 @@ object BotApp extends App with StrictLogging {
 
               // Fullbless Role
               val fullblessEmbed = new EmbedBuilder()
-              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole}> If enemies masslog on this world"
+              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole}> If enemies masslog on **$worldFormal**"
               fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
               fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
               fullblessEmbed.setColor(3092790)
@@ -4782,7 +4782,7 @@ object BotApp extends App with StrictLogging {
 
             // Fullbless Role
             val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on this world"
+            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
             fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
             fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
             fullblessEmbed.setColor(3092790)
@@ -5193,7 +5193,7 @@ object BotApp extends App with StrictLogging {
 
           // Fullbless Role
           val fullblessEmbed = new EmbedBuilder()
-          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on this world"
+          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
           fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
           fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
           fullblessEmbed.setColor(3092790)
