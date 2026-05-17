@@ -3540,8 +3540,9 @@ object BotApp extends App with StrictLogging {
         val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
         //val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
         //val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
-        val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
+
         val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
+        val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
         val activityChannel = guild.createTextChannel("📝・ᴀᴄᴛɪᴠɪᴛʏ", newCategory).complete()
 
         val publicRole = guild.getPublicRole
@@ -5036,23 +5037,6 @@ object BotApp extends App with StrictLogging {
             worldsData += (guild.getId -> updatedWorldsList)
           }
         }
-        if (levelsChannel == null) {
-          val recreateLevelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", category).complete()
-          channelList += ((recreateLevelsChannel, true))
-          worldRepairConfig(guild, worldFormal, "levels_channel", recreateLevelsChannel.getId)
-          // update the record in worldsData
-          if (worldsData.contains(guild.getId)) {
-            val worldsList = worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(levelsChannel = recreateLevelsChannel.getId)
-              } else {
-                world
-              }
-            }
-            worldsData += (guild.getId -> updatedWorldsList)
-          }
-        }
         if (deathsChannel == null) {
           val recreateDeathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", category).complete()
           channelList += ((recreateDeathsChannel, false))
@@ -5063,6 +5047,23 @@ object BotApp extends App with StrictLogging {
             val updatedWorldsList = worldsList.map { world =>
               if (world.name.toLowerCase == worldFormal.toLowerCase) {
                 world.copy(deathsChannel = recreateDeathsChannel.getId)
+              } else {
+                world
+              }
+            }
+            worldsData += (guild.getId -> updatedWorldsList)
+          }
+        }
+        if (levelsChannel == null) {
+          val recreateLevelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", category).complete()
+          channelList += ((recreateLevelsChannel, true))
+          worldRepairConfig(guild, worldFormal, "levels_channel", recreateLevelsChannel.getId)
+          // update the record in worldsData
+          if (worldsData.contains(guild.getId)) {
+            val worldsList = worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(levelsChannel = recreateLevelsChannel.getId)
               } else {
                 world
               }
