@@ -3969,7 +3969,7 @@ object BotApp extends App with StrictLogging {
               }
             }
             // create the online channel
-            val recreateAlliesChannel = guild.createTextChannel("online", category).complete()
+            val recreateAlliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", category).complete()
             worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
@@ -5548,6 +5548,7 @@ object BotApp extends App with StrictLogging {
         val allyPkRole = guild.getRoleById(allyPkRoleId)
         val masslogRole = guild.getRoleById(masslogRoleId)
 
+        //@unkown role-fix WIP
         if (fullblessRole != null) {
           try {
             fullblessRole.delete().queue()
