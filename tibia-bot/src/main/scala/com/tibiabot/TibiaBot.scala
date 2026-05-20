@@ -1193,11 +1193,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val lastPokedAt = masspokeCooldowns.get(channelId)
 
     // Masslog cooldown
+    val berlinNow = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime
+    val serverSaveCooldown = !berlinNow.isBefore(LocalTime.of(10, 0)) && berlinNow.isBefore(LocalTime.of(10, 45))
     val now = ZonedDateTime.now()
     val cutoff = now.minusMinutes(30)
     val recentStart = BotApp.startTime.atZone(now.getZone).isAfter(cutoff)
     val recentPoke  = Option(lastPokedAt).exists(_.isAfter(cutoff))
-    val isOnCooldown = recentStart || recentPoke
+    val isOnCooldown = recentStart || recentPoke || serverSave
 
     // Masslog formula
     val enemyCount = enemiesList.size
