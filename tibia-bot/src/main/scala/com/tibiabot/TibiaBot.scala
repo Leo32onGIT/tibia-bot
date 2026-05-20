@@ -70,6 +70,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
+  private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
+  private val cooldownMinutes = 30L
 
   private val logAndResumeDecider: Supervision.Decider = { e =>
     logger.error("An exception has occurred in the TibiaBot:", e)
@@ -1059,8 +1061,10 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
                           .queue()
                       }
+                      // WIP PVP COOLDOWN
                     } else if (embed._2 == "allypk") {
-                      if (guild.getRoleById(allyHelpRole) != null) { // a way to poke when allies get pked
+                      val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
+                      if (shouldPing) {
                         deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
                           .setEmbeds(embed._1.build())
                           .queue()
@@ -1199,7 +1203,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val enemyCount = enemiesList.size
 
     // val sensitivity = //make user configurable
-    val sensitivity = 2
+    val sensitivity = 0
+    val masslogFloor = 3
 
     // convert sensitivity into a multiplier adjustment
     val sensitivityModifier = sensitivity match {
@@ -1224,7 +1229,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
     // final required zap count
     // Masslog minimum of 3
-    val requiredZapCount = math.max(3, math.ceil(enemyCount * adjustedPercentage).toInt)
+    val requiredZapCount = math.max(masslogFloor, math.ceil(enemyCount * adjustedPercentage).toInt)
 
     val masslogCategory = zapCount >= requiredZapCount
     if (masslogCategory && !isOnCooldown) {
@@ -1851,6 +1856,30 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
         case _: Throwable => logger.error("Failed to send queued message")
       }
     }
+  }
+
+  def canPing(channelId: String): Boolean = {
+      pingCleanup()
+
+      val now = ZonedDateTime.now()
+      val lastPing = cooldowns.get(channelId)
+
+      if (lastPing != null &&
+          java.time.Duration.between(lastPing, now).toMinutes < cooldownMinutes) {
+
+        false
+      } else {
+        cooldowns.put(channelId, now)
+        true
+      }
+    }
+
+  private def pingCleanup(): Unit = {
+    val now = ZonedDateTime.now()
+
+    cooldowns.entrySet().removeIf(entry =>
+      java.time.Duration.between(entry.getValue, now).toMinutes >= cooldownMinutes
+    )
   }
 
   // Helper method to queue messages with rate limiting

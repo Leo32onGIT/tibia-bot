@@ -592,7 +592,7 @@ object BotApp extends App with StrictLogging {
                         rashidEmbed.setColor(3092790)
 
                         val dreamScarEmbed = new EmbedBuilder()
-                        dreamScarEmbed.setDescription(s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+                        dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
                         dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
                         dreamScarEmbed.setColor(3092790)
 
@@ -3400,7 +3400,7 @@ object BotApp extends App with StrictLogging {
 
           val dreamScarEmbed = new EmbedBuilder()
             .setDescription(
-              s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+              s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
             )
             .setThumbnail(creatureImageUrl(dreamScarDaily))
             .setColor(3092790)
@@ -4918,7 +4918,7 @@ object BotApp extends App with StrictLogging {
 
                   val dreamScarEmbed = new EmbedBuilder()
                     .setDescription(
-                      s"The Dream Courts boss for today is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+                      s"The Dream Courts boss for **$worldFormal** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
                     )
                     .setThumbnail(creatureImageUrl(dreamScarDaily))
                     .setColor(3092790)
