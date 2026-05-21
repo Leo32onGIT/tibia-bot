@@ -1199,7 +1199,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     val cutoff = now.minusMinutes(30)
     val recentStart = BotApp.startTime.atZone(now.getZone).isAfter(cutoff)
     val recentPoke  = Option(lastPokedAt).exists(_.isAfter(cutoff))
-    val isOnCooldown = recentStart || recentPoke || serverSave
+    val isOnCooldown = recentStart || recentPoke || serverSaveCooldown
 
     // Masslog formula
     val enemyCount = enemiesList.size
