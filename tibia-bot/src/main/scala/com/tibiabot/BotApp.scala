@@ -21,6 +21,7 @@ import org.postgresql.util.PSQLException
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
+import net.dv8tion.jda.api.utils.TimeFormat
 
 import java.awt.Color
 import java.sql.{Connection, DriverManager, Timestamp}
@@ -575,6 +576,7 @@ object BotApp extends App with StrictLogging {
                         }
 
                         val dreamScarDaily = dreamScar.getOrElse(lastWorld, "World not found")
+
                         val rashidLocation =
                           Map(
                             DayOfWeek.MONDAY    -> "Svargrond",
@@ -585,18 +587,28 @@ object BotApp extends App with StrictLogging {
                             DayOfWeek.SATURDAY  -> "Edron",
                             DayOfWeek.SUNDAY    -> "Carlin"
                           ).getOrElse(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek, "Unknown")
-
                         val rashidEmbed = new EmbedBuilder()
                         rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
                         rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
                         rashidEmbed.setColor(3092790)
+
+                        // Drome Timer
+                        val dromeTime = Instant.ofEpochSecond(1779868800L)
+                        val now = Instant.now()
+                        val isAfterNow = dromeTime.isAfter(now)
+                        val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+                        val dromeEmbed = new EmbedBuilder()
+                          .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                          .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                          .setColor(3092790)
 
                         val dreamScarEmbed = new EmbedBuilder()
                         dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
                         dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
                         dreamScarEmbed.setColor(3092790)
 
-                        val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ List(rashidEmbed.build(), dreamScarEmbed.build())
+                        val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
+                        val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ embedsList
 
                         boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
                           .setActionRow(
@@ -3406,8 +3418,21 @@ object BotApp extends App with StrictLogging {
             .setColor(3092790)
             .build()
 
+          // Drome Timer
+          val dromeTime = Instant.ofEpochSecond(1779868800L)
+          val now = Instant.now()
+          val isAfterNow = dromeTime.isAfter(now)
+          val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+          val dromeEmbed = new EmbedBuilder()
+            .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+            .setColor(3092790)
+            .build()
+
+          val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
+
           val addRashidDreamScarEmbeds: List[MessageEmbed] =
-            embeds ++ List(rashidEmbed, dreamScarEmbed)
+            embeds ++ embedsList
 
           boostedChannel
             .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
@@ -3507,18 +3532,73 @@ object BotApp extends App with StrictLogging {
             creatureEmbed <- creatureEmbedFuture
           } yield List(bossEmbed, creatureEmbed)
 
-          combinedFutures
-            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-              .setActionRow(
-                Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-              )
-              .queue((message: Message) => {
+          combinedFutures.map { embeds =>
+              val dreamScarDaily =
+                dreamScar.getOrElse(world, "World not found")
+
+              val rashidLocation =
+                Map(
+                  DayOfWeek.MONDAY    -> "Svargrond",
+                  DayOfWeek.TUESDAY   -> "Liberty Bay",
+                  DayOfWeek.WEDNESDAY -> "Port Hope",
+                  DayOfWeek.THURSDAY  -> "Ankrahmun",
+                  DayOfWeek.FRIDAY    -> "Darashia",
+                  DayOfWeek.SATURDAY  -> "Edron",
+                  DayOfWeek.SUNDAY    -> "Carlin"
+                ).getOrElse(
+                  ZonedDateTime
+                    .now(ZoneId.of("Europe/Berlin"))
+                    .minusHours(10)
+                    .getDayOfWeek,
+                  "Unknown"
+                )
+
+              val rashidEmbed = new EmbedBuilder()
+                .setDescription(
+                  s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
+                )
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+                .setColor(3092790)
+                .build()
+
+              val dreamScarEmbed = new EmbedBuilder()
+                .setDescription(
+                  s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+                )
+                .setThumbnail(creatureImageUrl(dreamScarDaily))
+                .setColor(3092790)
+                .build()
+
+              // Drome Timer
+              val dromeTime = Instant.ofEpochSecond(1779868800L)
+              val now = Instant.now()
+              val isAfterNow = dromeTime.isAfter(now)
+              val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+              val dromeEmbed = new EmbedBuilder()
+                .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                .setColor(3092790)
+                .build()
+
+              val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
+              val addRashidDreamScarEmbeds: List[MessageEmbed] =
+                embeds ++ embedsList
+
+              boostedChannel
+                .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+                .setActionRow(
+                  Button.primary(
+                    "boosted list",
+                    "Server Save Notifications"
+                  ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                )
+                .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
                 discordUpdateConfig(guild, "", "", "", message.getId, world)
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
-            )
+            }
         }
       }
       // check is world has already been setup
@@ -4924,8 +5004,20 @@ object BotApp extends App with StrictLogging {
                     .setColor(3092790)
                     .build()
 
+                  // Drome Timer
+                  val dromeTime = Instant.ofEpochSecond(1779868800L)
+                  val now = Instant.now()
+                  val isAfterNow = dromeTime.isAfter(now)
+                  val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+                  val dromeEmbed = new EmbedBuilder()
+                    .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                    .setColor(3092790)
+                    .build()
+
+                  val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
                   val finalEmbeds =
-                    embeds ++ List(rashidEmbed, dreamScarEmbed)
+                    embeds ++ embedsList
 
                   boostedChannel
                     .sendMessageEmbeds(finalEmbeds.asJava)
@@ -5168,18 +5260,74 @@ object BotApp extends App with StrictLogging {
             creatureEmbed <- creatureEmbedFuture
           } yield List(bossEmbed, creatureEmbed)
 
-          combinedFutures
-            .map(embeds => boostedChannel.sendMessageEmbeds(embeds.asJava)
-              .setActionRow(
-                Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-              )
-              .queue((message: Message) => {
+          combinedFutures.map { embeds =>
+
+              val dreamScarDaily =
+                dreamScar.getOrElse(world, "World not found")
+
+              val rashidLocation =
+                Map(
+                  DayOfWeek.MONDAY    -> "Svargrond",
+                  DayOfWeek.TUESDAY   -> "Liberty Bay",
+                  DayOfWeek.WEDNESDAY -> "Port Hope",
+                  DayOfWeek.THURSDAY  -> "Ankrahmun",
+                  DayOfWeek.FRIDAY    -> "Darashia",
+                  DayOfWeek.SATURDAY  -> "Edron",
+                  DayOfWeek.SUNDAY    -> "Carlin"
+                ).getOrElse(
+                  ZonedDateTime
+                    .now(ZoneId.of("Europe/Berlin"))
+                    .minusHours(10)
+                    .getDayOfWeek,
+                  "Unknown"
+                )
+
+              val rashidEmbed = new EmbedBuilder()
+                .setDescription(
+                  s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
+                )
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+                .setColor(3092790)
+                .build()
+
+              val dreamScarEmbed = new EmbedBuilder()
+                .setDescription(
+                  s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
+                )
+                .setThumbnail(creatureImageUrl(dreamScarDaily))
+                .setColor(3092790)
+                .build()
+
+              // Drome Timer
+              val dromeTime = Instant.ofEpochSecond(1779868800L)
+              val now = Instant.now()
+              val isAfterNow = dromeTime.isAfter(now)
+              val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+              val dromeEmbed = new EmbedBuilder()
+                .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                .setColor(3092790)
+                .build()
+
+              val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
+              val addRashidDreamScarEmbeds: List[MessageEmbed] =
+                embeds ++ embedsList
+
+              boostedChannel
+                .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+                .setActionRow(
+                  Button.primary(
+                    "boosted list",
+                    "Server Save Notifications"
+                  ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                )
+                .queue((message: Message) => {
                 //updateBoostedMessage(guild.getId, message.getId)
                 discordUpdateConfig(guild, "", "", "", message.getId, worldFormal)
               }, (e: Throwable) => {
                 logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
               })
-            )
+            }
 
           val worldConfigData = worldRetrieveConfig(guild, world)
           val fullblessLevel = worldConfigData("fullbless_level")
