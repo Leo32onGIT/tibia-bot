@@ -471,17 +471,16 @@ object BotApp extends App with StrictLogging {
       updateOnOdd += 1
     }
     // Updating boosted creature/boss at server save
-    val machineTimeZone = ZoneId.systemDefault()
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
     if (currentTime.isAfter(LocalTime.of(10, 0)) && currentTime.isBefore(LocalTime.of(10, 45))) {
       try{
-        if (System.currentTimeMillis() - dreamScarLastCheck.toLong > 1L * 60 * 60 * 1000) {
-          dreamScarLastCheck = System.currentTimeMillis().toString
+        val now = System.currentTimeMillis()
+        if (now - dreamScarLastCheck.toLong > 60L * 60 * 1000) {
+          dreamScarLastCheck = now.toString
           dreamScar = shiftAllBossesUp(dreamScar)
-
-          if (dromeTime.isBefore(Instant.now())) {
-            advanceDromeTime(Instant.now())
-          }
+        }
+        if (dromeTime.isBefore(Instant.now())) {
+          advanceDromeTime(Instant.now())
         }
       }
       catch {
@@ -606,7 +605,7 @@ object BotApp extends App with StrictLogging {
                         val isAfterNow = dromeTime.isAfter(now)
                         val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
                         val dromeEmbed = new EmbedBuilder()
-                          .setDescription(s"The current Drome cycle will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                          .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
                           .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                           .setColor(3092790)
 
@@ -3431,7 +3430,7 @@ object BotApp extends App with StrictLogging {
           val isAfterNow = dromeTime.isAfter(now)
           val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
           val dromeEmbed = new EmbedBuilder()
-            .setDescription(s"The current Drome cycle will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+            .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
             .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
             .setColor(3092790)
             .build()
@@ -3581,7 +3580,7 @@ object BotApp extends App with StrictLogging {
               val isAfterNow = dromeTime.isAfter(now)
               val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
               val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
                 .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                 .setColor(3092790)
                 .build()
@@ -5015,7 +5014,7 @@ object BotApp extends App with StrictLogging {
                   val isAfterNow = dromeTime.isAfter(now)
                   val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
                   val dromeEmbed = new EmbedBuilder()
-                    .setDescription(s"The current Drome cycle will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                    .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
                     .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                     .setColor(3092790)
                     .build()
@@ -5308,7 +5307,7 @@ object BotApp extends App with StrictLogging {
               val isAfterNow = dromeTime.isAfter(now)
               val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
               val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
                 .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                 .setColor(3092790)
                 .build()
@@ -6155,79 +6154,84 @@ object BotApp extends App with StrictLogging {
             // Check if sanitizedName is a valid creature
             //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
 
+            val dreamcourtCheck: Boolean =  if (List("plagueroot","malofur mangrinder","maxxenius","alptramun","izcandar the banished").contains(sanitizedName.toLowerCase)) true else false
             val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
             val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
-            if (monsterType == "all") {
-              val groupedAndSorted = existingNames
-                .groupBy(_.boostedType)
-                .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-                .toSeq
-                .sortBy(_._1) // Sort groups by type
-                .flatMap { case (group, names) =>
-                  names.map { boosted =>
-                    val emoji =
-                      if (group == "boss") Config.bossEmoji
-                      else if (group == "creature") Config.creatureEmoji
-                      else Config.indentEmoji
-
-                    val nameWithLink =
-                      if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                      else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-                    s"$emoji $nameWithLink"
-                  }
-                }.mkString("\n")
-              val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
-              val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
-              val combinedMessage = listMessage + s"\n\n$commandMessage"
-              if (combinedMessage.size >= 4096) {
-                val substituteText = "\n\n*`...cannot display any more results`*"
-                val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-                val truncatedMessage = listMessage.substring(0, lastLineIndex)
-                embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-              } else {
-                embedMessage = combinedMessage
-              }
+            if (dreamcourtCheck){
+              embedMessage = s"${Config.noEmoji} dreamcourt bosses arn't supported yet."
             } else {
-              val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
-              val preparedStatement = conn.prepareStatement(query)
-              preparedStatement.setString(1, userId)
-              preparedStatement.setString(2, sanitizedName)
-              preparedStatement.setString(3, monsterType)
-              preparedStatement.executeUpdate()
-              preparedStatement.close()
+              if (monsterType == "all") {
+                val groupedAndSorted = existingNames
+                  .groupBy(_.boostedType)
+                  .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+                  .toSeq
+                  .sortBy(_._1) // Sort groups by type
+                  .flatMap { case (group, names) =>
+                    names.map { boosted =>
+                      val emoji =
+                        if (group == "boss") Config.bossEmoji
+                        else if (group == "creature") Config.creatureEmoji
+                        else Config.indentEmoji
 
-              val newNames = existingNames :+ BoostedStamp(userId, monsterType, sanitizedName)
-              val groupedAndSorted = newNames
-                .groupBy(_.boostedType)
-                .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-                .toSeq
-                .sortBy(_._1) // Sort groups by type
-                .flatMap { case (group, names) =>
-                  names.map { boosted =>
-                    val emoji =
-                      if (group == "boss") Config.bossEmoji
-                      else if (group == "creature") Config.creatureEmoji
-                      else Config.indentEmoji
+                      val nameWithLink =
+                        if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                        else s"**${capitalizeAllWords(boosted.boostedName)}**"
 
-                    val nameWithLink =
-                      if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                      else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-                    s"$emoji $nameWithLink"
-                  }
-                }.mkString("\n")
-              val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
-              val commandMessage = s"${Config.yesEmoji} **$sanitizedName** was added."
-              //WIP
-              val combinedMessage = listMessage + s"\n\n$commandMessage"
-              if (combinedMessage.size >= 4096) {
-                val substituteText = "\n\n*`...cannot display any more results`*"
-                val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-                val truncatedMessage = listMessage.substring(0, lastLineIndex)
-                embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+                      s"$emoji $nameWithLink"
+                    }
+                  }.mkString("\n")
+                val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
+                val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
+                val combinedMessage = listMessage + s"\n\n$commandMessage"
+                if (combinedMessage.size >= 4096) {
+                  val substituteText = "\n\n*`...cannot display any more results`*"
+                  val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+                  val truncatedMessage = listMessage.substring(0, lastLineIndex)
+                  embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+                } else {
+                  embedMessage = combinedMessage
+                }
               } else {
-                embedMessage = combinedMessage
+                val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
+                val preparedStatement = conn.prepareStatement(query)
+                preparedStatement.setString(1, userId)
+                preparedStatement.setString(2, sanitizedName)
+                preparedStatement.setString(3, monsterType)
+                preparedStatement.executeUpdate()
+                preparedStatement.close()
+
+                val newNames = existingNames :+ BoostedStamp(userId, monsterType, sanitizedName)
+                val groupedAndSorted = newNames
+                  .groupBy(_.boostedType)
+                  .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
+                  .toSeq
+                  .sortBy(_._1) // Sort groups by type
+                  .flatMap { case (group, names) =>
+                    names.map { boosted =>
+                      val emoji =
+                        if (group == "boss") Config.bossEmoji
+                        else if (group == "creature") Config.creatureEmoji
+                        else Config.indentEmoji
+
+                      val nameWithLink =
+                        if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
+                        else s"**${capitalizeAllWords(boosted.boostedName)}**"
+
+                      s"$emoji $nameWithLink"
+                    }
+                  }.mkString("\n")
+                val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
+                val commandMessage = s"${Config.yesEmoji} **$sanitizedName** was added."
+                //WIP
+                val combinedMessage = listMessage + s"\n\n$commandMessage"
+                if (combinedMessage.size >= 4096) {
+                  val substituteText = "\n\n*`...cannot display any more results`*"
+                  val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
+                  val truncatedMessage = listMessage.substring(0, lastLineIndex)
+                  embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
+                } else {
+                  embedMessage = combinedMessage
+                }
               }
             }
           }
