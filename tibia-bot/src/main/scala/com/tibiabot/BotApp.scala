@@ -143,6 +143,7 @@ object BotApp extends App with StrictLogging {
   val indexOfBoss: Map[String, Int] = bossCycle.zipWithIndex.toMap
   var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
   var dreamScarLastCheck: String = System.currentTimeMillis().toString
+  var dromeTime = Instant.ofEpochSecond(1779868800L) // 27 May 2026 server save - increment 2 weeks from here
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -436,6 +437,10 @@ object BotApp extends App with StrictLogging {
   // Start all world streams
   var startUpComplete = false
   val startTime = Instant.now()
+  // update Drome Timer to the latest cycle
+  if (dromeTime.isBefore(startTime)) {
+    advanceDromeTime(startTime)
+  }
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
   // run the scheduler to clean cache and update dashboard every hour
@@ -473,6 +478,10 @@ object BotApp extends App with StrictLogging {
         if (System.currentTimeMillis() - dreamScarLastCheck.toLong > 1L * 60 * 60 * 1000) {
           dreamScarLastCheck = System.currentTimeMillis().toString
           dreamScar = shiftAllBossesUp(dreamScar)
+
+          if (dromeTime.isBefore(Instant.now())) {
+            advanceDromeTime(Instant.now())
+          }
         }
       }
       catch {
@@ -593,13 +602,12 @@ object BotApp extends App with StrictLogging {
                         rashidEmbed.setColor(3092790)
 
                         // Drome Timer
-                        val dromeTime = Instant.ofEpochSecond(1779868800L)
                         val now = Instant.now()
                         val isAfterNow = dromeTime.isAfter(now)
                         val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
                         val dromeEmbed = new EmbedBuilder()
-                          .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                          .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                          .setDescription(s"The Drome will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                          .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                           .setColor(3092790)
 
                         val dreamScarEmbed = new EmbedBuilder()
@@ -3419,13 +3427,12 @@ object BotApp extends App with StrictLogging {
             .build()
 
           // Drome Timer
-          val dromeTime = Instant.ofEpochSecond(1779868800L)
           val now = Instant.now()
           val isAfterNow = dromeTime.isAfter(now)
           val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
           val dromeEmbed = new EmbedBuilder()
-            .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+            .setDescription(s"The Drome will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
             .setColor(3092790)
             .build()
 
@@ -3570,13 +3577,12 @@ object BotApp extends App with StrictLogging {
                 .build()
 
               // Drome Timer
-              val dromeTime = Instant.ofEpochSecond(1779868800L)
               val now = Instant.now()
               val isAfterNow = dromeTime.isAfter(now)
               val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
               val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                .setDescription(s"The Drome will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                 .setColor(3092790)
                 .build()
 
@@ -5005,13 +5011,12 @@ object BotApp extends App with StrictLogging {
                     .build()
 
                   // Drome Timer
-                  val dromeTime = Instant.ofEpochSecond(1779868800L)
                   val now = Instant.now()
                   val isAfterNow = dromeTime.isAfter(now)
                   val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
                   val dromeEmbed = new EmbedBuilder()
-                    .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                    .setDescription(s"The Drome will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                     .setColor(3092790)
                     .build()
 
@@ -5299,13 +5304,12 @@ object BotApp extends App with StrictLogging {
                 .build()
 
               // Drome Timer
-              val dromeTime = Instant.ofEpochSecond(1779868800L)
               val now = Instant.now()
               val isAfterNow = dromeTime.isAfter(now)
               val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
               val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Drome_Cube.gif")
+                .setDescription(s"The Drome will end in:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
                 .setColor(3092790)
                 .build()
 
@@ -6611,6 +6615,18 @@ object BotApp extends App with StrictLogging {
         .toList
 
     creatures
+  }
+
+  def advanceDromeTime(inputTime: Instant): Unit = {
+    val berlin = ZoneId.of("Europe/Berlin")
+
+    val updatedDromeTime =
+      Iterator
+        .iterate(dromeTime)(t => t.atZone(berlin).plusWeeks(2).toInstant)
+        .dropWhile(_.isBefore(inputTime))
+        .next()
+
+    dromeTime = updatedDromeTime
   }
 
   def shiftAllBossesUp(current: Map[String, String]): Map[String, String] = {
