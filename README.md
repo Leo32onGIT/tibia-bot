@@ -2,9 +2,14 @@
 This branch is intended for hosting dedicated instances of Violent Bot.    
 You can run this locally `free/m` or on a vps for `vps hosting cost/m`
 
+# Patreon
+Join Patreon as a **paid supporter** and I will send you an invite link for the bot I am running myself.
+This is the best option if you are non-technical and simply wish to use Violent Bot.
+
 Production:
 - [Website](https://violentbot.xyz)
 - [Discord](https://discord.gg/PNnzzs4hN3)
+- [Patreon](https://www.patreon.com/violentbot)
    
 Current features include:    
 - Online List
