@@ -1744,6 +1744,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
     val userPendingScreenshots = pendingScreenshots.filter(_._1.startsWith(user.getId + "_")).toMap
 
     if (userPendingScreenshots.nonEmpty) {
+
+      val clipRegex = """(?i)https?://(?:www\.)?(?:medal\.tv/games/[^/\s]+/clips/[^\s]+|twitch\.tv/[^/\s]+/clip/[^\s]+)""".r
+
       // Check if message has attachments
       val attachments = event.getMessage.getAttachments.asScala
       val imageAttachments = attachments.filter { attachment =>
@@ -1831,8 +1834,8 @@ class BotListener extends ListenerAdapter with StrictLogging {
         }
       } else {
         // Check if user is trying to cancel uploads
-        val messageContent = event.getMessage.getContentRaw.toLowerCase.trim
-        if (messageContent.contains("cancel")) {
+        val messageContent = event.getMessage.getContentRaw.trim
+        if (messageContent.toLowerCase.contains("cancel")) {
           // Cancel all pending uploads for this user
           val cancelledCount = userPendingScreenshots.size
           userPendingScreenshots.keys.foreach(pendingScreenshots.remove)
@@ -1844,9 +1847,88 @@ class BotListener extends ListenerAdapter with StrictLogging {
           }
 
           logger.info(s"User ${user.getName} (${user.getId}) cancelled ${cancelledCount} pending uploads via DM")
+        } else if (clipRegex.findFirstIn(messageContent).isDefined) {
+          userPendingScreenshots.foreach { case (pendingKey, pending) =>
+            // Remove the pending request
+            pendingScreenshots.remove(pendingKey)
+
+            try {
+              val imageUrl = s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/clip128.png"
+
+              // Store the screenshot in database
+              BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, user.getName, pending.messageId)
+
+              // Update the original death message with the screenshot
+              val guild = event.getJDA.getGuildById(pending.guildId)
+              if (guild != null) {
+                val channel = guild.getTextChannelById(pending.channelId)
+                if (channel != null) {
+                  channel.retrieveMessageById(pending.messageId).queue(message => {
+                    val embeds = message.getEmbeds
+                    if (embeds.size() > 0) {
+                      val originalEmbed = embeds.get(0)
+                      val updatedEmbed = new EmbedBuilder(originalEmbed)
+
+                      // Get existing screenshots to check if we need navigation buttons
+                      val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
+                      val screenshotCount = screenshots.length
+                      val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
+
+                      // Update embed to show the newest screenshot
+                      val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
+                      if (latestScreenshot != null) {
+                        updatedEmbed.setImage(latestScreenshot.screenshotUrl)
+                          .setFooter(s"Clip added by ${latestScreenshot.addedName} • ${screenshotCount}/${screenshotCount}")
+                      } else {
+                        updatedEmbed.setImage(imageUrl)
+                          .setFooter(s"Clip added by ${user.getName}")
+                      }
+
+                      val buttons = if (screenshotCount > 1) {
+                        val baseButtons = List(
+                          Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"),
+                          Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
+                          Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
+                          Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
+                        )
+                        if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                          baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                        } else {
+                          baseButtons
+                        }
+                      } else {
+                        val baseButtons = List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", "Add Screenshot"))
+                        if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                          baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                        } else {
+                          baseButtons
+                        }
+                      }
+
+                      message
+                      .editMessage(messageContent)
+                      .setEmbeds(updatedEmbed.build())
+                      .setActionRow(buttons: _*)
+                      .queue()
+
+                      logger.info(s"Clip uploaded successfully via DM for ${pending.charName} death at ${pending.deathTime} in guild ${guild.getName}")
+                    }
+                  })
+                }
+              }
+
+              // Send confirmation DM to user
+              event.getChannel.sendMessage(s"${Config.yesEmoji} Clip uploaded successfully for **[${pending.charName}](${BotApp.charUrl(pending.charName)})**.").queue()
+
+            } catch {
+              case e: Exception =>
+                logger.error(s"Failed to store screenshot from DM: ${e.getMessage}", e)
+                event.getChannel.sendMessage(s"${Config.noEmoji} Failed to upload screenshot. Please try again.").queue()
+            }
+          }
         } else {
           // User sent a DM but no image attachment and not a cancel command
-          event.getChannel.sendMessage("Please upload an image file (PNG, JPG, GIF, WebP) or paste an image from your clipboard.\nType `cancel` to cancel any pending upload requests.").queue()
+          event.getChannel.sendMessage("Please do one of the following:\n* Upload an image file (PNG, JPG, GIF, WebP)\n* Paste an image from your clipboard\n* Paste the link for a Twitch or Medal clip\nType `cancel` to cancel any pending upload requests.").queue()
         }
       }
     } else {
