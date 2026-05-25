@@ -10,9 +10,9 @@ Current features include:
 - Online List
 - Levels List
 - Deaths List
-- Activity List (guild & name changes)
-- Poke if enemy dies fullbless
-- Poke if anyone dies to a rare nemesis boss
+- Activity Feed
+- Server Save Notifications
+- Command Log
 
 ## Pre-requisites:
 
@@ -25,12 +25,13 @@ Current features include:
 The bot is configured to point to emojis and roles in _my_ discord server.     
 You will need to change this to point to your emojis and your discord roles.
 
-1. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L55) file and edit it.
-2. Point to `emoji ids` to ones that exist on _your_ discord server.
+1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/dedicated/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
+2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
+3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
 
 #### Prepare your linux machine to host the bot
 1. Ensure `docker` is installed.
-1. Ensure `default-jre` is installed.
+1. Ensure `Java JDK 8` is installed.
 1. Ensure `sbt` is installed.
 3. Download the `postgres` docker image:    
 `docker pull postgres`
@@ -52,10 +53,12 @@ You will need to change this to point to your emojis and your discord roles.
 > ```
 5. Create the docker volume for the postgres database:    
 `docker volume create --name pgdata`
+6. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
+`docker network create violentbot`
 6. Run the postgres docker image:    
-`docker run --rm -d -t --env-file prod.env --hostname sqlhost --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql/data postgres`
+`docker run --rm -d -t --env-file prod.env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres`
 7. Run the docker container you just created & parse the **prod.env** file:     
-`docker run --rm -d -t --env-file prod.env --link postgres:postgres --name tibia-bot <image_id>`
+`docker run --rm -d -t --env-file prod.env --network=violentbot --name violent-bot <image_id>`
 
 ## Debugging
 
