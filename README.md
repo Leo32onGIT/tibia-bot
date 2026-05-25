@@ -22,8 +22,8 @@ Current features include:
 3. Click **Reset Token** & take note of the `Token` that is generated.
 
 #### Custom Emojis and Poke Roles
-The bot is configured to point to emojis and roles in _my_ discord server.     
-You will need to change this to point to your emojis and your discord roles.
+The bot is configured to point to emojis in _my_ discord server.     
+You will need to change this to point to your emojis.
 
 1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/dedicated/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
 2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
