@@ -10,6 +10,7 @@ import java.time.ZonedDateTime
 
 object CreatureManager extends StrictLogging {
 
+  implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
   implicit private val executionContext: ExecutionContextExecutor = scala.concurrent.ExecutionContext.global
 
   private val tibiaDataClient = new TibiaDataClient()

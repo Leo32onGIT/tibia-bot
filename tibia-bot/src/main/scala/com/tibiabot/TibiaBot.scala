@@ -1,15 +1,17 @@
 package com.tibiabot
 
-import akka.actor.Cancellable
+import akka.actor.{ActorSystem, Cancellable}
 import akka.stream.ActorAttributes.supervisionStrategy
 import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
-import com.tibiabot.tibiadata.TibiaDataClient
+import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.exceptions.ErrorHandler
+import net.dv8tion.jda.api.requests.ErrorResponse
 import net.dv8tion.jda.api.interactions.components.ActionRow
 import net.dv8tion.jda.api.interactions.components.buttons.Button
 
@@ -29,21 +31,20 @@ import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
-class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
   private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
   private case class CurrentOnline(name: String, level: Int, vocation: String, guildName: String, time: ZonedDateTime, duration: Long = 0L, flag: String)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
-  private case class CharLevel(name: String, level: Int, vocation: String, lastLogin: ZonedDateTime, time: ZonedDateTime)
   private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
   private case class OnlineListEntry(name: String, level: Int, lastUpdated: ZonedDateTime)
 
   //val guildId: String = guild.getId
 
   private val recentDeaths = mutable.Set.empty[CharKey]
-  private val recentLevels = mutable.Set.empty[CharLevel]
+  private val levelTracker = new tracking.LevelTracker
   private val recentOnline = mutable.Set.empty[CharKey]
   private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private var currentOnline = mutable.Set.empty[CurrentOnline]
@@ -54,7 +55,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
   // initialize cached deaths/levels from database
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
-  recentLevels ++= BotApp.getLevelsCache(world).map(levelsCache => CharLevel(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time)))
+  levelTracker.load(BotApp.getLevelsCache(world).map(levelsCache => tracking.LevelRecord(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time))))
 
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
   private var onlineListCategoryTimer: Map[String, ZonedDateTime] = Map.empty
@@ -65,13 +66,20 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
   private var onlineListTableUpdateTimer: ZonedDateTime = ZonedDateTime.now().minusMinutes(10) // Start immediately
   // ZonedDateTime.parse("2022-01-01T01:00:00Z")
 
-  private val tibiaDataClient = new TibiaDataClient()
+  private val tibiaDataClient: TibiaApi = new TibiaDataClient()
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
   private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
   private val cooldownMinutes = 30L
+  // Safety cap on the per-world outbound backlog (~drains 1 / message-delay-ms). Beyond
+  // this the sender drops and logs rather than growing unbounded under a pathological burst.
+  private val outboundQueueCapacity = 10000
+  // Benign, operator-side send failures (channel deleted / perms removed) — ignore instead
+  // of letting JDA's default handler spam them on every cycle; other errors still log.
+  private val ignoreDeletedTarget = new ErrorHandler()
+    .ignore(ErrorResponse.UNKNOWN_CHANNEL, ErrorResponse.MISSING_PERMISSIONS, ErrorResponse.MISSING_ACCESS)
 
   private val logAndResumeDecider: Supervision.Decider = { e =>
     logger.error("An exception has occurred in the TibiaBot:", e)
@@ -210,7 +218,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
 
             // Activity channel
             if (!blocker) {
-              val guild = BotApp.jda.getGuildById(discords.id)
+              val guild = BotApp.discordGateway.guildById(discords.id)
               val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
               val activityChannel = worldData.headOption.map(_.activityChannel).getOrElse("0")
               val activityTextChannel = guild.getTextChannelById(activityChannel)
@@ -256,7 +264,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 }
                 if (oldName != ""){
                   // update name in cache and db
-                  activityData = activityData + (guildId -> updatedActivityData)
+                  BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
                   BotApp.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                   skipJoinLeave = true
                   if (timeDelay.isDefined) {
@@ -273,7 +281,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             player
                           }
                         }
-                        huntedPlayersData = huntedPlayersData + (guildId -> updatedHuntedPlayersData)
+                        BotApp.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
                       }
                       if (allyPlayerCheck) {
                         // change name in allied players cache and db
@@ -285,7 +293,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                             player
                           }
                         }
-                        alliedPlayersData = alliedPlayersData + (guildId -> updatedAlliedPlayersData)
+                        BotApp.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
                       }
                       if (activityTextChannel != null) {
                         if (activityTextChannel.canTalk() || (!Config.prod)) {
@@ -366,7 +374,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           }
                           // remove from hunted list if in allied guild
                           if (allyGuildCheck) {
-                            huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name == charName))
+                            BotApp.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name == charName)))
                             BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
@@ -388,7 +396,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         if (wasInHuntedGuild) {
                           if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                             // add them to cached huntedPlayersData list
-                            huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                            BotApp.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             BotApp.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
@@ -407,7 +415,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         } else if (wasInAlliedGuild){
                           if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                             // remove from activity
-                            activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase)))
+                            BotApp.modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName.toLowerCase))))
                             BotApp.removePlayerActivityfromDatabase(guild, charName.toLowerCase)
                           }
                         }
@@ -419,7 +427,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         // joined a hunted guild
                         if (huntedGuildCheck) {
                           // remove from hunted 'Player' cache and db
-                          huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                          BotApp.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                           BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
                           // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
@@ -437,7 +445,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           }
                         } else if (allyGuildCheck) {
                           // remove from hunted 'Player' cache and db
-                          huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                          BotApp.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                           BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
                           // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
@@ -477,7 +485,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                       }.getOrElse(activityData.getOrElse(guildId, List()))
 
                       // Update in cache and db
-                      activityData = activityData + (guildId -> updatedActivityData)
+                      BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
                       BotApp.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
                     }
                   }
@@ -485,13 +493,13 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   // add to cache and db
                   val newActivity = BotApp.PlayerCache(charName, formerNamesList, guildName, ZonedDateTime.now())
                   val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
-                  activityData = activityData + (guildId -> updatedActivityData)
+                  BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
                   BotApp.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
                   // joined a hunted guild
                   if (huntedGuildCheck) {
                     if (huntedPlayerCheck) { // was he originally in hunted 'player' list?
                       // remove from hunted 'Player' cache and db
-                      huntedPlayersData = huntedPlayersData.updated(guildId, huntedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                      BotApp.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                       BotApp.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
                       // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
@@ -511,7 +519,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   } else if (allyGuildCheck) { // joined an allied guild
                     if (allyPlayerCheck) {
                       // remove from allied 'Player' cache and db
-                      alliedPlayersData = alliedPlayersData.updated(guildId, alliedPlayersData.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase))
+                      BotApp.modifyAlliedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                       BotApp.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
                       // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
@@ -572,12 +580,12 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
           currentOnline.find(_.name == charName).foreach { onlinePlayer =>
             // level (i need to add logic here to batch messages control throughput a bit)
             if (onlinePlayer.level > sheetLevel) {
-              val newCharLevel = CharLevel(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
+              val newLevelRecord = tracking.LevelRecord(charName, onlinePlayer.level, sheetVocation, sheetLastLogin, now)
               // post level to each discord
               if (discordsData.contains(world)) {
                 val discordsList = discordsData(world)
                 discordsList.foreach { discords =>
-                  val guild = BotApp.jda.getGuildById(discords.id)
+                  val guild = BotApp.discordGateway.guildById(discords.id)
                   val guildId = discords.id
 
                   // get appropriate guildIcon
@@ -622,19 +630,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                         } else {
                           true
                         }
-                      if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)) {
-                        val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                        if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))) {
-                          if (levelsCheck) {
-                            //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                            //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                            sendMessageWithRateLimit(levelsTextChannel, message = webhookMessage)
-                          }
-                        }
-                      } else {
+                      if (levelTracker.shouldRecord(charName, onlinePlayer.level, sheetLastLogin)) {
                         if (levelsCheck) {
-                          //createAndSendWebhookMessage(levelsTextChannel, webhookMessage, s"${world.capitalize}")
-                          //sender.sendWebhookMessage(guild, levelsTextChannel, webhookMessage, s"${world.capitalize}")
                           sendMessageWithRateLimit(levelsTextChannel, message = webhookMessage)
                         }
                       }
@@ -647,14 +644,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                 currentOnline -= onlinePlayer
                 currentOnline += onlinePlayer.copy(flag = Config.levelUpEmoji)
               }
-              if (recentLevels.exists(x => x.name == charName && x.level == onlinePlayer.level)) {
-                val lastLoginInRecentLevels = recentLevels.filter(x => x.name == charName && x.level == onlinePlayer.level)
-                if (lastLoginInRecentLevels.forall(x => x.lastLogin.isBefore(sheetLastLogin))) {
-                  recentLevels += newCharLevel
-                  BotApp.addLevelsCache(world, charName, onlinePlayer.level.toString, sheetVocation, sheetLastLogin.toString, now.toString)
-                }
-              } else {
-                recentLevels += newCharLevel
+              if (levelTracker.shouldRecord(charName, onlinePlayer.level, sheetLastLogin)) {
+                levelTracker.record(newLevelRecord)
                 BotApp.addLevelsCache(world, charName, onlinePlayer.level.toString, sheetVocation, sheetLastLogin.toString, now.toString)
               }
             }
@@ -705,7 +696,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     if (discordsData.contains(world)) {
       val discordsList = discordsData(world)
       discordsList.foreach { discords =>
-        val guild = BotApp.jda.getGuildById(discords.id)
+        val guild = BotApp.discordGateway.guildById(discords.id)
         val guildId = discords.id
         val adminChannel = discords.adminChannel
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
@@ -954,7 +945,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                           huntedBuffer.foreach { case (player, world, vocation, level) =>
                             val playerString = player.toLowerCase()
                             // add them to cached huntedPlayersData list
-                            huntedPlayersData = huntedPlayersData + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: huntedPlayersData.getOrElse(guildId, List())))
+                            BotApp.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             // add them to the database
                             BotApp.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
                             // send embed to admin channel
@@ -1018,14 +1009,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
                   embedCheck = false
                 }
               }
-              val embed = new EmbedBuilder()
-                embed.setTitle(
-                s"${vocEmoji(charDeath.char.character.character.vocation)} $charName ${vocEmoji(charDeath.char.character.character.vocation)}",
-                charUrl(charName)
-                )
-              embed.setDescription(embedText)
-              embed.setThumbnail(embedThumbnail)
-              embed.setColor(embedColor)
+              val embed = presentation.DeathEmbeds.build(charName, charDeath.char.character.character.vocation, embedText, embedThumbnail, embedColor)
 
               // return embed + poke
               (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond)
@@ -1130,17 +1114,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val voc = player.vocation.toLowerCase.split(' ').last
       val vocationEmoji = vocEmoji(voc)
       val durationInSec = player.duration
-      val durationInMin = durationInSec / 60
-      val durationStr =
-        if (durationInMin >= 60) {
-          val hours = durationInMin / 60
-          val mins = durationInMin % 60
-          s"${hours}hr ${mins}min"
-        } else {
-          s"${durationInMin}min"
-        }
-
-      val durationString = s"`$durationStr`"
+      val durationString = presentation.OnlineListEmbeds.durationString(durationInSec)
       val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List())
         .exists(_.name.equalsIgnoreCase(player.guildName))
       val huntedGuildCheck = huntedGuildsData.getOrElse(guildId, List())
@@ -1169,7 +1143,7 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
 
     // run channel checks before updating the channels
-    val guild = BotApp.jda.getGuildById(guildId)
+    val guild = BotApp.discordGateway.guildById(guildId)
     val pattern = "^(.*?)(?:-[0-9]+)?$".r
 
     // default online list
@@ -1204,36 +1178,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     // Masslog formula
     val enemyCount = enemiesList.size
 
-    // val sensitivity = //make user configurable
-    val sensitivity = 0
-    val masslogFloor = 3
-
-    // convert sensitivity into a multiplier adjustment
-    val sensitivityModifier = sensitivity match {
-      case 0 => 1.20 // stricter
-      case 1 => 1.10
-      case 2 => 1.00 // default
-      case 3 => 0.90
-      case 4 => 0.80 // very sensitive
-    }
-
-    // base percentages
-    val basePercentage =
-      enemyCount match {
-        case n if n <= 5  => 0.60
-        case n if n <= 10 => 0.55
-        case n if n <= 20 => 0.40
-        case _            => 0.32
-      }
-
-    // adjusted percentage
-    val adjustedPercentage = basePercentage * sensitivityModifier
-
-    // final required zap count
-    // Masslog minimum of 3
-    val requiredZapCount = math.max(masslogFloor, math.ceil(enemyCount * adjustedPercentage).toInt)
-
-    val masslogCategory = zapCount >= requiredZapCount
+    // Masslog threshold (sensitivity fixed at 0 today; formula in tracking.MasslogDetector)
+    val masslogCategory = tracking.MasslogDetector.isMasslog(zapCount, enemyCount, sensitivity = 0)
     if (masslogCategory && !isOnCooldown) {
       // get Activity channel
       val activityTextChannel = guild.getTextChannelById(activityChannel)
@@ -1733,34 +1679,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < deathRecentDuration
     }
-    recentLevels.filterInPlace { i =>
-      val diff = java.time.Duration.between(i.time, now).getSeconds
-      diff < recentLevelExpiry
-    }
+    levelTracker.prune(now, recentLevelExpiry)
   }
 
-  private def vocEmoji(vocation: String): String = {
-    val voc = vocation.toLowerCase.split(' ').last
-    voc match {
-      case "knight" => ":shield:"
-      case "druid" => ":snowflake:"
-      case "sorcerer" => ":fire:"
-      case "paladin" => ":bow_and_arrow:"
-      case "monk" => ":fist::skin-tone-3:"
-      case "none" => ":hatching_chick:"
-      case _ => ""
-    }
-  }
+  private def vocEmoji(vocation: String): String = presentation.Emojis.vocEmoji(vocation)
 
-  private def guildUrl(guild: String): String = {
-    val encodedString = URLEncoder.encode(guild, StandardCharsets.UTF_8.toString)
-    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${encodedString}"
-  }
+  private def guildUrl(guild: String): String = presentation.Urls.guildUrl(guild)
 
-  private def charUrl(char: String): String = {
-    val encodedString = URLEncoder.encode(char, StandardCharsets.UTF_8.toString)
-    s"https://www.tibia.com/community/?name=${encodedString}"
-  }
+  private def charUrl(char: String): String = presentation.Urls.charUrl(char)
 
   private def getKillerLevel(killerName: String): Option[Int] = {
     logger.info(s"getKillerLevel called for: $killerName")
@@ -1793,21 +1719,8 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     }
   }
 
-  private def creatureImageUrl(creature: String): String = {
-    val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
-      // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
-      val rx1 = """([^\w]\w)""".r
-      val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
-
-      // Lowercase the articles, prepositions etc., e.g. "The Voice of Ruin"
-      val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
-      val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
-
-      // Replace spaces with underscores and make sure the first letter is capitalised
-      parsed2.replaceAll(" ", "_").capitalize
-    })
-    s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$finalCreature.gif"
-  }
+  private def creatureImageUrl(creature: String): String =
+    presentation.Urls.creatureImageUrl(creature, Config.creatureUrlMappings)
 
   lazy val stream: RunnableGraph[Cancellable] =
     sourceTick via
@@ -1817,48 +1730,14 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
       postToDiscordAndCleanUp to Sink.ignore
 
   // Message queue for rate limiting
-  private case class QueuedMessage(
-    channel: TextChannel,
-    message: String,
-    embed: Option[EmbedBuilder] = None,
-    suppressNotifications: Boolean = true
-  )
-
-  private val messageQueue = mutable.Queue[QueuedMessage]()
-  private var messageQueueProcessor: Option[Cancellable] = None
-
-  // Initialize message queue processor
-  private def startMessageQueueProcessor(): Unit = {
-    if (messageQueueProcessor.isEmpty) {
-      messageQueueProcessor = Some(
-        mat.system.scheduler.scheduleWithFixedDelay(
-          0.seconds,
-          Config.messageDelayMs.milliseconds
-        )(() => processMessageQueue())
-      )
-    }
-  }
-
-  private def processMessageQueue(): Unit = {
-    if (messageQueue.nonEmpty) {
-      val msg = messageQueue.dequeue()
-      try {
-        msg.embed match {
-          case Some(embed) =>
-            if (msg.message.nonEmpty) {
-              msg.channel.sendMessage(msg.message).setEmbeds(embed.build()).setSuppressedNotifications(msg.suppressNotifications).queue()
-            } else {
-              msg.channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(msg.suppressNotifications).queue()
-            }
-          case None =>
-            msg.channel.sendMessage(msg.message).setSuppressedNotifications(msg.suppressNotifications).queue()
-        }
-      } catch {
-        case ex: Exception => logger.error(s"Failed to send queued message: ${ex.getMessage}")
-        case _: Throwable => logger.error("Failed to send queued message")
-      }
-    }
-  }
+  // Outbound message delivery: rate-limited and drained one message per tick.
+  private val outboundSender = new discord.RateLimitedSender(drain => {
+    val cancellable = mat.system.scheduler.scheduleWithFixedDelay(
+      0.seconds,
+      Config.messageDelayMs.milliseconds
+    )(new Runnable { def run(): Unit = drain() })(mat.system.dispatcher)
+    () => cancellable.cancel()
+  }, outboundQueueCapacity)
 
   def canPing(channelId: String): Boolean = {
       pingCleanup()
@@ -1891,8 +1770,17 @@ class TibiaBot(world: String)(implicit ex: ExecutionContextExecutor, mat: Materi
     embed: Option[EmbedBuilder] = None,
     suppressNotifications: Boolean = true
   ): Unit = {
-    messageQueue.enqueue(QueuedMessage(channel, message, embed, suppressNotifications))
-    startMessageQueueProcessor()
+    outboundSender.enqueue { () =>
+      embed match {
+        case Some(e) =>
+          if (message.nonEmpty)
+            channel.sendMessage(message).setEmbeds(e.build()).setSuppressedNotifications(suppressNotifications).queue(null, ignoreDeletedTarget)
+          else
+            channel.sendMessageEmbeds(e.build()).setSuppressedNotifications(suppressNotifications).queue(null, ignoreDeletedTarget)
+        case None =>
+          channel.sendMessage(message).setSuppressedNotifications(suppressNotifications).queue(null, ignoreDeletedTarget)
+      }
+    }
   }
 
 }

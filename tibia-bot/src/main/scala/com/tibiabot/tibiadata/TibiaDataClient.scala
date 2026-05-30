@@ -22,9 +22,8 @@ import akka.http.scaladsl.model.headers.{Date => DateHeader}
 import java.time.{ZonedDateTime, ZoneId}
 import java.time.format.DateTimeFormatter
 
-class TibiaDataClient extends JsonSupport with StrictLogging {
+class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
 
-  implicit private val system: ActorSystem = ActorSystem()
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
