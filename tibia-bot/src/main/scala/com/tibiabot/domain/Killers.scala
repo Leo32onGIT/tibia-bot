@@ -11,7 +11,7 @@ object Killers {
    *  killer names that denote an environmental death — `presentation.DeathEffect`
    *  draws its effect-animation keys from this same vocabulary. */
   val substanceSources: Set[String] =
-    Set("death", "earth", "energy", "fire", "ice", "holy", "a trap", "agony", "life drain", "drowning")
+    Set("death", "earth", "energy", "fire", "ice", "holy", "a trap", "agony", "life drain", "drowning", "invalid")
 
   /** Indefinite article ("a"/"an") for a name, chosen by its first letter. */
   def article(name: String): String =
