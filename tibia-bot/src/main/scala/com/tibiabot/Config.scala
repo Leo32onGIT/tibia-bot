@@ -3,7 +3,6 @@ package com.tibiabot
 import com.typesafe.config.ConfigFactory
 
 import scala.jdk.CollectionConverters._
-import scala.util.Try
 
 object Config {
   // prod or dev environment
@@ -42,11 +41,6 @@ object Config {
   val guildJoinGrey: String = discord.getString("guild-join-thumbnail-grey")
   val guildJoinRed: String = discord.getString("guild-join-thumbnail-red")
   val guildJoinGreen: String = discord.getString("guild-join-thumbnail-green")
-
-  // Legacy emoji support (fallback to discord.conf if EmojiManager not available)
-  private def getLegacyEmoji(key: String): String = {
-    Try(discord.getString(key)).getOrElse("❓")
-  }
 
   // Emojis
  val nemesisEmoji: String = discord.getString("nemesis-emoji")
@@ -212,6 +206,6 @@ object Config {
 
   )
   // creatures - dynamically fetched from TibiaData API
-  val creaturesListFromApi: List[String] = BotApp.fetchCreatureNames
+  val creaturesListFromApi: List[String] = BotApp.fetchCreatureNames()
   val creaturesList: List[String] = creaturesListFromApi.map(_.toLowerCase.trim)
 }

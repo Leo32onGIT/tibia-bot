@@ -2,6 +2,7 @@ package com.tibiabot.galthen
 
 import com.tibiabot.discord.DiscordGateway
 import com.tibiabot.domain.SatchelStamp
+import com.tibiabot.domain.time.SatchelCooldown
 import com.tibiabot.persistence.{ConnectionProvider, GalthenRepository}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
@@ -31,10 +32,11 @@ final class GalthenService(
   /** DM each user whose 30-day satchel cooldown has expired, then delete those rows. */
   def cleanExpired(): Unit = {
     val conn = connectionProvider.cache()
+    try {
 
     // Retrieve the data before deletion
     val selectStatement = conn.prepareStatement("SELECT userid,time,tag FROM satchel WHERE time < ?;")
-    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
+    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(SatchelCooldown.durationDays, ChronoUnit.DAYS).toInstant))
     val resultSet = selectStatement.executeQuery()
 
     // Retrieve the data from the result set
@@ -43,7 +45,7 @@ final class GalthenService(
       val tagId = Option(resultSet.getString("tag")).getOrElse("")
       val user: User = discordGateway.retrieveUser(userId)
       val userTimeStamp = resultSet.getTimestamp("time").toInstant()
-      val cooldown = userTimeStamp.plus(30, ChronoUnit.DAYS).getEpochSecond.toString()
+      val cooldown = userTimeStamp.plus(SatchelCooldown.durationDays, ChronoUnit.DAYS).getEpochSecond.toString()
 
       if (user != null) {
         try {
@@ -69,10 +71,11 @@ final class GalthenService(
 
     // Now you have the list of userids and time before deletion, you can proceed with deletion
     val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE time < ?;")
-    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
+    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(SatchelCooldown.durationDays, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
     deleteStatement.close()
-
-    conn.close()
+    } finally {
+      conn.close() // always release the connection, even if a query above threw
+    }
   }
 }

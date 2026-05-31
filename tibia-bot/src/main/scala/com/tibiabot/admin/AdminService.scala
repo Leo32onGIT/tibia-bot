@@ -5,8 +5,8 @@ import com.tibiabot.discord.DiscordGateway
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
-import scala.collection.mutable.ListBuffer
 
 /**
  * Bot-creator-only `/admin` operations, moved from BotApp. The shared `dreamScar`
@@ -20,6 +20,23 @@ final class AdminService(
   resyncDreamScar: () => Unit
 ) extends StrictLogging {
 
+  /** Post a "bot creator ran a command" notice to a guild's admin/command-log
+   *  channel. No-op if the channel is missing or the bot can't talk there. */
+  private def postCreatorLog(adminChannel: TextChannel, description: String, thumbnail: String): Unit =
+    if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
+      try {
+        val adminEmbed = new EmbedBuilder()
+          .setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
+          .setDescription(description)
+          .setThumbnail(thumbnail)
+          .setColor(com.tibiabot.presentation.Embeds.BrandColor)
+        adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
+      } catch {
+        case ex: Throwable =>
+          logger.info(s"Failed to send admin message for Guild ID: '${adminChannel.getGuild.getId}' Guild Name: '${adminChannel.getGuild.getName}'", ex)
+      }
+    }
+
   /** Leave a guild, posting the reason to its admin channel first. */
   def leave(guildId: String, reason: String): MessageEmbed = {
     val guild = discordGateway.guildById(guildId)
@@ -30,37 +47,20 @@ final class AdminService(
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner."
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (adminChannel != null) {
-        if (adminChannel.canTalk() || !(Config.prod)) {
-          try {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
-            adminEmbed.setDescription(s"<@$botUserId> has left your discord because of the following reason:\n> ${reason}")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
-          }
-        }
-      }
+      postCreatorLog(adminChannel,
+        s"<@$botUserId> has left your discord because of the following reason:\n> $reason",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
     }
 
     guild.leave().queue()
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedMessage)
-      .build()
+    com.tibiabot.presentation.Embeds.response(embedMessage)
   }
 
   /** Re-fetch the Dream Courts boss-of-the-day per world. */
   def resyncDreamCourtBosses(): MessageEmbed = {
     resyncDreamScar()
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(s":gear: The dreamcourts bosses for each world have been resynced.")
-      .build()
+    com.tibiabot.presentation.Embeds.response(s":gear: The dreamcourts bosses for each world have been resynced.")
   }
 
   /** Forward a message from the bot creator to a guild's admin channel. */
@@ -74,27 +74,17 @@ final class AdminService(
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null) {
-        if (adminChannel.canTalk() || !(Config.prod)) {
-          try {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
-            adminEmbed.setDescription(s"<@$botUserId> has forwarded a message from the bot's creator:\n> ${message}")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
+        postCreatorLog(adminChannel,
+          s"<@$botUserId> has forwarded a message from the bot's creator:\n> $message",
+          "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
+        embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
       } else {
+        // Previously a trailing assignment overwrote this, so the "channel deleted"
+        // feedback was unreachable and /admin message always reported success.
         embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
       }
-      embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedMessage)
-      .build()
+    com.tibiabot.presentation.Embeds.response(embedMessage)
   }
 
   /** Paginated list of every guild the bot is in, delivered via callback. */
@@ -102,22 +92,9 @@ final class AdminService(
     val allGuilds = discordGateway.guilds
     val allGuildsCleaned: List[String] = allGuilds.map(guild => s"**${guild.getName}** - `${guild.getId}`")
     logger.info(allGuildsCleaned.toString)
-    val embedBuffer = ListBuffer[MessageEmbed]()
-    var field = ""
-    allGuildsCleaned.foreach { v =>
-      val currentField = field + "\n" + v
-      if (currentField.length <= 3000) {
-        field = currentField
-      } else {
-        val interimEmbed = new EmbedBuilder()
-        interimEmbed.setDescription(field)
-        embedBuffer += interimEmbed.build()
-        field = v
-      }
+    val embeds = com.tibiabot.presentation.ListEmbeds.pack(allGuildsCleaned, 3000).map { description =>
+      new EmbedBuilder().setDescription(description).build()
     }
-    val finalEmbed = new EmbedBuilder()
-    finalEmbed.setDescription(field)
-    embedBuffer += finalEmbed.build()
-    callback(embedBuffer.toList)
+    callback(embeds)
   }
 }

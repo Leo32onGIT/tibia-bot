@@ -14,6 +14,11 @@ object DreamScarCycle {
 
   val indexOfBoss: Map[String, Int] = bossCycle.zipWithIndex.toMap
 
+  /** True if `name` is one of the Dream Courts boss-of-the-day bosses
+   *  (case-insensitive). Single source of truth for "is this a Dream Court boss". */
+  def isDreamCourtBoss(name: String): Boolean =
+    bossCycle.exists(_.equalsIgnoreCase(name))
+
   /** Shift each world's boss to the next in the cycle; unknown bosses are kept
    *  unchanged. Extracted verbatim from `BotApp.shiftAllBossesUp`. */
   def shiftAllBossesUp(current: Map[String, String]): Map[String, String] =

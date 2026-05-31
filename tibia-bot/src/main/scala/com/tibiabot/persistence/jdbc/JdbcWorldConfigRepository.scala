@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.Worlds
+import com.tibiabot.domain.{Worlds, WorldName}
 import com.tibiabot.persistence.{ConnectionProvider, WorldConfigRepository}
 
 import scala.collection.mutable.ListBuffer
@@ -13,8 +13,8 @@ import scala.util.{Failure, Success, Try}
  *  loading and testable. */
 final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, mergedWorlds: List[String]) extends WorldConfigRepository {
 
-  def listWorlds(guildId: String): List[Worlds] = {
-    val conn = connectionProvider.guild(guildId)
+  def listWorlds(guildId: String): List[Worlds] =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
 
     // Check if the column already exists in the table
@@ -105,17 +105,16 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     }
 
     statement.close()
-    conn.close()
     results.toList
   }
 
   def createWorld(guildId: String, world: String, alliesChannel: String, enemiesChannel: String,
                   neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String,
                   fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String,
-                  fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+                  fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, masslog_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, masslog_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
-    val formalQuery = world.toLowerCase().capitalize
+    val formalQuery = WorldName.formal(world)
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
     statement.setString(3, enemiesChannel)
@@ -170,13 +169,12 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def retrieveWorld(guildId: String, world: String): Map[String, String] = {
-    val conn = connectionProvider.guild(guildId)
+  def retrieveWorld(guildId: String, world: String): Map[String, String] =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement("SELECT * FROM worlds WHERE name = ?;")
-    val formalWorld = world.toLowerCase().capitalize
+    val formalWorld = WorldName.formal(world)
     statement.setString(1, formalWorld)
     val result = statement.executeQuery()
 
@@ -215,40 +213,36 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       configMap += ("combined_online" -> combinedOnlineValue)
     }
     statement.close()
-    conn.close()
     configMap
   }
 
-  def removeWorld(guildId: String, world: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def removeWorld(guildId: String, world: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement("DELETE FROM worlds WHERE name = ?")
-    val formalName = world.toLowerCase().capitalize
+    val formalName = WorldName.formal(world)
     statement.setString(1, formalName)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def updateWorldString(guildId: String, world: String, column: String, value: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def updateWorldString(guildId: String, world: String, column: String, value: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement(s"UPDATE worlds SET $column = ? WHERE name = ?;")
     statement.setString(1, value)
     statement.setString(2, world)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def updateWorldInt(guildId: String, world: String, column: String, value: Int): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def updateWorldInt(guildId: String, world: String, column: String, value: Int): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement(s"UPDATE worlds SET $column = ? WHERE name = ?;")
     statement.setInt(1, value)
     statement.setString(2, world)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 }

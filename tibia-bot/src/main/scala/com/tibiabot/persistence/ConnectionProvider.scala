@@ -13,6 +13,8 @@ trait ConnectionProvider {
   def cache(): Connection
   /** Maintenance connection to the default `postgres` database. */
   def admin(): Connection
-  /** Connection to the `premium` database. */
+  /** Connection to the `premium` database. PLANNED — only used by
+   *  SchemaInitializer.initPremium (the not-yet-wired Patreon/premium tier);
+   *  kept intentionally, not dead code. */
   def premium(): Connection
 }

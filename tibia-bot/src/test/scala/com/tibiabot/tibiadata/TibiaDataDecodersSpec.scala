@@ -27,9 +27,10 @@ class TibiaDataDecodersSpec extends AnyFunSuite with Matchers with JsonSupport {
   }
 
   test("creatures: boosted creature is named and the full list decodes") {
-    val r = fixture("creatures.json").parseJson.convertTo[CreaturesResponse]
+    // CreatureResponse is the model the live getBoostedCreature path decodes.
+    val r = fixture("creatures.json").parseJson.convertTo[CreatureResponse]
     r.creatures.boosted.name should not be empty
-    r.creatures.boosted.race should not be empty
+    r.creatures.boosted.image_url should startWith("https://")
     r.creatures.creature_list.size should be > 50
     // every list entry fully decodes (name + image url present)
     all(r.creatures.creature_list.map(_.name)) should not be empty
@@ -43,6 +44,18 @@ class TibiaDataDecodersSpec extends AnyFunSuite with Matchers with JsonSupport {
     val online = r.world.online_players.getOrElse(Nil)
     online should not be empty
     all(online.map(_.level)) should be > 0.0
+  }
+
+  test("worlds: the regular-world list decodes with the fields WorldManager reads") {
+    val r = fixture("worlds.json").parseJson.convertTo[WorldsResponse]
+    val worlds = r.worlds.regular_worlds
+    worlds.size should be > 50
+    all(worlds.map(_.name)) should not be empty
+    // WorldManager sorts these names; a few long-standing worlds should be present
+    val names = worlds.map(_.name)
+    names should contain ("Antica")
+    all(worlds.map(_.players_online)) should be >= 0.0
+    all(worlds.map(_.location)) should not be empty
   }
 
   test("character: empty guild object decodes to None and deaths/killers parse") {

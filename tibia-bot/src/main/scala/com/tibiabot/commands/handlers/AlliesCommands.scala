@@ -17,29 +17,23 @@ object AlliesCommands {
     val reasonOption: String = options.getOrElse("reason", "none")
     val worldOption: String = options.getOrElse("world", "")
 
-    var authed = false
-    val user = event.getUser // Get the user who ran the command
-    val guild = event.getGuild
-    val member = guild.retrieveMember(user).complete()
-    if (Permissions.hasManageServer(member)) {
-      authed = true
-    }
+    val authed = Permissions.callerHasManageServer(event)
 
     subCommand match {
       case "player" =>
         if (authed) {
           if (toggleOption == "add") {
-            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> true))
             BotApp.addAlly(event, "player", nameOption, reasonOption, embed => {
               event.getHook.sendMessageEmbeds(embed).queue(_ => {
-                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+                BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> false))
               })
             })
           } else if (toggleOption == "remove") {
-            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> true))
             BotApp.removeAlly(event, "player", nameOption, embed => {
               event.getHook.sendMessageEmbeds(embed).queue(_ => {
-                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+                BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> false))
               })
             })
           }
@@ -50,17 +44,17 @@ object AlliesCommands {
       case "guild" =>
         if (authed) {
           if (toggleOption == "add") {
-            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> true))
             BotApp.addAlly(event, "guild", nameOption, reasonOption, embed => {
               event.getHook.sendMessageEmbeds(embed).queue(_ => {
-                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+                BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> false))
               })
             })
           } else if (toggleOption == "remove") {
-            BotApp.activityCommandBlocker += (event.getGuild.getId -> true)
+            BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> true))
             BotApp.removeAlly(event, "guild", nameOption, embed => {
               event.getHook.sendMessageEmbeds(embed).queue(_ => {
-                BotApp.activityCommandBlocker += (event.getGuild.getId -> false)
+                BotApp.modifyActivityCommandBlocker(_ + (event.getGuild.getId -> false))
               })
             })
           }

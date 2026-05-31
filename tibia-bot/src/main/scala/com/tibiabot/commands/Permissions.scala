@@ -2,6 +2,7 @@ package com.tibiabot.commands
 
 import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.entities.Member
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
 /** Centralized command authorization checks. */
 object Permissions {
@@ -13,4 +14,10 @@ object Permissions {
   /** True if the member may run server-management commands. */
   def hasManageServer(member: Member): Boolean =
     member != null && member.hasPermission(Permission.MANAGE_SERVER)
+
+  /** True if the user who triggered `event` may run server-management commands.
+   *  Resolves the caller's Member (a blocking retrieve) then defers to
+   *  [[hasManageServer]]. */
+  def callerHasManageServer(event: SlashCommandInteractionEvent): Boolean =
+    hasManageServer(event.getGuild.retrieveMember(event.getUser).complete())
 }

@@ -1,6 +1,7 @@
 package com.tibiabot.commands.handlers
 
 import com.tibiabot.{BotApp, Config}
+import com.tibiabot.presentation.Embeds.BrandColor
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
@@ -34,7 +35,7 @@ object NeutralCommands {
               val labelOption: String = sanitizeLabel(options.getOrElse("label", ""))
               val emojiOption: String = options.getOrElse("emoji", "").trim
               if (labelOption == "" || emojiOption == ""){
-                val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You must supply a **label** and **emoji** when tagging a guild or player.").setColor(3092790).build()
+                val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} You must supply a **label** and **emoji** when tagging a guild or player.").setColor(BrandColor).build()
                 event.getHook.sendMessageEmbeds(embed).queue()
               } else {
                 if (isValidEmoji(emojiOption)) {
@@ -42,7 +43,7 @@ object NeutralCommands {
                     event.getHook.sendMessageEmbeds(embed).queue()
                   })
                 } else {
-                  val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} The provided emoji is invalid - use a standard discord emoji.\n:warning: Custom emojis are not supported.").setColor(3092790).build()
+                  val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} The provided emoji is invalid - use a standard discord emoji.\n:warning: Custom emojis are not supported.").setColor(BrandColor).build()
                   event.getHook.sendMessageEmbeds(embed).queue()
                 }
               }
@@ -62,7 +63,7 @@ object NeutralCommands {
               }
           }
         case other =>
-          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommandGroup '$other' for `/neutral`.").setColor(3092790).build()
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommandGroup '$other' for `/neutral`.").setColor(BrandColor).build()
           event.getHook.sendMessageEmbeds(embed).queue()
       }
     } else {
@@ -84,7 +85,7 @@ object NeutralCommands {
             event.getHook.sendMessageEmbeds(embed).queue()
           }
         case other =>
-          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/neutral`.").setColor(3092790).build()
+          val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/neutral`.").setColor(BrandColor).build()
           event.getHook.sendMessageEmbeds(embed).queue()
       }
     }

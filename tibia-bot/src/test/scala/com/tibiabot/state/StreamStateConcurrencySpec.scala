@@ -1,6 +1,6 @@
 package com.tibiabot.state
 
-import com.tibiabot.domain.{PlayerCache, Players}
+import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, Worlds}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -18,6 +18,9 @@ class StreamStateConcurrencySpec extends AnyFunSuite with Matchers {
   private val when = ZonedDateTime.parse("2026-01-01T00:00:00Z")
   private def cache(name: String) = PlayerCache(name, Nil, "guild", when)
   private def player(name: String) = Players(name, "false", "test", "0")
+  private def guildEntry(name: String) = Guilds(name, "false", "test", "0")
+  private def sortEntry(name: String) = CustomSort("guild", name, "label", ":x:")
+  private def discord(id: String) = Discords(id, "admin", "boosted", "msg")
 
   /** Run `body(threadIndex)` on `threads` threads at once, started together. */
   private def race(threads: Int)(body: Int => Unit): Unit = {
@@ -62,19 +65,110 @@ class StreamStateConcurrencySpec extends AnyFunSuite with Matchers {
     state.huntedPlayersData(guildId).map(_.name).toSet.size shouldBe threads * perThread // no duplicates/drops
   }
 
-  test("interleaved writes across all three maps stay consistent") {
+  test("concurrent guild-list appends to the SAME guild keep every entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250
+    val guildId = "shared-guild"
+    race(threads) { t =>
+      (0 until perThread).foreach { i =>
+        state.modifyHuntedGuildsData { m =>
+          m.updated(guildId, guildEntry(s"$t-$i") :: m.getOrElse(guildId, Nil))
+        }
+      }
+    }
+    state.huntedGuildsData(guildId).size shouldBe threads * perThread
+    state.alliedGuildsData shouldBe empty // independent map untouched
+  }
+
+  test("concurrent worldsData inserts never lose an entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250
+    race(threads) { t =>
+      (0 until perThread).foreach { k =>
+        state.modifyWorldsData(_ + (s"guild-$t-$k" -> List.empty[Worlds]))
+      }
+    }
+    state.worldsData.size shouldBe threads * perThread
+  }
+
+  test("concurrent discordsData inserts never lose an entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250
+    race(threads) { t =>
+      (0 until perThread).foreach { k =>
+        state.modifyDiscordsData(_ + (s"world-$t-$k" -> List(discord(s"d$t$k"))))
+      }
+    }
+    state.discordsData.size shouldBe threads * perThread
+  }
+
+  test("concurrent customSort inserts never lose an entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250
+    race(threads) { t =>
+      (0 until perThread).foreach { k =>
+        state.modifyCustomSortData(_ + (s"sort-$t-$k" -> List(sortEntry(s"s$t$k"))))
+      }
+    }
+    state.customSortData.size shouldBe threads * perThread
+  }
+
+  test("concurrent activityCommandBlocker inserts never lose an entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250
+    race(threads) { t =>
+      (0 until perThread).foreach { k =>
+        state.modifyActivityCommandBlocker(_ + (s"guild-$t-$k" -> true))
+      }
+    }
+    state.activityCommandBlocker.size shouldBe threads * perThread
+  }
+
+  test("concurrent characterCache inserts never lose an entry") {
+    val state = new StreamState
+    val threads = 16
+    val perThread = 250 // 16 * 250 = 4000 distinct character names
+    race(threads) { t =>
+      (0 until perThread).foreach { k =>
+        state.modifyCharacterCache(_ + (s"char-$t-$k" -> when))
+      }
+    }
+    state.characterCache.size shouldBe threads * perThread
+  }
+
+  test("interleaved writes across all ten maps stay consistent") {
     val state = new StreamState
     val threads = 12
     val perThread = 200
     race(threads) { t =>
       (0 until perThread).foreach { i =>
         state.modifyActivityData(_ + (s"a-$t-$i" -> List(cache("x"))))
-        state.modifyHuntedPlayersData(_ + (s"h-$t-$i" -> List(player("x"))))
-        state.modifyAlliedPlayersData(_ + (s"y-$t-$i" -> List(player("x"))))
+        state.modifyHuntedPlayersData(_ + (s"hp-$t-$i" -> List(player("x"))))
+        state.modifyAlliedPlayersData(_ + (s"ap-$t-$i" -> List(player("x"))))
+        state.modifyHuntedGuildsData(_ + (s"hg-$t-$i" -> List(guildEntry("x"))))
+        state.modifyAlliedGuildsData(_ + (s"ag-$t-$i" -> List(guildEntry("x"))))
+        state.modifyCustomSortData(_ + (s"cs-$t-$i" -> List(sortEntry("x"))))
+        state.modifyDiscordsData(_ + (s"d-$t-$i" -> List(discord("x"))))
+        state.modifyWorldsData(_ + (s"w-$t-$i" -> List.empty[Worlds]))
+        state.modifyActivityCommandBlocker(_ + (s"b-$t-$i" -> true))
+        state.modifyCharacterCache(_ + (s"c-$t-$i" -> when))
       }
     }
-    state.activityData.size shouldBe threads * perThread
-    state.huntedPlayersData.size shouldBe threads * perThread
-    state.alliedPlayersData.size shouldBe threads * perThread
+    val expected = threads * perThread
+    state.activityData.size shouldBe expected
+    state.huntedPlayersData.size shouldBe expected
+    state.alliedPlayersData.size shouldBe expected
+    state.huntedGuildsData.size shouldBe expected
+    state.alliedGuildsData.size shouldBe expected
+    state.customSortData.size shouldBe expected
+    state.discordsData.size shouldBe expected
+    state.worldsData.size shouldBe expected
+    state.activityCommandBlocker.size shouldBe expected
+    state.characterCache.size shouldBe expected
   }
 }

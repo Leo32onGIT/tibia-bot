@@ -3,8 +3,7 @@ package com.tibiabot.presentation
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-/** Characterization of the vocation->emoji mapping, including the deliberate
- *  divergence between the two call sites. */
+/** Characterization of the unified vocation->emoji mapping. */
 class EmojisSpec extends AnyFunSuite with Matchers {
 
   test("vocEmoji matches the promoted vocation by its last word") {
@@ -17,13 +16,17 @@ class EmojisSpec extends AnyFunSuite with Matchers {
     Emojis.vocEmoji("") shouldBe ""
   }
 
-  test("vocEmojiWithoutMonk matches BotApp's original behaviour") {
-    Emojis.vocEmojiWithoutMonk("Elite Knight") shouldBe ":shield:"
-    Emojis.vocEmojiWithoutMonk("None") shouldBe ":hatching_chick:"
+  test("monk now resolves everywhere (the BotApp-without-monk variant is gone)") {
+    Emojis.vocEmoji("Monk") shouldBe ":fist::skin-tone-3:"
   }
 
-  test("the divergence is preserved: monk maps to an emoji in one path, '' in the other") {
-    Emojis.vocEmoji("Monk") shouldBe ":fist::skin-tone-3:"
-    Emojis.vocEmojiWithoutMonk("Monk") shouldBe "" // BotApp predates monks
+  test("every grouped vocation has an emoji (guards against the monk-blank desync)") {
+    // The monk bug was a display-order vocation with no emoji. Pin that every
+    // vocation we group/sort by (domain.Vocations.displayOrder) renders something.
+    com.tibiabot.domain.Vocations.displayOrder.foreach { voc =>
+      withClue(s"vocation '$voc' must map to a non-empty emoji: ") {
+        Emojis.vocEmoji(voc) should not be empty
+      }
+    }
   }
 }

@@ -15,6 +15,7 @@ object JdbcUrls {
   /** Maintenance connection (the default `postgres` database). */
   def admin(host: String): String = s"${base(host)}/postgres"
 
-  /** Premium database. */
+  /** Premium database (PLANNED Patreon/premium tier — see
+   *  SchemaInitializer.initPremium; not wired into runtime yet, kept on purpose). */
   def premium(host: String): String = s"${base(host)}/premium"
 }

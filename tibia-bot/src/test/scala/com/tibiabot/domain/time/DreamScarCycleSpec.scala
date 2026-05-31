@@ -30,4 +30,16 @@ class DreamScarCycleSpec extends AnyFunSuite with Matchers {
     DreamScarCycle.indexOfBoss("Plagueroot") shouldBe 0
     DreamScarCycle.indexOfBoss("Izcandar the Banished") shouldBe 4
   }
+
+  test("isDreamCourtBoss recognises every cycle boss, case-insensitively") {
+    DreamScarCycle.bossCycle.foreach { boss =>
+      DreamScarCycle.isDreamCourtBoss(boss) shouldBe true
+      DreamScarCycle.isDreamCourtBoss(boss.toLowerCase) shouldBe true
+    }
+  }
+
+  test("isDreamCourtBoss is false for non-cycle names") {
+    DreamScarCycle.isDreamCourtBoss("Ferumbras") shouldBe false
+    DreamScarCycle.isDreamCourtBoss("") shouldBe false
+  }
 }

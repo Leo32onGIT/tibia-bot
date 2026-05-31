@@ -13,8 +13,8 @@ import scala.collection.mutable.ListBuffer
  *  same option logic as before (kept verbatim; not user input). */
 final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) extends HuntedAlliedRepository {
 
-  def getPlayers(guildId: String, query: String): List[Players] = {
-    val conn = connectionProvider.guild(guildId)
+  def getPlayers(guildId: String, query: String): List[Players] =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
     val result = statement.executeQuery(s"SELECT name,reason,reason_text,added_by FROM $query")
 
@@ -28,12 +28,11 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     }
 
     statement.close()
-    conn.close()
     results.toList
   }
 
-  def getGuilds(guildId: String, query: String): List[Guilds] = {
-    val conn = connectionProvider.guild(guildId)
+  def getGuilds(guildId: String, query: String): List[Guilds] =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
     val result = statement.executeQuery(s"SELECT name,reason,reason_text,added_by FROM $query")
 
@@ -47,12 +46,11 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     }
 
     statement.close()
-    conn.close()
     results.toList
   }
 
-  def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
     statement.setString(1, name)
@@ -62,11 +60,10 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
     val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
     statement.setString(1, name)
@@ -76,29 +73,26 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def removeHunted(guildId: String, option: String, name: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def removeHunted(guildId: String, option: String, name: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
     val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, name)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def removeAllied(guildId: String, option: String, name: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def removeAllied(guildId: String, option: String, name: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
     val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, name)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
   def rename(guildId: String, option: String, oldName: String, newName: String): Unit = {

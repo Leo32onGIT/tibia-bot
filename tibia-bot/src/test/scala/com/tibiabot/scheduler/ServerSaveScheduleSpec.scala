@@ -15,10 +15,17 @@ class ServerSaveScheduleSpec extends AnyFunSuite with Matchers {
     ServerSaveSchedule.isServerSaveWindow(LocalTime.of(10, 45)) shouldBe false
   }
 
-  test("rashidLocation maps each weekday to its city") {
+  test("rashidLocation maps every weekday to its canonical Tibia city") {
+    // The full fixed rotation, so a typo in any city name is caught.
     ServerSaveSchedule.rashidLocation(DayOfWeek.MONDAY) shouldBe "Svargrond"
+    ServerSaveSchedule.rashidLocation(DayOfWeek.TUESDAY) shouldBe "Liberty Bay"
+    ServerSaveSchedule.rashidLocation(DayOfWeek.WEDNESDAY) shouldBe "Port Hope"
     ServerSaveSchedule.rashidLocation(DayOfWeek.THURSDAY) shouldBe "Ankrahmun"
+    ServerSaveSchedule.rashidLocation(DayOfWeek.FRIDAY) shouldBe "Darashia"
+    ServerSaveSchedule.rashidLocation(DayOfWeek.SATURDAY) shouldBe "Edron"
     ServerSaveSchedule.rashidLocation(DayOfWeek.SUNDAY) shouldBe "Carlin"
+    // every weekday is covered (the match is exhaustive, never throws)
+    DayOfWeek.values.foreach(d => ServerSaveSchedule.rashidLocation(d) should not be empty)
   }
 
   test("shouldShowDrome only when drome is in the future and within 3 days") {

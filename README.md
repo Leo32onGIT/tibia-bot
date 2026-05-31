@@ -36,7 +36,7 @@ Supporting packages:
 | `commands/` | Slash-command schemas, `CommandRouter`, `Permissions`; `commands/handlers/` has one object per command. |
 | `interactions/` | Button, modal and message (screenshot-upload) interaction handlers. |
 | `discord/` | `DiscordGateway` (the JDA read seam) and `RateLimitedSender` (outbound message queue). |
-| `persistence/` | Repository ports + `ConnectionProvider`/`SchemaInitializer`; JDBC/Postgres impls in `persistence/jdbc/`. |
+| `persistence/` | Repository ports + `ConnectionProvider`/`SchemaInitializer`; JDBC/Postgres impls in `persistence/jdbc/`. All JDBC access goes through `JdbcSupport.withConnection`, which releases the connection even when a statement throws, so errors can't leak connections under concurrent load. |
 | `presentation/` | Pure embed/message builders (deaths, online list, boosted, galthen). |
 | `scheduler/` | Server-save schedule decisions (window, Rashid location, Drome countdown). |
 | `tracking/` | Death/level/online dedup state and masslog detection. |

@@ -31,7 +31,7 @@ object BoostedCommands {
       }
     } else {
       val embed = new EmbedBuilder()
-        .setDescription(s"${Config.noEmoji} Invalid option for `/boosted`.").setColor(3092790).build()
+        .setDescription(s"${Config.noEmoji} Invalid option for `/boosted`.").setColor(com.tibiabot.presentation.Embeds.BrandColor).build()
       event.getHook.sendMessageEmbeds(embed).queue()
     }
   }

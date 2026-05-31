@@ -1,21 +1,14 @@
 package com.tibiabot.presentation
 
-/** Pure vocation -> Discord emoji mapping.
+/** Pure vocation -> Discord emoji mapping. Matches a vocation to its emoji by
+ *  its last word, so promoted names ("Elite Knight", "Exalted Monk") resolve to
+ *  the base vocation. Used by both the stream (death/online) and command paths.
  *
- *  IMPORTANT: two variants exist because the original code diverged, and this
- *  extraction preserves BOTH behaviours exactly rather than silently unifying
- *  them (pinned by EmojisSpec):
- *
- *    - `vocEmoji`           — TibiaBot's version; includes the `monk` vocation.
- *    - `vocEmojiWithoutMonk`— BotApp's version; predates monks and omits it,
- *                             so a monk maps to "" there.
- *
- *  Reconciling the two (i.e. adding monk to BotApp's path) would be a behaviour
- *  change and is intentionally left as a separate, explicit decision.
- */
+ *  Previously a second `vocEmojiWithoutMonk` variant existed because BotApp's
+ *  original mapping predated monks and rendered them blank; that legacy variant
+ *  has been unified away so monk players render consistently everywhere. */
 object Emojis {
 
-  /** Includes monk. Matches the original `TibiaBot.vocEmoji`. */
   def vocEmoji(vocation: String): String =
     vocation.toLowerCase.split(' ').last match {
       case "knight"   => ":shield:"
@@ -23,17 +16,6 @@ object Emojis {
       case "sorcerer" => ":fire:"
       case "paladin"  => ":bow_and_arrow:"
       case "monk"     => ":fist::skin-tone-3:"
-      case "none"     => ":hatching_chick:"
-      case _          => ""
-    }
-
-  /** Omits monk. Matches the original `BotApp.vocEmoji`. */
-  def vocEmojiWithoutMonk(vocation: String): String =
-    vocation.toLowerCase.split(' ').last match {
-      case "knight"   => ":shield:"
-      case "druid"    => ":snowflake:"
-      case "sorcerer" => ":fire:"
-      case "paladin"  => ":bow_and_arrow:"
       case "none"     => ":hatching_chick:"
       case _          => ""
     }

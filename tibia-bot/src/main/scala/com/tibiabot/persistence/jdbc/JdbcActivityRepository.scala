@@ -14,8 +14,8 @@ import scala.collection.mutable.ListBuffer
  *  Guild parameter reduced to guildId. */
 final class JdbcActivityRepository(connectionProvider: ConnectionProvider) extends ActivityRepository {
 
-  def getActivity(guildId: String): List[PlayerCache] = {
-    val conn = connectionProvider.guild(guildId)
+  def getActivity(guildId: String): List[PlayerCache] =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
 
     // Check if the table already exists in bot_configuration
@@ -52,12 +52,11 @@ final class JdbcActivityRepository(connectionProvider: ConnectionProvider) exten
     }
 
     statement.close()
-    conn.close()
     results.toList
   }
 
-  def add(guildId: String, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def add(guildId: String, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement(
       s"""
          |INSERT INTO tracked_activity(name, former_names, guild_name, updated)
@@ -76,7 +75,6 @@ final class JdbcActivityRepository(connectionProvider: ConnectionProvider) exten
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
   def update(guildId: String, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit = {
@@ -112,24 +110,21 @@ final class JdbcActivityRepository(connectionProvider: ConnectionProvider) exten
     }
   }
 
-  def removeByGuild(guildId: String, guildName: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
-
+  def removeByGuild(guildId: String, guildName: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(guild_name) = LOWER(?);")
     statement.setString(1, guildName)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 
-  def removeByName(guildId: String, name: String): Unit = {
-    val conn = connectionProvider.guild(guildId)
+  def removeByName(guildId: String, name: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
     statement.setString(1, name)
     statement.executeUpdate()
 
     statement.close()
-    conn.close()
   }
 }

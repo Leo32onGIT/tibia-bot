@@ -2,6 +2,7 @@ package com.tibiabot.commands.handlers
 
 import com.tibiabot.BotApp
 import com.tibiabot.BotApp.SatchelStamp
+import com.tibiabot.domain.time.SatchelCooldown
 import com.tibiabot.presentation.GalthenEmbeds
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
@@ -29,13 +30,13 @@ object GalthenCommands {
       case Some(satchelTimeList) =>
         val tagList = satchelTimeList.collect {
           case satchel if tagOption.equalsIgnoreCase(satchel.tag) =>
-            val when = satchel.when.plusDays(30).toEpochSecond.toString()
+            val when = SatchelCooldown.expiresAtEpoch(satchel.when)
             s"<:satchel:1030348072577945651> can be collected by **`${satchel.tag}`** <t:$when:R>"
         }
 
         val fullList = satchelTimeList.collect {
           case satchel =>
-            val when = satchel.when.plusDays(30).toEpochSecond.toString()
+            val when = SatchelCooldown.expiresAtEpoch(satchel.when)
             val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
             s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
         }
