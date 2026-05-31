@@ -95,9 +95,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
           statement.executeUpdate("CREATE DATABASE bot_cache")
           logger.info("Database 'bot_cache' created successfully")
         } catch {
-          case e: org.postgresql.util.PSQLException
-            if e.getSQLState == "42P04" => // duplicate_database
-            logger.info("Database 'bot_cache' already exists, skipping creation")
+          case e: Throwable =>
+            logger.info("Database 'bot_cache' already exists, skipping creation", e)
         }
       }
       statement.close()

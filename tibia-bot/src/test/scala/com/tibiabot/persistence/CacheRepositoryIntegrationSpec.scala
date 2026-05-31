@@ -83,10 +83,19 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
   private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
     val conn = provider.admin()
     try {
-      val rs = conn.createStatement().executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-      if (!rs.next()) conn.createStatement().executeUpdate("CREATE DATABASE bot_cache")
-    } finally conn.close()
-  }
+      val rs = conn.createStatement()
+        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
+
+      if (!rs.next()) {
+        conn.createStatement()
+          .executeUpdate("CREATE DATABASE bot_cache")
+      }
+    } catch {
+      case e: Throwable =>
+        logger.info("Database 'bot_cache' already exists, skipping creation", e)
+    } finally {
+      conn.close()
+    }
 
   private def ensureTables(provider: JdbcConnectionProvider): Unit = {
     val conn = provider.cache()
