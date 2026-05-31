@@ -91,8 +91,14 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
       val exist = result.next()
       if (!exist) {
-        statement.executeUpdate(s"CREATE DATABASE bot_cache;")
-        logger.info(s"Database 'bot_cache' created successfully")
+        try {
+          statement.executeUpdate("CREATE DATABASE bot_cache")
+          logger.info("Database 'bot_cache' created successfully")
+        } catch {
+          case e: org.postgresql.util.PSQLException
+            if e.getSQLState == "42P04" => // duplicate_database
+            logger.info("Database 'bot_cache' already exists, skipping creation")
+        }
       }
       statement.close()
       !exist
