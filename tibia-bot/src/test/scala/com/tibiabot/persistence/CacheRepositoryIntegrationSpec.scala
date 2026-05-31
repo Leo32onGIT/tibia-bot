@@ -96,6 +96,7 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     } finally {
       conn.close()
     }
+  }
 
   private def ensureTables(provider: JdbcConnectionProvider): Unit = {
     val conn = provider.cache()
