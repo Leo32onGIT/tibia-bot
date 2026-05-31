@@ -7,6 +7,9 @@ enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
 dockerExposedPorts += 443
 dockerBaseImage := "eclipse-temurin:8-jre"
+// Also tag the built image `:latest` so docker-compose.yml can reference a
+// stable tag (otherwise only the version tag is created).
+dockerUpdateLatest := true
 
 val AkkaHttpVersion = "10.5.0"
 
@@ -23,6 +26,7 @@ libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.10.0"
 libraryDependencies += "org.postgresql" % "postgresql" % "42.5.4"
 libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
+libraryDependencies += "io.lettuce" % "lettuce-core" % "6.2.6.RELEASE"
 
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.15"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test

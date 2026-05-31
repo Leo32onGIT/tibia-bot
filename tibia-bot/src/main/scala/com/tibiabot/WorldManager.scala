@@ -12,12 +12,14 @@ object WorldManager extends StrictLogging {
 
   implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
 
-  private val tibiaDataClient = new TibiaDataClient()
+  private val tibiaDataClient: tibiadata.TibiaApi =
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
-  // The world list changes only at major game updates, so cache it for an hour
+  // The world list changes only at major game updates, so cache it (default 1h)
   // instead of making a blocking API call on every getWorldList() (e.g. once per
   // /leaderboards). Falls back to the last good value, then the static list.
-  private val cacheTtl = Duration.ofHours(1)
+  // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
+  private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(

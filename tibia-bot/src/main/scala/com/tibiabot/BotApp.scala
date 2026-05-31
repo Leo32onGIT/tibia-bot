@@ -54,7 +54,9 @@ object BotApp extends App with StrictLogging {
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
-  private val tibiaDataClient: tibiadata.TibiaApi = new TibiaDataClient()
+  private val tibiaDataClient: tibiadata.TibiaApi =
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
+      Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
@@ -149,6 +151,22 @@ object BotApp extends App with StrictLogging {
     streamState.modifyActivityCommandBlocker(f)
   def modifyCharacterCache(f: Map[String, ZonedDateTime] => Map[String, ZonedDateTime]): Unit =
     streamState.modifyCharacterCache(f)
+
+  // R1: warm the Date-header character cache from the last Redis snapshot so a
+  // restart doesn't re-baseline ~8000 characters against the rate-limited API,
+  // then snapshot it every 60s. Whole-map snapshot keeps the per-character hot
+  // path off Redis entirely; no-op + empty load when Redis is disabled.
+  private val charCachePersistence =
+    new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
+  charCachePersistence.load().foreach { loaded =>
+    if (loaded.nonEmpty) {
+      modifyCharacterCache(existing => loaded ++ existing) // existing (fresher) entries win
+      logger.info(s"Warmed character cache from Redis snapshot: ${loaded.size} entries")
+    }
+  }
+  private val snapshotInterval = Config.Cache.characterSnapshotInterval
+  actorSystem.scheduler.scheduleWithFixedDelay(snapshotInterval, snapshotInterval)(() => { charCachePersistence.save(characterCache); () })(ex)
+
   val worlds: List[String] = Config.worldList
 
   // Per-guild channel/role setup lifecycle (extraction of the channel ops from

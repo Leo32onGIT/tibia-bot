@@ -61,7 +61,8 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var onlineListTableUpdateTimer: ZonedDateTime = ZonedDateTime.now().minusMinutes(10) // Start immediately
 
-  private val tibiaDataClient: TibiaApi = new TibiaDataClient()
+  private val tibiaDataClient: TibiaApi =
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off

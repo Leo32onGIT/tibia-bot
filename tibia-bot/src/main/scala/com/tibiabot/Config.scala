@@ -2,7 +2,9 @@ package com.tibiabot
 
 import com.typesafe.config.ConfigFactory
 
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
+import scala.jdk.DurationConverters._
 
 object Config {
   // prod or dev environment
@@ -18,6 +20,27 @@ object Config {
   val postgresHost: String = discord.getString("postgres-host")
   val postgresPassword: String = discord.getString("postgres-password")
   val tibiadataApi: String = discord.getString("localapi-host")
+  val redisHost: String = discord.getString("redis-host")
+  val redisPort: Int = discord.getInt("redis-port")
+  val redisPassword: String = discord.getString("redis-password")
+  val redisEnabled: Boolean = redisHost.nonEmpty
+
+  /** Cache freshness, all in one place — how long cached TibiaData API responses
+   *  are reused before re-fetching. Backed by the `cache { }` block in
+   *  discord.conf (overridable per-key by CACHE_* env vars). HOCON durations
+   *  (`30m`, `1h`, `7d`) are read as scala FiniteDurations.
+   *
+   *  These are API-response cache TTLs ONLY. Behavioural dedup / notification
+   *  windows (death/level/online retention, DB cache cleanup) are intentionally
+   *  not here — they alter what gets posted and several are coupled pairs. */
+  object Cache {
+    private def dur(key: String): FiniteDuration = discord.getDuration(s"cache.$key").toScala
+    val boostedTtl: FiniteDuration = dur("boosted-ttl")
+    val highscoresTtl: FiniteDuration = dur("highscores-ttl")
+    val worldListTtl: FiniteDuration = dur("world-list-ttl")
+    val characterSnapshotTtl: FiniteDuration = dur("character-snapshot-ttl")
+    val characterSnapshotInterval: FiniteDuration = dur("character-snapshot-interval")
+  }
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap

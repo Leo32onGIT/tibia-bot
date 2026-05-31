@@ -10,7 +10,7 @@ Production:
 - [Website](https://violentbot.xyz)
 - [Discord](https://discord.gg/PNnzzs4hN3)
 - [Patreon](https://www.patreon.com/violentbot)
-
+   
 Current features include:    
 - Online List
 - Levels List
@@ -44,6 +44,59 @@ Supporting packages:
 | `wiki/` | Fandom wiki client and HTML parser. |
 | `domain/` | Core case classes; game-time cycles in `domain/time/`. |
 | `galthen/`, `boosted/`, `admin/` | Feature services extracted from `BotApp`. |
+
+```mermaid
+flowchart TB
+    Discord([Discord])
+
+    subgraph entry [Entry points]
+        BL["BotListener — thin event dispatcher"]
+        BA["BotApp — shared state + orchestration"]
+        TB["TibiaBot — per-world stream"]
+    end
+
+    subgraph layer [commands + interactions]
+        RT[CommandRouter]
+        HD["handlers — one per slash command"]
+        IX["Button / Modal / Screenshot handlers"]
+    end
+
+    subgraph svc [feature services]
+        FS["galthen · boosted · admin"]
+    end
+
+    subgraph infra [infrastructure]
+        GW[DiscordGateway]
+        SN[RateLimitedSender]
+        ST["state/StreamState"]
+        PR[presentation]
+        TR[tracking]
+        SC[scheduler]
+    end
+
+    subgraph data [data + external]
+        RP["persistence repositories"]
+        DB[(PostgreSQL)]
+        TD[tibiadata client]
+        WK[wiki client]
+        EXT{{"TibiaData v4 / Fandom"}}
+    end
+
+    Discord --> BL
+    BL --> RT --> HD --> BA
+    BL --> IX --> BA
+    BA --> FS --> RP
+    BA --> ST
+    BA --> RP --> DB
+    HD --> PR
+    SC --> BA
+    TB --> TD --> EXT
+    BA --> WK --> EXT
+    TB --> ST
+    TB --> TR
+    TB --> PR
+    TB --> SN --> GW --> Discord
+```
 
 **Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),
 all sharing a single `ActorSystem`/dispatcher and HTTP pool. Each world ticks every
@@ -122,40 +175,82 @@ You will need to change this to point to your emojis.
 2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
 3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
 
-#### Prepare your linux machine to host the bot
-1. Ensure `docker` is installed.
-1. Ensure `Java JDK 8` is installed.
-1. Ensure `sbt` is installed.
-3. Download the `postgres` docker image:    
-`docker pull postgres`
+#### Prepare your machine to host the bot
+1. Ensure `docker` (with the **Compose** plugin) is installed.
+2. Ensure you can build the bot image — either `sbt` + `Java JDK 8` locally, or use
+   the dockerized build shown below.
 
-## Deployment Steps
+Redis and (optionally) Postgres are provided by `docker-compose.yml`, so you no
+longer need to pull or run them by hand.
 
-1. Clone the repository to your host machine.    
-2. Compile the code into a docker image:    
-`sbt docker:publishLocal`    
-3. Take note of the docker \<image id\> you just created: `docker images`   
-> ![docker image id](https://i.imgur.com/nXvSeIL.png)
+## Running with Docker Compose
 
-4. Create a `prod.env` file with the discord server/channel id & bot authentication token:
-> ```env
-> TOKEN=XXXXXXXXXXXXXXXXXXXXXX   
-> POSTGRES_HOST=sqlhost
-> POSTGRES_PASSWORD=XXXXXXXXXX
-> TIBIADATA_HOST=https://api.tibiadata.com/
-> ```
-5. Create the docker volume for the postgres database:    
-`docker volume create --name pgdata`
-6. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
-`docker network create violentbot`
-6. Run the postgres docker image:    
-`docker run --rm -d -t --env-file prod.env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres`
-7. Run the docker container you just created & parse the **prod.env** file:     
-`docker run --rm -d -t --env-file prod.env --network=violentbot --name violent-bot <image_id>`
+The repository ships a `docker-compose.yml` that runs the bot together with a
+Redis cache and, optionally, a bundled Postgres.
+
+1. **Build the bot image** (tags `violent-bot-dedicated:latest`):
+
+   ```bash
+   sbt docker:publishLocal
+   ```
+
+   No local sbt? Stage the image with the dockerized build, then `docker build`:
+
+   ```bash
+   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
+     -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+     sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch docker:stage
+   docker build -t violent-bot-dedicated:latest tibia-bot/target/docker/stage
+   ```
+
+2. **Create your `.env`** from the template and fill it in:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Start the stack** — pick the database mode:
+
+   - **Bundled Postgres** (self-contained — keep `POSTGRES_HOST=postgres` in `.env`):
+
+     ```bash
+     docker compose --profile local-db up -d
+     ```
+
+   - **Pre-existing / external Postgres** (set `POSTGRES_HOST` to your server in
+     `.env`, no profile):
+
+     ```bash
+     docker compose up -d
+     ```
+
+Redis starts in both modes. To run **without** caching, set `REDIS_HOST=` (empty)
+in `.env`; the bot then ignores the redis container.
+
+### Connecting to a pre-existing Postgres
+
+Leave the `local-db` profile off and point `POSTGRES_HOST` at your database host
+or IP. The bot connects as the `postgres` user with `POSTGRES_PASSWORD` and creates
+its own databases on first run. It always uses **port 5432**, so your database must
+listen there.
+
+> With the bundled Postgres, the bot may log a few connection errors and restart
+> while Postgres initialises on first boot — this is expected and self-resolves.
+
+### Manual (without Compose)
+
+The original `docker run` flow still works: create a `violentbot` network, run a
+`postgres` container, a `redis:7-alpine` container (with `--appendonly yes`), and
+the `violent-bot-dedicated` image, each with `--env-file .env`. The
+`docker-compose.yml` is the source of truth for the exact images and settings.
 
 ## Debugging
 
-1. If something isn't working correctly you should be able to see why very clearly in the logs.
-2. Use `docker ps` to find the \<container id\> for the running bot.
-3. Use `docker logs <container id>` to view the logs.
-4. Use `docker pull dpage/pgadmin4` and `docker run -t --name pgadmin -p 0.0.0.0:82:80 --link postgres:postgres -e 'PGADMIN_DEFAULT_EMAIL=XXXXXXX@gmail.com' -e 'PGADMIN_DEFAULT_PASSWORD=XXXXXXXX' -d dpage/pgadmin4` if you need to visualise the postgres dbs
+1. Tail the bot logs: `docker compose logs -f bot` (errors are usually self-explanatory).
+2. See what's running: `docker compose ps`.
+3. **Pool sizing:** grep the bot logs for `[req-probe]` — every 60s it logs per-host
+   latency percentiles, req/sec and a suggested `max-connections` you can feed back
+   into `akka.conf`'s `per-host-override`.
+4. To visualise the databases, run pgAdmin on the compose network:
+   `docker run -t --name pgadmin -p 82:80 --network <compose-network> -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4`
+   (find `<compose-network>` with `docker network ls`).

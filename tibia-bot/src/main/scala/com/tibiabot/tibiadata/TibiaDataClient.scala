@@ -26,6 +26,25 @@ class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
   private val guildUrl = "https://api.tibiadata.com/v4/guild/"
 
+  // Start the shared latency/throughput probe (idempotent across the per-world clients).
+  RequestMetrics.ensureReporting(system)
+
+  /** Single chokepoint for every outbound request: issues it and records the
+   *  round-trip latency (bucketed by host) into the shared RequestMetrics probe,
+   *  without otherwise changing behaviour. */
+  private def timedRequest(req: HttpRequest): Future[HttpResponse] = {
+    val start = System.nanoTime()
+    val response = Http().singleRequest(req)
+    // Record only on success: a failed singleRequest (timeout, or a near-instant
+    // max-open-requests pool rejection) would otherwise skew the latency
+    // percentiles the probe exists to produce.
+    response.onComplete {
+      case scala.util.Success(_) => RequestMetrics.record(req.uri.authority.host.address(), (System.nanoTime() - start) / 1000000L)
+      case _                     => ()
+    }
+    response
+  }
+
   /** Shared recovery for an Unmarshal failure across every endpoint. On a
    *  non-JSON response (UnsupportedContentType) the spray-json unmarshaller
    *  rejects on the content-type check before reading the body, so the entity
@@ -53,7 +72,7 @@ class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with
   private def fetch[T](uri: String, contentTypeMessage: HttpResponse => String, parseMessage: => String)
                       (implicit um: akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
     for {
-      response <- Http().singleRequest(HttpRequest(uri = uri))
+      response <- timedRequest(HttpRequest(uri = uri))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[T].map(Right(_))
         .recover(recoverUnmarshal(decoded, contentTypeMessage(response), parseMessage))
@@ -153,12 +172,12 @@ class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with
 
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    fetchCharacterCached(name, Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName")))
+    fetchCharacterCached(name, timedRequest(HttpRequest(uri = s"$characterUrl$encodedName")))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val responseFuture = Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName"))
+    val responseFuture = timedRequest(HttpRequest(uri = s"$characterUrl$encodedName"))
     responseFuture.flatMap { response =>
       response.header[DateHeader] match {
         case Some(_) =>
@@ -187,7 +206,7 @@ class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with
     } else {
       encodedName
     }
-    fetchCharacterCached(name, Http().singleRequest(HttpRequest(uri = s"$apiUrl$bypassName")))
+    fetchCharacterCached(name, timedRequest(HttpRequest(uri = s"$apiUrl$bypassName")))
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
