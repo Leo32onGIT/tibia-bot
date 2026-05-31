@@ -86,29 +86,40 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
   }
 
   def initCache(): Unit = {
-    val needsTables = JdbcSupport.withConnection(connectionProvider.admin) { conn =>
+
+    val dbMissing = JdbcSupport.withConnection(connectionProvider.admin) { conn =>
       val statement = conn.createStatement()
-      val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-      val exist = result.next()
-      if (!exist) {
-        try {
-          statement.executeUpdate("CREATE DATABASE bot_cache")
-          logger.info("Database 'bot_cache' created successfully")
-        } catch {
-          case e: Throwable =>
-            logger.info("Database 'bot_cache' already exists, skipping creation", e)
+
+      val result = statement.executeQuery(
+        "SELECT datname FROM pg_database WHERE datname = 'bot_cache'"
+      )
+
+      try {
+        val exist = result.next()
+
+        if (!exist) {
+          try {
+            statement.executeUpdate("CREATE DATABASE bot_cache")
+            logger.info("Database 'bot_cache' created successfully")
+          } catch {
+            case e: Throwable =>
+              logger.info("Database 'bot_cache' already exists, skipping creation", e)
+          }
         }
+
+        !exist
+      } finally {
+        result.close()
+        statement.close()
       }
-      statement.close()
-      !exist
     }
 
-    if (needsTables) {
+    if (dbMissing) {
       JdbcSupport.withConnection(connectionProvider.cache) { newConn =>
         val newStatement = newConn.createStatement()
-        // create the tables in bot_configuration
+
         val createDeathsTable =
-          s"""CREATE TABLE deaths (
+          s"""CREATE TABLE IF NOT EXISTS deaths (
              |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
              |world VARCHAR(255) NOT NULL,
              |name VARCHAR(255) NOT NULL,
@@ -116,7 +127,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |);""".stripMargin
 
         val createLevelsTable =
-          s"""CREATE TABLE levels (
+          s"""CREATE TABLE IF NOT EXISTS levels (
              |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
              |world VARCHAR(255) NOT NULL,
              |name VARCHAR(255) NOT NULL,
@@ -126,36 +137,40 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |time VARCHAR(255) NOT NULL
              |);""".stripMargin
 
-       val createListTable =
-         s"""CREATE TABLE list (
-            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            |world VARCHAR(255) NOT NULL,
-            |former_worlds VARCHAR(255),
-            |name VARCHAR(255) NOT NULL,
-            |former_names VARCHAR(1000),
-            |level VARCHAR(255) NOT NULL,
-            |guild_name VARCHAR(255),
-            |vocation VARCHAR(255) NOT NULL,
-            |last_login VARCHAR(255) NOT NULL,
-            |time VARCHAR(255) NOT NULL
-            |);""".stripMargin
+        val createListTable =
+          s"""CREATE TABLE IF NOT EXISTS list (
+             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+             |world VARCHAR(255) NOT NULL,
+             |former_worlds VARCHAR(255),
+             |name VARCHAR(255) NOT NULL,
+             |former_names VARCHAR(1000),
+             |level VARCHAR(255) NOT NULL,
+             |guild_name VARCHAR(255),
+             |vocation VARCHAR(255) NOT NULL,
+             |last_login VARCHAR(255) NOT NULL,
+             |time VARCHAR(255) NOT NULL
+             |);""".stripMargin
 
-      val createGalthenTable =
-        s"""CREATE TABLE satchel (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |userid VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL,
-           |tag VARCHAR(255)
-           |);""".stripMargin
+        val createSatchelTable =
+          s"""CREATE TABLE IF NOT EXISTS satchel (
+             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+             |userid VARCHAR(255) NOT NULL,
+             |time VARCHAR(255) NOT NULL,
+             |tag VARCHAR(255)
+             |);""".stripMargin
 
         newStatement.executeUpdate(createDeathsTable)
         logger.info("Table 'deaths' created successfully")
+
         newStatement.executeUpdate(createLevelsTable)
         logger.info("Table 'levels' created successfully")
+
         newStatement.executeUpdate(createListTable)
         logger.info("Table 'list' created successfully")
-        newStatement.executeUpdate(createGalthenTable)
-        logger.info("Table 'galthen' created successfully")
+
+        newStatement.executeUpdate(createSatchelTable)
+        logger.info("Table 'satchel' created successfully")
+
         newStatement.close()
       }
     }

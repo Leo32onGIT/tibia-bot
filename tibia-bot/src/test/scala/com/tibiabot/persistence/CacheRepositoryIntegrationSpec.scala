@@ -91,7 +91,7 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
           .executeUpdate("CREATE DATABASE bot_cache")
       }
     } catch {
-      case _ => //
+      case _ : Throwable => //
     } finally {
       conn.close()
     }
