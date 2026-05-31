@@ -14,6 +14,8 @@ services:
   bot:
     image: violent-bot-dedicated:latest
     env_file: .env
+    networks:
+      - violentbot
     depends_on:
       redis:
         condition: service_healthy
@@ -25,6 +27,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    networks:
+      - violentbot
     # appendonly so the character-cache snapshot (and other cached keys) survive
     # a redis restart instead of forcing a cold re-fetch.
     command: ["redis-server", "--appendonly", "yes"]
@@ -59,3 +63,7 @@ services:
 volumes:
   redis-data:
   pgdata:
+
+networks:
+  violentbot:
+    external: true
