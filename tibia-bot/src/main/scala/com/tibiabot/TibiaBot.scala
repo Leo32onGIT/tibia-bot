@@ -675,7 +675,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
             val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
               var notablePoke = ""
               val charName = charDeath.char.character.character.name
-              val killer = charDeath.death.killers.last.name
+              val killer = charDeath.death.killers.lastOption.map(_.name).getOrElse("Invalid")
               var context = "Died"
               var embedColor = 3092790 // background default
               var embedThumbnail = presentation.DeathEffect.thumbnail(killer).getOrElse(creatureImageUrl(killer))

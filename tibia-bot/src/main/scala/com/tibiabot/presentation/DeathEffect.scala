@@ -31,6 +31,9 @@ object DeathEffect {
     "death"      -> resource("Death_Effect.gif"),
     "ice"        -> resource("Ice_Explosion_Effect.gif"),
     "drowning"   -> resource("Reaper_Effect.gif"),
+    "fire"   -> resource("Fire.gif"),
+    "holy"   -> resource("Holy_Effect.gif"),
+    "invalid"   -> resource("Phantasmal_Ooze.gif"),
     "life drain" -> resource("Red_Sparkles_Effect.gif")
   )
 
