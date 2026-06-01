@@ -87,7 +87,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
   def initCache(): Unit = {
 
-    val dbMissing = JdbcSupport.withConnection(connectionProvider.admin) { conn =>
+    JdbcSupport.withConnection(connectionProvider.admin) { conn =>
       val statement = conn.createStatement()
 
       val result = statement.executeQuery(
@@ -106,73 +106,68 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               logger.info("Database 'bot_cache' already exists, skipping creation", e)
           }
         }
-
-        !exist
       } finally {
         result.close()
         statement.close()
       }
     }
+    JdbcSupport.withConnection(connectionProvider.cache) { newConn =>
+      val newStatement = newConn.createStatement()
 
-    if (dbMissing) {
-      JdbcSupport.withConnection(connectionProvider.cache) { newConn =>
-        val newStatement = newConn.createStatement()
+      val createDeathsTable =
+        s"""CREATE TABLE IF NOT EXISTS deaths (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
 
-        val createDeathsTable =
-          s"""CREATE TABLE IF NOT EXISTS deaths (
-             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-             |world VARCHAR(255) NOT NULL,
-             |name VARCHAR(255) NOT NULL,
-             |time VARCHAR(255) NOT NULL
-             |);""".stripMargin
+      val createLevelsTable =
+        s"""CREATE TABLE IF NOT EXISTS levels (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |level VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(255) NOT NULL,
+           |last_login VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
 
-        val createLevelsTable =
-          s"""CREATE TABLE IF NOT EXISTS levels (
-             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-             |world VARCHAR(255) NOT NULL,
-             |name VARCHAR(255) NOT NULL,
-             |level VARCHAR(255) NOT NULL,
-             |vocation VARCHAR(255) NOT NULL,
-             |last_login VARCHAR(255) NOT NULL,
-             |time VARCHAR(255) NOT NULL
-             |);""".stripMargin
+      val createListTable =
+        s"""CREATE TABLE IF NOT EXISTS list (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |former_worlds VARCHAR(255),
+           |name VARCHAR(255) NOT NULL,
+           |former_names VARCHAR(1000),
+           |level VARCHAR(255) NOT NULL,
+           |guild_name VARCHAR(255),
+           |vocation VARCHAR(255) NOT NULL,
+           |last_login VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL
+           |);""".stripMargin
 
-        val createListTable =
-          s"""CREATE TABLE IF NOT EXISTS list (
-             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-             |world VARCHAR(255) NOT NULL,
-             |former_worlds VARCHAR(255),
-             |name VARCHAR(255) NOT NULL,
-             |former_names VARCHAR(1000),
-             |level VARCHAR(255) NOT NULL,
-             |guild_name VARCHAR(255),
-             |vocation VARCHAR(255) NOT NULL,
-             |last_login VARCHAR(255) NOT NULL,
-             |time VARCHAR(255) NOT NULL
-             |);""".stripMargin
+      val createSatchelTable =
+        s"""CREATE TABLE IF NOT EXISTS satchel (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |userid VARCHAR(255) NOT NULL,
+           |time VARCHAR(255) NOT NULL,
+           |tag VARCHAR(255)
+           |);""".stripMargin
 
-        val createSatchelTable =
-          s"""CREATE TABLE IF NOT EXISTS satchel (
-             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-             |userid VARCHAR(255) NOT NULL,
-             |time VARCHAR(255) NOT NULL,
-             |tag VARCHAR(255)
-             |);""".stripMargin
+      newStatement.executeUpdate(createDeathsTable)
+      logger.info("Table 'deaths' created successfully")
 
-        newStatement.executeUpdate(createDeathsTable)
-        logger.info("Table 'deaths' created successfully")
+      newStatement.executeUpdate(createLevelsTable)
+      logger.info("Table 'levels' created successfully")
 
-        newStatement.executeUpdate(createLevelsTable)
-        logger.info("Table 'levels' created successfully")
+      newStatement.executeUpdate(createListTable)
+      logger.info("Table 'list' created successfully")
 
-        newStatement.executeUpdate(createListTable)
-        logger.info("Table 'list' created successfully")
+      newStatement.executeUpdate(createSatchelTable)
+      logger.info("Table 'satchel' created successfully")
 
-        newStatement.executeUpdate(createSatchelTable)
-        logger.info("Table 'satchel' created successfully")
-
-        newStatement.close()
-      }
+      newStatement.close()
     }
   }
 
