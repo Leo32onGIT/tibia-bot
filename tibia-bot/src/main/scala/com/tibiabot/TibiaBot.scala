@@ -116,7 +116,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
       // cache bypass for Seanera
-      if (worldResponse.world.name == "Quidera" || worldResponse.world.name == "Runera") {
+      if (worldResponse.world.name == "Victoris" || worldResponse.world.name == "Runera") {
         // Remove existing online chars from the list...
         recentOnlineBypass.filterInPlace { i =>
           !online.exists(player => player.name == i.char)
@@ -137,7 +137,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
           .map(_.toSet)
       }
     case Left(warning) =>
-      if (world == "Quidera" || world == "Runera") {
+      if (world == "Victoris" || world == "Runera") {
         // use data from previous online list check
         val charsToCheck: Set[String] = recentOnlineBypass.map(_.char).toSet
         Source(charsToCheck)
