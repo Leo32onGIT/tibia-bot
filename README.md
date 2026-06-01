@@ -83,9 +83,84 @@ flowchart TB
     WN -.-> AS
 ```
 
-The N world streams run concurrently on the shared dispatcher and HTTP pool; the only
+The world streams run concurrently on the shared dispatcher and HTTP pool; the only
 points they contend on are `StreamState` (serialised writes) and the JDA rate limiter
 (outbound sends). Startup staggers stream launches by ~5.5s so they don't all poll at once.
+
+## Pre-requisites:
+
+#### Create the new bot in Discord
+1. Go to: https://discord.com/developers/applications and create a **New Application**.
+2. Go to the **Bot** tab and click on **Add Bot**.
+3. Click **Reset Token** & take note of the `Token` that is generated.
+
+#### Custom Emojis
+The bot is configured to point to emojis in _my_ discord server.     
+You will need to change this to point to your emojis.
+
+1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/dedicated/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
+2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
+3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
+
+#### Prepare your machine to host the bot
+1. Ensure `docker` (with the **Compose** plugin) is installed.
+2. Ensure you can build the bot image — either `sbt` + `Java JDK 8` locally
+
+## Deployment Steps   
+**Config and start the Postgres database first:**    
+
+1. Create a `.env` file and fill out it out:    
+
+   ```env
+   TOKEN=XXXXXXXXXXXXXXXXXXXXXX
+   POSTGRES_HOST=sqlhost
+   POSTGRES_PASSWORD=XXXXXXXXXX
+   TIBIADATA_HOST=https://api.tibiadata.com/
+   REDIS_HOST=redis
+   REDIS_PORT=6379
+   REDIS_PASSWORD=XXXXXXXXXXXX
+   ```
+2. Create the docker volume for the postgres database:    
+
+   ```bash
+   docker volume create --name pgdata
+   ```
+3. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
+
+   ```bash
+   docker network create violentbot
+   ```
+4. Run the postgres docker image:    
+
+   ```bash
+   docker run --rm -d -t --env-file prod.env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres
+   ```
+
+The repository ships a `docker-compose.yml` that runs the bot together with a
+Redis cache.
+
+8. **Build the bot image** (tags `violent-bot-dedicated:latest`):    
+
+   ```bash
+   sbt docker:publishLocal
+   ```
+   <details><summary>⚠️ No local sbt?</summary>Stage the image with the dockerized build, then `docker build`:    
+       
+   ```bash
+   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
+   -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+   sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch docker:stage
+   docker build -t violent-bot-dedicated:latest tibia-bot/target/docker/stage
+   ```
+   </details>
+
+9. **Start the stack**:    
+
+     ```bash
+     docker compose up -d
+     ```
+     
+To run **without** caching, unset `REDIS_HOST=` in `.env`.
 
 ## Building & Testing
 
@@ -106,91 +181,7 @@ Tests are hermetic by default:
   (`src/test/resources/tibiadata/`) with the production JSON formats, locking the API contract.
 - **Postgres integration tests** self-cancel unless a database is provided; to run them,
   add `--network <pg-net> -e PGHOST=<host> -e PGPASSWORD=<pw>` to the command above.
-
-## Pre-requisites:
-
-#### Create the new bot in Discord
-1. Go to: https://discord.com/developers/applications and create a **New Application**.
-2. Go to the **Bot** tab and click on **Add Bot**.
-3. Click **Reset Token** & take note of the `Token` that is generated.
-
-#### Custom Emojis and Poke Roles
-The bot is configured to point to emojis in _my_ discord server.     
-You will need to change this to point to your emojis.
-
-1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/dedicated/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
-2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
-3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
-
-#### Prepare your machine to host the bot
-1. Ensure `docker` (with the **Compose** plugin) is installed.
-2. Ensure you can build the bot image — either `sbt` + `Java JDK 8` locally, or use
-   the dockerized build shown below.
-
-Redis and (optionally) Postgres are provided by `docker-compose.yml`, so you no
-longer need to pull or run them by hand.
-
-## Running with Docker Compose
-
-The repository ships a `docker-compose.yml` that runs the bot together with a
-Redis cache and, optionally, a bundled Postgres.
-
-1. **Build the bot image** (tags `violent-bot-dedicated:latest`):
-
-   ```bash
-   sbt docker:publishLocal
-   ```
-
-   No local sbt? Stage the image with the dockerized build, then `docker build`:
-
-   ```bash
-   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
-     -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
-     sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch docker:stage
-   docker build -t violent-bot-dedicated:latest tibia-bot/target/docker/stage
-   ```
-
-2. **Create your `.env`** from the template and fill it in:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-3. **Start the stack** — pick the database mode:
-
-   - **Bundled Postgres** (self-contained — keep `POSTGRES_HOST=postgres` in `.env`):
-
-     ```bash
-     docker compose --profile local-db up -d
-     ```
-
-   - **Pre-existing / external Postgres** (set `POSTGRES_HOST` to your server in
-     `.env`, no profile):
-
-     ```bash
-     docker compose up -d
-     ```
-
-Redis starts in both modes. To run **without** caching, set `REDIS_HOST=` (empty)
-in `.env`; the bot then ignores the redis container.
-
-### Connecting to a pre-existing Postgres
-
-Leave the `local-db` profile off and point `POSTGRES_HOST` at your database host
-or IP. The bot connects as the `postgres` user with `POSTGRES_PASSWORD` and creates
-its own databases on first run. It always uses **port 5432**, so your database must
-listen there.
-
-> With the bundled Postgres, the bot may log a few connection errors and restart
-> while Postgres initialises on first boot — this is expected and self-resolves.
-
-### Manual (without Compose)
-
-The original `docker run` flow still works: create a `violentbot` network, run a
-`postgres` container, a `redis:7-alpine` container (with `--appendonly yes`), and
-the `violent-bot-dedicated` image, each with `--env-file .env`. The
-`docker-compose.yml` is the source of truth for the exact images and settings.
-
+  
 ## Debugging
 
 1. Tail the bot logs: `docker compose logs -f bot` (errors are usually self-explanatory).
