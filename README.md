@@ -10,7 +10,7 @@ Production:
 - [Website](https://violentbot.xyz)
 - [Discord](https://discord.gg/PNnzzs4hN3)
 - [Patreon](https://www.patreon.com/violentbot)
-   
+
 Current features include:    
 - Online List
 - Levels List
@@ -44,59 +44,6 @@ Supporting packages:
 | `wiki/` | Fandom wiki client and HTML parser. |
 | `domain/` | Core case classes; game-time cycles in `domain/time/`. |
 | `galthen/`, `boosted/`, `admin/` | Feature services extracted from `BotApp`. |
-
-```mermaid
-flowchart TB
-    Discord([Discord])
-
-    subgraph entry [Entry points]
-        BL["BotListener — thin event dispatcher"]
-        BA["BotApp — shared state + orchestration"]
-        TB["TibiaBot — per-world stream"]
-    end
-
-    subgraph layer [commands + interactions]
-        RT[CommandRouter]
-        HD["handlers — one per slash command"]
-        IX["Button / Modal / Screenshot handlers"]
-    end
-
-    subgraph svc [feature services]
-        FS["galthen · boosted · admin"]
-    end
-
-    subgraph infra [infrastructure]
-        GW[DiscordGateway]
-        SN[RateLimitedSender]
-        ST["state/StreamState"]
-        PR[presentation]
-        TR[tracking]
-        SC[scheduler]
-    end
-
-    subgraph data [data + external]
-        RP["persistence repositories"]
-        DB[(PostgreSQL)]
-        TD[tibiadata client]
-        WK[wiki client]
-        EXT{{"TibiaData v4 / Fandom"}}
-    end
-
-    Discord --> BL
-    BL --> RT --> HD --> BA
-    BL --> IX --> BA
-    BA --> FS --> RP
-    BA --> ST
-    BA --> RP --> DB
-    HD --> PR
-    SC --> BA
-    TB --> TD --> EXT
-    BA --> WK --> EXT
-    TB --> ST
-    TB --> TR
-    TB --> PR
-    TB --> SN --> GW --> Discord
-```
 
 **Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),
 all sharing a single `ActorSystem`/dispatcher and HTTP pool. Each world ticks every
