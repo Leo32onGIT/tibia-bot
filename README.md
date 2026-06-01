@@ -133,7 +133,7 @@ You will need to change this to point to your emojis.
 4. Run the postgres docker image:    
 
    ```bash
-   docker run --rm -d -t --env-file prod.env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres
+   docker run --rm -d -t --env-file .env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres
    ```
 
 The repository ships a `docker-compose.yml` that runs the bot together with a
