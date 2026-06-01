@@ -156,16 +156,16 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |);""".stripMargin
 
       newStatement.executeUpdate(createDeathsTable)
-      logger.info("Table 'deaths' created successfully")
+      //logger.info("Table 'deaths' created successfully")
 
       newStatement.executeUpdate(createLevelsTable)
-      logger.info("Table 'levels' created successfully")
+      //logger.info("Table 'levels' created successfully")
 
       newStatement.executeUpdate(createListTable)
-      logger.info("Table 'list' created successfully")
+      //logger.info("Table 'list' created successfully")
 
       newStatement.executeUpdate(createSatchelTable)
-      logger.info("Table 'satchel' created successfully")
+      //logger.info("Table 'satchel' created successfully")
 
       newStatement.close()
     }
