@@ -14,7 +14,12 @@ class SchemaInitializerIntegrationSpec extends AnyFunSuite with Matchers with Po
     new SchemaInitializer(provider).initCache()
     val conn = provider.cache()
     try {
-      Seq("deaths", "levels", "list", "satchel").foreach(t => hasTable(conn, t) shouldBe true)
+      Seq("deaths", "levels", "list", "satchel")
+      .foreach { t =>
+        withClue(s"table=$t ") {
+          hasTable(conn, t) shouldBe true
+        }
+      }
     } finally conn.close()
   }
 
