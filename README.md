@@ -190,5 +190,4 @@ Tests are hermetic by default:
    latency percentiles, req/sec and a suggested `max-connections` you can feed back
    into `akka.conf`'s `per-host-override`.
 4. To visualise the databases, run pgAdmin on the compose network:
-   `docker run -t --name pgadmin -p 82:80 --network <compose-network> -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4`
-   (find `<compose-network>` with `docker network ls`).
+   `docker run -t --name pgadmin -p 82:80 --network violentbot -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4`
