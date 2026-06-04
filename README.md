@@ -98,7 +98,7 @@ TIBIADATA_HOST=http://tibiadata-api:8080
 2. Run it on the same docker network so violent bot can access it:
 
 ```bash
-docker run -d -p 0.0.0.0:80:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
+docker run -d -p XXXXXXXX:80:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
 ```
 
 ## Pre-requisites:
