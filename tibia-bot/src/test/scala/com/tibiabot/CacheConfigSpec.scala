@@ -17,7 +17,7 @@ class CacheConfigSpec extends AnyFunSuite with Matchers {
     .getConfig("discord-config").getConfig("cache")
 
   test("every centralised cache TTL key is present with its expected default") {
-    cache.getDuration("boosted-ttl").toScala.toMinutes shouldBe 30
+    cache.getDuration("boosted-ttl").toScala.toMinutes shouldBe 1
     cache.getDuration("highscores-ttl").toScala.toMinutes shouldBe 30
     cache.getDuration("world-list-ttl").toScala.toHours shouldBe 1
     cache.getDuration("character-snapshot-ttl").toScala.toDays shouldBe 7
