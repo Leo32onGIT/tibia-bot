@@ -87,6 +87,20 @@ The world streams run concurrently on the shared dispatcher and HTTP pool; the o
 points they contend on are `StreamState` (serialised writes) and the JDA rate limiter
 (outbound sends). Startup staggers stream launches by ~5.5s so they don't all poll at once.
 
+## Local TibiaData Api (Optional)
+This is used for the Server Save api queries.    
+Local install gives you quicker notifications.
+
+1. Edit the `.env` file
+```env
+TIBIADATA_HOST=http://tibiadata-api:8080
+```
+2. Run it on the same docker network so violent bot can access it:
+
+```bash
+docker run -d -p 0.0.0.0:80:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
+```
+
 ## Pre-requisites:
 
 #### Create the new bot in Discord
@@ -173,15 +187,6 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
   sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
 ```
 
-Tests are hermetic by default:
-
-- **Unit tests** cover the pure logic (routing, permissions, embed builders, trackers,
-  schedule decisions, the rate-limited sender).
-- **Decoder tests** parse frozen real TibiaData `/v4` responses
-  (`src/test/resources/tibiadata/`) with the production JSON formats, locking the API contract.
-- **Postgres integration tests** self-cancel unless a database is provided; to run them,
-  add `--network <pg-net> -e PGHOST=<host> -e PGPASSWORD=<pw>` to the command above.
-  
 ## Debugging
 
 1. Tail the bot logs: `docker compose logs -f bot` (errors are usually self-explanatory).
