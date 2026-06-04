@@ -88,7 +88,7 @@ points they contend on are `StreamState` (serialised writes) and the JDA rate li
 (outbound sends). Startup staggers stream launches by ~5.5s so they don't all poll at once.
 
 ## Local TibiaData Api (Optional)
-This is used for the Server Save api queries.    
+This is only used for Boosted boss/creature endpoints currently.    
 Local install gives you quicker notifications.
 
 1. Edit the `.env` file
