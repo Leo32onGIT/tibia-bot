@@ -3,147 +3,199 @@ package com.tibiabot
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, RaceResponse, Members, HighscoresResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, Members, HighscoresResponse}
+import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.entities.Activity
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
-import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
-import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
-import net.dv8tion.jda.api.interactions.commands.Command.Choice
-import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData, SubcommandGroupData}
-import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 import net.dv8tion.jda.api.interactions.components.buttons._
-import net.dv8tion.jda.api.requests.GatewayIntent
-import net.dv8tion.jda.api.{EmbedBuilder, JDABuilder, Permission}
-import org.postgresql.util.PSQLException
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
+import net.dv8tion.jda.api.entities.Role
+import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.utils.TimeFormat
 
 import java.awt.Color
-import java.sql.{Connection, DriverManager, Timestamp}
-import java.time.{Instant, ZoneOffset, ZonedDateTime, DayOfWeek}
+import java.time.{Instant, ZonedDateTime}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import java.time.format._
 import scala.util.{Failure, Success}
-import java.time.{LocalTime, ZoneId, LocalDateTime, LocalDate}
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
-import scala.util.{Try, Success, Failure}
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import scala.util.Random
 import scala.concurrent.Await
-import scala.concurrent.duration._
-
-import sttp.client3._
-import org.jsoup.Jsoup
-import scala.jdk.CollectionConverters._
-import io.circe.parser._
-import io.circe.HCursor
+import com.tibiabot.presentation.Embeds.BrandColor
 
 object BotApp extends App with StrictLogging {
 
-  case class Worlds(name: String,
-    alliesChannel: String,
-    enemiesChannel: String,
-    neutralsChannel: String,
-    levelsChannel: String,
-    deathsChannel: String,
-    category: String,
-    fullblessRole: String,
-    nemesisRole: String,
-    allyPkRole: String,
-    masslogRole: String,
-    fullblessChannel: String,
-    nemesisChannel: String,
-    fullblessLevel: Int,
-    showNeutralLevels: String,
-    showNeutralDeaths: String,
-    showAlliesLevels: String,
-    showAlliesDeaths: String,
-    showEnemiesLevels: String,
-    showEnemiesDeaths: String,
-    detectHunteds: String,
-    levelsMin: Int,
-    deathsMin: Int,
-    exivaList: String,
-    activityChannel: String,
-    onlineCombined: String
-  )
-
-  private case class Streams(stream: akka.actor.Cancellable, usedBy: List[Discords])
-  case class Discords(id: String, adminChannel: String, boostedChannel: String, boostedMessage: String)
-  case class Players(name: String, reason: String, reasonText: String, addedBy: String)
-  case class BoostedCache(boss: String, creature: String, bossChanged: String, creatureChanged: String)
-  case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
-  case class Guilds(name: String, reason: String, reasonText: String, addedBy: String)
-  case class DeathsCache(world: String, name: String, time: String)
-  case class LevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String)
-  case class ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
-  case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
-  case class BoostedStamp(user: String, boostedType: String, boostedName: String)
-  case class DeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, addedAt: ZonedDateTime, messageId: String)
-  case class CustomSort(entityType: String, name: String, label: String, emoji: String)
-  case class BossEntry(world: String, boss: String)
+  // Domain model extracted to com.tibiabot.domain. Aliased here (type + companion
+  // val) so every existing reference — bare within BotApp and BotApp.X elsewhere —
+  // resolves unchanged. Compile-only: no behaviour change.
+  type Worlds = domain.Worlds; val Worlds = domain.Worlds
+  type Discords = domain.Discords; val Discords = domain.Discords
+  type Players = domain.Players; val Players = domain.Players
+  type Guilds = domain.Guilds; val Guilds = domain.Guilds
+  type BoostedCache = domain.BoostedCache; val BoostedCache = domain.BoostedCache
+  type PlayerCache = domain.PlayerCache; val PlayerCache = domain.PlayerCache
+  type DeathsCache = domain.DeathsCache; val DeathsCache = domain.DeathsCache
+  type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
+  type ListCache = domain.ListCache; val ListCache = domain.ListCache
+  type SatchelStamp = domain.SatchelStamp; val SatchelStamp = domain.SatchelStamp
+  type BoostedStamp = domain.BoostedStamp; val BoostedStamp = domain.BoostedStamp
+  type DeathScreenshot = domain.DeathScreenshot; val DeathScreenshot = domain.DeathScreenshot
+  type CustomSort = domain.CustomSort; val CustomSort = domain.CustomSort
+  type BossEntry = domain.BossEntry; val BossEntry = domain.BossEntry
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
-  private val tibiaDataClient = new TibiaDataClient()
+  private val tibiaDataClient: tibiadata.TibiaApi =
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
+      Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
+  private val connectionProvider: persistence.ConnectionProvider =
+    new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
+  private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
+  private val boostedRepository: persistence.BoostedRepository =
+    new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
+  private lazy val wikiClient: wiki.WikiClient = new wiki.FandomWikiClient()
+  private val galthenRepository: persistence.GalthenRepository =
+    new persistence.jdbc.JdbcGalthenRepository(connectionProvider)
+  private val deathScreenshotRepository: persistence.DeathScreenshotRepository =
+    new persistence.jdbc.JdbcDeathScreenshotRepository(connectionProvider)
+  private val cacheRepository: persistence.CacheRepository =
+    new persistence.jdbc.JdbcCacheRepository(connectionProvider)
+  private val activityRepository: persistence.ActivityRepository =
+    new persistence.jdbc.JdbcActivityRepository(connectionProvider)
+  private val huntedAlliedRepository: persistence.HuntedAlliedRepository =
+    new persistence.jdbc.JdbcHuntedAlliedRepository(connectionProvider)
+  private val customSortRepository: persistence.CustomSortRepository =
+    new persistence.jdbc.JdbcCustomSortRepository(connectionProvider)
+  private val worldConfigRepository: persistence.WorldConfigRepository =
+    new persistence.jdbc.JdbcWorldConfigRepository(connectionProvider, Config.mergedWorlds)
+  private val discordConfigRepository: persistence.DiscordConfigRepository =
+    new persistence.jdbc.JdbcDiscordConfigRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
 
-  val jda = JDABuilder.createDefault(Config.token)
-    .addEventListeners(new BotListener())
-    .build()
-
-  jda.awaitReady()
+  val jda = app.Bootstrap.buildReadyJda(Config.token, new BotListener())
   logger.info("JDA ready")
 
-  // get the discord servers the bot is in
-  private val guilds: List[Guild] = jda.getGuilds.asScala.toList
+  // single read-side seam over JDA (guild/user lookups, identity, presence)
+  val discordGateway: discord.DiscordGateway = new discord.JdaDiscordGateway(jda)
 
-  // stream list
-  private var botStreams = Map[String, Streams]()
+  // get the discord servers the bot is in
+  private val guilds: List[Guild] = discordGateway.guilds
+
+  // per-world stream lifecycle
+  private val streamSupervisor = new app.StreamSupervisor
+
+  // Galthen's Satchel cooldown tracking
+  val galthenService = new galthen.GalthenService(galthenRepository, connectionProvider, discordGateway)
+
+  // Per-user boosted boss/creature notification subscriptions
+  val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, () => boostedBossesList)
 
   // get bot userID (used to stamp automated enemy detection messages)
-  val botUser = jda.getSelfUser.getId
-  private val botName = jda.getSelfUser.getName
+  val botUser = discordGateway.selfUserId
+  // the application owner = the bot creator (used to gate /admin)
+  val botOwner: String = discordGateway.applicationOwnerId
 
-  // initialize core hunted/allied list
-  var customSortData: Map[String, List[CustomSort]] = Map.empty
-  var huntedPlayersData: Map[String, List[Players]] = Map.empty
-  var alliedPlayersData: Map[String, List[Players]] = Map.empty
-  var huntedGuildsData: Map[String, List[Guilds]] = Map.empty
-  var alliedGuildsData: Map[String, List[Guilds]] = Map.empty
-  var activityData: Map[String, List[PlayerCache]] = Map.empty
-  var activityCommandBlocker: Map[String, Boolean] = Map.empty
-  var characterCache: Map[String, ZonedDateTime] = Map.empty
-  val activityDataLock = new Object()
-
-  var worldsData: Map[String, List[Worlds]] = Map.empty
-  var discordsData: Map[String, List[Discords]] = Map.empty
-  var worlds: List[String] = Config.worldList
-
-  // https://tibia.fandom.com/wiki/Template:Dream_Scar_Boss/Offsets
-  val bossCycle = Vector(
-    "Plagueroot",
-    "Malofur Mangrinder",
-    "Maxxenius",
-    "Alptramun",
-    "Izcandar the Banished"
+  // Bot-creator-only /admin operations (needs botUser, defined above)
+  val adminService = new admin.AdminService(
+    discordGateway,
+    botUser,
+    discordRetrieveConfig _,
+    () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap }
   )
-  val indexOfBoss: Map[String, Int] = bossCycle.zipWithIndex.toMap
-  var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
-  var dreamScarLastCheck: String = System.currentTimeMillis().toString
-  var dromeTime = Instant.ofEpochSecond(1779868800L) // 27 May 2026 server save - increment 2 weeks from here
+
+  // Core hunted/allied/world state, read every cycle by the per-world streams and
+  // written by command threads — @volatile gives cross-thread visibility.
+
+  // The maps written by both streams and command threads live in StreamState, which
+  // serialises every read-modify-write. BotApp delegates so existing call sites
+  // (BotApp.activityData / modifyActivityData / ...) are unchanged.
+  val streamState = new state.StreamState
+  def activityData: Map[String, List[PlayerCache]] = streamState.activityData
+  def huntedPlayersData: Map[String, List[Players]] = streamState.huntedPlayersData
+  def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
+  def huntedGuildsData: Map[String, List[Guilds]] = streamState.huntedGuildsData
+  def alliedGuildsData: Map[String, List[Guilds]] = streamState.alliedGuildsData
+  def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
+  def discordsData: Map[String, List[Discords]] = streamState.discordsData
+  def worldsData: Map[String, List[Worlds]] = streamState.worldsData
+  def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
+  def characterCache: Map[String, ZonedDateTime] = streamState.characterCache
+  def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
+    streamState.modifyActivityData(f)
+  def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
+    streamState.modifyHuntedPlayersData(f)
+  def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
+    streamState.modifyAlliedPlayersData(f)
+  def modifyHuntedGuildsData(f: Map[String, List[Guilds]] => Map[String, List[Guilds]]): Unit =
+    streamState.modifyHuntedGuildsData(f)
+  def modifyAlliedGuildsData(f: Map[String, List[Guilds]] => Map[String, List[Guilds]]): Unit =
+    streamState.modifyAlliedGuildsData(f)
+  def modifyCustomSortData(f: Map[String, List[CustomSort]] => Map[String, List[CustomSort]]): Unit =
+    streamState.modifyCustomSortData(f)
+  def modifyDiscordsData(f: Map[String, List[Discords]] => Map[String, List[Discords]]): Unit =
+    streamState.modifyDiscordsData(f)
+  def modifyWorldsData(f: Map[String, List[Worlds]] => Map[String, List[Worlds]]): Unit =
+    streamState.modifyWorldsData(f)
+  def modifyActivityCommandBlocker(f: Map[String, Boolean] => Map[String, Boolean]): Unit =
+    streamState.modifyActivityCommandBlocker(f)
+  def modifyCharacterCache(f: Map[String, ZonedDateTime] => Map[String, ZonedDateTime]): Unit =
+    streamState.modifyCharacterCache(f)
+
+  // R1: warm the Date-header character cache from the last Redis snapshot so a
+  // restart doesn't re-baseline ~8000 characters against the rate-limited API,
+  // then snapshot it every 60s. Whole-map snapshot keeps the per-character hot
+  // path off Redis entirely; no-op + empty load when Redis is disabled.
+  private val charCachePersistence =
+    new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
+  charCachePersistence.load().foreach { loaded =>
+    if (loaded.nonEmpty) {
+      modifyCharacterCache(existing => loaded ++ existing) // existing (fresher) entries win
+      logger.info(s"Warmed character cache from Redis snapshot: ${loaded.size} entries")
+    }
+  }
+  private val snapshotInterval = Config.Cache.characterSnapshotInterval
+  actorSystem.scheduler.scheduleWithFixedDelay(snapshotInterval, snapshotInterval)(() => { charCachePersistence.save(characterCache); () })(ex)
+
+  val worlds: List[String] = Config.worldList
+
+  // Per-guild channel/role setup lifecycle (extraction of the channel ops from
+  // BotApp is in progress; currently the guild-join/leave handlers). State
+  // mutation stays in BotApp via the forgetGuild callback.
+  val channelService = new setup.ChannelService(
+    streamSupervisor,
+    schemaInitializer,
+    forgetGuild = guildId => {
+      if (worldsData.contains(guildId)) modifyWorldsData(_ - guildId)
+      val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
+        if (discordsList.exists(_.id == guildId)) world -> discordsList.filterNot(_.id == guildId)
+        else world -> discordsList
+      }
+      if (updatedDiscordsData != discordsData) modifyDiscordsData(_ => updatedDiscordsData)
+    },
+    sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
+  )
+
+  // Dream Courts boss rotation extracted to domain.time.DreamScarCycle.
+  // dreamScar/dromeTime are written by the scheduler thread (and dreamScar also by
+  // the /admin resync thread) but read every cycle by the per-world streams — so
+  // they need @volatile for the same cross-thread visibility reason as the state
+  // below; without it a stream can keep reading a stale boss/cycle after a shift.
+  val bossCycle = domain.time.DreamScarCycle.bossCycle
+  val indexOfBoss: Map[String, Int] = domain.time.DreamScarCycle.indexOfBoss
+  @volatile var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
+  @volatile var dreamScarLastCheck: String = System.currentTimeMillis().toString
+  @volatile var dromeTime = domain.time.DromeCycle.initial // 27 May 2026 server save - increment 2 weeks from here
 
   // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -165,260 +217,8 @@ object BotApp extends App with StrictLogging {
 
   val boostedBossesList: List[String] = Await.result(bossesFutures, 10.seconds)
 
-  // create the command to set up the bot
-  private val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be tracked")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to track")
-    .setRequired(true))
-
-  // remove world command
-  private val removeCommand: SlashCommandData = Commands.slash("remove", "Remove a world from being tracked")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to remove")
-    .setRequired(true))
-
-  // hunted command
-  private val huntedCommand: SlashCommandData = Commands.slash("hunted", "Manage the hunted list")
-    .addSubcommands(
-      new SubcommandData("guild", "Manage guilds in the hunted list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the hunted list").setRequired(true)
-        ),
-      new SubcommandData("player", "Manage players in the hunted list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The player name you want to add to the hunted list").setRequired(true),
-        new OptionData(OptionType.STRING, "reason", "You can add a reason when players are added to the hunted list")
-        ),
-      new SubcommandData("list", "List players & guilds in the hunted list"),
-      new SubcommandData("clear", "Remove all players and guilds from the hunted list"),
-      new SubcommandData("info", "Show detailed info on a hunted player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
-      ),
-      new SubcommandData("autodetect", "Configure the auto-detection on or off")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
-            .addChoices(
-              new Choice("on", "on"),
-              new Choice("off", "off")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("levels", "Show or hide hunted levels")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("deaths", "Show or hide hunted deaths")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted deaths?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-      )
-
-  // allies command
-  private val alliesCommand: SlashCommandData = Commands.slash("allies", "Manage the allies list")
-    .addSubcommands(
-      new SubcommandData("guild", "Manage guilds in the allies list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the allies list").setRequired(true)
-        ),
-      new SubcommandData("player", "Manage players in the allies list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The player name you want to add to the allies list").setRequired(true)
-        ),
-      new SubcommandData("list", "List players & guilds in the allies list"),
-      new SubcommandData("clear", "Remove all players and guilds from the allies list"),
-      new SubcommandData("info", "Show detailed info on a allied player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
-      ),
-      new SubcommandData("levels", "Show or hide ally levels")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("deaths", "Show or hide ally deaths")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-      )
-
-  // neutrals command
-  private val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Configuration options for neutrals")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("levels", "Show or hide neutral levels")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("deaths", "Show or hide neutral deaths")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-    )
-
-  // fullbless command
-  private val fullblessCommand: SlashCommandData = Commands.slash("fullbless", "Modify the level at which enemy fullblesses poke")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(
-      new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-      new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for fullbless pokes").setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(4000)
-    )
-
-  // leaderboards command
-  private val leaderboardsCommand: SlashCommandData = Commands.slash("leaderboards", "Modify the level at which enemy fullblesses poke")
-    .addOptions(
-      new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-    )
-
-  // minimum levels/deaths command
-  private val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("levels", "Hide events in the levels channel if the character is below a certain level")
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the levels channel").setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(4000)
-      ),
-      new SubcommandData("deaths", "Hide events in the deaths channel if the character is below a certain level")
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(4000)
-      )
-    )
-
-  // remove world command
-  private val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("leave", "Force the bot to leave a specific discord")
-      .addOptions(
-        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
-        new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
-      ),
-      new SubcommandData("info", "get discord info"),
-      new SubcommandData("dreamscar", "resync dreamscar wiki info"),
-      new SubcommandData("worldlist", "get discord info"),
-      new SubcommandData("message", "Send a message to a specific discord")
-      .addOptions(
-        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
-        new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
-      )
-    )
-
-  // exiva command
-  private val exivaCommand: SlashCommandData = Commands.slash("exiva", "Show or hide exiva lists on death posts")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("deaths", "Show or hide the exiva list in the deaths channel")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide the exiva list?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-    )
-
-    // exiva command
-    private val helpCommand: SlashCommandData = Commands.slash("help", "Resend the welcome message & basic getting started information")
-      .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-
-  // recreate channel command
-  private val repairCommand: SlashCommandData = Commands.slash("repair", "Repair & recreate channels that have been deleted for a specific world")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "What world are you trying to recreate channels for?").setRequired(true),
-      )
-
-  // set galthen satchel reminder
-  private val galthenCommand: SlashCommandData = Commands.slash("galthen", "Use this to set a galthen satchel cooldown timer")
-    .addSubcommands(
-      new SubcommandData("satchel", "Use this to set a galthen satchel cooldown timer")
-      .addOptions(
-        new OptionData(OptionType.STRING, "character", "What character/tag is this for?")
-      )
-    )
-
-  // online list config  command
-  private val onlineCombineCommand: SlashCommandData = Commands.slash("online", "Configure how the online list is displayed")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("list", "Configure the online list")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
-            .addChoices(
-              new Choice("separate", "separate"),
-              new Choice("combine", "combine")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-    )
-
-  // online list config  command
-  private val boostedCommand: SlashCommandData = Commands.slash("boosted", "Turn off these notifications or filter them")
-    .addOptions(
-      new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)
-        .addChoices(
-          new Choice("list", "list"),
-          new Choice("disable", "disable")
-        )
-    )
-
-  lazy val commands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand)
+  // Slash command schemas live in commands.CommandSchemas
+  lazy val commands = com.tibiabot.commands.CommandSchemas.commands
 
   // create the deaths/levels cache db
   createCacheDatabase()
@@ -426,7 +226,7 @@ object BotApp extends App with StrictLogging {
   // initialize the database
   guilds.foreach{g =>
     if (g.getIdLong == 867319250708463628L || g.getIdLong == 1082484147492237515L) { // Violent Bot Discords
-      val adminCommands = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand, adminCommand)
+      val adminCommands = com.tibiabot.commands.CommandSchemas.adminCommands
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
       // update the commands
@@ -435,7 +235,10 @@ object BotApp extends App with StrictLogging {
   }
 
   // Start all world streams
-  var startUpComplete = false
+  // Written once on the startup thread (after all world streams are launched) and
+  // read on JDA event threads in BotListener — @volatile so a command thread can't
+  // cache the initial false and reject every slash command as "still starting up".
+  @volatile var startUpComplete = false
   val startTime = Instant.now()
   // update Drome Timer to the latest cycle
   if (dromeTime.isBefore(startTime)) {
@@ -443,8 +246,10 @@ object BotApp extends App with StrictLogging {
   }
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
-  // run the scheduler to clean cache and update dashboard every hour
-  actorSystem.scheduler.schedule(60.seconds, 30.seconds) {
+  // run the scheduler to clean cache and update dashboard every hour.
+  // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
+  // body makes blocking API calls at server save — can't pile up behind itself.
+  actorSystem.scheduler.scheduleWithFixedDelay(60.seconds, 30.seconds)(() => {
     // set activity status
     // only do this every second cycle
     if (updateOnOdd >= 10) {
@@ -457,14 +262,14 @@ object BotApp extends App with StrictLogging {
           "another 50k spent on twist"
         )
         val randomActivityFromList = Random.shuffle(randomActivity).headOption.getOrElse("people press buttons")
-        jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, randomActivityFromList))
+        discordGateway.setWatchingActivity(randomActivityFromList)
       } catch {
         case _: Throwable => logger.info("Failed to update the bot's status counts")
       }
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
-      cleanGalthenList()
+      galthenService.cleanExpired()
       cleanOnlineListCache(30)
       updateOnOdd = 0 // Toggle the flag
     } else {
@@ -472,7 +277,7 @@ object BotApp extends App with StrictLogging {
     }
     // Updating boosted creature/boss at server save
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
-    if (currentTime.isAfter(LocalTime.of(10, 0)) && currentTime.isBefore(LocalTime.of(10, 45))) {
+    if (ServerSaveSchedule.isServerSaveWindow(currentTime)) {
       try{
         val now = System.currentTimeMillis()
         if (now - dreamScarLastCheck.toLong > 60L * 60 * 1000) {
@@ -502,7 +307,7 @@ object BotApp extends App with StrictLogging {
                 boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
-                createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
                 boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
@@ -520,7 +325,7 @@ object BotApp extends App with StrictLogging {
                 boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
-                createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
                 boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
@@ -540,7 +345,7 @@ object BotApp extends App with StrictLogging {
               boostedMonsterUpdate("", "", "0", "0")
               // Do something if at least one of the embeds changed
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-              val notificationsList: List[BoostedStamp] = boostedAll()
+              val notificationsList: List[BoostedStamp] = boostedService.boostedAll()
               notificationsList.foreach { entry =>
                 var matchedNotification = false
                 boostedInfoList.foreach { case (_, _, boostedName) =>
@@ -549,7 +354,7 @@ object BotApp extends App with StrictLogging {
                   }
                 }
                 if (matchedNotification) {
-                  val user: User = jda.retrieveUserById(entry.user).complete()
+                  val user: User = discordGateway.retrieveUser(entry.user)
                   if (user != null) {
                     try {
                       user.openPrivateChannel().queue { privateChannel =>
@@ -565,7 +370,7 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              jda.getGuilds.asScala.foreach { guild =>
+              discordGateway.guilds.foreach { guild =>
                 if (checkConfigDatabase(guild)) {
                   val discordInfo = discordRetrieveConfig(guild)
                   val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
@@ -585,34 +390,24 @@ object BotApp extends App with StrictLogging {
 
                         val dreamScarDaily = dreamScar.getOrElse(lastWorld, "World not found")
 
-                        val rashidLocation =
-                          Map(
-                            DayOfWeek.MONDAY    -> "Svargrond",
-                            DayOfWeek.TUESDAY   -> "Liberty Bay",
-                            DayOfWeek.WEDNESDAY -> "Port Hope",
-                            DayOfWeek.THURSDAY  -> "Ankrahmun",
-                            DayOfWeek.FRIDAY    -> "Darashia",
-                            DayOfWeek.SATURDAY  -> "Edron",
-                            DayOfWeek.SUNDAY    -> "Carlin"
-                          ).getOrElse(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek, "Unknown")
+                        val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
                         val rashidEmbed = new EmbedBuilder()
                         rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
                         rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                        rashidEmbed.setColor(3092790)
+                        rashidEmbed.setColor(BrandColor)
 
                         // Drome Timer
                         val now = Instant.now()
-                        val isAfterNow = dromeTime.isAfter(now)
-                        val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
+                        val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
                         val dromeEmbed = new EmbedBuilder()
                           .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
                           .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                          .setColor(3092790)
+                          .setColor(BrandColor)
 
                         val dreamScarEmbed = new EmbedBuilder()
                         dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
                         dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
-                        dreamScarEmbed.setColor(3092790)
+                        dreamScarEmbed.setColor(BrandColor)
 
                         val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
                         val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ embedsList
@@ -642,159 +437,24 @@ object BotApp extends App with StrictLogging {
         case _ : Throwable => logger.info("Failed to update the boosted messages")
       }
     }
-  }
-
-  // run hunted list cleanup every day at 10:30AM CET
-  private val currentTime = Instant.now
-  private val targetTime = LocalDateTime.of(LocalDate.now, LocalTime.of(10, 30, 0)).atZone(ZoneId.of("Europe/Berlin")).toInstant
-  private val initialDelay = Duration.fromNanos(targetTime.toEpochMilli - currentTime.toEpochMilli).toSeconds.seconds
-  private val interval = 24.hours
+  })
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()
 
-    characterCache = characterCache.filter {
+    modifyCharacterCache(_.filter {
       case (_, timestamp) =>
         val ageMinutes = timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES)
         ageMinutes <= maxAgeMinutes
-    }
+    })
   }
 
   //WIP
-  private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
+  private def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit =
+    cacheRepository.updateBoosted(boss, creature, bossChanged, creatureChanged)
 
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-
-    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
-
-    val results = new ListBuffer[BoostedCache]()
-    while (result.next()) {
-      val boss = Option(result.getString("boss")).getOrElse("None")
-      val creature = Option(result.getString("creature")).getOrElse("None")
-      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
-      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
-
-      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
-    }
-    statement.close()
-
-    if (results.isEmpty) {
-      // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-      insertStatement.setString(1, "None") // Default value for boss
-      insertStatement.setString(2, "None") // Default value for creature
-      insertStatement.setString(3, "0")
-      insertStatement.setString(4, "0")
-      insertStatement.executeUpdate()
-      insertStatement.close()
-    }
-
-    // update category if exists
-    if (boss != "") {
-      val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
-      statement.setString(1, boss)
-      statement.executeUpdate()
-      statement.close()
-    }
-    if (creature != "") {
-      val statement = conn.prepareStatement("UPDATE boosted_info SET creature = ?;")
-      statement.setString(1, creature)
-      statement.executeUpdate()
-      statement.close()
-    }
-    if (bossChanged != "") {
-      val statement = conn.prepareStatement("UPDATE boosted_info SET bosschanged = ?;")
-      statement.setString(1, bossChanged)
-      statement.executeUpdate()
-      statement.close()
-    }
-    if (creatureChanged != "") {
-      val statement = conn.prepareStatement("UPDATE boosted_info SET creaturechanged = ?;")
-      statement.setString(1, creatureChanged)
-      statement.executeUpdate()
-      statement.close()
-    }
-
-    conn.close()
-  }
-
-  private def boostedMessages(): List[BoostedCache] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-
-    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_info'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE boosted_info (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |boss VARCHAR(255) NOT NULL,
-           |bosschanged VARCHAR(255) NOT NULL,
-           |creature VARCHAR(255) NOT NULL,
-           |creaturechanged VARCHAR(255) NOT NULL
-           );""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    // Check if the column already exists in the table
-    val bossChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'bosschanged'")
-    val bossChangedExists = bossChangedExistsQuery.next()
-    bossChangedExistsQuery.close()
-
-    // Check if the column already exists in the table
-    val creatureChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'creaturechanged'")
-    val creatureChangedExists = creatureChangedExistsQuery.next()
-    creatureChangedExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!bossChangedExists) {
-      statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
-    }
-
-    // Add the column if it doesn't exist
-    if (!creatureChangedExists) {
-      statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
-    }
-
-    val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
-    val results = new ListBuffer[BoostedCache]()
-    while (result.next()) {
-      val boss = Option(result.getString("boss")).getOrElse("None")
-      val creature = Option(result.getString("creature")).getOrElse("None")
-      val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
-      val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
-      results += BoostedCache(boss, creature, bossChanged, creatureChanged)
-    }
-
-    if (results.isEmpty) {
-      // If the result list is empty, insert default values
-      val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-      insertStatement.setString(1, "None") // Default value for boss
-      insertStatement.setString(2, "None") // Default value for creature
-      insertStatement.setString(3, "0")
-      insertStatement.setString(4, "0")
-      insertStatement.executeUpdate()
-      insertStatement.close()
-
-      results += BoostedCache("None", "None", "0", "0")
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
+  private def boostedMessages(): List[BoostedCache] =
+    cacheRepository.getBoosted()
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
 
@@ -805,34 +465,34 @@ object BotApp extends App with StrictLogging {
       //if (Config.verifiedDiscords.contains(guildId)) {
         // get hunted Players
         val huntedPlayers = playerConfig(guild.get, "hunted_players")
-        huntedPlayersData += (guildId -> huntedPlayers)
+        modifyHuntedPlayersData(_ + (guildId -> huntedPlayers))
 
         // get allied Players
         val alliedPlayers = playerConfig(guild.get, "allied_players")
-        alliedPlayersData += (guildId -> alliedPlayers)
+        modifyAlliedPlayersData(_ + (guildId -> alliedPlayers))
 
         // get hunted guilds
         val huntedGuilds = guildConfig(guild.get, "hunted_guilds")
-        huntedGuildsData += (guildId -> huntedGuilds)
+        modifyHuntedGuildsData(_ + (guildId -> huntedGuilds))
 
         // get allied guilds
         val alliedGuilds = guildConfig(guild.get, "allied_guilds")
-        alliedGuildsData += (guildId -> alliedGuilds)
+        modifyAlliedGuildsData(_ + (guildId -> alliedGuilds))
 
         // get worlds
         val worldsInfo = worldConfig(guild.get)
-        worldsData += (guildId -> worldsInfo)
+        modifyWorldsData(_ + (guildId -> worldsInfo))
 
         // get tracked activity characters
         val activityInfo = activityConfig(guild.get, "tracked_activity")
-        activityData += (guildId -> activityInfo)
+        modifyActivityData(_ + (guildId -> activityInfo))
 
         // get customSort Data
         val customSortInfo = customSortConfig(guild.get, "online_list_categories")
-        customSortData += (guildId -> customSortInfo)
+        modifyCustomSortData(_ + (guildId -> customSortInfo))
 
         // set default activityCommandBlocker state
-        activityCommandBlocker += (guildId -> false)
+        modifyActivityCommandBlocker(_ + (guildId -> false))
 
         val adminChannels = discordRetrieveConfig(guild.get)
         val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
@@ -847,19 +507,13 @@ object BotApp extends App with StrictLogging {
               boostedChannel = boostedChannelId,
               boostedMessage = boostedMessageId
             )
-            discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
-            val botStream = if (botStreams.contains(world.get)) {
-              // If the stream already exists, update its usedBy list
-              val existingStream = botStreams(world.get)
-              val updatedUsedBy = existingStream.usedBy :+ discords
-              botStreams += (world.get -> existingStream.copy(usedBy = updatedUsedBy))
-              existingStream
-            } else {
-              // If the stream doesn't exist, create a new one with an empty usedBy list
-              val bot = new TibiaBot(world.get)
-              Streams(bot.stream.run(), List(discords))
+            modifyDiscordsData(d => d.updated(w.name, discords :: d.getOrElse(w.name, Nil)))
+            // Preserves prior behaviour: when the world stream already exists it was
+            // left unchanged (the usedBy append was overwritten and never took effect);
+            // only an absent world starts a new stream.
+            if (!streamSupervisor.contains(world.get)) {
+              streamSupervisor.put(world.get, new TibiaBot(world.get).stream.run(), List(discords))
             }
-            botStreams = botStreams + (world.get -> botStream)
           }
         }
       //}
@@ -873,34 +527,34 @@ object BotApp extends App with StrictLogging {
           if (checkConfigDatabase(g)) {
             // get hunted Players
             val huntedPlayers = playerConfig(g, "hunted_players")
-            huntedPlayersData += (guildId -> huntedPlayers)
+            modifyHuntedPlayersData(_ + (guildId -> huntedPlayers))
 
             // get allied Players
             val alliedPlayers = playerConfig(g, "allied_players")
-            alliedPlayersData += (guildId -> alliedPlayers)
+            modifyAlliedPlayersData(_ + (guildId -> alliedPlayers))
 
             // get hunted guilds
             val huntedGuilds = guildConfig(g, "hunted_guilds")
-            huntedGuildsData += (guildId -> huntedGuilds)
+            modifyHuntedGuildsData(_ + (guildId -> huntedGuilds))
 
             // get allied guilds
             val alliedGuilds = guildConfig(g, "allied_guilds")
-            alliedGuildsData += (guildId -> alliedGuilds)
+            modifyAlliedGuildsData(_ + (guildId -> alliedGuilds))
 
             // get worlds
             val worldsInfo = worldConfig(g)
-            worldsData += (guildId -> worldsInfo)
+            modifyWorldsData(_ + (guildId -> worldsInfo))
 
             // get tracked activity characters
             val activityInfo = activityConfig(g, "tracked_activity")
-            activityData += (guildId -> activityInfo)
+            modifyActivityData(_ + (guildId -> activityInfo))
 
             // get customSort Data
             val customSortInfo = customSortConfig(g, "online_list_categories")
-            customSortData += (guildId -> customSortInfo)
+            modifyCustomSortData(_ + (guildId -> customSortInfo))
 
             // set default activityCommandBlocker state
-            activityCommandBlocker += (guildId -> false)
+            modifyActivityCommandBlocker(_ + (guildId -> false))
 
             val adminChannels = discordRetrieveConfig(g)
             val adminChannelId = if (adminChannels.nonEmpty) adminChannels("admin_channel") else "0"
@@ -915,14 +569,13 @@ object BotApp extends App with StrictLogging {
                 boostedChannel = boostedChannelId,
                 boostedMessage = boostedMessageId
               )
-              discordsData = discordsData.updated(w.name, discords :: discordsData.getOrElse(w.name, Nil))
+              modifyDiscordsData(d => d.updated(w.name, discords :: d.getOrElse(w.name, Nil)))
             }
           }
         //}
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        val botStream = new TibiaBot(worldName)
-        botStreams += (worldName -> Streams(botStream.stream.run(), discordsList))
+        streamSupervisor.put(worldName, new TibiaBot(worldName).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 3 seconds
       }
       startUpComplete = true
@@ -952,14 +605,14 @@ object BotApp extends App with StrictLogging {
             // add guild to hunted list and database
             val gText = gData.reasonText
             val gUser = gData.addedBy
-            val gNameFormal = subOptionValueLower.split(" ").map(_.capitalize).mkString(" ")
+            val gNameFormal = presentation.Names.capitalizeWords(subOptionValueLower)
             val gLink = guildUrl(gNameFormal)
             embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** <@$gUser>\n **reason:** $gText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted guild details:")
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
-            embed.setColor(3092790)
+            embed.setColor(BrandColor)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
             return returnEmbed
@@ -974,14 +627,14 @@ object BotApp extends App with StrictLogging {
             // add guild to hunted list and database
             val pText = pData.reasonText
             val pUser = pData.addedBy
-            val pNameFormal = subOptionValueLower.split(" ").map(_.capitalize).mkString(" ")
+            val pNameFormal = presentation.Names.capitalizeWords(subOptionValueLower)
             val pLink = charUrl(pNameFormal)
             embedText = s"**Player:** [$pNameFormal]($pLink)\n **added by:** <@$pUser>\n **reason:** $pText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted player details:")
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
-            embed.setColor(3092790)
+            embed.setColor(BrandColor)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
             return returnEmbed
@@ -993,10 +646,7 @@ object BotApp extends App with StrictLogging {
     } else {
       embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
+    presentation.Embeds.response(embedText)
   }
 
   def infoAllies(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String): MessageEmbed = {
@@ -1014,14 +664,14 @@ object BotApp extends App with StrictLogging {
             // add guild to hunted list and database
             val gText = gData.reasonText
             val gUser = gData.addedBy
-            val gNameFormal = subOptionValueLower.split(" ").map(_.capitalize).mkString(" ")
+            val gNameFormal = presentation.Names.capitalizeWords(subOptionValueLower)
             val gLink = guildUrl(gNameFormal)
             embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** <@$gUser>\n **reason:** $gText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied guild details:")
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
-            embed.setColor(3092790)
+            embed.setColor(BrandColor)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
             return returnEmbed
@@ -1036,14 +686,14 @@ object BotApp extends App with StrictLogging {
             // add guild to hunted list and database
             val pText = pData.reasonText
             val pUser = pData.addedBy
-            val pNameFormal = subOptionValueLower.split(" ").map(_.capitalize).mkString(" ")
+            val pNameFormal = presentation.Names.capitalizeWords(subOptionValueLower)
             val pLink = charUrl(pNameFormal)
             embedText = s"**Player: [$pNameFormal]($pLink)**\n **added by:** <@$pUser>\n **reason:** $pText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied player details:")
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tibiapedia.gif")
-            embed.setColor(3092790)
+            embed.setColor(BrandColor)
             embed.setDescription(embedText)
             val returnEmbed = embed.build()
             return returnEmbed
@@ -1055,10 +705,7 @@ object BotApp extends App with StrictLogging {
     } else {
       embedText = s"${Config.noEmoji} You need to run `/setup` and add a world first."
     }
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
+    presentation.Embeds.response(embedText)
   }
 
   def listAlliesAndHuntedGuilds(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
@@ -1094,34 +741,15 @@ object BotApp extends App with StrictLogging {
               guildApiBuffer += s"**$name** *(This guild doesn't exist)*"
           }
           val guildsAsList: List[String] = List(guildHeader) ++ guildApiBuffer
-          var field = ""
-          var isFirstEmbed = true
-          guildsAsList.foreach { v =>
-            val currentField = field + "\n" + v
-            if (currentField.length <= 4096) { // don't add field yet, there is still room
-              field = currentField
-            } else { // it's full, add the field
-              val interimEmbed = new EmbedBuilder()
-              interimEmbed.setDescription(field)
-              interimEmbed.setColor(embedColor)
-              if (isFirstEmbed) {
-                interimEmbed.setThumbnail(guildThumbnail)
-                isFirstEmbed = false
-              }
-              guildBuffer += interimEmbed.build()
-              field = v
-            }
-          }
-          val finalEmbed = new EmbedBuilder()
-          finalEmbed.setDescription(field)
-          finalEmbed.setColor(embedColor)
-          if (isFirstEmbed) {
-            finalEmbed.setThumbnail(guildThumbnail)
-            isFirstEmbed = false
-          }
-          guildBuffer += finalEmbed.build()
+          guildBuffer ++= presentation.ListEmbeds.paginate(guildsAsList, guildThumbnail, embedColor)
           callback(guildBuffer.toList)
-        case Failure(_) => // e.printStackTrace
+        case Failure(exception) =>
+          // Don't leave the deferred /allies|/hunted reply hanging on failure.
+          logger.error(s"Failed to build the $arg guilds list for Guild '${guild.getName}': ${exception.getMessage}", exception)
+          val errorEmbed = new EmbedBuilder()
+          errorEmbed.setColor(embedColor)
+          errorEmbed.setDescription(s"${Config.noEmoji} Failed to load the guilds list, try again.")
+          callback(List(errorEmbed.build()))
       }
     } else { // guild list is empty
       val listIsEmpty = new EmbedBuilder()
@@ -1146,8 +774,8 @@ object BotApp extends App with StrictLogging {
     val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
 
     if (listGuilds.nonEmpty) {
-      activityDataLock.synchronized {
-        activityData = activityData.mapValues {
+      modifyActivityData { m =>
+        m.view.mapValues {
           _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
         }.toMap
       }
@@ -1159,11 +787,11 @@ object BotApp extends App with StrictLogging {
     }
 
     if (listPlayers.nonEmpty) {
-      activityDataLock.synchronized {
-        val updatedList = activityData.getOrElse(guildId, List.empty)
+      modifyActivityData { m =>
+        val updatedList = m.getOrElse(guildId, List.empty)
           .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
 
-        activityData = activityData.updated(guildId, updatedList)
+        m.updated(guildId, updatedList)
       }
 
       listPlayers.foreach { filterPlayer =>
@@ -1173,10 +801,7 @@ object BotApp extends App with StrictLogging {
     }
 
     val embedText = s"${Config.yesEmoji} The allies list has been reset."
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
+    presentation.Embeds.response(embedText)
   }
 
   def clearHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
@@ -1189,8 +814,8 @@ object BotApp extends App with StrictLogging {
     val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
     if (listGuilds.nonEmpty) {
       // Filter out activityData in one pass by using a Set for efficient lookup
-      activityDataLock.synchronized {
-        activityData = activityData.mapValues {
+      modifyActivityData { m =>
+        m.view.mapValues {
           _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
         }.toMap
       }
@@ -1202,11 +827,11 @@ object BotApp extends App with StrictLogging {
     }
     if (listPlayers.nonEmpty) {
       // Efficiently update activityData by using Set lookups for player names
-      activityDataLock.synchronized {
-        val updatedList = activityData.getOrElse(guildId, List.empty)
+      modifyActivityData { m =>
+        val updatedList = m.getOrElse(guildId, List.empty)
           .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
 
-        activityData = activityData.updated(guildId, updatedList)
+        m.updated(guildId, updatedList)
       }
       // Perform database removal in a batch operation
       listPlayers.foreach { filterPlayer =>
@@ -1215,327 +840,21 @@ object BotApp extends App with StrictLogging {
       }
     }
     var embedText = s"${Config.yesEmoji} The hunted list has been reset."
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
+    presentation.Embeds.response(embedText)
     //
   }
 
-  private def getListTable(world: String): List[ListCache] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
+  private def getListTable(world: String): List[ListCache] =
+    cacheRepository.getList(world)
 
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
+  def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit =
+    cacheRepository.addToList(name, formerNames, world, formerWorlds, guild, level, vocation, lastLogin, updatedTime)
 
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'list'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
+  private def cleanHuntedList(): Unit =
+    cacheRepository.removeExpiredList(ZonedDateTime.now())
 
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE list (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |world VARCHAR(255) NOT NULL,
-           |former_worlds VARCHAR(255),
-           |name VARCHAR(255) NOT NULL,
-           |former_names VARCHAR(1000),
-           |level VARCHAR(255) NOT NULL,
-           |guild_name VARCHAR(255),
-           |vocation VARCHAR(255) NOT NULL,
-           |last_login VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL
-           |);""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT name,former_names,world,former_worlds,guild_name,level,vocation,last_login,time FROM list WHERE world = '$world';")
-
-    val results = new ListBuffer[ListCache]()
-    while (result.next()) {
-
-      val guildName = Option(result.getString("guild_name")).getOrElse("")
-      val name = Option(result.getString("name")).getOrElse("")
-      val formerNames = Option(result.getString("former_names")).getOrElse("")
-      val formerNamesList = formerNames.split(",").toList
-      val world = Option(result.getString("world")).getOrElse("")
-      val formerWorlds = Option(result.getString("former_worlds")).getOrElse("")
-      val formerWorldsList = formerWorlds.split(",").toList
-      val level = Option(result.getString("level")).getOrElse("")
-      val vocation = Option(result.getString("vocation")).getOrElse("")
-      val lastLogin = Option(result.getString("last_login")).getOrElse("")
-      val updatedTimeTemporal = Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
-      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
-
-      // ListCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, last_login: String, updatedTime: ZonedDateTime)
-      results += ListCache(name, formerNamesList, world, formerWorldsList, guildName, level, vocation, lastLogin, updatedTime)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  // V1.6 Galthen Satchel Command
-  def getGalthenTable(userId: String): Option[List[SatchelStamp]] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery =
-      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'satchel'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE satchel (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |userid VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL,
-           |tag VARCHAR(255)
-           |);""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT time,tag FROM satchel WHERE userid = '$userId';")
-
-    val satchelStampList: ListBuffer[SatchelStamp] = ListBuffer()
-
-    while (result.next()) {
-      val updatedTimeTemporal =
-        Try(Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z")))
-          .getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
-      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
-      val tag = Option(result.getString("tag")).getOrElse("")
-
-      val satchelStamp = SatchelStamp(userId, updatedTime, tag)
-      satchelStampList += satchelStamp
-    }
-
-    statement.close()
-    conn.close()
-    Some(satchelStampList.toList)
-  }
-
-  def delGalthen(user: String, tag: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-
-    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND COALESCE(tag, '') = ?;")
-    deleteStatement.setString(1, user)
-    deleteStatement.setString(2, tag)
-    deleteStatement.executeUpdate()
-
-    deleteStatement.close()
-    conn.close()
-  }
-
-  def delAllGalthen(user: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-
-    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ?;")
-    deleteStatement.setString(1, user)
-    deleteStatement.executeUpdate()
-
-    deleteStatement.close()
-    conn.close()
-  }
-
-  def addGalthen(user: String, when: ZonedDateTime, tag: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    val selectStatement = conn.prepareStatement("SELECT time FROM satchel WHERE userid = ? AND tag = ?;")
-    selectStatement.setString(1, user)
-    selectStatement.setString(2, tag)
-    val resultSet = selectStatement.executeQuery()
-
-    if (resultSet.next()) {
-      // Update existing row
-      val updateStatement = conn.prepareStatement(
-        s"""
-           |UPDATE satchel
-           |SET time = ?
-           |WHERE userid = ? AND tag = ?;
-           |""".stripMargin
-      )
-      updateStatement.setTimestamp(1, Timestamp.from(when.toInstant))
-      updateStatement.setString(2, user)
-      updateStatement.setString(3, tag)
-      updateStatement.executeUpdate()
-      updateStatement.close()
-    } else {
-      // Insert new row
-      val insertStatement = conn.prepareStatement(
-        s"""
-           |INSERT INTO satchel(userid, time, tag)
-           |VALUES (?,?,?);
-           |""".stripMargin
-      )
-      insertStatement.setString(1, user)
-      insertStatement.setTimestamp(2, Timestamp.from(when.toInstant))
-      insertStatement.setString(3, tag)
-      insertStatement.executeUpdate()
-      insertStatement.close()
-    }
-
-    selectStatement.close()
-    conn.close()
-  }
-
-  def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val selectStatement = conn.prepareStatement("SELECT name FROM list WHERE LOWER(name) = LOWER(?);")
-    selectStatement.setString(1, name)
-    val resultSet = selectStatement.executeQuery()
-
-    if (resultSet.next()) {
-      // Update existing row
-      val updateStatement = conn.prepareStatement(
-        s"""
-           |UPDATE list
-           |SET former_names = ?, world = ?, former_worlds = ?, guild_name = ?, level = ?, vocation = ?, last_login = ?, time = ?
-           |WHERE LOWER(name) = LOWER(?);
-           |""".stripMargin
-      )
-      updateStatement.setString(1, formerNames.mkString(","))
-      updateStatement.setString(2, world.capitalize)
-      updateStatement.setString(3, formerWorlds.mkString(","))
-      updateStatement.setString(4, guild)
-      updateStatement.setString(5, level)
-      updateStatement.setString(6, vocation)
-      updateStatement.setString(7, lastLogin)
-      updateStatement.setTimestamp(8, Timestamp.from(updatedTime.toInstant))
-      updateStatement.setString(9, name)
-      updateStatement.executeUpdate()
-      updateStatement.close()
-    } else {
-      // Insert new row
-      val insertStatement = conn.prepareStatement(
-        s"""
-           |INSERT INTO list(name, former_names, world, former_worlds, guild_name, level, vocation, last_login, time)
-           |VALUES (?,?,?,?,?,?,?,?,?);
-           |""".stripMargin
-      )
-      insertStatement.setString(1, name)
-      insertStatement.setString(2, formerNames.mkString(","))
-      insertStatement.setString(3, world.capitalize)
-      insertStatement.setString(4, formerWorlds.mkString(","))
-      insertStatement.setString(5, guild)
-      insertStatement.setString(6, level)
-      insertStatement.setString(7, vocation)
-      insertStatement.setString(8, lastLogin)
-      insertStatement.setTimestamp(9, Timestamp.from(updatedTime.toInstant))
-      insertStatement.executeUpdate()
-      insertStatement.close()
-    }
-
-    selectStatement.close()
-    conn.close()
-  }
-
-  private def cleanHuntedList(): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-
-    // Modify the DELETE statement to include a WHERE clause with the condition for time
-    val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
-    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(7, ChronoUnit.DAYS).toInstant))
-    deleteStatement.executeUpdate()
-    deleteStatement.close()
-    conn.close()
-  }
-
-  private def cleanGalthenList(): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-
-    // Retrieve the data before deletion
-    val selectStatement = conn.prepareStatement("SELECT userid,time,tag FROM satchel WHERE time < ?;")
-    selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
-    val resultSet = selectStatement.executeQuery()
-
-    // Retrieve the data from the result set
-    while (resultSet.next()) {
-      val userId = resultSet.getString("userid")
-      val tagId = Option(resultSet.getString("tag")).getOrElse("")
-      val user: User = jda.retrieveUserById(userId).complete()
-      val userTimeStamp = resultSet.getTimestamp("time").toInstant()
-      val cooldown = userTimeStamp.plus(30, ChronoUnit.DAYS).getEpochSecond.toString()
-
-      if (user != null) {
-        try {
-          user.openPrivateChannel().queue { privateChannel =>
-            val embed = new EmbedBuilder()
-            if (tagId.nonEmpty) embed.setFooter(s"Tag: ${tagId.toLowerCase}")
-            val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
-            embed.setColor(178877)
-            embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-            embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you when the 30 day cooldown expires.")
-            privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
-              Button.success("galthenRemind", "Collected"),
-              Button.secondary("galthenClear", "Dismiss")
-            ).queue()
-          }
-        } catch {
-          case ex: Exception => //
-        }
-      }
-    }
-
-    selectStatement.close()
-
-    // Now you have the list of userids and time before deletion, you can proceed with deletion
-    val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE time < ?;")
-    deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(30, ChronoUnit.DAYS).toInstant))
-    deleteStatement.executeUpdate()
-    deleteStatement.close()
-
-    conn.close()
-  }
-
-  def dateStringToEpochSeconds(dateString: String): String = {
-    if (dateString != "") {
-      val formatter = DateTimeFormatter.ISO_INSTANT
-      val instant = Instant.from(formatter.parse(dateString))
-      val now = Instant.now()
-      if (Math.abs(instant.until(now, ChronoUnit.HOURS)) <= 24) {
-        s"<:daily:1133349016814485584><t:${instant.getEpochSecond().toString}:R>"
-      } else {
-        ""
-      }
-    } else ""
-  }
+  def dateStringToEpochSeconds(dateString: String): String =
+    presentation.RecentLogin.stamp(dateString, Instant.now())
 
   def listAlliesAndHuntedPlayers(event: SlashCommandInteractionEvent, arg: String, callback: List[MessageEmbed] => Unit): Unit = {
     // get command option
@@ -1543,7 +862,6 @@ object BotApp extends App with StrictLogging {
     val guildId = guild.getId
     val embedColor = 3092790
 
-    //val playerHeader = if (arg == "allies") s"${Config.allyGuild} **Players** ${Config.allyGuild}" else if (arg == "hunted") s"${Config.enemy} **Players** ${Config.enemy}" else ""
     val playerHeader = s"__**Players:**__"
     val listPlayers: List[Players] = if (arg == "allies") alliedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
       else if (arg == "hunted") huntedPlayersData.getOrElse(guild.getId, List.empty[Players]).map(g => g)
@@ -1578,12 +896,7 @@ object BotApp extends App with StrictLogging {
       futureResults.onComplete {
         case Success(output) =>
           val vocationBuffers = ListMap(
-            "druid" -> ListBuffer[(Int, String, String)](),
-            "knight" -> ListBuffer[(Int, String, String)](),
-            "paladin" -> ListBuffer[(Int, String, String)](),
-            "sorcerer" -> ListBuffer[(Int, String, String)](),
-            "monk" -> ListBuffer[(Int, String, String)](),
-            "none" -> ListBuffer[(Int, String, String)]()
+            domain.Vocations.displayOrder.map(_ -> ListBuffer[(Int, String, String)]()): _*
           )
           // Add concatenatedCacheNames to the respective vocationBuffers based on their vocations
           for (player <- filteredConcatenatedListCache) {
@@ -1591,29 +904,11 @@ object BotApp extends App with StrictLogging {
             val pWorld = player.world
             val pLvl = player.level // You might want to set an appropriate level here for characters in the cache
             val pVoc = player.vocation.toLowerCase.split(' ').last
-            val pEmoji = pVoc match {
-              case "knight" => ":shield:"
-              case "druid" => ":snowflake:"
-              case "sorcerer" => ":fire:"
-              case "paladin" => ":bow_and_arrow:"
-              case "monk" => ":fist::skin-tone-3:"
-              case "none" => ":hatching_chick:"
-              case _ => ""
-            }
+            val pEmoji = presentation.Emojis.vocEmoji(pVoc)
             val pGuild = player.guild
             val allyGuildCheck = if (pGuild != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == pGuild.toLowerCase()) else false
             val huntedGuildCheck = if (pGuild != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == pGuild.toLowerCase()) else false
-            val pIcon = (pGuild, allyGuildCheck, huntedGuildCheck, arg) match {
-              case (_, true, _, "allies") => Config.allyGuild // allied guilds
-              case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
-              case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
-              case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
-              case ("", _, _, "hunted") => Config.enemy // hunted players no guild
-              case ("", _, _, "allies") => Config.ally // allied player in no guild
-              case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
-              case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
-              case _ => ""
-            }
+            val pIcon = presentation.GuildIcons.listGuildIcon(pGuild, allyGuildCheck, huntedGuildCheck, arg)
             val pLoginRelative = dateStringToEpochSeconds(player.last_login) // "2022-01-01T01:00:00Z"
             if (pVoc != "") {
               // only show players on worlds that you have setup
@@ -1631,29 +926,18 @@ object BotApp extends App with StrictLogging {
                 val charGuildName = if(charGuild.isDefined) charGuild.head.name else ""
                 val allyGuildCheck = if (charGuildName != "") alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
                 val huntedGuildCheck = if (charGuildName != "") huntedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == charGuildName.toLowerCase()) else false
-                val guildIcon = (charGuildName, allyGuildCheck, huntedGuildCheck, arg) match {
-                  case (_, true, _, "allies") => Config.allyGuild // allied guilds
-                  case (_, _, true, "allies") => s"${Config.enemyGuild}${Config.ally}"  // allied players but in enemy guild(?)
-                  case (_, _, true, "hunted") => s"${Config.enemyGuild}" // enemy player in hunted guild
-                  case (_, true, _, "hunted") => s"${Config.allyGuild}${Config.enemy}" // hunted players but in ally guild(?)
-                  case ("", _, _, "hunted") => Config.enemy // hunted players no guild
-                  case ("", _, _, "allies") => Config.ally // allied player in no guild
-                  case (_, _, _, "hunted") => s"${Config.otherGuild}${Config.enemy}" // hunted in neutral guild
-                  case (_, _, _, "allies") => s"${Config.otherGuild}${Config.ally}" // ally in neutral guild
-                  case _ => ""
-                }
+                val guildIcon = presentation.GuildIcons.listGuildIcon(charGuildName, allyGuildCheck, huntedGuildCheck, arg)
                 val charVocation = charResponse.character.character.vocation
                 val charWorld = charResponse.character.character.world
                 val charLink = charUrl(charName)
                 val charEmoji = vocEmoji(charResponse)
-                val pNameFormal = name.split(" ").map(_.capitalize).mkString(" ")
+                val pNameFormal = presentation.Names.capitalizeWords(name)
                 val voc = charVocation.toLowerCase.split(' ').last
                 val lastLoginTime = charResponse.character.character.last_login.getOrElse("")
                 // only show players on worlds that you have setup
                 if (allWorlds.exists(_.name.toLowerCase == charWorld.toLowerCase)) {
                   vocationBuffers(voc) += ((charLevel, charWorld, s"$charEmoji **${charLevel.toString}** — **[$pNameFormal]($charLink)** $guildIcon ${dateStringToEpochSeconds(lastLoginTime)}"))
                 }
-                //def addListToCache(name: String, formerNames: List[String], world: String, formerWorlds: List[String], guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit = {
                 val formerNamesList = charResponse.character.character.former_names.map(_.toList).getOrElse(Nil)
                 val formerWorldsList = charResponse.character.character.former_worlds.map(_.toList).getOrElse(Nil)
                 val charLastLogin = charResponse.character.character.last_login.getOrElse("")
@@ -1664,83 +948,24 @@ object BotApp extends App with StrictLogging {
             case (Left(errorMessage), name, _, _) =>
               vocationBuffers("none") += ((0, "Character does not exist", s"${Config.noEmoji} **N/A** — **$name**"))
           }
-          // group by world
-          val vocationWorldBuffers = vocationBuffers.map {
-            case (voc, buffer) =>
-              voc -> buffer.groupBy(_._2)
-          }
-
-          // druids grouped by world sorted by level
-          val druidsWorldLists = vocationWorldBuffers("druid").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-          // knights
-          val knightsWorldLists = vocationWorldBuffers("knight").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-          // paladins
-          val paladinsWorldLists = vocationWorldBuffers("paladin").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-          // sorcerers
-          val sorcerersWorldLists = vocationWorldBuffers("sorcerer").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-          // monks
-          val monksWorldLists = vocationWorldBuffers("monk").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-          // none
-          val noneWorldLists = vocationWorldBuffers("none").map {
-            case (world, worldBuffer) =>
-              world -> worldBuffer.toList.sortBy(-_._1).map(_._3)
-          }
-
-          // combine these into one list now that its ordered by level and grouped by world
-          val allPlayers = List(noneWorldLists, monksWorldLists, sorcerersWorldLists, paladinsWorldLists, knightsWorldLists, druidsWorldLists).foldLeft(Map.empty[String, List[String]]) {
-            (acc, m) => m.foldLeft(acc) {
-              case (map, (k, v)) => map + (k -> (v ++ map.getOrElse(k, List())))
-            }
-          }
+          // group by world, ordered within each world by vocation then level
+          val allPlayers = presentation.WorldList.byWorld(
+            vocationBuffers.map { case (voc, buffer) => voc -> buffer.toSeq })
 
 
           // output a List[String] for the embed
-          val playersList = List(playerHeader) ++ createWorldList(allPlayers)
+          val playersList = List(playerHeader) ++ presentation.WorldList.format(allPlayers)
 
-          // build the embed
-          var field = ""
-          var isFirstEmbed = true
-          playersList.foreach { v =>
-            val currentField = field + "\n" + v
-            if (currentField.length <= 4096) { // don't add field yet, there is still room
-              field = currentField
-            } else { // it's full, add the field
-              val interimEmbed = new EmbedBuilder()
-              interimEmbed.setDescription(field)
-              interimEmbed.setColor(embedColor)
-              if (isFirstEmbed) {
-                interimEmbed.setThumbnail(embedThumbnail)
-                isFirstEmbed = false
-              }
-              playerBuffer += interimEmbed.build()
-              field = v
-            }
-          }
-          val finalEmbed = new EmbedBuilder()
-          finalEmbed.setDescription(field)
-          finalEmbed.setColor(embedColor)
-          if (isFirstEmbed) {
-            finalEmbed.setThumbnail(embedThumbnail)
-            isFirstEmbed = false
-          }
-          playerBuffer += finalEmbed.build()
+          // build the embeds
+          playerBuffer ++= presentation.ListEmbeds.paginate(playersList, embedThumbnail, embedColor)
           callback(playerBuffer.toList)
-        case Failure(_) => // e.printStackTrace
+        case Failure(exception) =>
+          // Don't leave the deferred /allies|/hunted reply hanging on failure.
+          logger.error(s"Failed to build the $arg players list for Guild '${guild.getName}': ${exception.getMessage}", exception)
+          val errorEmbed = new EmbedBuilder()
+          errorEmbed.setColor(embedColor)
+          errorEmbed.setDescription(s"${Config.noEmoji} Failed to load the players list, try again.")
+          callback(List(errorEmbed.build()))
       }
     } else { // player list is empty
       val listIsEmpty = new EmbedBuilder()
@@ -1754,63 +979,125 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def vocEmoji(char: CharacterResponse): String = {
-    val voc = char.character.character.vocation.toLowerCase.split(' ').last
-    voc match {
-      case "knight" => ":shield:"
-      case "druid" => ":snowflake:"
-      case "sorcerer" => ":fire:"
-      case "paladin" => ":bow_and_arrow:"
-      case "none" => ":hatching_chick:"
-      case _ => ""
+  def vocEmoji(char: CharacterResponse): String =
+    presentation.Emojis.vocEmoji(char.character.character.vocation)
+
+  /** Fetch a character and reduce it to the (name, world, vocation-emoji, level)
+   *  summary the add/remove player commands render. On lookup failure yields the
+   *  empty/"does not exist" summary (name == ""). Shared by those commands. */
+  private def fetchPlayerSummary(name: String): Future[(String, String, String, Int)] =
+    tibiaDataClient.getCharacter(name).map {
+      case Right(charResponse) =>
+        val character = charResponse.character.character
+        (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+      case Left(_) =>
+        ("", "", s"${Config.noEmoji}", 0)
     }
-  }
 
-  private def createWorldList(worlds: Map[String, List[String]]): List[String] = {
-    val sortedWorlds = worlds.toList.sortBy(_._1)
-      .sortWith((a, b) => {
-        if (a._1 == "Character does not exist") false
-        else if (b._1 == "Character does not exist") true
-        else a._1 < b._1
-      })
-    sortedWorlds.flatMap {
-      case (world, players) =>
-        s":globe_with_meridians: **$world** :globe_with_meridians:" :: players
+  /** Post a "command was run" audit embed to a guild's command-log channel, if
+   *  it exists and is writable. Centralises the block repeated by every command
+   *  that audits itself (title/colour are fixed; description/thumbnail vary). */
+  private def postAdminLog(adminChannel: TextChannel, description: String, thumbnail: String): Unit =
+    if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
+      val adminEmbed = new EmbedBuilder()
+      adminEmbed.setTitle(":gear: a command was run:")
+      adminEmbed.setDescription(description)
+      adminEmbed.setThumbnail(thumbnail)
+      adminEmbed.setColor(BrandColor)
+      adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
     }
+
+  /** The "boosted boss today" embed (with a Podium fallback if the API fails).
+   *  Shared by the channel-setup and server-save-notification paths. */
+  private def boostedBossEmbed(): Future[MessageEmbed] =
+    tibiaDataClient.getBoostedBoss().map {
+      case Right(boostedResponse) =>
+        val boostedBoss = boostedResponse.boostable_bosses.boosted.name
+        presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+      case Left(_) =>
+        presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Vigour"),"The boosted boss today failed to load?")
+    }
+
+  /** The "boosted creature today" embed (with a Podium fallback if the API fails). */
+  private def boostedCreatureEmbed(): Future[MessageEmbed] =
+    tibiaDataClient.getBoostedCreature().map {
+      case Right(creatureResponse) =>
+        val boostedCreature = creatureResponse.creatures.boosted.name
+        presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+      case Left(_) =>
+        presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Tenacity"),"The boosted creature today failed to load?")
+    }
+
+  /** The Rashid / Dream Courts / (Drome, when active) server-save embeds for a
+   *  world, appended after the boosted embeds in the notifications message.
+   *  Reads the live dreamScar map and dromeTime. */
+  private def serverSaveExtraEmbeds(world: String): List[MessageEmbed] = {
+    val dreamScarDaily = dreamScar.getOrElse(world, "World not found")
+    val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
+    val rashidEmbed = new EmbedBuilder()
+      .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+      .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+      .setColor(BrandColor)
+      .build()
+    val dreamScarEmbed = new EmbedBuilder()
+      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+      .setThumbnail(creatureImageUrl(dreamScarDaily))
+      .setColor(BrandColor)
+      .build()
+    val dromeShow = ServerSaveSchedule.shouldShowDrome(Instant.now(), dromeTime)
+    val dromeEmbed = new EmbedBuilder()
+      .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+      .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
+      .setColor(BrandColor)
+      .build()
+    if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
   }
 
-  def charUrl(char: String): String = {
-    val encodedString = URLEncoder.encode(char, StandardCharsets.UTF_8.toString)
-    s"https://www.tibia.com/community/?name=${encodedString}"
-  }
+  /** The role-subscription buttons under the fullbless/notifications embed. */
+  private def fullblessRoleButtons: List[Button] = List(
+    Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(Config.inqEmoji)),
+    Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(Config.bossEmoji)),
+    Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(Config.hazardEmoji)),
+    Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(Config.masslogEmoji))
+  )
 
-  def guildUrl(guild: String): String = {
-    val encodedString = URLEncoder.encode(guild, StandardCharsets.UTF_8.toString)
-    s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${encodedString}"
-  }
+  /** The "the bot will poke" role-notification embed for a world. Built by both
+   *  /setup (initial post) and /fullbless (edits the existing message). */
+  private def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, level: Int): MessageEmbed =
+    new EmbedBuilder()
+      .setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+      .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
+      .setColor(BrandColor)
+      .setFooter("Add or remove yourself from the role using the buttons below:")
+      .setDescription(s"The bot will poke:\n${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n${Config.masslogEmoji}<@&$masslogRoleId> If enemies masslog on **$world**")
+      .build()
+
+  def charUrl(char: String): String = presentation.Urls.charUrl(char)
+
+  def guildUrl(guild: String): String = presentation.Urls.guildUrl(guild)
 
   def updateAdminChannel(inputId: String, channelId: String): Unit = {
-    discordsData = discordsData.view.mapValues(_.map {
+    modifyDiscordsData(dd => dd.view.mapValues(_.map {
       case discord @ Discords(id, _, _, _) if id == inputId =>
         discord.copy(adminChannel = channelId)
       case other => other
-    }).toMap
+    }).toMap)
   }
 
   def updateBoostedChannel(inputId: String, channelId: String): Unit = {
-    discordsData = discordsData.view.mapValues(_.map {
+    modifyDiscordsData(dd => dd.view.mapValues(_.map {
       case discord @ Discords(id, _, _, _) if id == inputId =>
         discord.copy(boostedChannel = channelId)
       case other => other
-    }).toMap
+    }).toMap)
   }
 
   def updateBoostedMessage(inputId: String, messageId: String): Unit = {
-    discordsData = discordsData.view.mapValues(_.map {
+    modifyDiscordsData(dd => dd.view.mapValues(_.map {
       case discord @ Discords(id, _, _, _) if id == inputId =>
         discord.copy(boostedMessage = messageId)
       case other => other
-    }).toMap
+    }).toMap)
   }
 
   def addHunted(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: MessageEmbed => Unit): Unit = {
@@ -1820,7 +1107,7 @@ object BotApp extends App with StrictLogging {
     val commandUser = event.getUser.getId
     val guild = event.getGuild
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     // default embed content
     var embedText = s"${Config.noEmoji} An error occurred while running the /hunted command"
     if (checkConfigDatabase(guild)) {
@@ -1842,28 +1129,19 @@ object BotApp extends App with StrictLogging {
           if (guildName != "") {
             if (!huntedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add guild to hunted list and database
-              huntedGuildsData = huntedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: huntedGuildsData.getOrElse(guildId, List())))
+              modifyHuntedGuildsData(m => m + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: m.getOrElse(guildId, List()))))
               addHuntedToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               // add each player in the guild to the activity list
               guildMembers.foreach { member =>
                 val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
                   val updatedTime = ZonedDateTime.now()
-                  activityData = activityData + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  modifyActivityData(m => m + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers)))
                   addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
                 }
               }
@@ -1886,32 +1164,16 @@ object BotApp extends App with StrictLogging {
         }
       } else if (subCommand == "player") { // command run with 'player'
         // run api against player
-        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map {
-          case Right(charResponse) =>
-            val character = charResponse.character.character
-            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
-          case Left(errorMessage) =>
-            ("", "" , s"${Config.noEmoji}", 0)
-        }.map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(subOptionValueLower).map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!huntedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
               // add player to hunted list and database
-              huntedPlayersData = huntedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: huntedPlayersData.getOrElse(guildId, List())))
+              modifyHuntedPlayersData(m => m + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: m.getOrElse(guildId, List()))))
               addHuntedToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the hunted list."
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -1945,7 +1207,7 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     // default embed content
     var embedText = s"${Config.noEmoji} An error occurred while running the /allies command"
     if (checkConfigDatabase(guild)) {
@@ -1966,27 +1228,18 @@ object BotApp extends App with StrictLogging {
         }.map { case (guildName, guildMembers) =>
           if (guildName != "") {
             if (!alliedGuildsData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
-              alliedGuildsData = alliedGuildsData + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedGuildsData.getOrElse(guildId, List())))
+              modifyAlliedGuildsData(m => m + (guildId -> (Guilds(subOptionValueLower, reason, subOptionReason, commandUser) :: m.getOrElse(guildId, List()))))
               addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the allies list."
 
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               // add each player in the guild to the hunted list
               /***
               guildMembers.foreach { member =>
                 val guildPlayers = alliedPlayersData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
-                  alliedPlayersData = alliedPlayersData + (guildId -> (Players(member.name, "false", "this players guild was added to the hunted list", commandUser) :: guildPlayers))
+                  modifyAlliedPlayersData(m => m + (guildId -> (Players(member.name, "false", "this players guild was added to the hunted list", commandUser) :: guildPlayers)))
                   addAllyToDatabase(guild, "player", member.name, "false", "this players guild was added to the allies list", commandUser)
                 }
               }
@@ -1997,7 +1250,7 @@ object BotApp extends App with StrictLogging {
                 val guildPlayers = activityData.getOrElse(guildId, List())
                 if (!guildPlayers.exists(_.name == member.name)) {
                   val updatedTime = ZonedDateTime.now()
-                  activityData = activityData + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers))
+                  modifyActivityData(m => m + (guildId -> (PlayerCache(member.name, List(""), guildName, updatedTime) :: guildPlayers)))
                   addActivityToDatabase(guild, member.name, List(""), guildName, updatedTime)
                 }
               }
@@ -2020,30 +1273,14 @@ object BotApp extends App with StrictLogging {
         }
       } else if (subCommand == "player") {
         // run api against player
-        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map {
-          case Right(charResponse) =>
-            val character = charResponse.character.character
-            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
-          case Left(errorMessage) =>
-            ("", "", s"${Config.noEmoji}", 0)
-        }.map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(subOptionValueLower).map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!alliedPlayersData.getOrElse(guildId, List()).exists(g => g.name == subOptionValueLower)) {
-              alliedPlayersData = alliedPlayersData + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: alliedPlayersData.getOrElse(guildId, List())))
+              modifyAlliedPlayersData(m => m + (guildId -> (Players(subOptionValueLower, reason, subOptionReason, commandUser) :: m.getOrElse(guildId, List()))))
               addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the allies list."
 
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -2076,7 +1313,7 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     var embedText = s"${Config.noEmoji} An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
@@ -2102,10 +1339,10 @@ object BotApp extends App with StrictLogging {
             case Some(_) =>
               val updatedList = huntedGuildsList.filterNot(_.name.toLowerCase == subOptionValueLower)
               // Remove guilds from cache and db
-              huntedGuildsData = huntedGuildsData.updated(guildId, updatedList)
+              modifyHuntedGuildsData(_.updated(guildId, updatedList))
               removeHuntedFromDatabase(guild, "guild", subOptionValueLower)
 
-              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+              modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower))))
               removeGuildActivityfromDatabase(guild, subOptionValueLower)
 
               // Remove players that the bot auto-hunted due to being in that guild from cache and db
@@ -2114,25 +1351,16 @@ object BotApp extends App with StrictLogging {
               }
               val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
               val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
-              huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
+              modifyHuntedPlayersData(m => m.updated(guildId, updatedHuntedPlayersList))
 
-              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
+              modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase))))
               filteredPlayers.foreach { filterPlayer =>
                 removeHuntedFromDatabase(guild, "player", filterPlayer.name)
                 removePlayerActivityfromDatabase(guild, filterPlayer.name)
               }
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> removed guild **$guildString** from the hunted list.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> removed guild **$guildString** from the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedText = s":gear: The guild **$guildString** was removed from the hunted list."
               embedBuild.setDescription(embedText)
@@ -2147,9 +1375,9 @@ object BotApp extends App with StrictLogging {
               if (filteredPlayers.nonEmpty){
                 val huntedPlayersList = huntedPlayersData.getOrElse(guildId, List())
                 val updatedHuntedPlayersList = huntedPlayersList.filterNot(player => filteredPlayers.exists(_.name == player.name))
-                huntedPlayersData = huntedPlayersData.updated(guildId, updatedHuntedPlayersList)
+                modifyHuntedPlayersData(m => m.updated(guildId, updatedHuntedPlayersList))
 
-                activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase)))
+                modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(player => filteredPlayers.map(_.name.toLowerCase).contains(player.name.toLowerCase))))
                 filteredPlayers.foreach { filterPlayer =>
                   removeHuntedFromDatabase(guild, "player", filterPlayer.name)
                   removePlayerActivityfromDatabase(guild, filterPlayer.name)
@@ -2164,14 +1392,7 @@ object BotApp extends App with StrictLogging {
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
-        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map {
-          case Right(charResponse) =>
-            val character = charResponse.character.character
-            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
-          case Left(errorMessage) =>
-            ("", "", s"${Config.noEmoji}", 0)
-        }.map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(subOptionValueLower).map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
@@ -2180,23 +1401,14 @@ object BotApp extends App with StrictLogging {
             case Some(_) =>
               val updatedList = huntedPlayersList.filterNot(_.name.toLowerCase == subOptionValueLower)
 
-              huntedPlayersData = huntedPlayersData.updated(guildId, updatedList)
+              modifyHuntedPlayersData(m => m.updated(guildId, updatedList))
               removeHuntedFromDatabase(guild, "player", subOptionValueLower)
 
-              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+              modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower))))
               removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedText = s":gear: The player **$playerString** was removed from the hunted list."
               embedBuild.setDescription(embedText)
@@ -2221,7 +1433,7 @@ object BotApp extends App with StrictLogging {
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     var embedText = s"${Config.noEmoji} An error occurred while running the /removehunted command"
     if (checkConfigDatabase(guild)) {
       val guildId = guild.getId
@@ -2246,23 +1458,14 @@ object BotApp extends App with StrictLogging {
           alliedGuildsList.find(_.name.toLowerCase == subOptionValueLower) match {
             case Some(_) =>
               val updatedList = alliedGuildsList.filterNot(_.name.toLowerCase == subOptionValueLower)
-              alliedGuildsData = alliedGuildsData.updated(guildId, updatedList)
+              modifyAlliedGuildsData(_.updated(guildId, updatedList))
               removeAllyFromDatabase(guild, "guild", subOptionValueLower)
 
-              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower)))
+              modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower))))
               removeGuildActivityfromDatabase(guild, subOptionValueLower)
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> removed **$guildString** from the allies list.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> removed **$guildString** from the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedText = s":gear: The guild **$guildString** was removed from the allies list."
               embedBuild.setDescription(embedText)
@@ -2278,14 +1481,7 @@ object BotApp extends App with StrictLogging {
       } else if (subCommand == "player") {
         var playerString = subOptionValueLower
         // run api against player
-        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(subOptionValueLower)
-        playerCheck.map {
-          case Right(charResponse) =>
-            val character = charResponse.character.character
-            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
-          case Left(errorMessage) =>
-            ("", "", s"${Config.noEmoji}", 0)
-        }.map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(subOptionValueLower).map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             playerString = s"[$playerName](${charUrl(playerName)})"
           }
@@ -2293,23 +1489,14 @@ object BotApp extends App with StrictLogging {
           alliedPlayersList.find(_.name.toLowerCase == subOptionValueLower) match {
             case Some(_) =>
               val updatedList = alliedPlayersList.filterNot(_.name.toLowerCase == subOptionValueLower)
-              alliedPlayersData = alliedPlayersData.updated(guildId, updatedList)
+              modifyAlliedPlayersData(m => m.updated(guildId, updatedList))
               removeAllyFromDatabase(guild, "player", subOptionValueLower)
 
-              activityData = activityData + (guildId -> activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower)))
+              modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower))))
               removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedText = s":gear: The player **$playerString** was removed from the allies list."
               embedBuild.setDescription(embedText)
@@ -2330,975 +1517,94 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit = {
-    val conn = getConnection(guild)
-    val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
-    val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, name)
-    statement.setString(2, reason)
-    statement.setString(3, reasonText)
-    statement.setString(4, addedBy)
-    statement.executeUpdate()
+  def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
+    huntedAlliedRepository.addHunted(guild.getId, option, name, reason, reasonText, addedBy)
 
-    statement.close()
-    conn.close()
-  }
+  def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit =
+    activityRepository.add(guild.getId, name, formerNames, guildName, updatedTime)
 
-  def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(
-      s"""
-         |INSERT INTO tracked_activity(name, former_names, guild_name, updated)
-         |VALUES (?,?,?,?)
-         |ON CONFLICT (name)
-         |DO UPDATE SET
-         |  former_names = excluded.former_names,
-         |  guild_name = excluded.guild_name,
-         |  updated = excluded.updated;
-         |""".stripMargin
-    )
-    statement.setString(1, name)
-    statement.setString(2, formerNames.mkString(","))
-    statement.setString(3, guildName)
-    statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
-    statement.executeUpdate()
+  def updateActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit =
+    activityRepository.update(guild.getId, name, formerNames, guildName, updatedTime, newName)
 
-    statement.close()
-    conn.close()
-  }
+  def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit =
+    huntedAlliedRepository.rename(guild.getId, option, oldName, newName)
 
-  def updateActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime, newName: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
-    statement.setString(1, newName)
-    statement.setString(2, formerNames.mkString(","))
-    statement.setString(3, guildName)
-    statement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
-    statement.setString(5, name)
+  private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
+    huntedAlliedRepository.addAllied(guild.getId, option, name, reason, reasonText, addedBy)
 
-    try {
-      statement.executeUpdate()
-    } catch {
-      case e: PSQLException if e.getMessage.contains("duplicate key value") =>
-        val deleteStatement = conn.prepareStatement("DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
-        deleteStatement.setString(1, newName)
-        deleteStatement.executeUpdate()
-        deleteStatement.close()
+  def removeHuntedFromDatabase(guild: Guild, option: String, name: String): Unit =
+    huntedAlliedRepository.removeHunted(guild.getId, option, name)
 
-        // Retry the update
-        val retryStatement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
-        retryStatement.setString(1, newName)
-        retryStatement.setString(2, formerNames.mkString(","))
-        retryStatement.setString(3, guildName)
-        retryStatement.setTimestamp(4, Timestamp.from(updatedTime.toInstant))
-        retryStatement.setString(5, name)
-        retryStatement.executeUpdate()
-        retryStatement.close()
-    } finally {
-      statement.close()
-      conn.close()
-    }
-  }
+  private def removeGuildActivityfromDatabase(guild: Guild, guildName: String): Unit =
+    activityRepository.removeByGuild(guild.getId, guildName)
 
-  def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit = {
-    val conn = getConnection(guild)
-    val table = if (option == "hunted") "hunted_players" else if (option == "allied") "allied_players"
+  def removePlayerActivityfromDatabase(guild: Guild, playerName: String): Unit =
+    activityRepository.removeByName(guild.getId, playerName)
 
-    val statement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
-    statement.setString(1, newName)
-    statement.setString(2, oldName)
+  def removeAllyFromDatabase(guild: Guild, option: String, name: String): Unit =
+    huntedAlliedRepository.removeAllied(guild.getId, option, name)
 
-    try {
-      statement.executeUpdate()
-    } catch {
-      case e: PSQLException if e.getMessage.contains("duplicate key value") =>
-        // Handle duplicate key error
-        val deleteStatement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
-        deleteStatement.setString(1, newName)
-        deleteStatement.executeUpdate()
-        deleteStatement.close()
+  private def checkConfigDatabase(guild: Guild): Boolean = schemaInitializer.guildDatabaseExists(guild.getId)
 
-        // Retry the update within the same transaction
-        val retryStatement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
-        retryStatement.setString(1, newName)
-        retryStatement.setString(2, oldName)
-        retryStatement.executeUpdate()
-        retryStatement.close()
-    } finally {
-      statement.close()
-      conn.close()
-    }
-  }
+  private def createCacheDatabase(): Unit = schemaInitializer.initCache()
 
-  private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit = {
-    val conn = getConnection(guild)
-    val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
-    val statement = conn.prepareStatement(s"INSERT INTO $table(name, reason, reason_text, added_by) VALUES (?,?,?,?) ON CONFLICT (name) DO NOTHING;")
-    statement.setString(1, name)
-    statement.setString(2, reason)
-    statement.setString(3, reasonText)
-    statement.setString(4, addedBy)
-    statement.executeUpdate()
+  def getDeathsCache(world: String): List[DeathsCache] = cacheRepository.getDeaths(world)
 
-    statement.close()
-    conn.close()
-  }
+  def addDeathsCache(world: String, name: String, time: String): Unit =
+    cacheRepository.addDeath(world, name, time)
 
-  def removeHuntedFromDatabase(guild: Guild, option: String, name: String): Unit = {
-    val conn = getConnection(guild)
-    val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
-    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
-    statement.setString(1, name)
-    statement.executeUpdate()
+  private def removeDeathsCache(time: ZonedDateTime): Unit =
+    cacheRepository.removeExpiredDeaths(time)
 
-    statement.close()
-    conn.close()
-  }
+  def getLevelsCache(world: String): List[LevelsCache] = cacheRepository.getLevels(world)
 
-  private def removeGuildActivityfromDatabase(guild: Guild, guildName: String): Unit = {
-    val conn = getConnection(guild)
+  def addLevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String): Unit =
+    cacheRepository.addLevel(world, name, level, vocation, lastLogin, time)
 
-    val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(guild_name) = LOWER(?);")
-    statement.setString(1, guildName)
-    statement.executeUpdate()
+  private def removeLevelsCache(time: ZonedDateTime): Unit =
+    cacheRepository.removeExpiredLevels(time)
 
-    statement.close()
-    conn.close()
-  }
+  private def createConfigDatabase(guild: Guild): Unit = schemaInitializer.initGuild(guild.getId, guild.getName)
 
-  def removePlayerActivityfromDatabase(guild: Guild, playerName: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"DELETE FROM tracked_activity WHERE LOWER(name) = LOWER(?);")
-    statement.setString(1, playerName)
-    statement.executeUpdate()
+  private def playerConfig(guild: Guild, query: String): List[Players] =
+    huntedAlliedRepository.getPlayers(guild.getId, query)
 
-    statement.close()
-    conn.close()
-  }
+  private def guildConfig(guild: Guild, query: String): List[Guilds] =
+    huntedAlliedRepository.getGuilds(guild.getId, query)
 
-  def removeAllyFromDatabase(guild: Guild, option: String, name: String): Unit = {
-    val conn = getConnection(guild)
-    val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
-    val statement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
-    statement.setString(1, name)
-    statement.executeUpdate()
+  private def activityConfig(guild: Guild, query: String): List[PlayerCache] =
+    activityRepository.getActivity(guild.getId)
 
-    statement.close()
-    conn.close()
-  }
+  def discordRetrieveConfig(guild: Guild): Map[String, String] =
+    discordConfigRepository.getConfig(guild.getId)
 
-  private def checkConfigDatabase(guild: Guild): Boolean = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val guildId = guild.getId
+  private def worldConfig(guild: Guild): List[Worlds] =
+    worldConfigRepository.listWorlds(guild.getId)
 
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = '_$guildId'")
-    val exist = result.next()
+  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
+    worldConfigRepository.createWorld(guild.getId, world, alliesChannel, enemiesChannel, neutralsChannels, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, activityChannel)
 
-    statement.close()
-    conn.close()
+  private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessageId: String, created: ZonedDateTime): Unit =
+    discordConfigRepository.create(guild.getId, guildName, guildOwner, adminCategory, adminChannel, boostedChannel, boostedMessageId, created)
 
-    // check if database for discord exists
-    if (exist) {
-      true
-    } else {
-      false
-    }
-  }
+  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String, lastWorld: String): Unit =
+    discordConfigRepository.update(guild.getId, adminCategory, adminChannel, boostedChannel, boostedMessage, lastWorld)
 
-  private def createPremiumDatabase(): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
-    val username = "postgres"
-    val password = Config.postgresPassword
+  def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
+    worldConfigRepository.retrieveWorld(guild.getId, world)
 
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'premium'")
-    val exist = result.next()
-
-    // if bot_configuration doesn't exist
-    if (!exist) {
-      statement.executeUpdate(s"CREATE DATABASE bot_cache;")
-      logger.info(s"Database 'bot_cache' created successfully")
-      statement.close()
-      conn.close()
-
-      val newUrl = s"jdbc:postgresql://${Config.postgresHost}:5432/premium"
-      val newConn = DriverManager.getConnection(newUrl, username, password)
-      val newStatement = newConn.createStatement()
-      // create the tables in bot_configuration
-      val createPaymentsTable =
-        s"""CREATE TABLE payments (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |discord_id VARCHAR(255) NOT NULL,
-           |discord_name VARCHAR(255) NOT NULL,
-           |user_id VARCHAR(255) NOT NULL,
-           |user_name VARCHAR(255) NOT NULL,
-           |expiry VARCHAR(255) NOT NULL
-           |);""".stripMargin
-
-      newStatement.executeUpdate(createPaymentsTable)
-      logger.info("Table 'payments' created successfully")
-      newStatement.close()
-      newConn.close()
-    } else {
-      statement.close()
-      conn.close()
-    }
-  }
-
-  private def createCacheDatabase(): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-    val exist = result.next()
-
-    // if bot_configuration doesn't exist
-    if (!exist) {
-      statement.executeUpdate(s"CREATE DATABASE bot_cache;")
-      logger.info(s"Database 'bot_cache' created successfully")
-      statement.close()
-      conn.close()
-
-      val newUrl = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-      val newConn = DriverManager.getConnection(newUrl, username, password)
-      val newStatement = newConn.createStatement()
-      // create the tables in bot_configuration
-      val createDeathsTable =
-        s"""CREATE TABLE deaths (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |world VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL
-           |);""".stripMargin
-
-      val createLevelsTable =
-        s"""CREATE TABLE levels (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |world VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |level VARCHAR(255) NOT NULL,
-           |vocation VARCHAR(255) NOT NULL,
-           |last_login VARCHAR(255) NOT NULL,
-           |time VARCHAR(255) NOT NULL
-           |);""".stripMargin
-
-     val createListTable =
-       s"""CREATE TABLE list (
-          |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          |world VARCHAR(255) NOT NULL,
-          |former_worlds VARCHAR(255),
-          |name VARCHAR(255) NOT NULL,
-          |former_names VARCHAR(1000),
-          |level VARCHAR(255) NOT NULL,
-          |guild_name VARCHAR(255),
-          |vocation VARCHAR(255) NOT NULL,
-          |last_login VARCHAR(255) NOT NULL,
-          |time VARCHAR(255) NOT NULL
-          |);""".stripMargin
-
-    val createGalthenTable =
-      s"""CREATE TABLE satchel (
-         |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-         |userid VARCHAR(255) NOT NULL,
-         |time VARCHAR(255) NOT NULL,
-         |tag VARCHAR(255)
-         |);""".stripMargin
-
-      newStatement.executeUpdate(createDeathsTable)
-      logger.info("Table 'deaths' created successfully")
-      newStatement.executeUpdate(createLevelsTable)
-      logger.info("Table 'levels' created successfully")
-      newStatement.executeUpdate(createListTable)
-      logger.info("Table 'list' created successfully")
-      newStatement.executeUpdate(createGalthenTable)
-      logger.info("Table 'galthen' created successfully")
-      newStatement.close()
-      newConn.close()
-    } else {
-      statement.close()
-      conn.close()
-    }
-  }
-
-  def getDeathsCache(world: String): List[DeathsCache] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT world,name,time FROM deaths WHERE world = '$world';")
-
-    val results = new ListBuffer[DeathsCache]()
-    while (result.next()) {
-      val world = Option(result.getString("world")).getOrElse("")
-      val name = Option(result.getString("name")).getOrElse("")
-      val time = Option(result.getString("time")).getOrElse("")
-      results += DeathsCache(world, name, time)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  def addDeathsCache(world: String, name: String, time: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.prepareStatement("INSERT INTO deaths(world,name,time) VALUES (?, ?, ?);")
-    statement.setString(1, world)
-    statement.setString(2, name)
-    statement.setString(3, time)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  private def removeDeathsCache(time: ZonedDateTime): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT id,time from deaths;")
-    val results = new ListBuffer[Long]()
-    while (result.next()) {
-      val id = Option(result.getLong("id")).getOrElse(0L)
-      val timeDb = Option(result.getString("time")).getOrElse("")
-      val timeToDate = ZonedDateTime.parse(timeDb)
-      if (time.isAfter(timeToDate.plusMinutes(30)) && id != 0L) {
-        results += id
-      }
-    }
-    results.foreach { uid =>
-      statement.executeUpdate(s"DELETE from deaths where id = $uid;")
-    }
-    statement.close()
-    conn.close()
-  }
-
-  def getLevelsCache(world: String): List[LevelsCache] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT world,name,level,vocation,last_login,time FROM levels WHERE world = '$world';")
-
-    val results = new ListBuffer[LevelsCache]()
-    while (result.next()) {
-      val world = Option(result.getString("world")).getOrElse("")
-      val name = Option(result.getString("name")).getOrElse("")
-      val level = Option(result.getString("level")).getOrElse("")
-      val vocation = Option(result.getString("vocation")).getOrElse("")
-      val lastLogin = Option(result.getString("last_login")).getOrElse("")
-      val time = Option(result.getString("time")).getOrElse("")
-      results += LevelsCache(world, name, level, vocation, lastLogin, time)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  def addLevelsCache(world: String, name: String, level: String, vocation: String, lastLogin: String, time: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.prepareStatement("INSERT INTO levels(world,name,level,vocation,last_login,time) VALUES (?, ?, ?, ?, ?, ?);")
-    statement.setString(1, world)
-    statement.setString(2, name)
-    statement.setString(3, level)
-    statement.setString(4, vocation)
-    statement.setString(5, lastLogin)
-    statement.setString(6, time)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  private def removeLevelsCache(time: ZonedDateTime): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT id,time from levels;")
-    val results = new ListBuffer[Long]()
-    while (result.next()) {
-      val id = Option(result.getLong("id")).getOrElse(0L)
-      val timeDb = Option(result.getString("time")).getOrElse("")
-      val timeToDate = ZonedDateTime.parse(timeDb)
-      if (time.isAfter(timeToDate.plusHours(25)) && id != 0L) {
-        results += id
-      }
-    }
-    results.foreach { uid =>
-      statement.executeUpdate(s"DELETE from levels where id = $uid;")
-    }
-    statement.close()
-    conn.close()
-  }
-
-  private def createConfigDatabase(guild: Guild): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val guildId = guild.getId
-    val guildName = guild.getName
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = '_$guildId'")
-    val exist = result.next()
-
-    // if bot_configuration doesn't exist
-    if (!exist) {
-      statement.executeUpdate(s"CREATE DATABASE _$guildId;")
-      logger.info(s"Database '$guildId' for discord '$guildName' created successfully")
-      statement.close()
-      conn.close()
-
-      val newUrl = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
-      val newConn = DriverManager.getConnection(newUrl, username, password)
-      val newStatement = newConn.createStatement()
-      // create the tables in bot_configuration
-      val createDiscordInfoTable =
-        s"""CREATE TABLE discord_info (
-           |guild_name VARCHAR(255) NOT NULL,
-           |guild_owner VARCHAR(255) NOT NULL,
-           |admin_category VARCHAR(255) NOT NULL,
-           |admin_channel VARCHAR(255) NOT NULL,
-           |boosted_channel VARCHAR(255) NOT NULL,
-           |boosted_messageid VARCHAR(255) NOT NULL,
-           |flags VARCHAR(255) NOT NULL,
-           |created TIMESTAMP NOT NULL,
-           |PRIMARY KEY (guild_name)
-           |);""".stripMargin
-
-      val createHuntedPlayersTable =
-        s"""CREATE TABLE hunted_players (
-           |name VARCHAR(255) NOT NULL,
-           |reason VARCHAR(255) NOT NULL,
-           |reason_text VARCHAR(255) NOT NULL,
-           |added_by VARCHAR(255) NOT NULL,
-           |PRIMARY KEY (name)
-           |);""".stripMargin
-
-      val createHuntedGuildsTable =
-        s"""CREATE TABLE hunted_guilds (
-           |name VARCHAR(255) NOT NULL,
-           |reason VARCHAR(255) NOT NULL,
-           |reason_text VARCHAR(255) NOT NULL,
-           |added_by VARCHAR(255) NOT NULL,
-           |PRIMARY KEY (name)
-           |);""".stripMargin
-
-      val createAlliedPlayersTable =
-        s"""CREATE TABLE allied_players (
-           |name VARCHAR(255) NOT NULL,
-           |reason VARCHAR(255) NOT NULL,
-           |reason_text VARCHAR(255) NOT NULL,
-           |added_by VARCHAR(255) NOT NULL,
-           |PRIMARY KEY (name)
-           |);""".stripMargin
-
-      val createAlliedGuildsTable =
-        s"""CREATE TABLE allied_guilds (
-           |name VARCHAR(255) NOT NULL,
-           |reason VARCHAR(255) NOT NULL,
-           |reason_text VARCHAR(255) NOT NULL,
-           |added_by VARCHAR(255) NOT NULL,
-           |PRIMARY KEY (name)
-           |);""".stripMargin
-
-      val createWorldsTable =
-         s"""CREATE TABLE worlds (
-            |name VARCHAR(255) NOT NULL,
-            |allies_channel VARCHAR(255) NOT NULL,
-            |enemies_channel VARCHAR(255) NOT NULL,
-            |neutrals_channel VARCHAR(255) NOT NULL,
-            |levels_channel VARCHAR(255) NOT NULL,
-            |deaths_channel VARCHAR(255) NOT NULL,
-            |category VARCHAR(255) NOT NULL,
-            |fullbless_role VARCHAR(255) NOT NULL,
-            |nemesis_role VARCHAR(255) NOT NULL,
-            |allypk_role VARCHAR(255) NOT NULL,
-            |masslog_role VARCHAR(255) NOT NULL,
-            |fullbless_channel VARCHAR(255) NOT NULL,
-            |nemesis_channel VARCHAR(255) NOT NULL,
-            |fullbless_level INT NOT NULL,
-            |show_neutral_levels VARCHAR(255) NOT NULL,
-            |show_neutral_deaths VARCHAR(255) NOT NULL,
-            |show_allies_levels VARCHAR(255) NOT NULL,
-            |show_allies_deaths VARCHAR(255) NOT NULL,
-            |show_enemies_levels VARCHAR(255) NOT NULL,
-            |show_enemies_deaths VARCHAR(255) NOT NULL,
-            |detect_hunteds VARCHAR(255) NOT NULL,
-            |levels_min INT NOT NULL,
-            |deaths_min INT NOT NULL,
-            |exiva_list VARCHAR(255) NOT NULL,
-            |online_combined VARCHAR(255) NOT NULL,
-            |PRIMARY KEY (name)
-            |);""".stripMargin
-
-      newStatement.executeUpdate(createDiscordInfoTable)
-      logger.info("Table 'discord_info' created successfully")
-      newStatement.executeUpdate(createHuntedPlayersTable)
-      logger.info("Table 'hunted_players' created successfully")
-      newStatement.executeUpdate(createHuntedGuildsTable)
-      logger.info("Table 'hunted_guilds' created successfully")
-      newStatement.executeUpdate(createAlliedPlayersTable)
-      logger.info("Table 'allied_players' created successfully")
-      newStatement.executeUpdate(createAlliedGuildsTable)
-      logger.info("Table 'allied_guilds' created successfully")
-      newStatement.executeUpdate(createWorldsTable)
-      logger.info("Table 'worlds' created successfully")
-      newStatement.close()
-      newConn.close()
-    } else {
-      logger.info(s"Database '$guildId' already exists")
-      statement.close()
-      conn.close()
-    }
-  }
-
-  private def getConnection(guild: Guild): Connection = {
-    val guildId = guild.getId
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    DriverManager.getConnection(url, username, password)
-  }
-
-  private def playerConfig(guild: Guild, query: String): List[Players] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,reason,reason_text,added_by FROM $query")
-
-    val results = new ListBuffer[Players]()
-    while (result.next()) {
-      val name = Option(result.getString("name")).getOrElse("")
-      val reason = Option(result.getString("reason")).getOrElse("")
-      val reasonText = Option(result.getString("reason_text")).getOrElse("")
-      val addedBy = Option(result.getString("added_by")).getOrElse("")
-      results += Players(name, reason, reasonText, addedBy)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  private def guildConfig(guild: Guild, query: String): List[Guilds] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT name,reason,reason_text,added_by FROM $query")
-
-    val results = new ListBuffer[Guilds]()
-    while (result.next()) {
-      val name = Option(result.getString("name")).getOrElse("")
-      val reason = Option(result.getString("reason")).getOrElse("")
-      val reasonText = Option(result.getString("reason_text")).getOrElse("")
-      val addedBy = Option(result.getString("added_by")).getOrElse("")
-      results += Guilds(name, reason, reasonText, addedBy)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  private def activityConfig(guild: Guild, query: String): List[PlayerCache] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'tracked_activity'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createActivityTable =
-        s"""CREATE TABLE tracked_activity (
-           |name VARCHAR(255) NOT NULL,
-           |former_names VARCHAR(255) NOT NULL,
-           |guild_name VARCHAR(255) NOT NULL,
-           |updated TIMESTAMP NOT NULL,
-           |PRIMARY KEY (name)
-           |);""".stripMargin
-
-      statement.executeUpdate(createActivityTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT name,former_names,guild_name,updated FROM $query")
-
-    val results = new ListBuffer[PlayerCache]()
-    while (result.next()) {
-      val name = Option(result.getString("name")).getOrElse("")
-      val formerNames = Option(result.getString("former_names")).getOrElse("")
-      val guildName = Option(result.getString("guild_name")).getOrElse("")
-      val formerNamesList = formerNames.split(",").toList
-      val updatedTimeTemporal = Option(result.getTimestamp("updated").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
-      val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
-
-      results += PlayerCache(name, formerNamesList, guildName, updatedTime)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  def discordRetrieveConfig(guild: Guild): Map[String, String] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-
-    val channelExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_channel'")
-    val channelExists = channelExistsQuery.next()
-    channelExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!channelExists) {
-      statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_channel VARCHAR(255) DEFAULT '0'")
-    }
-
-    val lastWorldExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'last_world'")
-    val lastWorldExists = lastWorldExistsQuery.next()
-    lastWorldExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!lastWorldExists) {
-      statement.execute("ALTER TABLE discord_info ADD COLUMN last_world VARCHAR(255) DEFAULT '0'")
-    }
-
-    val messageExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'boosted_messageid'")
-    val messageExists = messageExistsQuery.next()
-    messageExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!messageExists) {
-      statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_messageid VARCHAR(255) DEFAULT '0'")
-    }
-
-    val result = statement.executeQuery(s"SELECT * FROM discord_info")
-    var configMap = Map[String, String]()
-    while (result.next()) {
-      configMap += ("guild_name" -> result.getString("guild_name"))
-      configMap += ("guild_owner" -> result.getString("guild_owner"))
-      configMap += ("admin_category" -> result.getString("admin_category"))
-      configMap += ("admin_channel" -> result.getString("admin_channel"))
-      configMap += ("boosted_channel" -> result.getString("boosted_channel"))
-      configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
-      configMap += ("last_world" -> result.getString("last_world"))
-      configMap += ("flags" -> result.getString("flags"))
-      configMap += ("created" -> result.getString("created"))
-    }
-
-    statement.close()
-    conn.close()
-    configMap
-  }
-
-  private def worldConfig(guild: Guild): List[Worlds] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-
-
-    // Check if the column already exists in the table
-    val columnExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'exiva_list'")
-    val columnExists = columnExistsQuery.next()
-    columnExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!columnExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'false'")
-    }
-
-    // Check if the column already exists in the table
-    val allyPkExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'allypk_role'")
-    val allyPkExists = allyPkExistsQuery.next()
-    allyPkExistsQuery.close()
-
-    // Add the allyPk if it doesn't exist
-    if (!allyPkExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN allypk_role VARCHAR(255) DEFAULT '0'")
-    }
-
-    // Check if the column already exists in the table
-    val masslogExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'masslog_role'")
-    val masslogExists = masslogExistsQuery.next()
-    masslogExistsQuery.close()
-
-    // Add the allyPk if it doesn't exist
-    if (!masslogExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN masslog_role VARCHAR(255) DEFAULT '0'")
-    }
-
-    // Check if the column already exists in the table
-    val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
-    val activityExists = activityExistsQuery.next()
-    activityExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!activityExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN activity_channel VARCHAR(255) DEFAULT '0'")
-    }
-
-    // Check if the column already exists in the table
-    val onlineCombinedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'online_combined'")
-    val onlineCombinedExists = onlineCombinedExistsQuery.next()
-    onlineCombinedExistsQuery.close()
-
-    // Add the column if it doesn't exist
-    if (!onlineCombinedExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
-    }
-
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined FROM worlds")
-
-    val results = new ListBuffer[Worlds]()
-    while (result.next()) {
-      val name = Option(result.getString("name")).getOrElse("")
-      val alliesChannel = Option(result.getString("allies_channel")).getOrElse(null)
-      val enemiesChannel = Option(result.getString("enemies_channel")).getOrElse(null)
-      val neutralsChannel = Option(result.getString("neutrals_channel")).getOrElse(null)
-      val levelsChannel = Option(result.getString("levels_channel")).getOrElse(null)
-      val deathsChannel = Option(result.getString("deaths_channel")).getOrElse(null)
-      val category = Option(result.getString("category")).getOrElse(null)
-      val fullblessRole = Option(result.getString("fullbless_role")).getOrElse(null)
-      val nemesisRole = Option(result.getString("nemesis_role")).getOrElse(null)
-      val allyPkRole = Option(result.getString("allypk_role")).getOrElse(null)
-      val masslogRole = Option(result.getString("masslog_role")).getOrElse(null)
-      val fullblessChannel = Option(result.getString("fullbless_channel")).getOrElse(null)
-      val nemesisChannel = Option(result.getString("nemesis_channel")).getOrElse(null)
-      val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
-      val showNeutralLevels = Option(result.getString("show_neutral_levels")).getOrElse("true")
-      val showNeutralDeaths = Option(result.getString("show_neutral_deaths")).getOrElse("true")
-      val showAlliesLevels = Option(result.getString("show_allies_levels")).getOrElse("true")
-      val showAlliesDeaths = Option(result.getString("show_allies_deaths")).getOrElse("true")
-      val showEnemiesLevels = Option(result.getString("show_enemies_levels")).getOrElse("true")
-      val showEnemiesDeaths = Option(result.getString("show_enemies_deaths")).getOrElse("true")
-      val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
-      val levelsMin = Option(result.getInt("levels_min")).getOrElse(8)
-      val deathsMin = Option(result.getInt("deaths_min")).getOrElse(8)
-      val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
-      val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
-      val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
-
-      // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
-      if (!Config.mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
-      }
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
-
-  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, masslog_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, masslog_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
-    val formalQuery = world.toLowerCase().capitalize
-    statement.setString(1, formalQuery)
-    statement.setString(2, alliesChannel)
-    statement.setString(3, enemiesChannel)
-    statement.setString(4, neutralsChannels)
-    statement.setString(5, levelsChannel)
-    statement.setString(6, deathsChannel)
-    statement.setString(7, category)
-    statement.setString(8, fullblessRole)
-    statement.setString(9, nemesisRole)
-    statement.setString(10, allyPkRole)
-    statement.setString(11, masslogRole)
-    statement.setString(12, fullblessChannel)
-    statement.setString(13, nemesisChannel)
-    statement.setInt(14, 250)
-    statement.setString(15, "true")
-    statement.setString(16, "true")
-    statement.setString(17, "true")
-    statement.setString(18, "true")
-    statement.setString(19, "true")
-    statement.setString(20, "true")
-    statement.setString(21, "on")
-    statement.setInt(22, 8)
-    statement.setInt(23, 8)
-    statement.setString(24, "false")
-    statement.setString(25, activityChannel)
-    statement.setString(26, "true")
-    statement.setString(27, alliesChannel)
-    statement.setString(28, enemiesChannel)
-    statement.setString(29, neutralsChannels)
-    statement.setString(30, levelsChannel)
-    statement.setString(31, deathsChannel)
-    statement.setString(32, category)
-    statement.setString(33, fullblessRole)
-    statement.setString(34, nemesisRole)
-    statement.setString(35, allyPkRole)
-    statement.setString(36, masslogRole)
-    statement.setString(37, fullblessChannel)
-    statement.setString(38, nemesisChannel)
-    statement.setInt(39, 250)
-    statement.setString(40, "true")
-    statement.setString(41, "true")
-    statement.setString(42, "true")
-    statement.setString(43, "true")
-    statement.setString(44, "true")
-    statement.setString(45, "true")
-    statement.setString(46, "on")
-    statement.setInt(47, 8)
-    statement.setInt(48, 8)
-    statement.setString(49, "false")
-    statement.setString(50, activityChannel)
-    statement.setString(51, "true")
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  private def discordCreateConfig(guild: Guild, guildName: String, guildOwner: String, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessageId: String, created: ZonedDateTime): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("INSERT INTO discord_info(guild_name, guild_owner, admin_category, admin_channel, boosted_channel, boosted_messageid, flags, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_name) DO UPDATE SET guild_owner = EXCLUDED.guild_owner, admin_category = EXCLUDED.admin_category, admin_channel = EXCLUDED.admin_channel, boosted_channel = EXCLUDED.boosted_channel, boosted_messageid = EXCLUDED.boosted_messageid, flags = EXCLUDED.flags, created = EXCLUDED.created;")
-    statement.setString(1, guildName)
-    statement.setString(2, guildOwner)
-    statement.setString(3, adminCategory)
-    statement.setString(4, adminChannel)
-    statement.setString(5, boostedChannel)
-    statement.setString(6, boostedMessageId)
-    statement.setString(7, "none")
-    statement.setTimestamp(8, Timestamp.from(created.toInstant))
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
-
-  private def discordUpdateConfig(guild: Guild, adminCategory: String, adminChannel: String, boostedChannel: String, boostedMessage: String, lastWorld: String): Unit = {
-    val conn = getConnection(guild)
-    // update category if exists
-    if (adminCategory != "") {
-      val statement = conn.prepareStatement("UPDATE discord_info SET admin_category = ?;")
-      statement.setString(1, adminCategory)
-      statement.executeUpdate()
-      statement.close()
-    }
-    if (adminChannel != "") {
-      // update channel
-      val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
-      statement.setString(1, adminChannel)
-      statement.executeUpdate()
-      statement.close()
-    }
-
-    if (boostedChannel != "") {
-      // update channel
-      val statement = conn.prepareStatement("UPDATE discord_info SET boosted_channel = ?;")
-      statement.setString(1, boostedChannel)
-      statement.executeUpdate()
-      statement.close()
-    }
-
-    if (boostedMessage != "") {
-      // update channel
-      val statement = conn.prepareStatement("UPDATE discord_info SET boosted_messageid = ?;")
-      statement.setString(1, boostedMessage)
-      statement.executeUpdate()
-      statement.close()
-    }
-
-    if (lastWorld != "") {
-      // update channel
-      val statement = conn.prepareStatement("UPDATE discord_info SET last_world = ?;")
-      statement.setString(1, lastWorld)
-      statement.executeUpdate()
-      statement.close()
-    }
-
-    conn.close()
-  }
-
-  def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] = {
-      val conn = getConnection(guild)
-      val statement = conn.prepareStatement("SELECT * FROM worlds WHERE name = ?;")
-      val formalWorld = world.toLowerCase().capitalize
-      statement.setString(1, formalWorld)
-      val result = statement.executeQuery()
-
-      var configMap = Map[String, String]()
-      while(result.next()) {
-          configMap += ("name" -> result.getString("name"))
-          configMap += ("allies_channel" -> result.getString("allies_channel"))
-          configMap += ("enemies_channel" -> result.getString("enemies_channel"))
-          configMap += ("neutrals_channel" -> result.getString("neutrals_channel"))
-          configMap += ("levels_channel" -> result.getString("levels_channel"))
-          configMap += ("deaths_channel" -> result.getString("deaths_channel"))
-          configMap += ("category" -> result.getString("category"))
-          configMap += ("fullbless_role" -> result.getString("fullbless_role"))
-          configMap += ("nemesis_role" -> result.getString("nemesis_role"))
-          configMap += ("allypk_role" -> result.getString("allypk_role"))
-          configMap += ("masslog_role" -> result.getString("masslog_role"))
-          configMap += ("fullbless_channel" -> result.getString("fullbless_channel"))
-          configMap += ("nemesis_channel" -> result.getString("nemesis_channel"))
-          configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)
-          configMap += ("show_neutral_levels" -> result.getString("show_neutral_levels"))
-          configMap += ("show_neutral_deaths" -> result.getString("show_neutral_deaths"))
-          configMap += ("show_allies_levels" -> result.getString("show_allies_levels"))
-          configMap += ("show_allies_deaths" -> result.getString("show_allies_deaths"))
-          configMap += ("show_enemies_levels" -> result.getString("show_enemies_levels"))
-          configMap += ("show_enemies_deaths" -> result.getString("show_enemies_deaths"))
-          configMap += ("detect_hunteds" -> result.getString("detect_hunteds"))
-          configMap += ("levels_min" -> result.getInt("levels_min").toString)
-          configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
-          configMap += ("exiva_list" -> result.getString("exiva_list"))
-          configMap += ("activity_channel" -> result.getString("activity_channel"))
-
-          val combinedOnlineValue: String = Try(result.getString("combined_online")) match {
-            case Success(value) => value // Column exists, use the retrieved value
-            case Failure(_) => "false" // Column doesn't exist, use the default value
-          }
-          configMap += ("combined_online" -> combinedOnlineValue)
-      }
-      statement.close()
-      conn.close()
-      configMap
-  }
-
-  private def worldRemoveConfig(guild: Guild, query: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("DELETE FROM worlds WHERE name = ?")
-    val formalName = query.toLowerCase().capitalize
-    statement.setString(1, formalName)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def worldRemoveConfig(guild: Guild, query: String): Unit =
+    worldConfigRepository.removeWorld(guild.getId, query)
 
   def createChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
     // get guild & world information from the slash interaction
-    val world: String = event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim().toLowerCase().capitalize
-    val embedText = if (worlds.contains(world)) {
+    val world: String = domain.WorldName.formal(event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim())
+    // The role/category/channel/permission creation below is a long sequence of
+    // blocking .complete() calls. If any one throws (missing permission, Discord
+    // error, channel cap) the server is left half-built and the slash interaction
+    // would otherwise hang with no reply — so report it cleanly and point at /repair.
+    val embedText = try {
+      if (worlds.contains(world)) {
       // get guild id
       val guild = event.getGuild
 
@@ -3306,24 +1612,14 @@ object BotApp extends App with StrictLogging {
       createConfigDatabase(guild)
 
       val botRole = guild.getBotRole
-      val fullblessRoleString = s"$world Fullbless"
-      val fullblessRoleCheck = guild.getRolesByName(fullblessRoleString, true)
-      val fullblessRole = if (!fullblessRoleCheck.isEmpty) fullblessRoleCheck.get(0) else guild.createRole().setName(fullblessRoleString).setColor(new Color(0, 156, 70)).complete()
+      val fullblessRole = getOrCreateRole(guild, s"$world Fullbless", new Color(0, 156, 70))
+      val nemesisRole = getOrCreateRole(guild, s"$world Rare Boss", new Color(164, 76, 230))
+      val allyPkRole = getOrCreateRole(guild, s"$world PVP", new Color(220, 0, 0))
+      val masslogRole = getOrCreateRole(guild, s"$world Masslog", new Color(219, 175, 72))
 
-      val nemesisRoleString = s"$world Rare Boss"
-      val nemesisRoleCheck = guild.getRolesByName(nemesisRoleString, true)
-      val nemesisRole = if (!nemesisRoleCheck.isEmpty) nemesisRoleCheck.get(0) else guild.createRole().setName(nemesisRoleString).setColor(new Color(164, 76, 230)).complete()
-
-      val allyPkRoleString = s"$world PVP"
-      val allyPkCheck = guild.getRolesByName(allyPkRoleString, true)
-      val allyPkRole = if (!allyPkCheck.isEmpty) allyPkCheck.get(0) else guild.createRole().setName(allyPkRoleString).setColor(new Color(220, 0, 0)).complete()
-
-      val masslogRoleString = s"$world Masslog"
-      val masslogCheck = guild.getRolesByName(masslogRoleString, true)
-      val masslogRole = if (!masslogCheck.isEmpty) masslogCheck.get(0) else guild.createRole().setName(masslogRoleString).setColor(new Color(219, 175, 72)).complete()
-
-      val worldCount = worldConfig(guild)
-      val count = worldCount.length
+      // touch the worlds config so listWorlds runs its ALTER TABLE column
+      // migrations on older databases before /setup writes to the table
+      worldConfig(guild)
 
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
@@ -3334,10 +1630,11 @@ object BotApp extends App with StrictLogging {
           .grant(Permission.MESSAGE_SEND)
           .complete()
         adminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
-        val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategory).complete()
+        val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategory).complete()
         // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+        adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
         adminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
         val guildOwner = if (guild.getOwner == null) "Not Available" else guild.getOwner.getEffectiveName
         discordCreateConfig(guild, guild.getName, guildOwner, adminCategory.getId, adminChannel.getId, "0", "0", ZonedDateTime.now())
@@ -3349,124 +1646,9 @@ object BotApp extends App with StrictLogging {
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-        val galthenEmbed = new EmbedBuilder()
-        galthenEmbed.setColor(3092790)
-        galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-        galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-        boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-          Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-        ).queue()
+        postGalthenTracker(boostedChannel)
 
-        // Boosted Boss
-        val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-        val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-          case Right(boostedResponse) =>
-            val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-          case Left(errorMessage) =>
-            val boostedBoss = "Podium_of_Vigour"
-            createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-        }
-
-        // Boosted Creature
-        val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-        val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-          case Right(creatureResponse) =>
-            val boostedCreature = creatureResponse.creatures.boosted.name
-            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-          case Left(errorMessage) =>
-            val boostedCreature = "Podium_of_Tenacity"
-            createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-        }
-
-        // Combine both futures and send the message
-        val combinedFutures: Future[List[MessageEmbed]] = for {
-          bossEmbed <- bossEmbedFuture
-          creatureEmbed <- creatureEmbedFuture
-        } yield List(bossEmbed, creatureEmbed)
-
-        combinedFutures.map { embeds =>
-
-          val dreamScarDaily =
-            dreamScar.getOrElse(world, "World not found")
-
-          val rashidLocation =
-            Map(
-              DayOfWeek.MONDAY    -> "Svargrond",
-              DayOfWeek.TUESDAY   -> "Liberty Bay",
-              DayOfWeek.WEDNESDAY -> "Port Hope",
-              DayOfWeek.THURSDAY  -> "Ankrahmun",
-              DayOfWeek.FRIDAY    -> "Darashia",
-              DayOfWeek.SATURDAY  -> "Edron",
-              DayOfWeek.SUNDAY    -> "Carlin"
-            ).getOrElse(
-              ZonedDateTime
-                .now(ZoneId.of("Europe/Berlin"))
-                .minusHours(10)
-                .getDayOfWeek,
-              "Unknown"
-            )
-
-          val rashidEmbed = new EmbedBuilder()
-            .setDescription(
-              s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
-            )
-            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-            .setColor(3092790)
-            .build()
-
-          val dreamScarEmbed = new EmbedBuilder()
-            .setDescription(
-              s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
-            )
-            .setThumbnail(creatureImageUrl(dreamScarDaily))
-            .setColor(3092790)
-            .build()
-
-          // Drome Timer
-          val now = Instant.now()
-          val isAfterNow = dromeTime.isAfter(now)
-          val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
-          val dromeEmbed = new EmbedBuilder()
-            .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-            .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-            .setColor(3092790)
-            .build()
-
-          val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
-
-          val addRashidDreamScarEmbeds: List[MessageEmbed] =
-            embeds ++ embedsList
-
-          boostedChannel
-            .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-            .setActionRow(
-              Button.primary(
-                "boosted list",
-                "Server Save Notifications"
-              ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-            )
-            .queue(
-              (message: Message) => {
-                discordUpdateConfig(
-                  guild,
-                  "",
-                  "",
-                  "",
-                  message.getId,
-                  world
-                )
-              },
-              (e: Throwable) => {
-                logger.warn(
-                  s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':",
-                  e
-                )
-              }
-            )
-        }
+        postBoostedNotifications(boostedChannel, guild, world)
       } else {
         var adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
@@ -3484,7 +1666,7 @@ object BotApp extends App with StrictLogging {
         }
         if (adminChannelCheck == null) {
           // admin channel has been deleted
-          val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategoryCheck).complete()
+          val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategoryCheck).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
           adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -3500,110 +1682,9 @@ object BotApp extends App with StrictLogging {
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-          val galthenEmbed = new EmbedBuilder()
-          galthenEmbed.setColor(3092790)
-          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-          galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-          boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          ).queue()
+          postGalthenTracker(boostedChannel)
 
-          // Boosted Boss
-          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-            case Right(boostedResponse) =>
-              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-            case Left(errorMessage) =>
-              val boostedBoss = "Podium_of_Vigour"
-              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-          }
-
-          // Boosted Creature
-          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-            case Right(creatureResponse) =>
-              val boostedCreature = creatureResponse.creatures.boosted.name
-              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-            case Left(errorMessage) =>
-              val boostedCreature = "Podium_of_Tenacity"
-              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-          }
-
-          // Combine both futures and send the message
-          val combinedFutures: Future[List[MessageEmbed]] = for {
-            bossEmbed <- bossEmbedFuture
-            creatureEmbed <- creatureEmbedFuture
-          } yield List(bossEmbed, creatureEmbed)
-
-          combinedFutures.map { embeds =>
-              val dreamScarDaily =
-                dreamScar.getOrElse(world, "World not found")
-
-              val rashidLocation =
-                Map(
-                  DayOfWeek.MONDAY    -> "Svargrond",
-                  DayOfWeek.TUESDAY   -> "Liberty Bay",
-                  DayOfWeek.WEDNESDAY -> "Port Hope",
-                  DayOfWeek.THURSDAY  -> "Ankrahmun",
-                  DayOfWeek.FRIDAY    -> "Darashia",
-                  DayOfWeek.SATURDAY  -> "Edron",
-                  DayOfWeek.SUNDAY    -> "Carlin"
-                ).getOrElse(
-                  ZonedDateTime
-                    .now(ZoneId.of("Europe/Berlin"))
-                    .minusHours(10)
-                    .getDayOfWeek,
-                  "Unknown"
-                )
-
-              val rashidEmbed = new EmbedBuilder()
-                .setDescription(
-                  s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
-                )
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                .setColor(3092790)
-                .build()
-
-              val dreamScarEmbed = new EmbedBuilder()
-                .setDescription(
-                  s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
-                )
-                .setThumbnail(creatureImageUrl(dreamScarDaily))
-                .setColor(3092790)
-                .build()
-
-              // Drome Timer
-              val now = Instant.now()
-              val isAfterNow = dromeTime.isAfter(now)
-              val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
-              val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                .setColor(3092790)
-                .build()
-
-              val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
-              val addRashidDreamScarEmbeds: List[MessageEmbed] =
-                embeds ++ embedsList
-
-              boostedChannel
-                .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-                .setActionRow(
-                  Button.primary(
-                    "boosted list",
-                    "Server Save Notifications"
-                  ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId, world)
-              }, (e: Throwable) => {
-                logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-              })
-            }
+          postBoostedNotifications(boostedChannel, guild, world)
         }
       }
       // check is world has already been setup
@@ -3612,19 +1693,9 @@ object BotApp extends App with StrictLogging {
       if (worldConfigData.isEmpty) {
         // create the category
         val newCategory = guild.createCategory(world).complete()
-        newCategory.upsertPermissionOverride(botRole)
-          .grant(Permission.VIEW_CHANNEL)
-          .grant(Permission.MESSAGE_SEND)
-          .grant(Permission.MESSAGE_MENTION_EVERYONE)
-          .grant(Permission.MESSAGE_EMBED_LINKS)
-          .grant(Permission.MESSAGE_HISTORY)
-          .grant(Permission.MANAGE_CHANNEL)
-          .complete()
-        newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
+        grantWorldPerms(newCategory, botRole, guild.getPublicRole)
         // create the channels
         val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
-        //val enemiesChannel = guild.createTextChannel("enemies", newCategory).complete()
-        //val neutralsChannel = guild.createTextChannel("neutrals", newCategory).complete()
 
         val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
         val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
@@ -3632,19 +1703,7 @@ object BotApp extends App with StrictLogging {
 
         val publicRole = guild.getPublicRole
         val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
-        channelList.asInstanceOf[Iterable[TextChannel]].foreach { channel =>
-          channel.upsertPermissionOverride(botRole)
-            .grant(Permission.VIEW_CHANNEL)
-            .grant(Permission.MESSAGE_SEND)
-            .grant(Permission.MESSAGE_MENTION_EVERYONE)
-            .grant(Permission.MESSAGE_EMBED_LINKS)
-            .grant(Permission.MESSAGE_HISTORY)
-            .grant(Permission.MANAGE_CHANNEL)
-            .complete()
-          channel.upsertPermissionOverride(publicRole)
-            .deny(Permission.MESSAGE_SEND)
-            .complete()
-        }
+        channelList.foreach(grantWorldPerms(_, botRole, publicRole))
 
         val notificationsConfig = discordRetrieveConfig(guild)
         val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
@@ -3653,20 +1712,8 @@ object BotApp extends App with StrictLogging {
           if (notificationsChannel.canTalk()) {
 
             // Fullbless Role
-            val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `250`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$world**"
-            fullblessEmbed.setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
-            fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-            fullblessEmbed.setColor(3092790)
-            fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            fullblessEmbed.setDescription(fullblessEmbedText)
-            notificationsChannel.sendMessageEmbeds(fullblessEmbed.build())
-              .setActionRow(
-                Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
-                Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
-                Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-              )
+            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, 250))
+              .setActionRow(fullblessRoleButtons: _*)
               .queue()
             }
         }
@@ -3679,64 +1726,49 @@ object BotApp extends App with StrictLogging {
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
 
-        // post initial embed in levels channel
-        val levelsTextChannel: TextChannel = guild.getTextChannelById(levelsId)
-        if (levelsTextChannel != null) {
-          val levelsEmbed = new EmbedBuilder()
-          levelsEmbed.setDescription(s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
-          levelsEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-          levelsEmbed.setColor(3092790)
-          levelsTextChannel.sendMessageEmbeds(levelsEmbed.build()).queue()
-        }
-
-        // post initial embed in deaths channel
-        val deathsTextChannel: TextChannel = guild.getTextChannelById(deathsId)
-        if (deathsTextChannel != null) {
-          val deathsEmbed = new EmbedBuilder()
-          deathsEmbed.setDescription(s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
-          deathsEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-          deathsEmbed.setColor(3092790)
-          deathsTextChannel.sendMessageEmbeds(deathsEmbed.build()).queue()
-        }
-
-        // post initial embed in activity channel
-        val activityTextChannel: TextChannel = guild.getTextChannelById(activityId)
-        if (activityTextChannel != null) {
-          val activityEmbed = new EmbedBuilder()
-          activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
-          activityEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-          activityEmbed.setColor(3092790)
-          activityTextChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-        }
+        // post initial embeds in the levels / deaths / activity channels
+        postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
+        postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
+        postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
         // update the database
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
+
+        // audit the setup in the command-log channel, matching /repair and /remove
+        val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
+        postAdminLog(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*"
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
         s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
       }
-    } else {
-      s"${Config.noEmoji} This is not a valid World on Tibia."
+      } else {
+        s"${Config.noEmoji} This is not a valid World on Tibia."
+      }
+    } catch {
+      case e: net.dv8tion.jda.api.exceptions.PermissionException =>
+        logger.warn(s"/setup of '$world' on guild '${event.getGuild.getId}' aborted on a missing permission: ${e.getMessage}")
+        s"${Config.noEmoji} I couldn't finish setting up **$world** because I'm missing a required permission. Grant me **Manage Roles**, **Manage Channels** and **Manage Permissions**, then run `/repair $world`."
+      case e: Exception =>
+        logger.warn(s"/setup of '$world' on guild '${event.getGuild.getId}' failed before completing", e)
+        s"${Config.noEmoji} Something went wrong while setting up **$world**, so it may be only partially configured. Wait a moment, then run `/repair $world` (or `/setup` again) to finish."
     }
     // embed reply
-    new EmbedBuilder()
-      .setColor(3092790)
-      .setDescription(embedText)
-      .build()
+    presentation.Embeds.response(embedText)
   }
 
   def detectHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
     val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
     val worldOption: String = options.getOrElse("world", "")
     val settingOption: String = options.getOrElse("option", "")
-    val worldFormal = worldOption.toLowerCase().capitalize.trim
+    val worldFormal = domain.WorldName.formal(worldOption).trim
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
     val detectSetting = cache.headOption.map(_.detectHunteds).getOrElse(null)
     if (detectSetting != null) {
@@ -3753,22 +1785,13 @@ object BotApp extends App with StrictLogging {
             w
           }
         }
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         detectHuntedsToDatabase(guild, worldFormal, settingOption)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif")
 
         embedBuild.setDescription(s":gear: **Automatic enemy detection** is now set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
@@ -3779,25 +1802,16 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def detectHuntedsToDatabase(guild: Guild, world: String, detectSetting: String): Unit = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET detect_hunteds = ? WHERE name = ?;")
-    statement.setString(1, detectSetting)
-    statement.setString(2, worldFormal)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def detectHuntedsToDatabase(guild: Guild, world: String, detectSetting: String): Unit =
+    worldConfigRepository.updateWorldString(guild.getId, domain.WorldName.formal(world), "detect_hunteds", detectSetting)
 
   def deathsLevelsHideShow(event: SlashCommandInteractionEvent, world: String, setting: String, playerType: String, channelType: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val settingType = if (setting == "show") "true" else "false"
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val thumbnailIcon = playerType match {
       case "allies"   => "Angel_Statue"
       case "neutrals" => "Guardian_Statue"
@@ -3860,22 +1874,13 @@ object BotApp extends App with StrictLogging {
             w
           }
         }
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         deathsLevelsHideShowToDatabase(guild, world, settingType, playerType, channelType)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.", s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
 
         embedBuild.setDescription(s":gear: The **$channelType** channel is now set to **$setting $playerType** for the world **$worldFormal**.")
         embedBuild.build()
@@ -3891,11 +1896,11 @@ object BotApp extends App with StrictLogging {
     val worldOption: String = options.getOrElse("world", "")
     val settingOption: String = options.getOrElse("option", "")
     val settingType = if (settingOption == "show") "true" else "false"
-    val worldFormal = worldOption.toLowerCase().capitalize.trim
+    val worldFormal = domain.WorldName.formal(worldOption).trim
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == worldOption.toLowerCase())
     val detectSetting = cache.headOption.map(_.exivaList).getOrElse(null)
     if (detectSetting != null) {
@@ -3912,22 +1917,13 @@ object BotApp extends App with StrictLogging {
             w
           }
         }
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         exivaListToDatabase(guild, worldFormal, settingType)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Find_Person.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Find_Person.gif")
 
         embedBuild.setDescription(s":gear: **exiva list on deaths** is now set to **$settingOption** for the world **$worldFormal**.")
         embedBuild.build()
@@ -3938,25 +1934,16 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def exivaListToDatabase(guild: Guild, world: String, detectSetting: String): Unit = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET exiva_list = ? WHERE name = ?;")
-    statement.setString(1, detectSetting)
-    statement.setString(2, worldFormal)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def exivaListToDatabase(guild: Guild, world: String, detectSetting: String): Unit =
+    worldConfigRepository.updateWorldString(guild.getId, domain.WorldName.formal(world), "exiva_list", detectSetting)
 
   def onlineListConfig(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val settingType = if (setting == "combine") "true" else "false"
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val thumbnailIcon = "Blackboard"
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
     val existingSetting = cache.headOption.map(_.onlineCombined)
@@ -4029,15 +2016,7 @@ object BotApp extends App with StrictLogging {
             if (category == null) {
               // create the category
               val newCategory = guild.createCategory(worldFormal).complete()
-              newCategory.upsertPermissionOverride(botRole)
-                .grant(Permission.VIEW_CHANNEL)
-                .grant(Permission.MESSAGE_SEND)
-                .grant(Permission.MESSAGE_MENTION_EVERYONE)
-                .grant(Permission.MESSAGE_EMBED_LINKS)
-                .grant(Permission.MESSAGE_HISTORY)
-                .grant(Permission.MANAGE_CHANNEL)
-                .complete()
-              newCategory.upsertPermissionOverride(publicRole).deny(Permission.MESSAGE_SEND).complete()
+              grantWorldPerms(newCategory, botRole, publicRole)
               category = newCategory
               worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
@@ -4051,7 +2030,7 @@ object BotApp extends App with StrictLogging {
                     world
                   }
                 }
-                worldsData += (guild.getId -> updatedWorldsList)
+                modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
               }
             }
             // create the online channel
@@ -4067,20 +2046,10 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             // apply permissions to created channel
-            recreateAlliesChannel.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .grant(Permission.MESSAGE_MENTION_EVERYONE)
-              .grant(Permission.MESSAGE_EMBED_LINKS)
-              .grant(Permission.MESSAGE_HISTORY)
-              .grant(Permission.MANAGE_CHANNEL)
-              .complete()
-            recreateAlliesChannel.upsertPermissionOverride(publicRole)
-              .deny(Permission.MESSAGE_SEND)
-              .complete()
+            grantWorldPerms(recreateAlliesChannel, botRole, publicRole)
             disclaimer += s"\n- *You may want to move the new <#${recreateAlliesChannel.getId}> channel.*"
           } catch {
             case ex: Throwable => logger.info(s"Failed to create category or online channels for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}' while combining the online list", ex)
@@ -4099,15 +2068,7 @@ object BotApp extends App with StrictLogging {
             if (category == null) {
               // create the category
               val newCategory = guild.createCategory(worldFormal).complete()
-              newCategory.upsertPermissionOverride(botRole)
-                .grant(Permission.VIEW_CHANNEL)
-                .grant(Permission.MESSAGE_SEND)
-                .grant(Permission.MESSAGE_MENTION_EVERYONE)
-                .grant(Permission.MESSAGE_EMBED_LINKS)
-                .grant(Permission.MESSAGE_HISTORY)
-                .grant(Permission.MANAGE_CHANNEL)
-                .complete()
-              newCategory.upsertPermissionOverride(publicRole).deny(Permission.MESSAGE_SEND).complete()
+              grantWorldPerms(newCategory, botRole, publicRole)
               category = newCategory
               worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
@@ -4121,7 +2082,7 @@ object BotApp extends App with StrictLogging {
                     world
                   }
                 }
-                worldsData += (guild.getId -> updatedWorldsList)
+                modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
               }
             } else {
               try {
@@ -4160,7 +2121,7 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             disclaimer += s"\n- *The channel <#${recreateAlliesChannel.getId}> has been recreated (you may want to move it).*"
 
@@ -4178,7 +2139,7 @@ object BotApp extends App with StrictLogging {
                     world
                   }
                 }
-                worldsData += (guild.getId -> updatedWorldsList)
+                modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
               }
               disclaimer += s"\n- *The channel <#${recreateEnemiesChannel.getId}> has been recreated (you may want to move it).*"
             }
@@ -4197,24 +2158,14 @@ object BotApp extends App with StrictLogging {
                     world
                   }
                 }
-                worldsData += (guild.getId -> updatedWorldsList)
+                modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
               }
               disclaimer += s"\n- *The channel <#${recreateNeutralsChannel.getId}> has been recreated (you may want to move it).*"
             }
             // apply required permissions to the new channel(s)
             if (channelList.nonEmpty) {
-              channelList.foreach { case (channel, webhooks) =>
-                channel.upsertPermissionOverride(botRole)
-                  .grant(Permission.VIEW_CHANNEL)
-                  .grant(Permission.MESSAGE_SEND)
-                  .grant(Permission.MESSAGE_MENTION_EVERYONE)
-                  .grant(Permission.MESSAGE_EMBED_LINKS)
-                  .grant(Permission.MESSAGE_HISTORY)
-                  .grant(Permission.MANAGE_CHANNEL)
-                  .complete()
-                channel.upsertPermissionOverride(publicRole)
-                  .deny(Permission.MESSAGE_SEND)
-                  .complete()
+              channelList.foreach { case (channel, _) =>
+                grantWorldPerms(channel, botRole, publicRole)
               }
             }
           } catch {
@@ -4231,22 +2182,13 @@ object BotApp extends App with StrictLogging {
           }
         }
 
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         onlineListConfigToDatabase(guild, world, settingType)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer")
-            adminEmbed.setThumbnail(s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer", s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
 
         embedBuild.setDescription(s":gear: The online list channel is now set to **$setting** for the world **$worldFormal**.\n$disclaimer")
         embedBuild.build()
@@ -4257,58 +2199,11 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def onlineListConfigToDatabase(guild: Guild, world: String, setting: String): Unit = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"UPDATE worlds SET online_combined = ? WHERE name = ?;")
-    statement.setString(1, setting)
-    statement.setString(2, worldFormal)
-    statement.executeUpdate()
+  private def onlineListConfigToDatabase(guild: Guild, world: String, setting: String): Unit =
+    worldConfigRepository.updateWorldString(guild.getId, domain.WorldName.formal(world), "online_combined", setting)
 
-    statement.close()
-    conn.close()
-  }
-
-  private def customSortConfig(guild: Guild, query: String): List[CustomSort] = {
-    val conn = getConnection(guild)
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'online_list_categories'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createCustomSortTable =
-        s"""CREATE TABLE online_list_categories (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |entity VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |label VARCHAR(255) NOT NULL,
-           |emoji VARCHAR(255) NOT NULL,
-           |added VARCHAR(255) NOT NULL
-           |);""".stripMargin
-
-      statement.executeUpdate(createCustomSortTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT entity,name,label,emoji FROM $query")
-
-    val results = new ListBuffer[CustomSort]()
-    while (result.next()) {
-      val entity = Option(result.getString("entity")).getOrElse("")
-      val name = Option(result.getString("name")).getOrElse("")
-      val label = Option(result.getString("label")).getOrElse("")
-      val emoji = Option(result.getString("emoji")).getOrElse("")
-
-      results += CustomSort(entity, name, label, emoji)
-    }
-
-    statement.close()
-    conn.close()
-    results.toList
-  }
+  private def customSortConfig(guild: Guild, query: String): List[CustomSort] =
+    customSortRepository.getAll(guild.getId)
 
   def addOnlineListCategory(event: SlashCommandInteractionEvent, guildOrPlayer: String, name: String, label: String, emoji: String, callback: MessageEmbed => Unit): Unit = {
     // get command information
@@ -4317,7 +2212,7 @@ object BotApp extends App with StrictLogging {
     val labelCapital = label.capitalize
     val guild = event.getGuild
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     // default embed content
     var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
@@ -4342,22 +2237,12 @@ object BotApp extends App with StrictLogging {
               val emojiDupe = emojiDupeOption.map(_.emoji).getOrElse(emoji)
 
               // add guild to hunted list and database
-              // case class CustomSort(type: String, name: String, emoji: String, label: String)
-              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, guildName, labelCapital, emojiDupe) :: customSortData.getOrElse(guildId, List())))
+              modifyCustomSortData(m => m + (guildId -> (CustomSort(guildOrPlayer, guildName, labelCapital, emojiDupe) :: m.getOrElse(guildId, List()))))
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, labelCapital, emojiDupe)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -4377,14 +2262,7 @@ object BotApp extends App with StrictLogging {
         }
       } else if (guildOrPlayer == "player") { // command run with 'player'
         // run api against player
-        val playerCheck: Future[Either[String, CharacterResponse]] = tibiaDataClient.getCharacter(nameLower)
-        playerCheck.map {
-          case Right(charResponse) =>
-            val character = charResponse.character.character
-            (character.name, character.world, vocEmoji(charResponse), character.level.toInt)
-          case Left(errorMessage) =>
-            ("", "", s"${Config.noEmoji}", 0)
-        }.map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(nameLower).map { case (playerName, world, vocation, level) =>
           if (playerName != "") {
             if (!customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
 
@@ -4392,21 +2270,12 @@ object BotApp extends App with StrictLogging {
               val emojiDupe = emojiDupeOption.map(_.emoji).getOrElse(emoji)
 
               // add player to hunted list and database
-              customSortData = customSortData + (guildId -> (CustomSort(guildOrPlayer, playerName, labelCapital, emojiDupe) :: customSortData.getOrElse(guildId, List())))
+              modifyCustomSortData(m => m + (guildId -> (CustomSort(guildOrPlayer, playerName, labelCapital, emojiDupe) :: m.getOrElse(guildId, List()))))
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, labelCapital, emojiDupe)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
               // send embed to admin channel
-              if (adminChannel != null) {
-                if (adminChannel.canTalk() || !(Config.prod)) {
-                  val adminEmbed = new EmbedBuilder()
-                  adminEmbed.setTitle(s":gear: a command was run:")
-                  adminEmbed.setDescription(s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe")
-                  adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
-                  adminEmbed.setColor(3092790)
-                  adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-                }
-              }
+              postAdminLog(adminChannel, s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -4432,20 +2301,8 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def addOnlineListCategoryToDatabase(guild: Guild, guildOrPlayer: String, name: String, label: String, emoji: String): Unit = {
-    val conn = getConnection(guild)
-    val query = "INSERT INTO online_list_categories(entity, name, label, emoji, added) VALUES (?, ?, ?, ?, ?);"
-    val statement = conn.prepareStatement(query)
-    statement.setString(1, guildOrPlayer)
-    statement.setString(2, name)
-    statement.setString(3, label)
-    statement.setString(4, emoji)
-    statement.setString(5, ZonedDateTime.now().toEpochSecond().toString)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def addOnlineListCategoryToDatabase(guild: Guild, guildOrPlayer: String, name: String, label: String, emoji: String): Unit =
+    customSortRepository.add(guild.getId, guildOrPlayer, name, label, emoji)
 
   def removeOnlineListCategory(event: SlashCommandInteractionEvent, guildOrPlayer: String, name: String): MessageEmbed = {
     // get command information
@@ -4453,7 +2310,7 @@ object BotApp extends App with StrictLogging {
     val nameLower = name.toLowerCase
     val guild = event.getGuild
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     // default embed content
     var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
@@ -4464,22 +2321,13 @@ object BotApp extends App with StrictLogging {
       if (guildOrPlayer == "guild") { // command run with 'guild'
         if (customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.toLowerCase == nameLower)) {
 
-          customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "guild" && entry.name.equalsIgnoreCase(nameLower)))
+          modifyCustomSortData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "guild" && entry.name.equalsIgnoreCase(nameLower))))
           removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
 
           embedText = s":gear: The guild **$nameLower** had its tag removed."
 
           // send embed to admin channel
-          if (adminChannel != null) {
-            if (adminChannel.canTalk() || !(Config.prod)) {
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> removed the guild **$nameLower** from custom tagging.")
-              adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-            }
-          }
+          postAdminLog(adminChannel, s"<@$commandUser> removed the guild **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
         } else {
           embedText = s"${Config.noEmoji} The guild **$nameLower** does not have a tag assigned."
 
@@ -4487,22 +2335,13 @@ object BotApp extends App with StrictLogging {
       } else if (guildOrPlayer == "player") { // command run with 'player'
         if (customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
 
-          customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "player" && entry.name.equalsIgnoreCase(nameLower)))
+          modifyCustomSortData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(entry => entry.entityType == "player" && entry.name.equalsIgnoreCase(nameLower))))
           removeOnlineListCategoryFromDatabase(guild, guildOrPlayer, nameLower)
 
           embedText = s":gear: The player **$nameLower** had its tag removed."
 
           // send embed to admin channel
-          if (adminChannel != null) {
-            if (adminChannel.canTalk() || !(Config.prod)) {
-              val adminEmbed = new EmbedBuilder()
-              adminEmbed.setTitle(s":gear: a command was run:")
-              adminEmbed.setDescription(s"<@$commandUser> removed the player **$nameLower** from custom tagging.")
-              adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
-              adminEmbed.setColor(3092790)
-              adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-            }
-          }
+          postAdminLog(adminChannel, s"<@$commandUser> removed the player **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
         } else {
           embedText = s"${Config.noEmoji} The player **$nameLower** already has a tag assigned."
         }
@@ -4514,16 +2353,8 @@ object BotApp extends App with StrictLogging {
     embedBuild.build()
   }
 
-  private def removeOnlineListCategoryFromDatabase(guild: Guild, guildOrPlayer: String, name: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE name = ? AND entity = ?;")
-    statement.setString(1, name)
-    statement.setString(2, guildOrPlayer)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def removeOnlineListCategoryFromDatabase(guild: Guild, guildOrPlayer: String, name: String): Unit =
+    customSortRepository.removeByNameEntity(guild.getId, guildOrPlayer, name)
 
   def clearOnlineListCategory(event: SlashCommandInteractionEvent, label: String): MessageEmbed = {
     // get command information
@@ -4531,7 +2362,7 @@ object BotApp extends App with StrictLogging {
     val labelLower = label.toLowerCase
     val guild = event.getGuild
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     // default embed content
     var embedText = s"${Config.noEmoji} An error occurred while running the `/online` command"
     if (checkConfigDatabase(guild)) {
@@ -4541,22 +2372,13 @@ object BotApp extends App with StrictLogging {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (customSortData.getOrElse(guildId, List()).exists(g => g.label.toLowerCase == labelLower)) {
 
-        customSortData = customSortData + (guildId -> customSortData.getOrElse(guildId, List()).filterNot(entry => entry.label.equalsIgnoreCase(labelLower)))
+        modifyCustomSortData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(entry => entry.label.equalsIgnoreCase(labelLower))))
         clearOnlineListCategoryFromDatabase(guild, labelLower)
 
         embedText = s":gear: The tag **$labelLower** has been cleared."
 
         // send embed to admin channel
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> cleared everyone from the tag **$labelLower**.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> cleared everyone from the tag **$labelLower**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
       } else {
         embedText = s"${Config.noEmoji} The tag **$labelLower** does not exist."
 
@@ -4568,15 +2390,8 @@ object BotApp extends App with StrictLogging {
     embedBuild.build()
   }
 
-  private def clearOnlineListCategoryFromDatabase(guild: Guild, label: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE LOWER(label) = LOWER(?);")
-    statement.setString(1, label)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def clearOnlineListCategoryFromDatabase(guild: Guild, label: String): Unit =
+    customSortRepository.removeByLabel(guild.getId, label)
 
   def listOnlineListCategory(event: SlashCommandInteractionEvent): List[MessageEmbed] = {
     // get command information
@@ -4590,21 +2405,21 @@ object BotApp extends App with StrictLogging {
     if (guildTags.isEmpty) {
       val interimEmbed = new EmbedBuilder()
       interimEmbed.setDescription(s"${Config.noEmoji} You do not have any custom tags.")
-      interimEmbed.setColor(3092790)
+      interimEmbed.setColor(BrandColor)
       embedBuffer += interimEmbed.build()
     } else {
       val groupedTags: Map[(String, String), List[CustomSort]] = guildTags.groupBy(tag => (tag.label, tag.emoji))
       val groupList = ListBuffer[String]()
 
       val infoEmbed = new EmbedBuilder()
-      infoEmbed.setDescription(s":speech_balloon: Tags are for *players* or *guilds* that arn't in your **allies** or **enemies** lists.\n\n- Their deaths will be highlighted **yellow**.\n- If you use the **`/online list combine`** version of the online list they will appear under their own category.")
+      infoEmbed.setDescription(s":speech_balloon: Tags are for *players* or *guilds* that aren't in your **allies** or **enemies** lists.\n\n- Their deaths will be highlighted **yellow**.\n- If you use the **`/online list combine`** version of the online list they will appear under their own category.")
       infoEmbed.setColor(14397256)
       embedBuffer += infoEmbed.build()
 
       // guildTags contains data
       groupedTags.foreach { case ((label, emoji), tags) =>
         groupList += s"\n$emoji **$label** $emoji"
-        val tagInformation = tags.map { customSort =>
+        tags.foreach { customSort =>
           groupList += s"- ${customSort.name} *(${customSort.entityType})*"
         }
       }
@@ -4633,8 +2448,7 @@ object BotApp extends App with StrictLogging {
   }
 
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
-    val worldFormal = world.toLowerCase().capitalize
-    val conn = getConnection(guild)
+    val worldFormal = domain.WorldName.formal(world)
     val tablePrefix = playerType match {
       case "allies" => "show_allies_"
       case "neutrals" => "show_neutral_"
@@ -4642,21 +2456,15 @@ object BotApp extends App with StrictLogging {
       case _ => ""
     }
     val tableName = s"$tablePrefix$channelType"
-    val statement = conn.prepareStatement(s"UPDATE worlds SET $tableName = ? WHERE name = ?;")
-    statement.setString(1, setting)
-    statement.setString(2, worldFormal)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
+    worldConfigRepository.updateWorldString(guild.getId, worldFormal, tableName, setting)
   }
 
   def fullblessLevel(event: SlashCommandInteractionEvent, world: String, level: Int): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
     val levelSetting = cache.headOption.map(_.fullblessLevel).getOrElse(null)
     if (levelSetting != null) {
@@ -4673,7 +2481,7 @@ object BotApp extends App with StrictLogging {
             w
           }
         }
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         fullblessLevelToDatabase(guild, worldFormal, level)
 
         // edit the fullblesschannel embeds
@@ -4693,34 +2501,13 @@ object BotApp extends App with StrictLogging {
               val masslogRole = worldConfigData("masslog_role")
 
               // Fullbless Role
-              val fullblessEmbed = new EmbedBuilder()
-              val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole}> If an enemy fullblesses and is over level `${level}`\n${Config.bossEmoji}<@&${nemesisRole}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole}> If enemies masslog on **$worldFormal**"
-              fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-              fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-              fullblessEmbed.setColor(3092790)
-              fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-              fullblessEmbed.setDescription(fullblessEmbedText)
-              message.editMessageEmbeds(fullblessEmbed.build())
-                .setActionRow(
-                  Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
-                  Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                  Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
-                  Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-                )
+              message.editMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level))
+                .setActionRow(fullblessRoleButtons: _*)
                 .queue()
             }
           }
         }
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
 
         embedBuild.setDescription(s":gear: The level to poke for **enemy fullblesses**\nis now set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
@@ -4732,9 +2519,9 @@ object BotApp extends App with StrictLogging {
   }
 
   def leaderboards(event: SlashCommandInteractionEvent, world: String, callback: MessageEmbed => Unit): Unit = {
-    val worldFormal = world.toLowerCase.capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
 
     if (Config.worldList.exists(_.equalsIgnoreCase(world))) {
       // Get the high scores
@@ -4764,11 +2551,11 @@ object BotApp extends App with StrictLogging {
 
 
   def repairChannel(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     embedBuild.setDescription(s"${Config.noEmoji} No action was taken as all channels for **$worldFormal** still exist.")
     val cache: Option[List[Worlds]] = worldsData.get(guild.getId) match {
       case Some(worlds) =>
@@ -4777,6 +2564,10 @@ object BotApp extends App with StrictLogging {
         else None
       case None => None
     }
+    // Like /setup, this recreates roles/channels/overrides through blocking
+    // .complete() calls; guard so a mid-way failure reports cleanly instead of
+    // hanging the interaction with channels left half-recreated.
+    try {
     if (cache.isDefined) {
       // get the bots main roles
       val botRole = guild.getBotRole
@@ -4871,7 +2662,7 @@ object BotApp extends App with StrictLogging {
             val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
             fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
             fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-            fullblessEmbed.setColor(3092790)
+            fullblessEmbed.setColor(BrandColor)
             fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
@@ -4899,7 +2690,7 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
@@ -4911,7 +2702,7 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
@@ -4923,7 +2714,7 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             // update the record in worldsData
             if (worldsData.contains(guild.getId)) {
@@ -4935,7 +2726,7 @@ object BotApp extends App with StrictLogging {
                   world
                 }
               }
-              worldsData += (guild.getId -> updatedWorldsList)
+              modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
             embedBuild.setDescription(s"${Config.yesEmoji} Missing notification message was recreated.")
           }
@@ -4945,104 +2736,7 @@ object BotApp extends App with StrictLogging {
               boostedMessageAction.complete()
             } catch {
               case e: Throwable =>
-                // Boosted Boss
-                val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-                val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-                  case Right(boostedResponse) =>
-                    val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-                    createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-                  case Left(errorMessage) =>
-                    val boostedBoss = "Podium_of_Vigour"
-                    createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-                }
-
-                // Boosted Creature
-                val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-                val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-                  case Right(creatureResponse) =>
-                    val boostedCreature = creatureResponse.creatures.boosted.name
-                    createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-                  case Left(errorMessage) =>
-                    val boostedCreature = "Podium_of_Tenacity"
-                    createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-                }
-
-                // Combine both futures and send the message
-                val combinedFutures: Future[List[MessageEmbed]] = for {
-                  bossEmbed <- bossEmbedFuture
-                  creatureEmbed <- creatureEmbedFuture
-                } yield List(bossEmbed, creatureEmbed)
-
-                combinedFutures.map { embeds =>
-                  val dreamScarDaily = dreamScar.getOrElse(worldFormal, "World not found")
-                  val rashidLocation =
-                    Map(
-                      DayOfWeek.MONDAY    -> "Svargrond",
-                      DayOfWeek.TUESDAY   -> "Liberty Bay",
-                      DayOfWeek.WEDNESDAY -> "Port Hope",
-                      DayOfWeek.THURSDAY  -> "Ankrahmun",
-                      DayOfWeek.FRIDAY    -> "Darashia",
-                      DayOfWeek.SATURDAY  -> "Edron",
-                      DayOfWeek.SUNDAY    -> "Carlin"
-                    ).getOrElse(
-                      ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
-                        .minusHours(10)
-                        .getDayOfWeek,
-                      "Unknown"
-                    )
-
-                  val rashidEmbed = new EmbedBuilder()
-                    .setDescription(
-                      s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
-                    )
-                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                    .setColor(3092790)
-                    .build()
-
-                  val dreamScarEmbed = new EmbedBuilder()
-                    .setDescription(
-                      s"The Dream Courts boss for **$worldFormal** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
-                    )
-                    .setThumbnail(creatureImageUrl(dreamScarDaily))
-                    .setColor(3092790)
-                    .build()
-
-                  // Drome Timer
-                  val now = Instant.now()
-                  val isAfterNow = dromeTime.isAfter(now)
-                  val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
-                  val dromeEmbed = new EmbedBuilder()
-                    .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                    .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                    .setColor(3092790)
-                    .build()
-
-                  val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
-                  val finalEmbeds =
-                    embeds ++ embedsList
-
-                  boostedChannel
-                    .sendMessageEmbeds(finalEmbeds.asJava)
-                    .setActionRow(
-                      Button.primary(
-                        "boosted list",
-                        "Server Save Notifications"
-                      ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                    )
-                    .queue(
-                      (message: Message) => {
-                        discordUpdateConfig(guild, "", "", "", message.getId, worldFormal)
-                      },
-                      (e: Throwable) => {
-                        logger.warn(
-                          s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':",
-                          e
-                        )
-                      }
-                    )
-                }
+                postBoostedNotifications(boostedChannel, guild, worldFormal)
             }
           }
         } else {
@@ -5054,15 +2748,7 @@ object BotApp extends App with StrictLogging {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
-          newCategory.upsertPermissionOverride(botRole)
-            .grant(Permission.VIEW_CHANNEL)
-            .grant(Permission.MESSAGE_SEND)
-            .grant(Permission.MESSAGE_MENTION_EVERYONE)
-            .grant(Permission.MESSAGE_EMBED_LINKS)
-            .grant(Permission.MESSAGE_HISTORY)
-            .grant(Permission.MANAGE_CHANNEL)
-            .complete()
-          newCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).complete()
+          grantWorldPerms(newCategory, botRole, guild.getPublicRole)
           category = newCategory
           worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
@@ -5076,7 +2762,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         val channelList = ListBuffer[(TextChannel, Boolean)]()
@@ -5096,7 +2782,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         if (enemiesChannel == null && onlineCombinedVal == "false") {
@@ -5113,7 +2799,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         if (neutralsChannel == null && onlineCombinedVal == "false") {
@@ -5130,7 +2816,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         if (deathsChannel == null) {
@@ -5147,7 +2833,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         if (levelsChannel == null) {
@@ -5164,7 +2850,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
         if (activityChannel == null) {
@@ -5181,16 +2867,10 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
           // post initial embed in activity channel
-          if (recreateActivityChannel != null) {
-            val activityEmbed = new EmbedBuilder()
-            activityEmbed.setDescription(s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
-            activityEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-            activityEmbed.setColor(3092790)
-            recreateActivityChannel.sendMessageEmbeds(activityEmbed.build()).queue()
-          }
+          postChannelIntro(recreateActivityChannel, s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
         }
 
         if (boostedChannel == null) {
@@ -5209,6 +2889,7 @@ object BotApp extends App with StrictLogging {
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          newBoostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           newBoostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
           boostedChannel = newBoostedChannel
           // update db & cache
@@ -5226,111 +2907,11 @@ object BotApp extends App with StrictLogging {
             .deny(Permission.MESSAGE_SEND)
             .complete()
 
-          val galthenEmbed = new EmbedBuilder()
-          galthenEmbed.setColor(3092790)
-          galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-          galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-          boostedChannel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
-            Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          ).queue()
+          postGalthenTracker(boostedChannel)
 
-          // Boosted Boss
-          val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
-          val bossEmbedFuture: Future[MessageEmbed] = boostedBoss.map {
-            case Right(boostedResponse) =>
-              val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
-
-            case Left(errorMessage) =>
-              val boostedBoss = "Podium_of_Vigour"
-              createBoostedEmbed("Boosted Boss", Config.bossEmoji, "https://www.tibia.com/library/?subtopic=boostablebosses", creatureImageUrl(boostedBoss), "The boosted boss today failed to load?")
-          }
-
-          // Boosted Creature
-          val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
-          val creatureEmbedFuture: Future[MessageEmbed] = boostedCreature.map {
-            case Right(creatureResponse) =>
-              val boostedCreature = creatureResponse.creatures.boosted.name
-              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
-
-            case Left(errorMessage) =>
-              val boostedCreature = "Podium_of_Tenacity"
-              createBoostedEmbed("Boosted Creature", Config.creatureEmoji, "https://www.tibia.com/library/?subtopic=creatures", creatureImageUrl(boostedCreature), "The boosted creature today failed to load?")
-          }
-
-          // Combine both futures and send the message
-          val combinedFutures: Future[List[MessageEmbed]] = for {
-            bossEmbed <- bossEmbedFuture
-            creatureEmbed <- creatureEmbedFuture
-          } yield List(bossEmbed, creatureEmbed)
-
-          combinedFutures.map { embeds =>
-
-              val dreamScarDaily =
-                dreamScar.getOrElse(world, "World not found")
-
-              val rashidLocation =
-                Map(
-                  DayOfWeek.MONDAY    -> "Svargrond",
-                  DayOfWeek.TUESDAY   -> "Liberty Bay",
-                  DayOfWeek.WEDNESDAY -> "Port Hope",
-                  DayOfWeek.THURSDAY  -> "Ankrahmun",
-                  DayOfWeek.FRIDAY    -> "Darashia",
-                  DayOfWeek.SATURDAY  -> "Edron",
-                  DayOfWeek.SUNDAY    -> "Carlin"
-                ).getOrElse(
-                  ZonedDateTime
-                    .now(ZoneId.of("Europe/Berlin"))
-                    .minusHours(10)
-                    .getDayOfWeek,
-                  "Unknown"
-                )
-
-              val rashidEmbed = new EmbedBuilder()
-                .setDescription(
-                  s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**"
-                )
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                .setColor(3092790)
-                .build()
-
-              val dreamScarEmbed = new EmbedBuilder()
-                .setDescription(
-                  s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**"
-                )
-                .setThumbnail(creatureImageUrl(dreamScarDaily))
-                .setColor(3092790)
-                .build()
-
-              // Drome Timer
-              val now = Instant.now()
-              val isAfterNow = dromeTime.isAfter(now)
-              val dromeShow = isAfterNow && java.time.Duration.between(now, dromeTime).toDays <= 3
-              val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                .setColor(3092790)
-                .build()
-
-              val embedsList = if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
-              val addRashidDreamScarEmbeds: List[MessageEmbed] =
-                embeds ++ embedsList
-
-              boostedChannel
-                .sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-                .setActionRow(
-                  Button.primary(
-                    "boosted list",
-                    "Server Save Notifications"
-                  ).withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                )
-                .queue((message: Message) => {
-                //updateBoostedMessage(guild.getId, message.getId)
-                discordUpdateConfig(guild, "", "", "", message.getId, worldFormal)
-              }, (e: Throwable) => {
-                logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-              })
-            }
+          // Boosted Boss + creature + server-save notifications (use the canonical
+          // world name so the Dream Courts lookup resolves)
+          postBoostedNotifications(boostedChannel, guild, worldFormal)
 
           val worldConfigData = worldRetrieveConfig(guild, world)
           val fullblessLevel = worldConfigData("fullbless_level")
@@ -5348,7 +2929,7 @@ object BotApp extends App with StrictLogging {
           val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
           fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
           fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-          fullblessEmbed.setColor(3092790)
+          fullblessEmbed.setColor(BrandColor)
           fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           fullblessEmbed.setDescription(fullblessEmbedText)
           boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
@@ -5371,7 +2952,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
 
           // Update role id if it changed
@@ -5387,7 +2968,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
@@ -5402,7 +2983,7 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
 
           // Update role id if it changed
@@ -5418,27 +2999,14 @@ object BotApp extends App with StrictLogging {
                 world
               }
             }
-            worldsData += (guild.getId -> updatedWorldsList)
+            modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
         }
 
         // apply required permissions to the new channel(s)
         if (channelList.nonEmpty) {
-          channelList.foreach { case (channel, webhooks) =>
-            channel.upsertPermissionOverride(botRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .grant(Permission.MESSAGE_MENTION_EVERYONE)
-              .grant(Permission.MESSAGE_EMBED_LINKS)
-              .grant(Permission.MESSAGE_HISTORY)
-              .grant(Permission.MANAGE_CHANNEL)
-              .complete()
-            channel.upsertPermissionOverride(publicRole)
-              .deny(Permission.MESSAGE_SEND)
-              .complete()
-            if (webhooks) {
-              //
-            }
+          channelList.foreach { case (channel, _) =>
+            grantWorldPerms(channel, botRole, publicRole)
           }
         }
         // recreate admin channel and/or category
@@ -5453,51 +3021,43 @@ object BotApp extends App with StrictLogging {
             adminCategory = newAdminCategory
           }
           // create the channel
-          val newAdminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ᲼ʟᴏɢ", adminCategory).complete()
+          val newAdminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategory).complete()
           // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
           newAdminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           newAdminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
+          newAdminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
           newAdminChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           adminChannel = newAdminChannel
           // update db & cache
           discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "", worldFormal)
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
-        if (adminChannel != null) {
-          if (adminChannel.canTalk()) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
     } else {
       embedBuild.setDescription(s"${Config.noEmoji} You cannot run a `/repair` on **$worldFormal** because that world has not been `/setup` yet.")
     }
+    } catch {
+      case e: net.dv8tion.jda.api.exceptions.PermissionException =>
+        logger.warn(s"/repair of '$worldFormal' on guild '${guild.getId}' aborted on a missing permission: ${e.getMessage}")
+        embedBuild.setDescription(s"${Config.noEmoji} I couldn't finish repairing **$worldFormal** because I'm missing a required permission. Grant me **Manage Roles**, **Manage Channels** and **Manage Permissions**, then run `/repair $world` again.")
+      case e: Exception =>
+        logger.warn(s"/repair of '$worldFormal' on guild '${guild.getId}' failed before completing", e)
+        embedBuild.setDescription(s"${Config.noEmoji} Something went wrong while repairing **$worldFormal**; some channels may still be missing. Wait a moment, then run `/repair $world` again.")
+    }
     embedBuild.build()
   }
 
-  private def worldRepairConfig(guild: Guild, world: String, tableName: String, newValue: String): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement(s"UPDATE worlds SET $tableName = ? WHERE name = ?;")
-    statement.setString(1, newValue)
-    statement.setString(2, world)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def worldRepairConfig(guild: Guild, world: String, tableName: String, newValue: String): Unit =
+    worldConfigRepository.updateWorldString(guild.getId, world, tableName, newValue)
 
   def minLevel(event: SlashCommandInteractionEvent, world: String, level: Int, levelsOrDeaths: String): MessageEmbed = {
-    val worldFormal = world.toLowerCase().capitalize
+    val worldFormal = domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
     val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(3092790)
+    embedBuild.setColor(BrandColor)
     val cache = worldsData.getOrElse(guild.getId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
     val levelSetting = cache.headOption.map(_.levelsMin).getOrElse(null)
     val deathSetting = cache.headOption.map(_.deathsMin).getOrElse(null)
@@ -5520,21 +3080,12 @@ object BotApp extends App with StrictLogging {
             w
           }
         }
-        worldsData = worldsData + (guild.getId -> modifiedWorlds)
+        modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         minLevelToDatabase(guild, worldFormal, level, levelsOrDeaths)
 
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
-        if (adminChannel != null) {
-          if (adminChannel.canTalk() || !(Config.prod)) {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s":gear: a command was run:")
-            adminEmbed.setDescription(s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          }
-        }
+        postAdminLog(adminChannel, s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif")
         embedBuild.setDescription(s":gear: The minimum level for the **$levelsOrDeaths channel**\nis now set to `$level` for the world **$worldFormal**.")
         embedBuild.build()
       }
@@ -5544,131 +3095,101 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def fullblessLevelToDatabase(guild: Guild, world: String, level: Int): Unit = {
-    val conn = getConnection(guild)
-    val statement = conn.prepareStatement("UPDATE worlds SET fullbless_level = ? WHERE name = ?;")
-    statement.setInt(1, level)
-    statement.setString(2, world)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
-  }
+  private def fullblessLevelToDatabase(guild: Guild, world: String, level: Int): Unit =
+    worldConfigRepository.updateWorldInt(guild.getId, world, "fullbless_level", level)
 
   private def minLevelToDatabase(guild: Guild, world: String, level: Int, levelOrDeath: String): Unit = {
-    val conn = getConnection(guild)
     val columnName = if (levelOrDeath == "levels") "levels_min" else "deaths_min"
-    val statement = conn.prepareStatement(s"UPDATE worlds SET $columnName = ? WHERE name = ?;")
-    statement.setInt(1, level)
-    statement.setString(2, world)
-    statement.executeUpdate()
-
-    statement.close()
-    conn.close()
+    worldConfigRepository.updateWorldInt(guild.getId, world, columnName, level)
   }
 
-  def discordLeave(event: GuildLeaveEvent): Unit = {
-    val guildId = event.getGuild.getId
+  /** Build the boosted boss + creature + server-save embeds and post them to a
+   *  guild's notifications channel with the server-save button, storing the
+   *  message id so the daily scheduler can edit it later. Used when /setup or
+   *  /repair (re)creates the notifications channel. */
+  private def postBoostedNotifications(channel: TextChannel, guild: Guild, world: String): Unit = {
+    val combinedFutures: Future[List[MessageEmbed]] = for {
+      bossEmbed <- boostedBossEmbed()
+      creatureEmbed <- boostedCreatureEmbed()
+    } yield List(bossEmbed, creatureEmbed)
 
-    // Remove from worldsData if exists
-    if (worldsData.contains(guildId)) {
-      val updatedWorldsData = worldsData - guildId
-      worldsData = updatedWorldsData
+    combinedFutures.map { embeds =>
+      val allEmbeds = embeds ++ serverSaveExtraEmbeds(world)
+      channel
+        .sendMessageEmbeds(allEmbeds.asJava)
+        .setActionRow(Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji)))
+        .queue(
+          (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
+          (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+        )
+    }
+  }
+
+  /** Post a channel's intro/help embed (the "this channel shows ..." message)
+   *  if the channel exists. Used for the levels/deaths/activity channels. */
+  private def postChannelIntro(channel: TextChannel, description: String): Unit =
+    if (channel != null) {
+      val embed = new EmbedBuilder()
+      embed.setDescription(description)
+      embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
+      embed.setColor(BrandColor)
+      channel.sendMessageEmbeds(embed.build()).queue()
     }
 
-    // Remove from discordsData if exists
-    val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
-      if (discordsList.exists(_.id == guildId)) {
-        val updatedDiscords = discordsList.filterNot(_.id == guildId)
-        world -> updatedDiscords
-      } else {
-        world -> discordsList
+  /** Post the Galthen's Satchel cooldown-tracker embed + button into a guild's
+   *  notifications channel (done on every /setup and /repair of that channel). */
+  private def postGalthenTracker(channel: TextChannel): Unit = {
+    val galthenEmbed = new EmbedBuilder()
+    galthenEmbed.setColor(BrandColor)
+    galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
+    galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
+    channel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+      Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
+    ).queue()
+  }
+
+  /** Apply the standard per-world channel/category permissions: grant the bot
+   *  the channel-management set and deny @everyone the ability to post. Used for
+   *  the world category and each world channel in /setup and /repair. */
+  private def grantWorldPerms(entity: IPermissionContainer, botRole: Role, publicRole: Role): Unit = {
+    entity.upsertPermissionOverride(botRole)
+      .grant(Permission.VIEW_CHANNEL)
+      .grant(Permission.MESSAGE_SEND)
+      .grant(Permission.MESSAGE_MENTION_EVERYONE)
+      .grant(Permission.MESSAGE_EMBED_LINKS)
+      .grant(Permission.MESSAGE_HISTORY)
+      .grant(Permission.MANAGE_CHANNEL)
+      .complete()
+    entity.upsertPermissionOverride(publicRole).deny(Permission.MESSAGE_SEND).complete()
+  }
+
+  /** Reuse the guild's existing role of this name, or create it with the given
+   *  colour. Used by /setup and /repair to (re)build the per-world poke roles. */
+  private def getOrCreateRole(guild: Guild, name: String, color: Color): Role = {
+    val existing = guild.getRolesByName(name, true)
+    if (!existing.isEmpty) existing.get(0)
+    else guild.createRole().setName(name).setColor(color).complete()
+  }
+
+  /** Delete a world's role if it still exists, logging (not throwing) on failure. */
+  private def deleteRoleQuietly(role: Role, roleId: String, guild: Guild): Unit =
+    if (role != null) {
+      try role.delete().queue()
+      catch {
+        case ex: Throwable => logger.info(s"Failed to delete Role ID: '$roleId' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
       }
     }
-    // Only update discordsData if the guild existed in it
-    if (updatedDiscordsData != discordsData) {
-      discordsData = updatedDiscordsData
-    }
-
-    // Remove from botStreams if exists
-    val updatedBotStreams = botStreams.map { case (world, streams) =>
-      val updatedUsedBy = streams.usedBy.filterNot(_.id == guildId)
-      if (updatedUsedBy.isEmpty) {
-        streams.stream.cancel()
-        None // Return None to indicate that this entry should be removed from the map
-      } else if (streams.usedBy != updatedUsedBy) {
-        // Only update the streams if the usedBy list has changed
-        Some(world -> streams.copy(usedBy = updatedUsedBy)) // Return the updated entry wrapped in Some
-      } else {
-        Some(world -> streams) // Return the existing entry wrapped in Some
-      }
-    }.flatten.toMap // Convert the resulting Iterable[(String, Streams)] back into a Map
-
-    // Only update botStreams if any changes were made
-    if (updatedBotStreams != botStreams) {
-      botStreams = updatedBotStreams
-    }
-
-    logger.info(guildId)
-
-    if (guildId == "912739993015947324" || guildId == "1176279097001918516" || guildId == "1224670957466161234") {
-      // Config is shared with Pulsera Bot
-      logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
-    } else {
-      removeConfigDatabase(guildId)
-    }
-
-  }
-
-  def discordJoin(event: GuildJoinEvent): Unit = {
-    val guild = event.getGuild
-    val publicChannel = guild.getTextChannelById(guild.getDefaultChannel.getId)
-    if (publicChannel != null) {
-      if (publicChannel.canTalk() || !(Config.prod)) {
-        val embedBuilder = new EmbedBuilder()
-        val descripText = Config.helpText
-        embedBuilder.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
-        embedBuilder.setDescription(descripText)
-        embedBuilder.setThumbnail(Config.webHookAvatar)
-        embedBuilder.setColor(14397256) // orange for bot auto command
-        try {
-          publicChannel.sendMessageEmbeds(embedBuilder.build()).queue()
-        } catch {
-          case ex: Throwable => logger.error(s"Failed to send 'New Discord Join' message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
-        }
-      }
-    }
-  }
-
-  private def removeConfigDatabase(guildId: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/postgres"
-    val username = "postgres"
-    val password = Config.postgresPassword
-
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-    val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = '_$guildId'")
-    val exist = result.next()
-
-    // if bot_configuration exists
-    if (exist) {
-      statement.executeUpdate(s"DROP DATABASE _$guildId;")
-      logger.info(s"Database '$guildId' removed successfully")
-      statement.close()
-      conn.close()
-    } else {
-      logger.info(s"Database '$guildId' was not removed as it doesn't exist")
-      statement.close()
-      conn.close()
-    }
-  }
 
   def removeChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
     // get guild & world information from the slash interaction
-    val world: String = event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim().toLowerCase().capitalize
+    val world: String = domain.WorldName.formal(event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim())
     val embedText = if (worlds.contains(world) || Config.mergedWorlds.contains(world)) {
       val guild = event.getGuild
       val worldConfigData = worldRetrieveConfig(guild, world)
+      // Channel/category deletion below goes through blocking .complete() calls;
+      // guard so a mid-way failure reports cleanly instead of hanging the
+      // interaction with the world left partially removed.
+      try {
       if (worldConfigData.nonEmpty) {
         // get channel ids
         val alliesChannelId = worldConfigData("allies_channel")
@@ -5684,10 +3205,7 @@ object BotApp extends App with StrictLogging {
 
         // check if command is being run in one of the channels being deleted
         if (channelIds.contains(event.getChannel.getId)) {
-          return new EmbedBuilder()
-          .setColor(3092790)
-          .setDescription(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
-          .build()
+          return presentation.Embeds.response(s"${Config.noEmoji} That command would delete this channel, run it somewhere else.")
         }
 
         val fullblessRoleId = worldConfigData("fullbless_role")
@@ -5695,61 +3213,18 @@ object BotApp extends App with StrictLogging {
         val allyPkRoleId = worldConfigData("allypk_role")
         val masslogRoleId = worldConfigData("masslog_role")
 
-        val fullblessRole = guild.getRoleById(nemesisRoleId)
-        val nemesisRole = guild.getRoleById(fullblessRoleId)
+        val fullblessRole = guild.getRoleById(fullblessRoleId)
+        val nemesisRole = guild.getRoleById(nemesisRoleId)
         val allyPkRole = guild.getRoleById(allyPkRoleId)
         val masslogRole = guild.getRoleById(masslogRoleId)
 
-        //@unkown role-fix WIP
-        if (fullblessRole != null) {
-          try {
-            fullblessRole.delete().queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${fullblessRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
-          }
-        }
+        deleteRoleQuietly(fullblessRole, fullblessRoleId, guild)
+        deleteRoleQuietly(nemesisRole, nemesisRoleId, guild)
+        deleteRoleQuietly(allyPkRole, allyPkRoleId, guild)
+        deleteRoleQuietly(masslogRole, masslogRoleId, guild)
 
-        if (nemesisRole != null) {
-          try {
-            nemesisRole.delete().queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${nemesisRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
-
-        if (allyPkRole != null) {
-          try {
-            allyPkRole.delete().queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${allyPkRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
-
-        if (masslogRole != null) {
-          try {
-            masslogRole.delete().queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to delete Role ID: '${masslogRoleId}' for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
-
-        // remove the guild from the world stream
-        val getWorldStream = botStreams.get(world)
-        getWorldStream match {
-          case Some(streams) =>
-            // remove the guild from the usedBy list
-            val updatedUsedBy = streams.usedBy.filterNot(_.id == guild.getId)
-            // if there are no more guilds in the usedBy list
-            if (updatedUsedBy.isEmpty) {
-              streams.stream.cancel()
-              botStreams -= world
-            } else {
-              // update the botStreams map with the updated usedBy list
-              botStreams += (world -> streams.copy(usedBy = updatedUsedBy))
-            }
-          case None =>
-            logger.info(s"No stream found for guild '${guild.getName} - ${guild.getId}' and world '$world'.")
-        }
+        // remove the guild from the world stream, cancelling it if now unused
+        streamSupervisor.removeGuildFromWorld(world, guild.getId)
 
         // delete the channels & category
         channelIds.foreach { channelId =>
@@ -5769,882 +3244,86 @@ object BotApp extends App with StrictLogging {
           .map(_.filterNot(_.name.toLowerCase() == world.toLowerCase()))
           .map(worlds => worldsData + (guild.getId -> worlds))
           .getOrElse(worldsData)
-        worldsData = updatedWorldsData
+        modifyWorldsData(_ => updatedWorldsData)
 
         // remove from discordsData
         discordsData.get(world)
           .foreach { discords =>
             val updatedDiscords = discords.filterNot(_.id == guild.getId)
-            discordsData += (world -> updatedDiscords)
+            modifyDiscordsData(_ + (world -> updatedDiscords))
           }
 
         // update the database
         worldRemoveConfig(guild, world)
 
+        // If that was the guild's last world, the guild-level command-log and
+        // notifications channels (and the "Violent Bot" category) would be left
+        // orphaned, so remove them too. Otherwise audit the removal in the
+        // command-log channel (which survives).
+        val remainingWorlds = updatedWorldsData.get(guild.getId).getOrElse(Nil)
+        val discordConfig = discordRetrieveConfig(guild)
+        if (remainingWorlds.isEmpty) {
+          val boostedChannel = guild.getTextChannelById(discordConfig.getOrElse("boosted_channel", "0"))
+          if (boostedChannel != null) boostedChannel.delete().complete()
+          val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
+          if (adminChannel != null) adminChannel.delete().complete()
+          val adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
+          if (adminCategory != null) adminCategory.delete().complete()
+        } else {
+          val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
+          postAdminLog(adminChannel, s"<@${event.getUser.getId}> has run `/remove` on the world **$world** and deleted its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+        }
+
         s":gear: The world **$world** has been removed."
       } else {
         s"${Config.noEmoji} The world **$world** is not configured here."
+      }
+      } catch {
+        case e: net.dv8tion.jda.api.exceptions.PermissionException =>
+          logger.warn(s"/remove of '$world' on guild '${guild.getId}' aborted on a missing permission: ${e.getMessage}")
+          s"${Config.noEmoji} I couldn't finish removing **$world** because I'm missing a required permission. Grant me **Manage Channels** and **Manage Roles**, then run `/remove $world` again."
+        case e: Exception =>
+          logger.warn(s"/remove of '$world' on guild '${guild.getId}' failed before completing", e)
+          s"${Config.noEmoji} Something went wrong while removing **$world**; some channels may still remain. Wait a moment, then run `/remove $world` again."
       }
     } else {
       s"${Config.noEmoji} This is not a valid World on Tibia."
     }
     // embed reply
-    new EmbedBuilder()
-    .setColor(3092790)
-    .setDescription(embedText)
-    .build()
+    presentation.Embeds.response(embedText)
   }
 
-  def adminLeave(event: SlashCommandInteractionEvent, guildId: String, reason: String): MessageEmbed = {
-    // get guild & world information from the slash interaction
-    val guildL: Long = java.lang.Long.parseLong(guildId)
-    val guild = jda.getGuildById(guildL)
-    val discordInfo = discordRetrieveConfig(guild)
-    var embedMessage = ""
 
-    if (discordInfo.isEmpty) {
-      embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner."
-    } else {
-      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (adminChannel != null) {
-        if (adminChannel.canTalk() || !(Config.prod)) {
-          try {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
-            adminEmbed.setDescription(s"<@$botUser> has left your discord because of the following reason:\n> ${reason}")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
-          }
-        }
-      }
-      embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
-    }
+  private def creatureImageUrl(creature: String): String =
+    presentation.Urls.creatureImageUrl(creature, Config.creatureUrlMappings)
 
-    guild.leave().queue()
-    // embed reply
-    new EmbedBuilder()
-    .setColor(3092790)
-    .setDescription(embedMessage)
-    .build()
-  }
-
-  def adminDreamScar(event: SlashCommandInteractionEvent): MessageEmbed = {
-    dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
-    var embedMessage = s":gear: The dreamcourts bosses for each world have been resynced."
-    // embed reply
-    new EmbedBuilder()
-    .setColor(3092790)
-    .setDescription(embedMessage)
-    .build()
-  }
-
-  def adminMessage(event: SlashCommandInteractionEvent, guildId: String, message: String): MessageEmbed = {
-    // get guild & world information from the slash interaction
-    val guildL: Long = java.lang.Long.parseLong(guildId)
-    val guild = jda.getGuildById(guildL)
-    val discordInfo = discordRetrieveConfig(guild)
-    var embedMessage = ""
-
-    if (discordInfo.isEmpty) {
-      embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** doesn't have any worlds setup yet, so a message cannot be sent."
-    } else {
-      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      if (adminChannel != null) {
-        if (adminChannel.canTalk() || !(Config.prod)) {
-          try {
-            val adminEmbed = new EmbedBuilder()
-            adminEmbed.setTitle(s"${Config.noEmoji} The creator of the bot has run a command:")
-            adminEmbed.setDescription(s"<@$botUser> has forwarded a message from the bot's creator:\n> ${message}")
-            adminEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
-            adminEmbed.setColor(3092790)
-            adminChannel.sendMessageEmbeds(adminEmbed.build()).queue()
-          } catch {
-            case ex: Throwable => logger.info(s"Failed to send admin message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'")
-          }
-        }
-      } else {
-        embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
-      }
-      embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
-    }
-    // embed reply
-    new EmbedBuilder()
-    .setColor(3092790)
-    .setDescription(embedMessage)
-    .build()
-  }
-
-  def adminInfo(event: SlashCommandInteractionEvent, callback: List[MessageEmbed] => Unit): Unit = {
-    val allGuilds = jda.getGuilds.asScala.toList
-    val allGuildsCleaned: List[String] = allGuilds.map(guild => s"**${guild.getName}** - `${guild.getId}`")
-    logger.info(allGuildsCleaned.toString)
-    // build the embed
-    val embedBuffer = ListBuffer[MessageEmbed]()
-    var field = ""
-    allGuildsCleaned.foreach { v =>
-      val currentField = field + "\n" + v
-      if (currentField.length <= 3000) { // don't add field yet, there is still room
-        field = currentField
-      } else { // it's full, add the field
-        val interimEmbed = new EmbedBuilder()
-        interimEmbed.setDescription(field)
-        embedBuffer += interimEmbed.build()
-        field = v
-      }
-    }
-    val finalEmbed = new EmbedBuilder()
-    finalEmbed.setDescription(field)
-    embedBuffer += finalEmbed.build()
-    callback(embedBuffer.toList)
-  }
-
-  private def creatureImageUrl(creature: String): String = {
-    val key = creature.toLowerCase
-
-    key match {
-      case "death" =>
-        "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Death_Effect.gif"
-      case "ice" =>
-        "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Ice_Explosion_Effect.gif"
-      case "drowning" =>
-        "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Reaper_Effect.gif"
-      case "pvp" =>
-        "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif"
-      case "life drain" =>
-        "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Red_Sparkles_Effect.gif"
-
-      case _ =>
-        val finalCreature = Config.creatureUrlMappings.getOrElse(key, {
-          val rx1 = """([^\w]\w)""".r
-          val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
-
-          val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
-          val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
-
-          parsed2.replaceAll(" ", "_").capitalize
-        })
-
-        s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$finalCreature.gif"
-    }
-  }
-
-  def creatureWikiUrl(creature: String): String = {
-    val finalCreature = Config.creatureUrlMappings.getOrElse(creature.toLowerCase, {
-      // Capitalise the start of each word, including after punctuation e.g. "Mooh'Tah Warrior", "Two-Headed Turtle"
-      val rx1 = """([^\w]\w)""".r
-      val parsed1 = rx1.replaceAllIn(creature, m => m.group(1).toUpperCase)
-
-      // Lowercase the articles, prepositions etc., e.g. "The Voice of Ruin"
-      val rx2 = """( A| Of| The| In| On| To| And| With| From)(?=( ))""".r
-      val parsed2 = rx2.replaceAllIn(parsed1, m => m.group(1).toLowerCase)
-
-      // Replace spaces with underscores and make sure the first letter is capitalised
-      parsed2.replaceAll(" ", "_").capitalize
-    })
-    s"https://www.tibiawiki.com.br/wiki/$finalCreature"
-  }
-
-  // V1.9 Boosted Command
-  def createBoostedEmbed(name: String, emoji: String, wikiUrl: String, thumbnail: String, embedText: String): MessageEmbed = {
-    val embed = new EmbedBuilder()
-    //embed.setTitle(s"$emoji $name $emoji", wikiUrl)
-    embed.setThumbnail(thumbnail)
-    embed.setColor(3092790)
-    embed.setDescription(embedText)
-    embed.build()
-  }
-
-  def capitalizeAllWords(s: String): String = {
-    s.split(" ").map(_.capitalize).mkString(" ")
-  }
-
-  def boostedAll(): List[BoostedStamp] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery =
-      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE boosted_notifications (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |userid VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |type VARCHAR(255),
-           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
-           |);""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT userid,name,type FROM boosted_notifications;")
-    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
-
-    while (result.next()) {
-      val boostedUserSql = Option(result.getString("userid")).getOrElse("")
-      val boostedNameSql = Option(result.getString("name")).getOrElse("")
-      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
-
-      val boostedStamp = BoostedStamp(boostedUserSql, boostedTypeSql, boostedNameSql)
-      boostedStampList += boostedStamp
-    }
-
-    statement.close()
-    conn.close()
-
-    boostedStampList.toList
-  }
-
-  def boostedList(userId: String): Boolean = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery =
-      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE boosted_notifications (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |userid VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |type VARCHAR(255),
-           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
-           |);""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT name,type FROM boosted_notifications WHERE userid = '$userId';")
-    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
-
-    while (result.next()) {
-      val boostedNameSql = Option(result.getString("name")).getOrElse("")
-      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
-
-      val boostedStamp = BoostedStamp(userId, boostedTypeSql, boostedNameSql)
-      boostedStampList += boostedStamp
-    }
-
-    statement.close()
-    conn.close()
-
-    val existingNames = boostedStampList.toList
-    existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
-  }
-
-  def boosted(userId: String, boostedOption: String, boostedName: String): MessageEmbed = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/bot_cache"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    var embedMessage = s"${Config.noEmoji} This command failed to run, try again?"
-
-    val statement = conn.createStatement()
-
-    // Check if the table already exists in bot_configuration
-    val tableExistsQuery =
-      statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
-    val tableExists = tableExistsQuery.next()
-    tableExistsQuery.close()
-
-    // Create the table if it doesn't exist
-    if (!tableExists) {
-      val createListTable =
-        s"""CREATE TABLE boosted_notifications (
-           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           |userid VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |type VARCHAR(255),
-           |CONSTRAINT unique_user_name_constraint UNIQUE (userid, name)
-           |);""".stripMargin
-
-      statement.executeUpdate(createListTable)
-    }
-
-    val result = statement.executeQuery(s"SELECT name,type FROM boosted_notifications WHERE userid = '$userId';")
-    val boostedStampList: ListBuffer[BoostedStamp] = ListBuffer()
-
-    while (result.next()) {
-      val boostedNameSql = Option(result.getString("name")).getOrElse("")
-      val boostedTypeSql = Option(result.getString("type")).getOrElse("")
-
-      val boostedStamp = BoostedStamp(userId, boostedTypeSql, boostedNameSql)
-      boostedStampList += boostedStamp
-    }
-    statement.close()
-
-    val sanitizedName = boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase
-    val existingNames = boostedStampList.toList
-
-    val replyEmbed = new EmbedBuilder()
-    replyEmbed.setColor(3092790)
-    if (boostedOption == "list") { // UNFINISHED
-      if (existingNames.size > 0) {
-        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
-        val groupedAndSorted = existingNames
-          .groupBy(_.boostedType)
-          .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-          .toSeq
-          .sortBy(_._1) // Sort groups by type
-          .flatMap { case (group, names) =>
-            names.map { boosted =>
-              val emoji =
-                if (group == "boss") Config.bossEmoji
-                else if (group == "creature") Config.creatureEmoji
-                else Config.indentEmoji
-
-              val nameWithLink =
-                if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-              s"$emoji $nameWithLink"
-            }
-          }.mkString("\n")
-        embedMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
-        val combinedMessage = embedMessage
-        if (combinedMessage.size >= 4096) {
-          val substituteText = "\n\n*`...cannot display any more results`*"
-          val lastLineIndex = embedMessage.lastIndexOf('\n', (4090 - (substituteText.size)))
-          val truncatedMessage = embedMessage.substring(0, lastLineIndex)
-          embedMessage = truncatedMessage + substituteText
-        } else {
-          embedMessage = combinedMessage
-        }
-      } else {
-        embedMessage = s"${Config.letterEmoji} Your notification list is *empty*."
-      }
-    } else if (boostedOption == "add"){
-      if (sanitizedName != "") {
-        if (existingNames.exists(_.boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase == sanitizedName)) {
-          embedMessage = s"${Config.noEmoji} **$sanitizedName** already exists."
-        } else {
-          if (sanitizedName == "all") {
-            val query =
-              "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
-            val preparedStatement = conn.prepareStatement(query)
-            preparedStatement.setString(1, userId)
-            preparedStatement.setString(2, sanitizedName)
-            preparedStatement.setString(3, "all")
-            preparedStatement.executeUpdate()
-            preparedStatement.close()
-            embedMessage = s"${Config.yesEmoji} you have enabled notifications for **all** bosses and creatures."
-          } else {
-            // Check if sanitizedName exists in boostedBossesList
-            val isBoostedBoss = boostedBossesList.exists(_.equalsIgnoreCase(sanitizedName))
-
-            // Check if sanitizedName is a valid creature
-            //val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
-
-            val dreamcourtCheck: Boolean =  if (List("plagueroot","malofur mangrinder","maxxenius","alptramun","izcandar the banished").contains(sanitizedName.toLowerCase)) true else false
-            val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
-            val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
-            if (dreamcourtCheck){
-              embedMessage = s"${Config.noEmoji} dreamcourt bosses arn't supported yet."
-            } else {
-              if (monsterType == "all") {
-                val groupedAndSorted = existingNames
-                  .groupBy(_.boostedType)
-                  .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-                  .toSeq
-                  .sortBy(_._1) // Sort groups by type
-                  .flatMap { case (group, names) =>
-                    names.map { boosted =>
-                      val emoji =
-                        if (group == "boss") Config.bossEmoji
-                        else if (group == "creature") Config.creatureEmoji
-                        else Config.indentEmoji
-
-                      val nameWithLink =
-                        if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                        else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-                      s"$emoji $nameWithLink"
-                    }
-                  }.mkString("\n")
-                val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
-                val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
-                val combinedMessage = listMessage + s"\n\n$commandMessage"
-                if (combinedMessage.size >= 4096) {
-                  val substituteText = "\n\n*`...cannot display any more results`*"
-                  val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-                  val truncatedMessage = listMessage.substring(0, lastLineIndex)
-                  embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-                } else {
-                  embedMessage = combinedMessage
-                }
-              } else {
-                val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
-                val preparedStatement = conn.prepareStatement(query)
-                preparedStatement.setString(1, userId)
-                preparedStatement.setString(2, sanitizedName)
-                preparedStatement.setString(3, monsterType)
-                preparedStatement.executeUpdate()
-                preparedStatement.close()
-
-                val newNames = existingNames :+ BoostedStamp(userId, monsterType, sanitizedName)
-                val groupedAndSorted = newNames
-                  .groupBy(_.boostedType)
-                  .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-                  .toSeq
-                  .sortBy(_._1) // Sort groups by type
-                  .flatMap { case (group, names) =>
-                    names.map { boosted =>
-                      val emoji =
-                        if (group == "boss") Config.bossEmoji
-                        else if (group == "creature") Config.creatureEmoji
-                        else Config.indentEmoji
-
-                      val nameWithLink =
-                        if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                        else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-                      s"$emoji $nameWithLink"
-                    }
-                  }.mkString("\n")
-                val listMessage = if (groupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted" else s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
-                val commandMessage = s"${Config.yesEmoji} **$sanitizedName** was added."
-                //WIP
-                val combinedMessage = listMessage + s"\n\n$commandMessage"
-                if (combinedMessage.size >= 4096) {
-                  val substituteText = "\n\n*`...cannot display any more results`*"
-                  val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-                  val truncatedMessage = listMessage.substring(0, lastLineIndex)
-                  embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-                } else {
-                  embedMessage = combinedMessage
-                }
-              }
-            }
-          }
-        }
-      } else {
-        // Check if sanitizedName exists in boostedBossesList
-        val isBoostedBoss = boostedBossesList.exists(_.equalsIgnoreCase(sanitizedName))
-
-        // Check if sanitizedName is a valid creature
-        /**
-        val boostedCreature: Future[Either[String, RaceResponse]] = tibiaDataClient.getCreature(sanitizedName)
-        val creatureCheck: Future[Boolean] = boostedCreature.map {
-          case Right(raceResponse) =>
-          raceResponse.creature.isDefined
-          case Left(errorMessage) => false
-        }
-        **/
-        val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
-        val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
-        val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
-        val newNames = existingNames :+ BoostedStamp(userId, monsterType, boostedName)
-        val groupedAndSorted = newNames
-          .groupBy(_.boostedType)
-          .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-          .toSeq
-          .sortBy(_._1) // Sort groups by type
-          .flatMap { case (group, names) =>
-            names.map { boosted =>
-              val emoji =
-                if (group == "boss") Config.bossEmoji
-                else if (group == "creature") Config.creatureEmoji
-                else Config.indentEmoji
-
-              val nameWithLink =
-                if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-                else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-              s"$emoji $nameWithLink"
-            }
-          }.mkString("\n")
-        val listMessage = if (listSetting) s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*." else s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$groupedAndSorted"
-        val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not a valid `boss` or `creature`."
-        val combinedMessage = listMessage + s"\n\n$commandMessage"
-        if (combinedMessage.size >= 4096) {
-          val substituteText = "\n\n*`...cannot display any more results`*"
-          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-          val truncatedMessage = listMessage.substring(0, lastLineIndex)
-          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-        } else {
-          embedMessage = combinedMessage
-        }
-      }
-    } else if (boostedOption == "remove"){
-      val filteredGroupedAndSorted = existingNames
-        .groupBy(_.boostedType)
-        .mapValues(_.sortBy(_.boostedName.toLowerCase)) // Sort within each group by name
-        .toSeq
-        .sortBy(_._1) // Sort groups by type
-        .flatMap { case (group, names) =>
-          val filteredNames = names.filterNot(bs => bs.boostedName.toLowerCase == sanitizedName)
-
-          filteredNames.map { boosted =>
-            val emoji =
-              if (group == "boss") Config.bossEmoji
-              else if (group == "creature") Config.creatureEmoji
-              else Config.indentEmoji
-
-            val nameWithLink =
-              if (group == "boss" || group == "creature") s"**[${capitalizeAllWords(boosted.boostedName)}](${creatureWikiUrl(capitalizeAllWords(boosted.boostedName))})**"
-              else s"**${capitalizeAllWords(boosted.boostedName)}**"
-
-            s"$emoji $nameWithLink"
-          }
-        }.mkString("\n")
-      if (sanitizedName == "all") {
-        var query = "DELETE FROM boosted_notifications WHERE userid = ?"
-        val preparedStatement = conn.prepareStatement(query)
-        preparedStatement.setString(1, userId)
-        preparedStatement.executeUpdate()
-        preparedStatement.close()
-
-        embedMessage = s"${Config.yesEmoji} you have disabled notifications for **all** bosses and creatures."
-      } else if (existingNames.exists(_.boostedName.replaceAll("[^a-zA-Z'\\-\\s]", "").trim.toLowerCase == sanitizedName)) {
-        var query = "DELETE FROM boosted_notifications WHERE userid = ? AND LOWER(name) = LOWER(?)"
-        val preparedStatement = conn.prepareStatement(query)
-        preparedStatement.setString(1, userId)
-        preparedStatement.setString(2, sanitizedName)
-        preparedStatement.executeUpdate()
-        preparedStatement.close()
-
-        val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
-        val commandMessage = s"${Config.yesEmoji} you removed **$sanitizedName** from the list."
-        val combinedMessage = listMessage + s"\n\n$commandMessage"
-        if (combinedMessage.size >= 4096) {
-          val substituteText = "\n\n*`...cannot display any more results`*"
-          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-          val truncatedMessage = listMessage.substring(0, lastLineIndex)
-          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-        } else {
-          embedMessage = combinedMessage
-        }
-
-      } else {
-
-        val listMessage = if (filteredGroupedAndSorted.trim != "") s"${Config.letterEmoji} You will be messaged if any of the following **booses** or **creatures** are boosted:\n\n$filteredGroupedAndSorted" else s"${Config.letterEmoji} Your notification list is *empty*."
-        val commandMessage = s"${Config.noEmoji} **$sanitizedName** is not on your list."
-        val combinedMessage = listMessage + s"\n\n$commandMessage"
-        if (combinedMessage.size >= 4096) {
-          val substituteText = "\n\n*`...cannot display any more results`*"
-          val lastLineIndex = listMessage.lastIndexOf('\n', (4090 - (substituteText.size + commandMessage.size)))
-          val truncatedMessage = listMessage.substring(0, lastLineIndex)
-          embedMessage = truncatedMessage + substituteText + s"\n\n$commandMessage"
-        } else {
-          embedMessage = combinedMessage
-        }
-      }
-      //
-    } else if (boostedOption == "toggle"){
-      val existingSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
-      if (existingSetting) {
-        var query = "DELETE FROM boosted_notifications WHERE userid = ?"
-        val preparedStatement = conn.prepareStatement(query)
-        preparedStatement.setString(1, userId)
-        preparedStatement.executeUpdate()
-        preparedStatement.close()
-        // WIP Message
-        embedMessage = s"${Config.letterEmoji} Your notification list is *empty*."
-      } else {
-        val query = "INSERT INTO boosted_notifications (userid, name, type) VALUES (?, ?, ?) ON CONFLICT (userid, name) DO NOTHING"
-        val preparedStatement = conn.prepareStatement(query)
-        preparedStatement.setString(1, userId)
-        preparedStatement.setString(2, "all")
-        preparedStatement.setString(3, "all")
-        preparedStatement.executeUpdate()
-        preparedStatement.close()
-        embedMessage = s"${Config.letterEmoji} You will be notified for **all** boosted **bosses** and **creatures** at *server save*."
-      }
-      //
-    } else if (boostedOption == "disable") {
-      var query = "DELETE FROM boosted_notifications WHERE userid = ?"
-      val preparedStatement = conn.prepareStatement(query)
-      preparedStatement.setString(1, userId)
-      preparedStatement.executeUpdate()
-      preparedStatement.close()
-
-      embedMessage = s"${Config.yesEmoji} you have **disabled** notifications for **all** bosses and creatures."
-    }
-
-    conn.close()
-    replyEmbed.setDescription(embedMessage).build()
-  }
+  def creatureWikiUrl(creature: String): String =
+    presentation.Urls.creatureWikiUrl(creature, Config.creatureUrlMappings)
 
   // Death screenshot database methods
-  def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, messageId: String): Unit = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    try {
-      // Create table if it doesn't exist
-      val createTableStatement = conn.createStatement()
-      createTableStatement.execute(
-        s"""CREATE TABLE IF NOT EXISTS death_screenshots (
-           |    guild_id VARCHAR(100) NOT NULL,
-           |    world VARCHAR(50) NOT NULL,
-           |    character_name VARCHAR(255) NOT NULL,
-           |    death_time BIGINT NOT NULL,
-           |    screenshot_url TEXT NOT NULL,
-           |    added_by VARCHAR(100) NOT NULL,
-           |    added_name VARCHAR(100) NOT NULL,
-           |    added_at TIMESTAMP NOT NULL,
-           |    message_id VARCHAR(100) NOT NULL,
-           |    PRIMARY KEY (guild_id, world, character_name, death_time, screenshot_url)
-           |)""".stripMargin)
-      createTableStatement.close()
+  def storeDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, addedBy: String, addedName: String, messageId: String): Unit =
+    deathScreenshotRepository.store(guildId, world, characterName, deathTime, screenshotUrl, addedBy, addedName, messageId)
 
-      // Insert screenshot
-      val insertStatement = conn.prepareStatement(
-        "INSERT INTO death_screenshots (guild_id, world, character_name, death_time, screenshot_url, added_by, added_name, added_at, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      )
-      insertStatement.setString(1, guildId)
-      insertStatement.setString(2, world)
-      insertStatement.setString(3, characterName)
-      insertStatement.setLong(4, deathTime)
-      insertStatement.setString(5, screenshotUrl)
-      insertStatement.setString(6, addedBy)
-      insertStatement.setString(7, addedName)
-      insertStatement.setTimestamp(8, Timestamp.from(Instant.now()))
-      insertStatement.setString(9, messageId)
-      insertStatement.executeUpdate()
-      insertStatement.close()
-    } catch {
-      case ex: Exception => logger.error(s"Failed to store death screenshot: ${ex.getMessage}")
-    } finally {
-      conn.close()
-    }
-  }
-
-  def getDeathScreenshots(guildId: String, world: String, characterName: String, deathTime: Long): List[DeathScreenshot] = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    val screenshots = ListBuffer[DeathScreenshot]()
-    try {
-      val selectStatement = conn.prepareStatement(
-        "SELECT * FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? ORDER BY added_at ASC"
-      )
-      selectStatement.setString(1, guildId)
-      selectStatement.setString(2, characterName)
-      selectStatement.setLong(3, deathTime)
-      val resultSet = selectStatement.executeQuery()
-
-      while (resultSet.next()) {
-        screenshots += DeathScreenshot(
-          guildId = resultSet.getString("guild_id"),
-          world = resultSet.getString("world"),
-          characterName = resultSet.getString("character_name"),
-          deathTime = resultSet.getLong("death_time"),
-          screenshotUrl = resultSet.getString("screenshot_url"),
-          addedBy = resultSet.getString("added_by"),
-          addedName = resultSet.getString("added_name"),
-          addedAt = ZonedDateTime.ofInstant(resultSet.getTimestamp("added_at").toInstant, ZoneOffset.UTC),
-          messageId = resultSet.getString("message_id")
-        )
-      }
-      resultSet.close()
-      selectStatement.close()
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Failed to get death screenshots: ${ex.getMessage}")
-    } finally {
-      conn.close()
-    }
-    screenshots.toList
-  }
+  def getDeathScreenshots(guildId: String, world: String, characterName: String, deathTime: Long): List[DeathScreenshot] =
+    deathScreenshotRepository.get(guildId, world, characterName, deathTime)
 
   def deleteDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, userId: String): Boolean = {
-    val url = s"jdbc:postgresql://${Config.postgresHost}:5432/_$guildId"
-    val username = "postgres"
-    val password = Config.postgresPassword
-    val conn = DriverManager.getConnection(url, username, password)
-    var deleted = false
-    val guild = jda.getGuildById(guildId)
+    val guild = discordGateway.guildById(guildId)
     val member = guild.retrieveMemberById(userId).complete()
     val admin = member != null && (member.hasPermission(Permission.MANAGE_SERVER) || member.hasPermission(Permission.MESSAGE_MANAGE))
-    try {
-      // First check if the user is the one who added the screenshot or is an admin
-      val checkStatement = conn.prepareStatement(
-        "SELECT added_by FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
-      )
-      checkStatement.setString(1, guildId)
-      checkStatement.setString(2, characterName)
-      checkStatement.setLong(3, deathTime)
-      checkStatement.setString(4, screenshotUrl)
-      val resultSet = checkStatement.executeQuery()
-
-      if (resultSet.next()) {
-        val addedBy = resultSet.getString("added_by")
-        if (addedBy == userId || admin) { // User can delete their own screenshots
-          val deleteStatement = conn.prepareStatement(
-            "DELETE FROM death_screenshots WHERE guild_id = ? AND character_name = ? AND death_time = ? AND screenshot_url = ?"
-          )
-          deleteStatement.setString(1, guildId)
-          deleteStatement.setString(2, characterName)
-          deleteStatement.setLong(3, deathTime)
-          deleteStatement.setString(4, screenshotUrl)
-          val rowsDeleted = deleteStatement.executeUpdate()
-          deleted = rowsDeleted > 0
-          deleteStatement.close()
-        }
-      }
-      resultSet.close()
-      checkStatement.close()
-    } catch {
-      case ex: Exception => logger.error(s"Failed to delete death screenshot: ${ex.getMessage}")
-    } finally {
-      conn.close()
-    }
-    deleted
-  }
-
-  def fetchDreamScarBosses(): List[BossEntry] = {
-    val backend = HttpURLConnectionBackend()
-    val apiUrl =
-      "https://tibia.fandom.com/api.php" +
-        "?action=parse" +
-        "&page=Dream_Scar/Boss_of_the_Day" +
-        "&prop=text" +
-        "&format=json"
-    val response = basicRequest
-      .get(uri"$apiUrl")
-      .header("User-Agent", "Mozilla/5.0")
-      .send(backend)
-    val jsonStr = response.body.getOrElse(
-      throw new RuntimeException("Empty response from API")
-    )
-    // Parse JSON
-    val parsed = parse(jsonStr).getOrElse(
-      throw new RuntimeException("Invalid JSON from API")
-    )
-    val html = parsed.hcursor
-      .downField("parse")
-      .downField("text")
-      .downField("*")
-      .as[String]
-      .getOrElse(
-        throw new RuntimeException("Could not extract HTML from API response")
-      )
-    // Parse HTML table
-    val doc = Jsoup.parse(html)
-    val table = doc.select("table.wikitable").first()
-    if (table == null) return Nil
-    table.select("tr")
-      .asScala
-      .drop(1)
-      .flatMap { row =>
-        val cols = row.select("td").asScala
-        if (cols.size >= 2) {
-          Some(BossEntry(cols(0).text().trim, cols(1).text().trim))
-        } else None
-      }
-      .toList
-  }
-
-  def fetchCreatureNames(): List[String] = {
-
-    val backend = HttpURLConnectionBackend()
-
-    val apiUrl =
-      "https://tibia.fandom.com/api.php" +
-        "?action=parse" +
-        "&page=List_of_Creatures_(Ordered)" +
-        "&prop=text" +
-        "&format=json"
-
-    val response =
-      basicRequest
-        .get(uri"$apiUrl")
-        .header("User-Agent", "Mozilla/5.0")
-        .send(backend)
-
-    val jsonStr = response.body.getOrElse(
-      throw new RuntimeException("Empty API response")
-    )
-
-    val parsed = parse(jsonStr).getOrElse(
-      throw new RuntimeException("Invalid JSON")
-    )
-
-    val html =
-      parsed.hcursor
-        .downField("parse")
-        .downField("text")
-        .downField("*")
-        .as[String]
-        .getOrElse(
-          throw new RuntimeException("Could not extract HTML")
-        )
-
-    val doc = Jsoup.parse(html)
-
-    // grab all creature links
-    val creatures =
-      doc.select("a")
-        .asScala
-        .flatMap { link =>
-
-          val href = link.attr("href")
-          val text = link.text().trim
-
-          // creature pages are /wiki/Creature_Name
-          if (
-            href.startsWith("/wiki/") &&
-            text.nonEmpty &&
-            !text.contains(":") &&
-            !href.contains("List_of_Creatures")
-          ) {
-            Some(text)
-          } else {
-            None
-          }
-        }
-        .distinct
-        .toList
-
-    creatures
-  }
-
-  def advanceDromeTime(inputTime: Instant): Unit = {
-    val berlin = ZoneId.of("Europe/Berlin")
-
-    val updatedDromeTime =
-      Iterator
-        .iterate(dromeTime)(t => t.atZone(berlin).plusWeeks(2).toInstant)
-        .dropWhile(_.isBefore(inputTime))
-        .next()
-
-    dromeTime = updatedDromeTime
-  }
-
-  def shiftAllBossesUp(current: Map[String, String]): Map[String, String] = {
-    current.map { case (world, boss) =>
-
-      val nextBoss = indexOfBoss.get(boss) match {
-        case Some(idx) =>
-          bossCycle((idx + 1) % bossCycle.length)
-        case None =>
-          boss // fallback: keep unchanged
-      }
-
-      world -> nextBoss
+    deathScreenshotRepository.deleteIfPermitted(guildId, characterName, deathTime, screenshotUrl) { addedBy =>
+      addedBy == userId || admin
     }
   }
+
+  def fetchDreamScarBosses(): List[BossEntry] = wikiClient.dreamScarBosses()
+
+  def fetchCreatureNames(): List[String] = wikiClient.creatureNames()
+
+  def advanceDromeTime(inputTime: Instant): Unit =
+    dromeTime = domain.time.DromeCycle.advanceFrom(dromeTime, inputTime)
+
+  def shiftAllBossesUp(current: Map[String, String]): Map[String, String] =
+    domain.time.DreamScarCycle.shiftAllBossesUp(current)
 
 }

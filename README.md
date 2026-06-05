@@ -10,7 +10,7 @@ Production:
 - [Website](https://violentbot.xyz)
 - [Discord](https://discord.gg/PNnzzs4hN3)
 - [Patreon](https://www.patreon.com/violentbot)
-   
+
 Current features include:    
 - Online List
 - Levels List
@@ -19,6 +19,88 @@ Current features include:
 - Server Save Notifications
 - Command Log
 
+## Architecture
+
+The code is organised into focused packages under `com.tibiabot` rather than a few
+god-objects. The top-level entry points stay thin:
+
+- `BotApp` — application state and orchestration (wires the collaborators below).
+- `BotListener` — a thin JDA event dispatcher; routes each event to a handler.
+- `TibiaBot` — the per-world Akka stream that polls TibiaData and detects deaths/levels.
+
+Supporting packages:
+
+| Package | Responsibility |
+| --- | --- |
+| `app/` | Startup wiring — `Bootstrap` (JDA session) and `StreamSupervisor` (per-world stream lifecycle). |
+| `commands/` | Slash-command schemas, `CommandRouter`, `Permissions`; `commands/handlers/` has one object per command. |
+| `interactions/` | Button, modal and message (screenshot-upload) interaction handlers. |
+| `discord/` | `DiscordGateway` (the JDA read seam) and `RateLimitedSender` (outbound message queue). |
+| `persistence/` | Repository ports + `ConnectionProvider`/`SchemaInitializer`; JDBC/Postgres impls in `persistence/jdbc/`. All JDBC access goes through `JdbcSupport.withConnection`, which releases the connection even when a statement throws, so errors can't leak connections under concurrent load. |
+| `presentation/` | Pure embed/message builders (deaths, online list, boosted, galthen). |
+| `scheduler/` | Server-save schedule decisions (window, Rashid location, Drome countdown). |
+| `tracking/` | Death/level/online dedup state and masslog detection. |
+| `tibiadata/` | TibiaData v4 API client; response models in `tibiadata/response/`. |
+| `wiki/` | Fandom wiki client and HTML parser. |
+| `domain/` | Core case classes; game-time cycles in `domain/time/`. |
+| `galthen/`, `boosted/`, `admin/` | Feature services extracted from `BotApp`. |
+
+**Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),
+all sharing a single `ActorSystem`/dispatcher and HTTP pool. Each world ticks every
+60s through a back-pressured `mapAsync(1)` pipeline with a `mapAsyncUnordered(32)`
+fan-out for per-character lookups, and per-stage `Supervision.Resume` so a single bad
+response never kills the stream. Per-world dedup state is isolated to each stream; the
+state shared across worlds (`state/StreamState`) is read lock-free on `@volatile` fields
+and mutated only through synchronized `modify*` helpers, so concurrent per-guild updates
+never clobber each other.
+
+```mermaid
+flowchart TB
+    subgraph sup ["app/StreamSupervisor — one Akka stream per world"]
+        WA[world A]
+        WB[world B]
+        WN[world N]
+    end
+
+    subgraph pipe ["the pipeline each world runs independently — tick 60s, back-pressured"]
+        direction LR
+        T["Source.tick 60s"] --> GWp["getWorld<br/>mapAsync(1)"]
+        GWp --> GC["getCharacterData<br/>mapAsyncUnordered(32)"]
+        GC --> SDp["scanForDeaths<br/>mapAsync(1)"]
+        SDp --> PDp["postToDiscord<br/>mapAsync(1)"]
+    end
+
+    WA --> T
+    WB --> T
+    WN --> T
+
+    GC -->|HTTP per online character| API{{TibiaData v4 API}}
+    SDp <-->|"@volatile read · synchronized modify*"| ST[("state/StreamState")]
+    PDp --> SN["RateLimitedSender<br/>per-world queue"] --> JDA["JDA global rate limiter"] --> D([Discord])
+
+    WA -.->|run concurrently on| AS[/"shared ActorSystem dispatcher + akka-http pool"/]
+    WB -.-> AS
+    WN -.-> AS
+```
+
+The world streams run concurrently on the shared dispatcher and HTTP pool; the only
+points they contend on are `StreamState` (serialised writes) and the JDA rate limiter
+(outbound sends). Startup staggers stream launches by ~5.5s so they don't all poll at once.
+
+## Local TibiaData Api (Optional)
+This is only used for Boosted boss/creature endpoints currently.    
+Local install gives you quicker notifications.
+
+1. Edit the `.env` file
+```env
+TIBIADATA_HOST=http://tibiadata-api:8080
+```
+2. Run it on the same docker network so violent bot can access it:
+
+```bash
+docker run -d -p XXXXXXXX:80:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
+```
+
 ## Pre-requisites:
 
 #### Create the new bot in Discord
@@ -26,7 +108,7 @@ Current features include:
 2. Go to the **Bot** tab and click on **Add Bot**.
 3. Click **Reset Token** & take note of the `Token` that is generated.
 
-#### Custom Emojis and Poke Roles
+#### Custom Emojis
 The bot is configured to point to emojis in _my_ discord server.     
 You will need to change this to point to your emojis.
 
@@ -34,40 +116,84 @@ You will need to change this to point to your emojis.
 2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
 3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
 
-#### Prepare your linux machine to host the bot
-1. Ensure `docker` is installed.
-1. Ensure `Java JDK 8` is installed.
-1. Ensure `sbt` is installed.
-3. Download the `postgres` docker image:    
-`docker pull postgres`
+#### Prepare your machine to host the bot
+1. Ensure `docker` (with the **Compose** plugin) is installed.
+2. Ensure you can build the bot image — either `sbt` + `Java JDK 8` locally
 
-## Deployment Steps
+## Deployment Steps   
+**Config and start the Postgres database first:**    
 
-1. Clone the repository to your host machine.    
-2. Compile the code into a docker image:    
-`sbt docker:publishLocal`    
-3. Take note of the docker \<image id\> you just created: `docker images`   
-> ![docker image id](https://i.imgur.com/nXvSeIL.png)
+1. Create a `.env` file and fill out it out:    
 
-4. Create a `prod.env` file with the discord server/channel id & bot authentication token:
-> ```env
-> TOKEN=XXXXXXXXXXXXXXXXXXXXXX   
-> POSTGRES_HOST=sqlhost
-> POSTGRES_PASSWORD=XXXXXXXXXX
-> TIBIADATA_HOST=https://api.tibiadata.com/
-> ```
-5. Create the docker volume for the postgres database:    
-`docker volume create --name pgdata`
-6. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
-`docker network create violentbot`
-6. Run the postgres docker image:    
-`docker run --rm -d -t --env-file prod.env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres`
-7. Run the docker container you just created & parse the **prod.env** file:     
-`docker run --rm -d -t --env-file prod.env --network=violentbot --name violent-bot <image_id>`
+   ```env
+   TOKEN=XXXXXXXXXXXXXXXXXXXXXX
+   POSTGRES_HOST=sqlhost
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=XXXXXXXXXX
+   TIBIADATA_HOST=https://api.tibiadata.com/
+   REDIS_HOST=redis
+   REDIS_PORT=6379
+   REDIS_PASSWORD=XXXXXXXXXXXX
+   ```
+2. Create the docker volume for the postgres database:    
+
+   ```bash
+   docker volume create --name pgdata
+   ```
+3. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
+
+   ```bash
+   docker network create violentbot
+   ```
+4. Run the postgres docker image:    
+
+   ```bash
+   docker run --rm -d -t --env-file .env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres
+   ```
+
+The repository ships a `docker-compose.yml` that runs the bot together with a
+Redis cache.
+
+8. **Build the bot image** (tags `violent-bot-dedicated:latest`):    
+
+   ```bash
+   sbt docker:publishLocal
+   ```
+   <details><summary>⚠️ No local sbt?</summary>Stage the image with the dockerized build, then `docker build`:    
+
+   ```bash
+   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
+   -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+   sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch docker:stage
+   docker build -t violent-bot-dedicated:latest tibia-bot/target/docker/stage
+   ```
+   </details>
+
+9. **Start the stack**:    
+
+     ```bash
+     docker compose up -d
+     ```
+
+To run **without** caching, unset `REDIS_HOST=` in `.env`.
+
+## Building & Testing
+
+The project targets Java 8 and builds with sbt. If you don't have a JDK 8 / sbt
+toolchain locally, build and test in Docker:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
+  -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+  sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
+```
 
 ## Debugging
 
-1. If something isn't working correctly you should be able to see why very clearly in the logs.
-2. Use `docker ps` to find the \<container id\> for the running bot.
-3. Use `docker logs <container id>` to view the logs.
-4. Use `docker pull dpage/pgadmin4` and `docker run -t --name pgadmin -p 0.0.0.0:82:80 --link postgres:postgres -e 'PGADMIN_DEFAULT_EMAIL=XXXXXXX@gmail.com' -e 'PGADMIN_DEFAULT_PASSWORD=XXXXXXXX' -d dpage/pgadmin4` if you need to visualise the postgres dbs
+1. Tail the bot logs: `docker compose logs -f bot` (errors are usually self-explanatory).
+2. See what's running: `docker compose ps`.
+3. **Pool sizing:** grep the bot logs for `[req-probe]` — every 60s it logs per-host
+   latency percentiles, req/sec and a suggested `max-connections` you can feed back
+   into `akka.conf`'s `per-host-override`.
+4. To visualise the databases, run pgAdmin on the compose network:
+   `docker run -t --name pgadmin -p 82:80 --network violentbot -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4`

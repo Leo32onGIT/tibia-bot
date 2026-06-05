@@ -1,0 +1,69 @@
+# Violent Bot — Docker Compose
+#
+# Quick start (see README "Running with Docker Compose"):
+#   1. Build the bot image once:   sbt docker:publishLocal   (-> violent-bot-dedicated:latest)
+#   2. cp .env.example .env        and fill it in
+#   3. Start it:
+#        • bundled Postgres:   docker compose --profile local-db up -d
+#        • pre-existing DB:    docker compose up -d          (set POSTGRES_HOST in .env)
+#
+# Redis (the cache) starts by default in both modes. Leave REDIS_HOST empty in
+# .env to run without caching (the bot then ignores the redis container).
+
+services:
+  bot:
+    image: violent-bot-dedicated:latest
+    env_file: .env
+    networks:
+      - violentbot
+    depends_on:
+      redis:
+        condition: service_healthy
+    # The bot connects to Postgres at boot; with the bundled DB (local-db profile)
+    # it may restart a couple of times while Postgres initialises — that is
+    # expected and harmless. It is NOT wired to depends_on postgres so that a
+    # pre-existing/external database works without starting the local one.
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - violentbot
+    # appendonly so the character-cache snapshot (and other cached keys) survive
+    # a redis restart instead of forcing a cold re-fetch.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Optional bundled Postgres — enabled ONLY with the `local-db` profile:
+  #   docker compose --profile local-db up -d
+  # To use a pre-existing database instead, omit the profile and point
+  # POSTGRES_HOST at your server. NOTE: the bot hardcodes port 5432, so an
+  # external database must listen on 5432.
+  postgres:
+    image: postgres:16
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  redis-data:
+  pgdata:
+
+networks:
+  violentbot:
+    external: true

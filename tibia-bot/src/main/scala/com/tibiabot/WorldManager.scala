@@ -4,17 +4,22 @@ import com.tibiabot.tibiadata.TibiaDataClient
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContextExecutor, Future}
+import scala.concurrent.Await
 import scala.util.{Failure, Success, Try}
-import java.time.ZonedDateTime
+import java.time.{Duration, ZonedDateTime}
 
 object WorldManager extends StrictLogging {
 
-  implicit private val executionContext: ExecutionContextExecutor = scala.concurrent.ExecutionContext.global
+  implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
 
-  private val tibiaDataClient = new TibiaDataClient()
-  private var cachedWorldList: Option[List[String]] = None
-  private var lastFetchTime: Option[ZonedDateTime] = None
+  private val tibiaDataClient: tibiadata.TibiaApi =
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
+
+  // The world list changes only at major game updates, so cache it (default 1h)
+  // instead of making a blocking API call on every getWorldList() (e.g. once per
+  // /leaderboards). Falls back to the last good value, then the static list.
+  // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
+  private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 
   // Fallback static world list in case API fails
   private val fallbackWorldList = List(
@@ -33,30 +38,30 @@ object WorldManager extends StrictLogging {
     "Idyllia", "Hostera", "Dracobra", "Xymera", "Blumera", "Monstera", "Tempestera", "Terribra", "Sombra", "Eclipta", "Kalanta", "Citra", "Kanda", "Opulera", "Ignibra", "Maligna", "Junera", "Floribra"
   )
 
-  def getWorldList(): List[String] = {
-    logger.info("Fetching world list from TibiaData API...")
-    refreshWorldList()
-  }
+  private val worldListCache = new CachedList[String](
+    fetch = () => fetchWorldNames(),
+    fallback = fallbackWorldList,
+    ttl = cacheTtl,
+    now = () => ZonedDateTime.now()
+  )
 
-  private def refreshWorldList(): List[String] = {
-    Try {
-      val worldsResponse = Await.result(tibiaDataClient.getWorlds(), Duration(30, "seconds"))
-      worldsResponse match {
-        case Right(response) =>
-          val worldNames = response.worlds.regular_worlds.map(_.name).sorted
-          cachedWorldList = Some(worldNames)
-          lastFetchTime = Some(ZonedDateTime.now())
-          logger.info(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
-          worldNames
-        case Left(error) =>
-          logger.warn(s"Failed to fetch worlds from API: $error, using fallback list")
-          cachedWorldList.getOrElse(fallbackWorldList)
-      }
-    } match {
-      case Success(worlds) => worlds
+  def getWorldList(): List[String] = worldListCache.get()
+
+  /** One blocking fetch of the sorted regular-world names, as an Either so the
+   *  cache can decide whether to keep the previous value on failure. */
+  private def fetchWorldNames(): Either[String, List[String]] = {
+    logger.info("Fetching world list from TibiaData API...")
+    Try(Await.result(tibiaDataClient.getWorlds(), 30.seconds)) match {
+      case Success(Right(response)) =>
+        val worldNames = response.worlds.regular_worlds.map(_.name).sorted
+        logger.info(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
+        Right(worldNames)
+      case Success(Left(error)) =>
+        logger.warn(s"Failed to fetch worlds from API: $error, using last good / fallback list")
+        Left(error)
       case Failure(exception) =>
-        logger.error(s"Exception while fetching worlds from API: ${exception.getMessage}, using fallback list")
-        cachedWorldList.getOrElse(fallbackWorldList)
+        logger.error(s"Exception while fetching worlds from API: ${exception.getMessage}, using last good / fallback list")
+        Left(exception.getMessage)
     }
   }
 }
