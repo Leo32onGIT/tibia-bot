@@ -1,6 +1,7 @@
 package com.tibiabot.persistence
 
 import org.scalatest.funsuite.AnyFunSuite
+import com.tibiabot.Config
 
 /** Mix-in for Postgres integration tests.
  *
