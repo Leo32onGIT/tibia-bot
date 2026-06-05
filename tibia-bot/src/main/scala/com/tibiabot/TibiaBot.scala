@@ -1053,6 +1053,8 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
 
     // Masslog threshold (sensitivity fixed at 0 today; formula in tracking.MasslogDetector)
     val masslogCategory = tracking.MasslogDetector.isMasslog(zapCount, enemyCount, sensitivity = 0)
+
+    /**
     if (masslogCategory && !isOnCooldown) {
       // get Activity channel
       val activityTextChannel = guild.getTextChannelById(activityChannel)
@@ -1083,6 +1085,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
         }
       }
     }
+    **/
 
     // combined online list into one channel
     if (onlineCombined == "true") {
