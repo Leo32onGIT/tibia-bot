@@ -37,8 +37,17 @@ class GalthenRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
     val conn = provider.admin()
     try {
-      val rs = conn.createStatement().executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-      if (!rs.next()) conn.createStatement().executeUpdate("CREATE DATABASE bot_cache")
-    } finally conn.close()
+      val rs = conn.createStatement()
+        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
+
+      if (!rs.next()) {
+        conn.createStatement()
+          .executeUpdate("CREATE DATABASE bot_cache")
+      }
+    } catch {
+      case _ : Throwable => //
+    } finally {
+      conn.close()
+    }
   }
 }
