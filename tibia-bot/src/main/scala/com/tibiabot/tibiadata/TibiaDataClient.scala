@@ -192,20 +192,20 @@ class TibiaDataClient(implicit val system: ActorSystem) extends JsonSupport with
   def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]] = {
     val name = input._1
     val level = input._2
-    val apiUrl = if (level >= 250) {
+    val apiUrl = if (level >= 1000) {
       s"${Config.tibiadataApi}/v4/character/"
     } else {
       characterUrl
     }
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 250) {
-      val random = new Random()
-      // Append randomly generated "+" characters to the last word, limited to a maximum length of 20
-      val numPluses = math.min(random.nextInt(3), 20 - encodedName.length) // Randomly generate 0-6 "+" characters, limited to a max length of 20
-      encodedName + ("+" * numPluses)
-    } else {
-      encodedName
-    }
+    val bypassName: String = if (level >= 1000) {
+          val randomizedName = encodedName.map { c =>
+            if (c.isLetter)
+              if (Random.nextBoolean()) c.toUpper else c.toLower
+            else c
+          }
+          randomizedName
+        } else encodedName
     fetchCharacterCached(name, timedRequest(HttpRequest(uri = s"$apiUrl$bypassName")))
   }
 
