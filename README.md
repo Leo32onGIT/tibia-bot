@@ -128,6 +128,7 @@ You will need to change this to point to your emojis.
    ```env
    TOKEN=XXXXXXXXXXXXXXXXXXXXXX
    POSTGRES_HOST=sqlhost
+   POSTGRES_USER=postgres
    POSTGRES_PASSWORD=XXXXXXXXXX
    TIBIADATA_HOST=https://api.tibiadata.com/
    REDIS_HOST=redis
@@ -159,7 +160,7 @@ Redis cache.
    sbt docker:publishLocal
    ```
    <details><summary>⚠️ No local sbt?</summary>Stage the image with the dockerized build, then `docker build`:    
-       
+
    ```bash
    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
    -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
@@ -173,7 +174,7 @@ Redis cache.
      ```bash
      docker compose up -d
      ```
-     
+
 To run **without** caching, unset `REDIS_HOST=` in `.env`.
 
 ## Building & Testing

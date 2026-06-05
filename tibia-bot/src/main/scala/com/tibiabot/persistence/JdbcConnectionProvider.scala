@@ -4,7 +4,7 @@ import java.sql.{Connection, DriverManager}
 
 /** DriverManager-backed ConnectionProvider. Reproduces today's exact URL
  *  shapes, username and password — no behaviour change. */
-final class JdbcConnectionProvider(host: String, password: String, user: String = "postgres")
+final class JdbcConnectionProvider(host: String, password: String, user: String = Config.postgresUser)
     extends ConnectionProvider {
 
   def guild(guildId: String): Connection = open(JdbcUrls.guild(host, guildId))
