@@ -1,6 +1,7 @@
 package com.tibiabot.persistence
 
 import com.tibiabot.persistence.jdbc.JdbcCacheRepository
+import com.tibiabot.Config
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 

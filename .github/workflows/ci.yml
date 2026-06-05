@@ -40,4 +40,5 @@ jobs:
         env:
           PGHOST: localhost
           PGPASSWORD: postgres
+          PGUSER: postgres
         run: sbt -batch clean test
