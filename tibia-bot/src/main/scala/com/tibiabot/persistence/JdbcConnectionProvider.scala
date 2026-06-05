@@ -11,7 +11,6 @@ final class JdbcConnectionProvider(host: String, password: String, user: String 
   def cache(): Connection = open(JdbcUrls.cache(host))
   def admin(): Connection = open(JdbcUrls.admin(host))
   def premium(): Connection = open(JdbcUrls.premium(host))
-  val postgresUser = Option(com.tibiabot.Config.postgresUser).filter(_.nonEmpty).getOrElse(user)
 
-  private def open(url: String): Connection = DriverManager.getConnection(url, postgresUser, password)
+  private def open(url: String): Connection = DriverManager.getConnection(url, user, password)
 }

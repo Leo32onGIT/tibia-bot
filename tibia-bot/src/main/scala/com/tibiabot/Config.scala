@@ -18,7 +18,6 @@ object Config {
 
   val token: String = discord.getString("token")
   val postgresHost: String = discord.getString("postgres-host")
-  val postgresUser: String = discord.getString("postgres-user")
   val postgresPassword: String = discord.getString("postgres-password")
   val tibiadataApi: String = discord.getString("localapi-host")
   val redisHost: String = discord.getString("redis-host")
