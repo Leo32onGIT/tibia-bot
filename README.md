@@ -112,8 +112,8 @@ docker run -d -p XXXXXXXX:80:8080 --name tibiadata-api --network violentbot --rm
 The bot is configured to point to emojis in _my_ discord server.     
 You will need to change this to point to your emojis.
 
-1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/dedicated/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
-2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/dedicated/tibia-bot/src/main/resources/discord.conf#L17-L60) file and edit it.
+1. Upload the emojis provided in the [discord emojis](https://github.com/Leo32onGIT/tibia-bot/tree/main/tibia-bot/src/main/resources/discord%20emojis) folder to your discord.
+2. Open the [discord.conf](https://github.com/Leo32onGIT/tibia-bot/blob/main/tibia-bot/src/main/resources/discord.conf#L38-L81) file and edit it.
 3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
 
 #### Prepare your machine to host the bot
