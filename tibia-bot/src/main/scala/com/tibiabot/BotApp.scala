@@ -388,7 +388,11 @@ object BotApp extends App with StrictLogging {
                           }
                         }
 
-                        val dreamScarDaily = dreamScar.getOrElse(lastWorld, "World not found")
+                        val dreamScarDaily =
+                          dreamScar
+                            .get(lastWorld)
+                            .orElse(dreamScar.get("Unknown"))
+                            .getOrElse("Unknown")
 
                         val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
                         val rashidEmbed = new EmbedBuilder()
@@ -1032,7 +1036,11 @@ object BotApp extends App with StrictLogging {
    *  world, appended after the boosted embeds in the notifications message.
    *  Reads the live dreamScar map and dromeTime. */
   private def serverSaveExtraEmbeds(world: String): List[MessageEmbed] = {
-    val dreamScarDaily = dreamScar.getOrElse(world, "World not found")
+    val dreamScarDaily =
+      dreamScar
+        .get(world)
+        .orElse(dreamScar.get("Unknown"))
+        .getOrElse("Unknown")
     val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
     val rashidEmbed = new EmbedBuilder()
       .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")

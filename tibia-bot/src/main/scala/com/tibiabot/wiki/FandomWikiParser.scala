@@ -11,19 +11,35 @@ import scala.jdk.CollectionConverters._
 object FandomWikiParser {
 
   def parseDreamScarBosses(html: String): List[BossEntry] = {
+
     val doc = Jsoup.parse(html)
+
     val table = doc.select("table.wikitable").first()
-    if (table == null) return Nil
-    table.select("tr")
-      .asScala
-      .drop(1)
-      .flatMap { row =>
-        val cols = row.select("td").asScala
-        if (cols.size >= 2) {
-          Some(BossEntry(cols(0).text().trim, cols(1).text().trim))
-        } else None
+
+    val tableEntries =
+      if (table == null) Nil
+      else {
+        table.select("tr")
+          .asScala
+          .drop(1)
+          .flatMap { row =>
+            val cols = row.select("td").asScala
+            if (cols.size >= 2)
+              Some(BossEntry(cols(0).text().trim, cols(1).text().trim))
+            else None
+          }
+          .toList
       }
-      .toList
+
+    val fallbackBoss =
+      Option(doc.select("div.mp-rashid").first())
+        .map(_.select("a").asScala.map(_.text().trim).filter(_.nonEmpty))
+        .flatMap(_.find(_ != "Dream Scar")) // skip page link
+
+    val fallbackEntry =
+      fallbackBoss.map(b => BossEntry("Unknown", b)).toList
+
+    tableEntries ++ fallbackEntry
   }
 
   def parseCreatureNames(html: String): List[String] = {
