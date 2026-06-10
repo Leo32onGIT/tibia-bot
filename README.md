@@ -89,7 +89,7 @@ points they contend on are `StreamState` (serialised writes) and the JDA rate li
 
 ## Local TibiaData Api (Optional)
 This is only used for Boosted boss/creature endpoints currently.    
-Local install gives you quicker notifications.
+Using a local instance of TibiaData gives you quicker notifications.
 
 1. Edit the `.env` file
 ```env
@@ -184,16 +184,15 @@ toolchain locally, build and test in Docker:
 
 ```bash
 docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
-  -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
-  sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
+-v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
 ```
 
 ## Debugging
 
 1. Tail the bot logs: `docker compose logs -f bot` (errors are usually self-explanatory).
 2. See what's running: `docker compose ps`.
-3. **Pool sizing:** grep the bot logs for `[req-probe]` — every 60s it logs per-host
-   latency percentiles, req/sec and a suggested `max-connections` you can feed back
-   into `akka.conf`'s `per-host-override`.
-4. To visualise the databases, run pgAdmin on the compose network:
-   `docker run -t --name pgadmin -p 82:80 --network violentbot -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4`
+3. To visualise the databases, run pgAdmin on the compose network:
+   ```bash
+   docker run -t --name pgadmin -p 82:80 --network violentbot -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4
+   ```
