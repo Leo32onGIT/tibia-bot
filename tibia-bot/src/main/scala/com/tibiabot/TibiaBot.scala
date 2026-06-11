@@ -584,7 +584,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
                       val showNeutralLevels = worldData.headOption.map(_.showNeutralLevels).getOrElse("true")
                       val showAlliesLevels = worldData.headOption.map(_.showAlliesLevels).getOrElse("true")
                       val showEnemiesLevels = worldData.headOption.map(_.showEnemiesLevels).getOrElse("true")
-                      val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(8)
+                      val minimumLevel = worldData.headOption.map(_.levelsMin).getOrElse(20)
                       val enemyIcons = List(Config.enemy, Config.enemyGuild, s"${Config.otherGuild}${Config.enemy}")
                       val alliesIcons = List(Config.allyGuild, Config.ally, s"${Config.otherGuild}${Config.ally}")
                       val neutralIcons = List(Config.otherGuild, "")
@@ -903,7 +903,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
               (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond)
             }
             val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
-            val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(8)
+            val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
             // Process embeds with rate limiting
             val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
             validEmbeds.grouped(Config.batchSize).zipWithIndex.foreach { case (batch, batchIndex) =>
