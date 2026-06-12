@@ -935,31 +935,37 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
                       }
                       // WIP PVP COOLDOWN
                     } else if (embed._2 == "allypk") {
-                      val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
-                      if (shouldPing) {
-                        deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
-                          .setEmbeds(embed._1.build())
-                          .queue()
-                      } else {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .queue()
+                      if (embed._5 >= minimumLevel) {
+                        val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
+                        if (shouldPing) {
+                          deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
+                            .setEmbeds(embed._1.build())
+                            .queue()
+                        } else {
+                          deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                            .queue()
+                        }
                       }
                     } else if (embed._2 == "fullbless") {
-                      // send adjusted embed for fullblesses
-                      val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-                      val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-                      if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
-                          .setEmbeds(adjustedEmbed.build())
-                          .queue()
-                      } else {
-                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                          .queue()
+                      if (embed._5 >= minimumLevel) {
+                        // send adjusted embed for fullblesses
+                        val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+                        val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                        if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
+                          deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
+                            .setEmbeds(adjustedEmbed.build())
+                            .queue()
+                        } else {
+                          deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                            .queue()
+                        }
                       }
                     } else if (embed._2 == "screenshot") {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .setComponents(actionRow)
-                        .queue()
+                      if (embed._5 >= minimumLevel) {
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .setComponents(actionRow)
+                          .queue()
+                        }
                     } else {
                       // for regular deaths check if level > /filter deaths <level>
                       if (embed._5 >= minimumLevel) {
