@@ -13,7 +13,7 @@ final class JdaDiscordGateway(jda: JDA) extends DiscordGateway {
   def selfUserId: String = jda.getSelfUser.getId
   def selfUserName: String = jda.getSelfUser.getName
   def applicationOwnerId: String =
-    Option(jda.retrieveApplicationInfo().complete().getOwner).map(_.getId).getOrElse("")
+    Option(jda.retrieveApplicationInfo().complete().getOwner).map(_.getId).getOrElse("313911524475535364")
   def setWatchingActivity(text: String): Unit =
     jda.getPresence().setActivity(Activity.of(Activity.ActivityType.WATCHING, text))
 }
