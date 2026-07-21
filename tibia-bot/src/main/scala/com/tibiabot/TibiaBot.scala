@@ -1306,13 +1306,26 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       // ~50 guilds: this was by far the largest source of background-lane
       // traffic). "Last updated" only refreshes when content changes, same as
       // the online-list rename guard above.
+      //
+      // Every line embeds a live "how long online" duration (e.g. `5min`,
+      // `1hr 23min`) that ticks up roughly every minute, so a raw text compare
+      // almost never matches even when the roster itself is unchanged — that
+      // defeated the guard above (observed still sending 1000+/5min after
+      // adding it). Comparing with the duration stripped out means an
+      // unchanged roster is correctly detected as unchanged; the tradeoff is
+      // the *displayed* duration only refreshes when something else about the
+      // list changes too (a login/logout, level-up, guild change), not every
+      // single check.
+      val durationPattern = "`(?:\\d+hr )?\\d+min`".r
+      def withoutDuration(text: String): String = durationPattern.replaceAllIn(text, "`_`")
+
       val fields = presentation.OnlineListEmbeds.packFields(values)
       val lastIndex = fields.size - 1
       fields.zipWithIndex.foreach { case (field, currentMessage) =>
         if (currentMessage < messages.size) {
           val message = messages.get(currentMessage)
           val existingDescription = message.getEmbeds.asScala.headOption.map(_.getDescription).getOrElse(null)
-          if (existingDescription != field) {
+          if (Option(existingDescription).map(withoutDuration) != Some(withoutDuration(field))) {
             val embed = new EmbedBuilder()
             embed.setDescription(field)
             embed.setColor(embedColor)
