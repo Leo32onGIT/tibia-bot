@@ -7,13 +7,16 @@ import akka.http.scaladsl.coding.Coders
 import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
+import akka.pattern.after
 import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
 import scala.util.Random
+import scala.util.control.NonFatal
 import com.tibiabot.state.StreamState
 import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.duration._
 import spray.json.DeserializationException
 import akka.http.scaladsl.model.headers.{Date => DateHeader}
 import java.time.{ZonedDateTime, ZoneId}
@@ -25,6 +28,37 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
 
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
   private val guildUrl = "https://api.tibiadata.com/v4/guild/"
+
+  private val retryableStatusCodes: Set[Int] = Set(429, 500, 502, 503, 504)
+  private val maxRetries = 2
+  private def retryBackoff(attempt: Int): FiniteDuration = (250 * (attempt + 1)).milliseconds
+
+  /** Issue a GET with a short bounded retry on transient failures: a handful of
+   *  retryable HTTP statuses (rate-limited / upstream briefly unavailable, e.g.
+   *  a 503 from api.tibiadata.com) or a connection-level failure (timeout,
+   *  reset). Anything else — including a well-formed 200 or a definitive 404 —
+   *  is returned as-is on the first attempt, since retrying a real answer would
+   *  just get the same answer again. Bounded to 2 retries with a short backoff
+   *  (250ms, 500ms) so the character poll path (up to 32-way concurrent, every
+   *  ~60s per world) stays predictable rather than piling up retries under a
+   *  sustained outage — a failure past that still degrades to the existing
+   *  logged-Left behaviour untouched. */
+  private def requestWithRetry(request: HttpRequest, attempt: Int = 0): Future[HttpResponse] =
+    Http().singleRequest(request).flatMap { response =>
+      if (attempt < maxRetries && retryableStatusCodes.contains(response.status.intValue)) {
+        val delay = retryBackoff(attempt)
+        logger.warn(s"Got ${response.status} from ${request.uri} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
+        response.discardEntityBytes()
+        after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+      } else {
+        Future.successful(response)
+      }
+    }.recoverWith {
+      case NonFatal(ex) if attempt < maxRetries =>
+        val delay = retryBackoff(attempt)
+        logger.warn(s"Request to ${request.uri} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
+        after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+    }
 
   /** Shared recovery for an Unmarshal failure across every endpoint. On a
    *  non-JSON response (UnsupportedContentType) the spray-json unmarshaller
@@ -53,7 +87,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
   private def fetch[T](uri: String, contentTypeMessage: HttpResponse => String, parseMessage: => String)
                       (implicit um: akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
     for {
-      response <- Http().singleRequest(HttpRequest(uri = uri))
+      response <- requestWithRetry(HttpRequest(uri = uri))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[T].map(Right(_))
         .recover(recoverUnmarshal(decoded, contentTypeMessage(response), parseMessage))
@@ -153,12 +187,12 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
 
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    fetchCharacterCached(name, Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName")))
+    fetchCharacterCached(name, requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val responseFuture = Http().singleRequest(HttpRequest(uri = s"$characterUrl$encodedName"))
+    val responseFuture = requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName"))
     responseFuture.flatMap { response =>
       response.header[DateHeader] match {
         case Some(_) =>
@@ -187,7 +221,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
           }
           randomizedName
         } else encodedName
-    fetchCharacterCached(name, Http().singleRequest(HttpRequest(uri = s"$apiUrl$bypassName")))
+    fetchCharacterCached(name, requestWithRetry(HttpRequest(uri = s"$apiUrl$bypassName")))
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
