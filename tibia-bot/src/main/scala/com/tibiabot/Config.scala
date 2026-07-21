@@ -109,9 +109,6 @@ object Config {
  val masslogEmoji: String = discord.getString("masslog-emoji")
  val dromeEmoji: String = discord.getString("drome-emoji")
   // Rate limiting configuration
-  val messageDelayMs: Int = discord.getInt("message-delay-ms")
-  val batchSize: Int = discord.getInt("batch-size")
-  val batchDelayMs: Int = discord.getInt("batch-delay-ms")
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
 
   // creature mappings

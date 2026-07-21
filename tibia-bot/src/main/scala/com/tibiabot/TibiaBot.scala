@@ -914,81 +914,75 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
             }
             val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
             val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
-            // Process embeds with rate limiting
+            // Deaths are top priority — send immediately, no artificial pacing. JDA's
+            // own rate limiter already queues/paces REST calls safely against Discord's
+            // real limits; this used to add its own delay on top (up to ~25s for a
+            // burst of 20), which only worked against the "post fast" goal without
+            // buying any real additional protection.
             val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
-            validEmbeds.grouped(Config.batchSize).zipWithIndex.foreach { case (batch, batchIndex) =>
-              batch.zipWithIndex.foreach { case (embed, indexInBatch) =>
-                try {
-                  // Calculate delay for this message
-                  val messageDelay = (batchIndex * Config.batchSize + indexInBatch) * Config.messageDelayMs
-                  val additionalBatchDelay = batchIndex * Config.batchDelayMs
-                  val totalDelay = messageDelay + additionalBatchDelay
+            validEmbeds.foreach { embed =>
+              try {
+                // Create screenshot button
+                val screenshotButton = Button.secondary(
+                  s"death_screenshot_${embed._3}_${embed._7}_placeholder",
+                  "Add Screenshot"
+                )
+                val actionRow = ActionRow.of(screenshotButton)
 
-                  // Schedule the message with delay
-                  mat.system.scheduler.scheduleOnce(totalDelay.milliseconds) {
-                    // Create screenshot button
-                    val screenshotButton = Button.secondary(
-                      s"death_screenshot_${embed._3}_${embed._7}_placeholder",
-                      "Add Screenshot"
-                    )
-                    val actionRow = ActionRow.of(screenshotButton)
-
-                    // nemesis and enemy fullbless ignore the level filter
-                    if (embed._2 == "nemesis") {
-                      val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
-                      if (shouldPing) {
-                        deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
-                          .setEmbeds(embed._1.build())
-                          .queue()
-                      } else {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .queue()
-                      }
-                    } else if (embed._2 == "allypk") {
-                      if (embed._5 >= minimumLevel) {
-                        val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
-                        if (shouldPing) {
-                          deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
-                            .setEmbeds(embed._1.build())
-                            .queue()
-                        } else {
-                          deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                            .queue()
-                        }
-                      }
-                    } else if (embed._2 == "fullbless") {
-                      if (embed._5 >= minimumLevel) {
-                        // send adjusted embed for fullblesses
-                        val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-                        val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-                        if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                          deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
-                            .setEmbeds(adjustedEmbed.build())
-                            .queue()
-                        } else {
-                          deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                            .queue()
-                        }
-                      }
-                    } else if (embed._2 == "screenshot") {
-                      if (embed._5 >= minimumLevel) {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .setComponents(actionRow)
-                          .queue()
-                        }
+                // nemesis and enemy fullbless ignore the level filter
+                if (embed._2 == "nemesis") {
+                  val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
+                  if (shouldPing) {
+                    deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
+                      .setEmbeds(embed._1.build())
+                      .queue()
+                  } else {
+                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                      .queue()
+                  }
+                } else if (embed._2 == "allypk") {
+                  if (embed._5 >= minimumLevel) {
+                    val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
+                    if (shouldPing) {
+                      deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
+                        .setEmbeds(embed._1.build())
+                        .queue()
                     } else {
-                      // for regular deaths check if level > /filter deaths <level>
-                      if (embed._5 >= minimumLevel) {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .setSuppressedNotifications(true)
-                          .queue()
-                      }
+                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                        .queue()
                     }
                   }
-                } catch {
-                  case ex: Exception => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                  case _: Throwable => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
+                } else if (embed._2 == "fullbless") {
+                  if (embed._5 >= minimumLevel) {
+                    // send adjusted embed for fullblesses
+                    val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+                    val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                    if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
+                      deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
+                        .setEmbeds(adjustedEmbed.build())
+                        .queue()
+                    } else {
+                      deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                        .queue()
+                    }
+                  }
+                } else if (embed._2 == "screenshot") {
+                  if (embed._5 >= minimumLevel) {
+                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                      .setComponents(actionRow)
+                      .queue()
+                    }
+                } else {
+                  // for regular deaths check if level > /filter deaths <level>
+                  if (embed._5 >= minimumLevel) {
+                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                      .setSuppressedNotifications(true)
+                      .queue()
+                  }
                 }
+              } catch {
+                case ex: Exception => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                case _: Throwable => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
               }
             }
           }
