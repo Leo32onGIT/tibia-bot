@@ -6,7 +6,8 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -98,7 +99,7 @@ object ScreenshotMessageHandler extends StrictLogging {
                       }
                     }
 
-                    message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
+                    message.editMessageEmbeds(updatedEmbed.build()).setComponents(ActionRow.of(buttons.asJava)).queue()
 
                     // React to the user's message to confirm, then delete it
                     event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue(_ => {
@@ -197,7 +198,7 @@ object ScreenshotMessageHandler extends StrictLogging {
                       }
                     }
 
-                    message.editMessageEmbeds(updatedEmbed.build()).setActionRow(buttons: _*).queue()
+                    message.editMessageEmbeds(updatedEmbed.build()).setComponents(ActionRow.of(buttons.asJava)).queue()
 
                     logger.info(s"Screenshot uploaded successfully via DM for ${pending.charName} death at ${pending.deathTime} in guild ${guild.getName}")
                   }

@@ -13,8 +13,8 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.exceptions.ErrorHandler
 import net.dv8tion.jda.api.requests.ErrorResponse
-import net.dv8tion.jda.api.interactions.components.ActionRow
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 
 import java.time.ZonedDateTime
 import scala.collection.immutable.ListMap
@@ -1341,8 +1341,6 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
   private def charUrl(char: String): String = presentation.Urls.charUrl(char)
 
   private def getKillerLevel(killerName: String): Option[Int] = {
-    logger.info(s"getKillerLevel called for: $killerName")
-
     // Check the dedicated online list table for the killer
     val onlineLevel = onlineListTable.get(killerName.toLowerCase).map(_.level)
     if (onlineLevel.isDefined) {
@@ -1354,7 +1352,6 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
         characterResponse match {
           case Right(response) =>
             val level = response.character.character.level.toInt
-            logger.info(s"Found level $level for $killerName via TibiaData API")
             Some(level)
           case Left(error) =>
             logger.warn(s"Failed to get character $killerName from TibiaData API: $error")

@@ -14,7 +14,8 @@ import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
 import net.dv8tion.jda.api.events.guild.{GuildJoinEvent, GuildLeaveEvent}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 
 import java.awt.Color
@@ -132,9 +133,9 @@ final class ChannelService(
     galthenEmbed.setColor(BrandColor)
     galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
     galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-    channel.sendMessageEmbeds(galthenEmbed.build()).addActionRow(
+    channel.sendMessageEmbeds(galthenEmbed.build()).addComponents(ActionRow.of(
       Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-    ).queue()
+    )).queue()
   }
 
   /** Build the boosted boss + creature + server-save embeds and post them to a
@@ -151,7 +152,7 @@ final class ChannelService(
       val allEmbeds = embeds ++ serverSaveExtraEmbeds(world)
       channel
         .sendMessageEmbeds(allEmbeds.asJava)
-        .setActionRow(Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji)))
+        .setComponents(ActionRow.of(Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))))
         .queue(
           (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
           (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
@@ -295,7 +296,7 @@ final class ChannelService(
 
             // Fullbless Role
             notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, 250))
-              .setActionRow(fullblessRoleButtons: _*)
+              .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
             }
         }
@@ -458,12 +459,12 @@ final class ChannelService(
             fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
             fullblessEmbed.setDescription(fullblessEmbedText)
             boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
-              .setActionRow(
+              .setComponents(ActionRow.of(
                 Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
                 Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
                 Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
                 Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-              )
+              ))
               .queue()
 
             // Update role id if it changed
@@ -725,12 +726,12 @@ final class ChannelService(
           fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
           fullblessEmbed.setDescription(fullblessEmbedText)
           boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
-            .setActionRow(
+            .setComponents(ActionRow.of(
               Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
               Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
               Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
               Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-            )
+            ))
             .queue()
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)

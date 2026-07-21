@@ -9,7 +9,8 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
-import net.dv8tion.jda.api.interactions.components.buttons._
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.Role
@@ -381,9 +382,9 @@ object BotApp extends App with StrictLogging {
                     try {
                       user.openPrivateChannel().queue { privateChannel =>
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setActionRow(
+                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
                           Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                        ).queue()
+                        )).queue()
                       }
                     } catch {
                       case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
@@ -439,9 +440,9 @@ object BotApp extends App with StrictLogging {
                         val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ embedsList
 
                         boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-                          .setActionRow(
+                          .setComponents(ActionRow.of(
                             Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )
+                          ))
                           .queue((message: Message) => {
                             //updateBoostedMessage(guild.getId, message.getId)
                             discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)

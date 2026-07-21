@@ -10,6 +10,7 @@ import com.tibiabot.tibiadata.TibiaApi
 import com.tibiabot.tibiadata.response.HighscoresResponse
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
@@ -270,7 +271,7 @@ final class WorldSettingsService(
 
               // Fullbless Role
               message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level))
-                .setActionRow(channelService.fullblessRoleButtons: _*)
+                .setComponents(ActionRow.of(channelService.fullblessRoleButtons.asJava))
                 .queue()
             }
           }

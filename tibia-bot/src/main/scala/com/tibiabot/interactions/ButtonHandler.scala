@@ -10,12 +10,14 @@ import java.time.ZonedDateTime
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
-import net.dv8tion.jda.api.interactions.components.ActionRow
-import net.dv8tion.jda.api.interactions.components.buttons.Button
-import net.dv8tion.jda.api.interactions.components.text.{TextInput, TextInputStyle}
-import net.dv8tion.jda.api.interactions.modals.Modal
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
+import net.dv8tion.jda.api.components.label.Label
+import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
+import net.dv8tion.jda.api.modals.Modal
 
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 /** Handles all button-click interactions (galthen, boosted, screenshot nav,
  *  role toggles). Moved verbatim from BotListener.onButtonInteraction; the
@@ -82,45 +84,45 @@ object ButtonHandler extends StrictLogging {
       event.deferEdit().queue()
       event.getHook().editOriginalComponents().queue()
     } else if (button == "galthenAdd") {
-      val inputWindow = TextInput.create("galthen add", "Tag/Name for this cooldown", TextInputStyle.SHORT)
+      val inputWindow = TextInput.create("galthen add", TextInputStyle.SHORT)
         .setPlaceholder("Character Name or Tag to Add")
         .build()
-      val modal = Modal.create("add galthen", "Add a Galthen Satchel cooldown").addComponents(ActionRow.of(inputWindow)).build()
+      val modal = Modal.create("add galthen", "Add a Galthen Satchel cooldown").addComponents(Label.of("Tag/Name for this cooldown", inputWindow)).build()
       event.replyModal(modal).queue()
     } else if (button == "galthenButtonRem") {
-      val inputWindow = TextInput.create("galthen rem", "Tag/Name for the cooldown", TextInputStyle.SHORT)
+      val inputWindow = TextInput.create("galthen rem", TextInputStyle.SHORT)
         .setPlaceholder("Character Name or Tag to Remove")
         .build()
-      val modal = Modal.create("rem galthen", "Remove a Galthen Satchel cooldown").addComponents(ActionRow.of(inputWindow)).build()
+      val modal = Modal.create("rem galthen", "Remove a Galthen Satchel cooldown").addComponents(Label.of("Tag/Name for the cooldown", inputWindow)).build()
       event.replyModal(modal).queue()
     } else if (button == "boosted add") {
-      val inputWindow = TextInput.create("boosted add", "Boss or Creature name", TextInputStyle.SHORT)
+      val inputWindow = TextInput.create("boosted add", TextInputStyle.SHORT)
         .setPlaceholder("Grand Master Oberon")
         .build()
-      val modal = Modal.create("add modal", "Add a Boss or Creature").addComponents(ActionRow.of(inputWindow)).build()
+      val modal = Modal.create("add modal", "Add a Boss or Creature").addComponents(Label.of("Boss or Creature name", inputWindow)).build()
       event.replyModal(modal).queue()
     } else if (button == "boosted remove") {
 
-      val inputWindow = TextInput.create("boosted remove", "Boss or Creature name", TextInputStyle.SHORT).build()
-      val modal = Modal.create("remove modal", "Add Server Save Notificiations:").addComponents(ActionRow.of(inputWindow)).build()
+      val inputWindow = TextInput.create("boosted remove", TextInputStyle.SHORT).build()
+      val modal = Modal.create("remove modal", "Add Server Save Notificiations:").addComponents(Label.of("Boss or Creature name", inputWindow)).build()
       event.replyModal(modal).queue()
     } else if (button == "boosted list") {
       event.deferReply(true).queue()
       val allCheck = BotApp.boostedService.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boostedService.boosted(event.getUser.getId, "list", "")
-        event.getHook.sendMessageEmbeds(embed).setActionRow(
+        event.getHook.sendMessageEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add").asDisabled,
           Button.danger("boosted remove", "Remove").asDisabled,
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
-        ).queue()
+        )).queue()
       } else {
         val embed = BotApp.boostedService.boosted(event.getUser.getId, "list", "")
-        event.getHook.sendMessageEmbeds(embed).setActionRow(
+        event.getHook.sendMessageEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add"),
           Button.danger("boosted remove", "Remove"),
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
-        ).queue()
+        )).queue()
       }
     } else if (button == "boosted toggle") {
       event.deferEdit().queue()
@@ -128,18 +130,18 @@ object ButtonHandler extends StrictLogging {
       val allCheck = BotApp.boostedService.boostedList(event.getUser.getId)
       if (allCheck) {
         val embed = BotApp.boostedService.boosted(event.getUser.getId, "toggle", "all")
-        event.getHook.editOriginalEmbeds(embed).setActionRow(
+        event.getHook.editOriginalEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add"),
           Button.danger("boosted remove", "Remove"),
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
-        ).queue()
+        )).queue()
       } else {
         val embed = BotApp.boostedService.boosted(event.getUser.getId, "toggle", "all")
-        event.getHook.editOriginalEmbeds(embed).setActionRow(
+        event.getHook.editOriginalEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add").asDisabled,
           Button.danger("boosted remove", "Remove").asDisabled,
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
-        ).queue()
+        )).queue()
       }
     } else if (button == "galthen default") {
       event.deferReply(true).queue()
@@ -150,9 +152,9 @@ object ButtonHandler extends StrictLogging {
         case Some(satchelTimeList) if satchelTimeList.isEmpty =>
           embed.setColor(presentation.Embeds.BrandColor)
           embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+          event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
             Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          ).queue()
+          )).queue()
         case Some(satchelTimeList) =>
           val fullList = satchelTimeList.collect {
             case satchel =>
@@ -165,30 +167,30 @@ object ButtonHandler extends StrictLogging {
             embed.setDescription(presentation.GalthenEmbeds.truncate(fullList))
             embed.setColor(presentation.Embeds.BrandColor)
             if (fullList.size == 1){
-              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
                 Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                 Button.danger("galthenRemoveAll", "Remove")
-              ).queue()
+              )).queue()
             } else {
-              event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+              event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
                 Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                 Button.danger("galthenButtonRem", "Remove"),
                 Button.secondary("galthenRemoveAll", "Clear All")
-              ).queue()
+              )).queue()
             }
           } else {
             embed.setColor(presentation.Embeds.BrandColor)
             embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-            event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+            event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
               Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-            ).queue()
+            )).queue()
           }
         case None =>
           embed.setColor(presentation.Embeds.BrandColor)
           embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-          event.getHook.sendMessageEmbeds(embed.build()).addActionRow(
+          event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
             Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          ).queue()
+          )).queue()
       }
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
@@ -397,11 +399,11 @@ object ButtonHandler extends StrictLogging {
                 Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
               )
               val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              List(ActionRow.of(buttonsWithDelete: _*))
+              List(ActionRow.of(buttonsWithDelete.asJava))
             } else {
               val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
               val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              List(ActionRow.of(buttonsWithDelete: _*))
+              List(ActionRow.of(buttonsWithDelete.asJava))
             }
 
             event.getHook.editOriginalEmbeds(embed).setComponents(components: _*).queue()
@@ -452,11 +454,11 @@ object ButtonHandler extends StrictLogging {
                   Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
                 )
                 val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                List(ActionRow.of(buttonsWithDelete: _*))
+                List(ActionRow.of(buttonsWithDelete.asJava))
               } else {
                 val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
                 val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                List(ActionRow.of(buttonsWithDelete: _*))
+                List(ActionRow.of(buttonsWithDelete.asJava))
               }
 
               event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(components: _*).queue()

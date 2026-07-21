@@ -1,7 +1,7 @@
 name := "violent-bot-dedicated"
 version := "2.2"
 
-scalaVersion := "2.13.9"
+scalaVersion := "2.13.18"
 
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
@@ -18,10 +18,10 @@ libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.7.0"
 libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.10"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.3.16"
 libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.6"
 libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
-libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-beta.4"
+libraryDependencies += "net.dv8tion" % "JDA" % "6.5.0"
 libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.10.0"
 libraryDependencies += "org.postgresql" % "postgresql" % "42.5.4"

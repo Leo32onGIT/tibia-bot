@@ -7,7 +7,8 @@ import com.tibiabot.persistence.{ConnectionProvider, GalthenRepository}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.User
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 
 import java.sql.Timestamp
 import java.time.ZonedDateTime
@@ -56,10 +57,10 @@ final class GalthenService(
             embed.setColor(178877)
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
             embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you when the 30 day cooldown expires.")
-            privateChannel.sendMessageEmbeds(embed.build()).addActionRow(
+            privateChannel.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
               Button.success("galthenRemind", "Collected"),
               Button.secondary("galthenClear", "Dismiss")
-            ).queue()
+            )).queue()
           }
         } catch {
           case ex: Exception => logger.warn(s"Failed to send Galthen expiry DM to user: '$userId'", ex)

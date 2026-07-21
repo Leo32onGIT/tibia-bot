@@ -4,7 +4,8 @@ import com.tibiabot.{BotApp, Config}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 
 /** Handles `/boosted`: manage per-user boosted boss/creature notifications. */
 object BoostedCommands {
@@ -18,16 +19,16 @@ object BoostedCommands {
     } else if (toggleOption == "list") {
       val embed = BotApp.boostedService.boosted(userId, "list", "")
       if (BotApp.boostedService.boostedList(userId)) {
-        event.getHook.sendMessageEmbeds(embed).setActionRow(
+        event.getHook.sendMessageEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add").asDisabled,
           Button.danger("boosted remove", "Remove").asDisabled,
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
-        ).queue()
+        )).queue()
       } else {
-        event.getHook.sendMessageEmbeds(embed).setActionRow(
+        event.getHook.sendMessageEmbeds(embed).setComponents(ActionRow.of(
           Button.success("boosted add", "Add"),
           Button.danger("boosted remove", "Remove")
-        ).queue()
+        )).queue()
       }
     } else {
       val embed = new EmbedBuilder()

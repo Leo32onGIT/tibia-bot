@@ -5,7 +5,8 @@ import com.tibiabot.domain.SatchelStamp
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
-import net.dv8tion.jda.api.interactions.components.buttons.Button
+import net.dv8tion.jda.api.components.actionrow.ActionRow
+import net.dv8tion.jda.api.components.buttons.Button
 
 import scala.jdk.CollectionConverters._
 import java.time.ZonedDateTime
@@ -18,22 +19,22 @@ object ModalHandler {
      val user = event.getUser
      val modalValues = event.getValues.asScala.toList
      modalValues.map { element =>
-       val id = element.getId
+       val id = element.getCustomId
        val inputName = domain.BossAliases.canonical(element.getAsString.trim.toLowerCase)
        if (id == "boosted add") {
          val newEmbed = BotApp.boostedService.boosted(user.getId, "add", inputName)
-         event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
+         event.getHook().editOriginalEmbeds(newEmbed).setComponents(ActionRow.of(
            Button.success("boosted add", "Add"),
            Button.danger("boosted remove", "Remove"),
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
-         ).queue()
+         )).queue()
        } else if (id == "boosted remove") {
          val newEmbed = BotApp.boostedService.boosted(user.getId, "remove", inputName)
-         event.getHook().editOriginalEmbeds(newEmbed).setActionRow(
+         event.getHook().editOriginalEmbeds(newEmbed).setComponents(ActionRow.of(
            Button.success("boosted add", "Add"),
            Button.danger("boosted remove", "Remove"),
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
-         ).queue()
+         )).queue()
        } else if (id == "galthen add") {
 
          val newEmbed = new EmbedBuilder()
@@ -69,16 +70,16 @@ object ModalHandler {
          val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **added**."
          newEmbed.setDescription(editedMessage + replyMessage)
          if (oneRecord) {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                Button.danger("galthenRemoveAll", "Remove")
-             ).queue()
+             )).queue()
          } else {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                Button.danger("galthenButtonRem", "Remove"),
                Button.secondary("galthenRemoveAll", "Clear All")
-             ).queue()
+             )).queue()
          }
        } else if (id == "galthen rem") {
          val newEmbed = new EmbedBuilder()
@@ -114,16 +115,16 @@ object ModalHandler {
          val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **Disabled**."
          newEmbed.setDescription(editedMessage + replyMessage)
          if (oneRecord) {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                Button.danger("galthenRemoveAll", "Remove")
-             ).queue()
+             )).queue()
          } else {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setActionRow(
+           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
                Button.danger("galthenButtonRem", "Remove"),
                Button.secondary("galthenRemoveAll", "Clear All")
-             ).queue()
+             )).queue()
          }
        }
      }
