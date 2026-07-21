@@ -24,7 +24,7 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     val sender = new RateLimitedSender(ticker.start)
     val sent = ListBuffer.empty[String]
 
-    List("a", "b", "c").foreach(s => sender.enqueue(() => sent += s))
+    List("a", "b", "c").foreach(s => sender.enqueue("test")(() => sent += s))
 
     sent shouldBe empty            // nothing sent until a tick fires
     ticker.tick(); sent.toList shouldBe List("a")
@@ -36,7 +36,7 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
   test("starts the ticker only once across many enqueues") {
     val ticker = new ManualTicker
     val sender = new RateLimitedSender(ticker.start)
-    (1 to 5).foreach(_ => sender.enqueue(() => ()))
+    (1 to 5).foreach(_ => sender.enqueue("test")(() => ()))
     ticker.starts shouldBe 1
   }
 
@@ -45,8 +45,8 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     val sender = new RateLimitedSender(ticker.start)
     val sent = ListBuffer.empty[String]
 
-    sender.enqueue(() => throw new RuntimeException("boom"))
-    sender.enqueue(() => sent += "after")
+    sender.enqueue("test")(() => throw new RuntimeException("boom"))
+    sender.enqueue("test")(() => sent += "after")
 
     noException should be thrownBy ticker.tick()
     ticker.tick()
@@ -58,8 +58,39 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     val sender = new RateLimitedSender(ticker.start, capacity = 2)
     val sent = ListBuffer.empty[String]
 
-    List("a", "b", "c").foreach(s => sender.enqueue(() => sent += s)) // "c" dropped (tail drop)
+    List("a", "b", "c").foreach(s => sender.enqueue("test")(() => sent += s)) // "c" dropped (tail drop)
     ticker.tick(); ticker.tick(); ticker.tick()
     sent.toList shouldBe List("a", "b")
+    sender.totalDropped shouldBe 1
+  }
+
+  test("queueDepth reflects the current backlog, draining as ticks fire") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+
+    List("a", "b", "c").foreach(s => sender.enqueue("test")(() => ()))
+    sender.queueDepth shouldBe 3
+    ticker.tick()
+    sender.queueDepth shouldBe 2
+    ticker.tick(); ticker.tick()
+    sender.queueDepth shouldBe 0
+  }
+
+  test("snapshotAndReset reports per-label counts and clears the window") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+
+    sender.enqueue("rename")(() => ())
+    sender.enqueue("rename")(() => ())
+    sender.enqueue("online-list")(() => ())
+    ticker.tick(); ticker.tick(); ticker.tick()
+
+    val snapshot = sender.snapshotAndReset()
+    snapshot("rename").count shouldBe 2
+    snapshot("online-list").count shouldBe 1
+    snapshot.get("rename").map(_.avgWaitMs) should not be empty
+
+    // window resets: nothing new happened since the snapshot
+    sender.snapshotAndReset() shouldBe empty
   }
 }

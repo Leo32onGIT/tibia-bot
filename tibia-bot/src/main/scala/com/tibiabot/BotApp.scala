@@ -72,6 +72,29 @@ object BotApp extends App with StrictLogging {
     )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
     () => cancellable.cancel()
   })
+
+  // Periodic visibility into the background lane while tuning the rate-limit
+  // changes: queue depth (and its trend since the last log) shows whether the
+  // lane is keeping up or backing up; the per-label breakdown shows which
+  // traffic is actually consuming the shared budget and how long it's waiting.
+  private var lastLoggedQueueDepth = 0
+  actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
+    val depth = outboundSender.queueDepth
+    val delta = depth - lastLoggedQueueDepth
+    lastLoggedQueueDepth = depth
+    val trend =
+      if (delta > 0) s"+$delta, growing"
+      else if (delta < 0) s"$delta, draining"
+      else "unchanged"
+    val perLabel = outboundSender.snapshotAndReset()
+    val breakdown =
+      if (perLabel.isEmpty) "no background-lane traffic"
+      else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
+        s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
+      }.mkString(" | ")
+    logger.info(s"[rate-limit] background lane depth: $depth ($trend vs 5m ago) | dropped total: ${outboundSender.totalDropped} | last 5m -- $breakdown")
+  })(ex)
+
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
@@ -391,7 +414,7 @@ object BotApp extends App with StrictLogging {
                 if (matchedNotification) {
                   // Low priority (per-user DM burst) — goes through the shared background
                   // lane so it can't compete with deaths/boosted-channel posts for REST slots.
-                  outboundSender.enqueue { () =>
+                  outboundSender.enqueue("boosted-dm") { () =>
                     val user: User = discordGateway.retrieveUser(entry.user)
                     if (user != null) {
                       try {

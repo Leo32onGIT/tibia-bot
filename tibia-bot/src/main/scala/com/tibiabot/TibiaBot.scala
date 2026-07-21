@@ -284,7 +284,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
                           activityEmbed.setColor(playerType)
                           activityEmbed.setThumbnail(Config.nameChangeThumbnail)
-                          sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
+                          sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                         }
                       }
                     }
@@ -333,7 +333,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                               activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})**.")
                               activityEmbed.setColor(14397256)
                               activityEmbed.setThumbnail(Config.guildLeaveThumbnail)
-                              sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
+                              sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                             }
                           }
                         } else { // Left a tracked guild, but joined a new one in the same turn
@@ -350,7 +350,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                               activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** has left the **${guildType}** guild **[${guildNameFromActivityData}](${guildUrl(guildNameFromActivityData)})** and joined the guild **[${guildName}](${guildUrl(guildName)})**.")
                               activityEmbed.setColor(colorType)
                               activityEmbed.setThumbnail(thumbnailType)
-                              sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
+                              sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                             }
                           }
                           // remove from hunted list if in allied guild
@@ -367,7 +367,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                                 adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                                sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                               }
                             }
                           }
@@ -389,7 +389,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                                 adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
                                 adminEmbed.setThumbnail(creatureImageUrl("Stone_Coffin"))
                                 adminEmbed.setColor(14397256) // orange for bot auto command
-                                sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                                sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                               }
                             }
                           }
@@ -421,7 +421,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                              sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                             }
                           }
                         } else if (allyGuildCheck) {
@@ -439,7 +439,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
-                              sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                              sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                             }
                           }
                         }
@@ -455,7 +455,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                             activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                             activityEmbed.setColor(colorType)
                             activityEmbed.setThumbnail(thumbnailType)
-                            sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
+                            sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                           }
                         }
                       }
@@ -493,7 +493,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                          sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                         }
                       }
                     }
@@ -513,7 +513,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
                           adminEmbed.setThumbnail(creatureImageUrl("Broom"))
                           adminEmbed.setColor(14397256) // orange for bot auto command
-                          sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                          sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                         }
                       }
                     }
@@ -532,7 +532,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** joined the **${guildType}** guild **[${guildName}](${guildUrl(guildName)})**.")
                         activityEmbed.setColor(colorType)
                         activityEmbed.setThumbnail(thumbnailType)
-                        sendMessageWithRateLimit(activityTextChannel, embed = Some(activityEmbed))
+                        sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                       }
                     }
                   }
@@ -630,7 +630,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
     // of one message per level-up, chunked to stay within Discord's message length limit.
     levelUpBuffer.values.foreach { case (channel, lines) =>
       presentation.ListEmbeds.pack(lines.toList, 1900).foreach { chunk =>
-        sendMessageWithRateLimit(channel, message = chunk.stripPrefix("\n"))
+        sendMessageWithRateLimit(channel, "level-up", message = chunk.stripPrefix("\n"))
       }
     }
 
@@ -871,7 +871,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                             adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
                             adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                             adminEmbed.setColor(14397256) // orange for bot auto command
-                            sendMessageWithRateLimit(adminTextChannel, embed = Some(adminEmbed), suppressNotifications = true)
+                            sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
                           }
                         }
                       }
@@ -1310,7 +1310,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
         }
         if (currentMessage < messages.size) {
           val message = messages.get(currentMessage)
-          outboundSender.enqueue { () =>
+          outboundSender.enqueue("online-list") { () =>
             try {
               message.editMessageEmbeds(embed.build()).queue()
             } catch {
@@ -1318,7 +1318,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
             }
           }
         } else {
-          outboundSender.enqueue { () =>
+          outboundSender.enqueue("online-list") { () =>
             try {
               channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
             } catch {
@@ -1440,7 +1440,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
         val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
         if (category.getName != baseName) {
           onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
-          outboundSender.enqueue { () =>
+          outboundSender.enqueue("rename") { () =>
             try {
               category.getManager.setName(s"$baseName$masslogIcon").queue()
             } catch {
@@ -1465,7 +1465,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
     if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
       if (channel.getName != targetName) {
         onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
-        outboundSender.enqueue { () =>
+        outboundSender.enqueue("rename") { () =>
           try {
             channel.getManager.setName(targetName).queue()
           } catch {
@@ -1476,14 +1476,16 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
     }
   }
 
-  // Helper method to queue messages with rate limiting
+  // Helper method to queue messages with rate limiting. `label` tags the send for
+  // the periodic queue-monitoring log (BotApp) — e.g. "activity", "admin", "level-up".
   private def sendMessageWithRateLimit(
     channel: TextChannel,
+    label: String,
     message: String = "",
     embed: Option[EmbedBuilder] = None,
     suppressNotifications: Boolean = true
   ): Unit = {
-    outboundSender.enqueue { () =>
+    outboundSender.enqueue(label) { () =>
       embed match {
         case Some(e) =>
           if (message.nonEmpty)
