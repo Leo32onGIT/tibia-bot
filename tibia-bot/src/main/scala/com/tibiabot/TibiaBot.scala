@@ -1298,26 +1298,44 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       // go through the shared background lane (outboundSender) — guilds sharing
       // a world all become due in the same tick, so this smooths that burst
       // instead of firing every channel's edit/send at once.
+      //
+      // An existing message is only re-edited when its description actually
+      // changed — this runs every ~90-120s per guild regardless of whether the
+      // online list moved at all, so without this guard it unconditionally
+      // resends on every check (observed growing the shared queue unbounded at
+      // ~50 guilds: this was by far the largest source of background-lane
+      // traffic). "Last updated" only refreshes when content changes, same as
+      // the online-list rename guard above.
       val fields = presentation.OnlineListEmbeds.packFields(values)
       val lastIndex = fields.size - 1
       fields.zipWithIndex.foreach { case (field, currentMessage) =>
-        val embed = new EmbedBuilder()
-        embed.setDescription(field)
-        embed.setColor(embedColor)
-        if (currentMessage == lastIndex) {
-          embed.setFooter("Last updated")
-          embed.setTimestamp(OffsetDateTime.now())
-        }
         if (currentMessage < messages.size) {
           val message = messages.get(currentMessage)
-          outboundSender.enqueue("online-list") { () =>
-            try {
-              message.editMessageEmbeds(embed.build()).queue()
-            } catch {
-              case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
+          val existingDescription = message.getEmbeds.asScala.headOption.map(_.getDescription).getOrElse(null)
+          if (existingDescription != field) {
+            val embed = new EmbedBuilder()
+            embed.setDescription(field)
+            embed.setColor(embedColor)
+            if (currentMessage == lastIndex) {
+              embed.setFooter("Last updated")
+              embed.setTimestamp(OffsetDateTime.now())
+            }
+            outboundSender.enqueue("online-list") { () =>
+              try {
+                message.editMessageEmbeds(embed.build()).queue()
+              } catch {
+                case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
+              }
             }
           }
         } else {
+          val embed = new EmbedBuilder()
+          embed.setDescription(field)
+          embed.setColor(embedColor)
+          if (currentMessage == lastIndex) {
+            embed.setFooter("Last updated")
+            embed.setTimestamp(OffsetDateTime.now())
+          }
           outboundSender.enqueue("online-list") { () =>
             try {
               channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
