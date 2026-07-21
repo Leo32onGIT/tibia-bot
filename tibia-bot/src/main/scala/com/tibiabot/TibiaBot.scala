@@ -1406,41 +1406,55 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
   }
 
   /** Renames a world's online-list category to reflect the live ally/enemy
-   *  counts (and the mass-log ⚡), throttled to once per 6-minute window. The
-   *  name-change guard intentionally ignores the ⚡ suffix, matching the
-   *  original — so the category re-renames once after a mass-log toggle. */
+   *  counts (and the mass-log ⚡), throttled to at most once per 6-minute
+   *  window *actually spent renaming* — the window only advances when a
+   *  rename is genuinely dispatched, not on every check, so a channel whose
+   *  name is already correct doesn't burn its window and go stale later.
+   *  The name-change guard intentionally ignores the ⚡ suffix, matching the
+   *  original — so the category re-renames once after a mass-log toggle.
+   *  The actual send goes through the shared bot-wide background lane
+   *  (`outboundSender`) so a burst of many entities coming due at once (many
+   *  guilds sharing a world) drains at a safe shared pace instead of firing
+   *  all at once. */
   private def renameOnlineCategoryIfDue(guild: Guild, categoryId: String, world: String, alliesCount: Int, enemiesCount: Int, masslogIcon: String): Unit = {
     val category = guild.getCategoryById(categoryId)
     if (category != null) {
       val lastRename = onlineListCategoryTimer.getOrElse(categoryId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
       if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
-        onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
-        try {
-          val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
-          if (category.getName != baseName) {
-            category.getManager.setName(s"$baseName$masslogIcon").queue()
+        val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
+        if (category.getName != baseName) {
+          onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
+          outboundSender.enqueue { () =>
+            try {
+              category.getManager.setName(s"$baseName$masslogIcon").queue()
+            } catch {
+              case ex: Throwable => logger.warn(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
+            }
           }
-        } catch {
-          case ex: Throwable => logger.warn(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
         }
       }
     }
   }
 
   /** Renames an online-list text channel to `targetName`, throttled to at most
-   *  once per 6-minute window per channel (tracked in onlineListCategoryTimer)
-   *  and skipped when the name is already correct. Rename failures (e.g. missing
-   *  Manage Channels) are logged, not fatal — `label` names the channel in the
-   *  log line. */
+   *  once per 6-minute window *actually spent renaming* (tracked in
+   *  onlineListCategoryTimer, only advanced when a rename is genuinely
+   *  dispatched — see renameOnlineCategoryIfDue) and skipped when the name is
+   *  already correct. The actual send goes through the shared bot-wide
+   *  background lane (`outboundSender`), same reasoning as above. Rename
+   *  failures (e.g. missing Manage Channels) are logged, not fatal — `label`
+   *  names the channel in the log line. */
   private def renameOnlineChannelIfDue(channel: TextChannel, targetName: String, label: String, guildId: String, guildName: String): Unit = {
     val lastRename = onlineListCategoryTimer.getOrElse(channel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
     if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
-      onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
       if (channel.getName != targetName) {
-        try {
-          channel.getManager.setName(targetName).queue()
-        } catch {
-          case ex: Throwable => logger.warn(s"Failed to rename the $label for Guild ID: '$guildId' Guild Name: '$guildName'", ex)
+        onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
+        outboundSender.enqueue { () =>
+          try {
+            channel.getManager.setName(targetName).queue()
+          } catch {
+            case ex: Throwable => logger.warn(s"Failed to rename the $label for Guild ID: '$guildId' Guild Name: '$guildName'", ex)
+          }
         }
       }
     }
