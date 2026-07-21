@@ -14,6 +14,9 @@ import scala.jdk.CollectionConverters._
 import com.tibiabot.domain.PendingScreenshot
 import com.tibiabot.commands.{CommandRouter, SlashRouting}
 
+import java.util.concurrent.{Executors, ThreadFactory}
+import java.util.concurrent.atomic.AtomicInteger
+
 class BotListener extends ListenerAdapter with StrictLogging {
 
   // Mutated from both onButtonInteraction and onMessageReceived, which JDA
@@ -25,10 +28,36 @@ class BotListener extends ListenerAdapter with StrictLogging {
   // Slash-command dispatch table lives in commands.SlashRouting (one entry per command).
   private val slashRouter = new CommandRouter[SlashCommandInteractionEvent](SlashRouting.handlers)
 
+  // Slash-command handlers run here, off JDA's shared event thread. Some
+  // handlers (channel/role creation in particular) make many sequential
+  // blocking JDA REST calls; without this, one slow command would starve
+  // dispatch of every other event — including a different user's slash
+  // command, whose deferReply() would then never fire within Discord's
+  // 3-second ack window and show as "interaction failed" even though its
+  // own handler code is fine.
+  private val commandExecutor = {
+    val threadCount = new AtomicInteger(0)
+    val factory: ThreadFactory = (r: Runnable) => {
+      val thread = new Thread(r, s"slash-command-${threadCount.incrementAndGet()}")
+      thread.setDaemon(true)
+      thread
+    }
+    Executors.newFixedThreadPool(8, factory)
+  }
+
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
     event.deferReply(true).queue()
     if (BotApp.startUpComplete) {
-      slashRouter.route(event.getName, event)
+      commandExecutor.execute(() => {
+        try {
+          slashRouter.route(event.getName, event)
+        } catch {
+          case ex: Throwable =>
+            logger.error(s"Unhandled exception running slash command '${event.getName}'", ex)
+            val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Something went wrong running that command.").setColor(presentation.Embeds.BrandColor).build()
+            event.getHook.sendMessageEmbeds(embed).queue(_ => (), _ => ())
+        }
+      })
     } else {
       val responseText = s"${Config.noEmoji} The bot is still starting up, try running your command later."
       val embed = new EmbedBuilder().setDescription(responseText).setColor(presentation.Embeds.BrandColor).build()
@@ -38,7 +67,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
-    guild.updateCommands().addCommands(commands.asJava).complete()
+    guild.updateCommands().addCommands(commands.asJava).queue()
     BotApp.channelService.discordJoin(event)
   }
 
