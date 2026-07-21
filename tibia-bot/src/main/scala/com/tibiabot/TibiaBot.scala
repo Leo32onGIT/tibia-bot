@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
-class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
@@ -69,9 +69,6 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
   private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
   private val cooldownMinutes = 30L
-  // Safety cap on the per-world outbound backlog (~drains 1 / message-delay-ms). Beyond
-  // this the sender drops and logs rather than growing unbounded under a pathological burst.
-  private val outboundQueueCapacity = 10000
   // Benign, operator-side send failures (channel deleted / perms removed) — ignore instead
   // of letting JDA's default handler spam them on every cycle; other errors still log.
   private val ignoreDeletedTarget = new ErrorHandler()
@@ -154,6 +151,12 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
 
   private lazy val scanForDeaths = Flow[Set[Either[String, CharacterResponse]]].mapAsync(1) { characterResponses =>
     val now = ZonedDateTime.now()
+
+    // Level-ups are low priority and can arrive in bursts (many characters levelling
+    // in the same tick) — buffered per channel here and flushed as one combined
+    // message per channel below, instead of one message per level-up. Safe as a plain
+    // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
+    val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
 
     // gather guild icons data for online player list
     val newDeaths = characterResponses.flatMap {
@@ -592,7 +595,7 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
                         showNeutralLevels, showAlliesLevels, showEnemiesLevels, onlinePlayer.level, minimumLevel)
                       if (levelTracker.shouldRecord(charName, onlinePlayer.level, sheetLastLogin)) {
                         if (levelsCheck) {
-                          sendMessageWithRateLimit(levelsTextChannel, message = webhookMessage)
+                          levelUpBuffer.getOrElseUpdate(levelsTextChannel.getId, (levelsTextChannel, ListBuffer.empty[String]))._2 += webhookMessage
                         }
                       }
                     }
@@ -622,6 +625,15 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
         }
       case Left(errorMessage) => None
     }
+
+    // Flush this tick's buffered level-ups: one combined message per channel instead
+    // of one message per level-up, chunked to stay within Discord's message length limit.
+    levelUpBuffer.values.foreach { case (channel, lines) =>
+      presentation.ListEmbeds.pack(lines.toList, 1900).foreach { chunk =>
+        sendMessageWithRateLimit(channel, message = chunk.stripPrefix("\n"))
+      }
+    }
+
     // update online lists
     if (discordsData.contains(world)) {
       val discordsList = discordsData(world)
@@ -1374,16 +1386,6 @@ class TibiaBot(world: String)(implicit system: ActorSystem, ex: ExecutionContext
       getCharacterData via
       scanForDeaths via
       postToDiscordAndCleanUp to Sink.ignore
-
-  // Message queue for rate limiting
-  // Outbound message delivery: rate-limited and drained one message per tick.
-  private val outboundSender = new discord.RateLimitedSender(drain => {
-    val cancellable = mat.system.scheduler.scheduleWithFixedDelay(
-      0.seconds,
-      Config.messageDelayMs.milliseconds
-    )(new Runnable { def run(): Unit = drain() })(mat.system.dispatcher)
-    () => cancellable.cancel()
-  }, outboundQueueCapacity)
 
   def canPing(channelId: String): Boolean = {
       pingCleanup()

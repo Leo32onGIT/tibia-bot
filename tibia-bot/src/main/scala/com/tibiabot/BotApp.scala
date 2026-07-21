@@ -60,6 +60,18 @@ object BotApp extends App with StrictLogging {
 
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
+
+  // Shared, bot-wide background lane for low-priority outbound sends (activity/admin
+  // embeds, batched level-ups, boosted-DM notifications) — one instance across every
+  // world stream so the aggregate send rate is bounded bot-wide, not per world. Deaths
+  // and the boosted-channel server-save post are top priority and bypass this entirely.
+  val outboundSender = new discord.RateLimitedSender(drain => {
+    val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
+      0.seconds,
+      Config.globalMessageDelayMs.milliseconds
+    )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
+    () => cancellable.cancel()
+  })
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
@@ -377,17 +389,21 @@ object BotApp extends App with StrictLogging {
                   }
                 }
                 if (matchedNotification) {
-                  val user: User = discordGateway.retrieveUser(entry.user)
-                  if (user != null) {
-                    try {
-                      user.openPrivateChannel().queue { privateChannel =>
-                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
-                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                        )).queue()
+                  // Low priority (per-user DM burst) — goes through the shared background
+                  // lane so it can't compete with deaths/boosted-channel posts for REST slots.
+                  outboundSender.enqueue { () =>
+                    val user: User = discordGateway.retrieveUser(entry.user)
+                    if (user != null) {
+                      try {
+                        user.openPrivateChannel().queue { privateChannel =>
+                          val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                          privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
+                            Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                          )).queue()
+                        }
+                      } catch {
+                        case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
                       }
-                    } catch {
-                      case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
                     }
                   }
                 }
@@ -543,7 +559,7 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get).stream.run(), List(discords))
+            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender).stream.run(), List(discords))
           }
         }
       }
@@ -563,7 +579,7 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName).stream.run(), discordsList)
+        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 3 seconds
       }
       startUpComplete = true
