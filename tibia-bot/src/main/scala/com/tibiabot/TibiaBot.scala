@@ -1294,7 +1294,10 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
 
       // Pack the lines into embed-sized descriptions, then reconcile against the
       // existing messages: edit in place where one exists, otherwise post. Only
-      // the trailing embed carries the "Last updated" footer + timestamp.
+      // the trailing embed carries the "Last updated" footer + timestamp. Sends
+      // go through the shared background lane (outboundSender) — guilds sharing
+      // a world all become due in the same tick, so this smooths that burst
+      // instead of firing every channel's edit/send at once.
       val fields = presentation.OnlineListEmbeds.packFields(values)
       val lastIndex = fields.size - 1
       fields.zipWithIndex.foreach { case (field, currentMessage) =>
@@ -1306,9 +1309,22 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
           embed.setTimestamp(OffsetDateTime.now())
         }
         if (currentMessage < messages.size) {
-          messages.get(currentMessage).editMessageEmbeds(embed.build()).queue()
+          val message = messages.get(currentMessage)
+          outboundSender.enqueue { () =>
+            try {
+              message.editMessageEmbeds(embed.build()).queue()
+            } catch {
+              case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
+            }
+          }
         } else {
-          channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
+          outboundSender.enqueue { () =>
+            try {
+              channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
+            } catch {
+              case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
+            }
+          }
         }
       }
       if (lastIndex < messages.size - 1) {
