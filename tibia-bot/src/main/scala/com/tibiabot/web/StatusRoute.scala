@@ -12,7 +12,7 @@ import spray.json._
  * data source), both restricted to the bot owner. Authentication (which
  * Discord user is this) is [[DiscordAuth]]'s job; this class only adds the
  * authorization on top — a future gated route would reuse [[DiscordAuth]]
- * unchanged and swap in its own guard instead of [[requireOwner]].
+ * unchanged and swap in its own guard instead of `requireOwner`.
  */
 final class StatusRoute(
   discordAuth: DiscordAuth,
@@ -59,7 +59,7 @@ final class StatusRoute(
     val streams = streamSupervisor.snapshot
 
     val worldsJson = streams.keySet.union(worldSnapshots.keySet).toList.sorted.map { world =>
-      val snap = worldSnapshots.getOrElse(world, tracking.WorldSnapshot(0, None, None, 0, 0, 0))
+      val snap = worldSnapshots.getOrElse(world, tracking.WorldSnapshot(0, None, None, 0, 0, 0, battleyeGreen = true, pvpType = ""))
       val discordsJson = streams.get(world).map(_.usedBy).getOrElse(Nil).map { d =>
         val guild = discordGateway.guildById(d.id)
         val name = Option(guild).map(_.getName).getOrElse("Unknown")
@@ -77,6 +77,8 @@ final class StatusRoute(
         "deaths15m" -> JsNumber(snap.deaths),
         "levels15m" -> JsNumber(snap.levels),
         "edits15m" -> JsNumber(snap.edits),
+        "battleyeGreen" -> JsBoolean(snap.battleyeGreen),
+        "pvpType" -> JsString(snap.pvpType),
         "discords" -> JsArray(discordsJson.toVector)
       )
     }

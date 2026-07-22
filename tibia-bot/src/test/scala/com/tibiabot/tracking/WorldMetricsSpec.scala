@@ -18,19 +18,24 @@ class WorldMetricsSpec extends AnyFunSuite with Matchers {
     snap.edits shouldBe 0
   }
 
-  test("recordPoll overwrites population and poll timing") {
+  test("recordPoll overwrites population, poll timing, battleye and pvp type") {
     val m = new WorldMetrics
     val now = Instant.now()
     val next = now.plusSeconds(60)
-    m.recordPoll(150, now, next)
+    m.recordPoll(150, now, next, battleyeGreen_ = true, pvpType_ = "Open PvP")
     val snap = m.snapshot()
     snap.population shouldBe 150
     snap.lastPollAt shouldBe Some(now)
     snap.nextPollAt shouldBe Some(next)
+    snap.battleyeGreen shouldBe true
+    snap.pvpType shouldBe "Open PvP"
 
     // a later poll overwrites, it does not accumulate
-    m.recordPoll(140, next, next.plusSeconds(60))
-    m.snapshot().population shouldBe 140
+    m.recordPoll(140, next, next.plusSeconds(60), battleyeGreen_ = false, pvpType_ = "Optional PvP")
+    val snap2 = m.snapshot()
+    snap2.population shouldBe 140
+    snap2.battleyeGreen shouldBe false
+    snap2.pvpType shouldBe "Optional PvP"
   }
 
   test("increments accumulate independently per counter") {
@@ -50,7 +55,7 @@ class WorldMetricsSpec extends AnyFunSuite with Matchers {
   test("resetCounters zeroes deaths/levels/edits but leaves population and poll timing alone") {
     val m = new WorldMetrics
     val now = Instant.now()
-    m.recordPoll(200, now, now.plusSeconds(60))
+    m.recordPoll(200, now, now.plusSeconds(60), battleyeGreen_ = true, pvpType_ = "Open PvP")
     m.incrementDeaths()
     m.incrementLevels()
     m.incrementEdits()

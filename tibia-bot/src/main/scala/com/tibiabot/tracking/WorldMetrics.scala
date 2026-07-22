@@ -9,7 +9,9 @@ final case class WorldSnapshot(
   nextPollAt: Option[Instant],
   deaths: Long,
   levels: Long,
-  edits: Long
+  edits: Long,
+  battleyeGreen: Boolean,
+  pvpType: String
 )
 
 /** Per-world counters and poll timing for the monitoring dashboard. Population
@@ -24,14 +26,22 @@ final class WorldMetrics {
   @volatile private var population: Int = 0
   @volatile private var lastPollAt: Option[Instant] = None
   @volatile private var nextPollAt: Option[Instant] = None
+  // A world's BattlEye status and PvP type essentially never change once it
+  // exists, but they're only known from the same poll response population
+  // comes from, so they're overwritten alongside it rather than configured
+  // separately.
+  @volatile private var battleyeGreen: Boolean = true
+  @volatile private var pvpType: String = ""
   private var deaths: Long = 0
   private var levels: Long = 0
   private var edits: Long = 0
 
-  def recordPoll(currentPopulation: Int, polledAt: Instant, nextPollAt_ : Instant): Unit = {
+  def recordPoll(currentPopulation: Int, polledAt: Instant, nextPollAt_ : Instant, battleyeGreen_ : Boolean, pvpType_ : String): Unit = {
     population = currentPopulation
     lastPollAt = Some(polledAt)
     nextPollAt = Some(nextPollAt_)
+    battleyeGreen = battleyeGreen_
+    pvpType = pvpType_
   }
 
   def incrementDeaths(): Unit = synchronized { deaths += 1 }
@@ -45,6 +55,6 @@ final class WorldMetrics {
   }
 
   def snapshot(): WorldSnapshot = synchronized {
-    WorldSnapshot(population, lastPollAt, nextPollAt, deaths, levels, edits)
+    WorldSnapshot(population, lastPollAt, nextPollAt, deaths, levels, edits, battleyeGreen, pvpType)
   }
 }

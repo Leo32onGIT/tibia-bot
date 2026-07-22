@@ -106,7 +106,14 @@ class TibiaBot(
       // get online data with durations (carries over guild/duration/flag, drops log-offs)
       onlineTracker.updateFromOnline(online.map(player => (player.name, player.level.toInt, player.vocation)), now)
       val onlineWithVocLvlAndDuration = onlineTracker.snapshot
-      worldMetrics.recordPoll(onlineWithVocLvlAndDuration.size, now.toInstant, now.plusSeconds(60).toInstant)
+      // battleye_date is the literal string "release" for a world protected since
+      // launch (green BattlEye); any actual date means protection was added later
+      // (yellow BattlEye) — confirmed against the live TibiaData API, not documented.
+      worldMetrics.recordPoll(
+        onlineWithVocLvlAndDuration.size, now.toInstant, now.plusSeconds(60).toInstant,
+        battleyeGreen_ = worldResponse.world.battleye_date == "release",
+        pvpType_ = worldResponse.world.pvp_type
+      )
 
       // Update online list table every 5 minutes for killer level lookups
       if (now.isAfter(onlineListTableUpdateTimer.plusMinutes(5))) {
