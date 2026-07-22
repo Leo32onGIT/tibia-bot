@@ -18,6 +18,13 @@
     --good: #3ecf8e;
     --warn: #e0a93e;
     --bad: #e0563e;
+    /* Dedicated 4-step scale for the sidebar edits heat map — kept separate
+       from --warn/--bad above so retuning it doesn't also recolor the
+       deaths/edits icons and tag pills that reuse those. */
+    --heat-great: #3ecf8e;
+    --heat-good: #e0c23e;
+    --heat-medium: #cf7a2e;
+    --heat-hot: #a8362a;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -177,10 +184,10 @@ function sortedWorlds(worlds) {
 // bands rather than relative-to-max, so "great" always means the same thing
 // regardless of how busy the bot is overall.
 function heatColor(edits) {
-  if (edits < 50) return 'var(--good)';
-  if (edits < 100) return 'var(--accent)';
-  if (edits < 250) return 'var(--warn)';
-  return 'var(--bad)';
+  if (edits < 50) return 'var(--heat-great)';
+  if (edits < 100) return 'var(--heat-good)';
+  if (edits < 250) return 'var(--heat-medium)';
+  return 'var(--heat-hot)';
 }
 
 function renderSidebar(worlds) {
