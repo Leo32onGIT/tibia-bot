@@ -119,6 +119,9 @@
   .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; }
   .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; }
   .discord-item i { color: var(--muted); font-size: 14px; }
+  .discord-item .owner-icon { color: var(--warn); font-size: 13px; }
+  .discord-item .sep { color: var(--muted); }
+  .discord-item .owner { color: var(--muted); }
   .discord-item .gid { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 
   .lanes { display: flex; gap: 24px; padding: 16px; flex-wrap: wrap; }
@@ -232,7 +235,7 @@ function renderDetail(worlds) {
   `;
 
   document.getElementById('detail-discords').innerHTML = world.discords.length
-    ? world.discords.map(d => `<div class="discord-item"><i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="gid">${d.id}</span></div>`).join('')
+    ? world.discords.map(d => `<div class="discord-item"><i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`).join('')
     : '<div class="muted">No discords tracking this world</div>';
 }
 

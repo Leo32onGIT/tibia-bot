@@ -63,7 +63,11 @@ final class StatusRoute(
       val discordsJson = streams.get(world).map(_.usedBy).getOrElse(Nil).map { d =>
         val guild = discordGateway.guildById(d.id)
         val name = Option(guild).map(_.getName).getOrElse("Unknown")
-        JsObject("id" -> JsString(d.id), "name" -> JsString(name))
+        // getOwner is a cached lookup (no REST call) and can be null if the
+        // owner isn't in JDA's member cache — same fallback used elsewhere
+        // in this codebase (ChannelService.scala) for the same reason.
+        val owner = Option(guild).flatMap(g => Option(g.getOwner)).map(_.getEffectiveName).getOrElse("Unknown")
+        JsObject("id" -> JsString(d.id), "name" -> JsString(name), "owner" -> JsString(owner))
       }
       JsObject(
         "name" -> JsString(world),
