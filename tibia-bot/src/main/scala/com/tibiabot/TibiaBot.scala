@@ -168,6 +168,11 @@ class TibiaBot(
     // message per channel below, instead of one message per level-up. Safe as a plain
     // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
     val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
+    // Names collected alongside levelUpBuffer purely for one combined RecentEvents
+    // row per world per tick (see the flush below) — every channel in
+    // levelUpBuffer already belongs to this same world, since a TibiaBot only
+    // ever tracks one.
+    val levelUpNames = ListBuffer.empty[String]
 
     val newDeaths = characterResponses.flatMap {
       case Right(char) =>
@@ -582,6 +587,7 @@ class TibiaBot(
                       if (levelTracker.shouldRecord(charName, onlinePlayer.level, sheetLastLogin)) {
                         if (levelsCheck) {
                           levelUpBuffer.getOrElseUpdate(levelsTextChannel.getId, (levelsTextChannel, ListBuffer.empty[String]))._2 += webhookMessage
+                          levelUpNames += charName
                         }
                       }
                     }
@@ -615,13 +621,16 @@ class TibiaBot(
     // Flush this tick's buffered level-ups: one combined message per channel instead
     // of one message per level-up, chunked to stay within Discord's message length limit.
     levelUpBuffer.values.foreach { case (channel, lines) =>
-      lines.foreach { line =>
-        worldMetrics.incrementLevels()
-        recentEvents.record("level-up", world, line)
-      }
+      lines.foreach(_ => worldMetrics.incrementLevels())
       presentation.ListEmbeds.pack(lines.toList, 1900).foreach { chunk =>
         sendMessageWithRateLimit(channel, "level-up", message = chunk.stripPrefix("\n"))
       }
+    }
+    // One combined RecentEvents row per world per tick, not one per character —
+    // a burst of level-ups would otherwise flood the dashboard's activity feed.
+    if (levelUpNames.nonEmpty) {
+      val summary = if (levelUpNames.size == 1) "1 player leveled up" else s"${levelUpNames.size} players leveled up"
+      recentEvents.record("level-up", world, summary)
     }
 
     // update online lists
