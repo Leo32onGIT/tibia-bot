@@ -8,8 +8,7 @@ import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.mutable.ListBuffer
 import scala.util.Try
 
-/** JDBC implementation of GalthenRepository. Bodies moved verbatim from BotApp's
- *  getGalthenTable/addGalthen/delGalthen/delAllGalthen, routed through
+/** JDBC implementation of GalthenRepository, routed through
  *  JdbcSupport.withConnection so the connection is always released. */
 final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extends GalthenRepository {
 
@@ -17,13 +16,11 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.createStatement()
 
-      // Check if the table already exists in bot_configuration
       val tableExistsQuery =
         statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'satchel'")
       val tableExists = tableExistsQuery.next()
       tableExistsQuery.close()
 
-      // Create the table if it doesn't exist
       if (!tableExists) {
         val createListTable =
           s"""CREATE TABLE satchel (
@@ -82,7 +79,6 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
       val resultSet = selectStatement.executeQuery()
 
       if (resultSet.next()) {
-        // Update existing row
         val updateStatement = conn.prepareStatement(
           s"""
              |UPDATE satchel
@@ -96,7 +92,6 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
         updateStatement.executeUpdate()
         updateStatement.close()
       } else {
-        // Insert new row
         val insertStatement = conn.prepareStatement(
           s"""
              |INSERT INTO satchel(userid, time, tag)

@@ -6,10 +6,8 @@ import com.tibiabot.persistence.{ConnectionProvider, WorldConfigRepository}
 import scala.collection.mutable.ListBuffer
 import scala.util.{Failure, Success, Try}
 
-/** JDBC implementation of WorldConfigRepository. Bodies moved verbatim from
- *  BotApp's worldConfig/worldCreateConfig/worldRetrieveConfig/worldRemoveConfig,
- *  with the Guild parameter reduced to guildId. `mergedWorlds` (Config.mergedWorlds)
- *  is injected rather than read from Config so this stays decoupled from config
+/** JDBC implementation of WorldConfigRepository. `mergedWorlds` is injected
+ *  rather than read from Config directly, so this stays decoupled from config
  *  loading and testable. */
 final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, mergedWorlds: List[String]) extends WorldConfigRepository {
 
@@ -17,52 +15,42 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
 
-    // Check if the column already exists in the table
     val columnExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'exiva_list'")
     val columnExists = columnExistsQuery.next()
     columnExistsQuery.close()
 
-    // Add the column if it doesn't exist
     if (!columnExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'false'")
     }
 
-    // Check if the column already exists in the table
     val allyPkExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'allypk_role'")
     val allyPkExists = allyPkExistsQuery.next()
     allyPkExistsQuery.close()
 
-    // Add the allyPk if it doesn't exist
     if (!allyPkExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN allypk_role VARCHAR(255) DEFAULT '0'")
     }
 
-    // Check if the column already exists in the table
     val masslogExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'masslog_role'")
     val masslogExists = masslogExistsQuery.next()
     masslogExistsQuery.close()
 
-    // Add the allyPk if it doesn't exist
     if (!masslogExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN masslog_role VARCHAR(255) DEFAULT '0'")
     }
 
-    // Check if the column already exists in the table
     val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
     val activityExists = activityExistsQuery.next()
     activityExistsQuery.close()
 
-    // Add the column if it doesn't exist
     if (!activityExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN activity_channel VARCHAR(255) DEFAULT '0'")
     }
 
-    // Check if the column already exists in the table
     val onlineCombinedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'online_combined'")
     val onlineCombinedExists = onlineCombinedExistsQuery.next()
     onlineCombinedExistsQuery.close()
 
-    // Add the column if it doesn't exist
     if (!onlineCombinedExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
     }
@@ -98,7 +86,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
       val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
 
-      // Ignore merged worlds (they are now effectively inactive and ignored but their data still exists in the db)
+      // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
         results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined)
       }
@@ -207,8 +195,8 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       configMap += ("activity_channel" -> result.getString("activity_channel"))
 
       val combinedOnlineValue: String = Try(result.getString("combined_online")) match {
-        case Success(value) => value // Column exists, use the retrieved value
-        case Failure(_) => "false" // Column doesn't exist, use the default value
+        case Success(value) => value
+        case Failure(_) => "false"
       }
       configMap += ("combined_online" -> combinedOnlineValue)
     }

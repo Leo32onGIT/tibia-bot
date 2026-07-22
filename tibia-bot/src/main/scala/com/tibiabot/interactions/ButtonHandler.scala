@@ -297,23 +297,19 @@ object ButtonHandler extends StrictLogging {
         }
       }
     } else if (button.startsWith("death_screenshot_")) {
-      // Handle death screenshot button clicks
       val buttonParts = button.split("_")
       if (buttonParts.length >= 4) {
         val charName = buttonParts(2)
         val deathTime = buttonParts(3).toLong
         val messageId = event.getInteraction.getMessage.getId
 
-        // Get world from guild configuration
         val worldOpt = streamState.worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
 
         worldOpt match {
           case Some(world) =>
-            // Store pending screenshot request
             val pendingKey = s"${event.getUser.getId}_${guild.getId}"
             pendingScreenshots.put(pendingKey, PendingScreenshot(charName, deathTime, messageId, guild.getId, world, event.getUser.getId, event.getChannel.getId))
 
-            // Send DM to user
             event.getUser.openPrivateChannel().queue(privateChannel => {
               val embed = new EmbedBuilder()
                 .setColor(presentation.Embeds.BrandColor)
@@ -325,13 +321,12 @@ object ButtonHandler extends StrictLogging {
 
               privateChannel.sendMessageEmbeds(embed).queue(
                 _ => {
-                  // Confirm to user that DM was sent
                   event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](${BotApp.charUrl(charName)})**.").setEphemeral(true).queue()
                 },
                 error => {
-                  // Fallback if DM fails
+                  // DM failed to send: fall back to prompting in-channel
                   val fallbackEmbed = new EmbedBuilder()
-                    .setColor(16711680) // Red color
+                    .setColor(16711680) // red
                     .setTitle(s"Upload Screenshot for ${charName}")
                     .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, Webp) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
                                   s"The screenshot will be added to the death message for **[${charName}](${BotApp.charUrl(charName)})**.")
@@ -343,7 +338,7 @@ object ButtonHandler extends StrictLogging {
               )
             })
 
-            // Set a timeout to remove the pending request after 5 minutes
+            // Expire the pending request after 5 minutes
             scala.concurrent.ExecutionContext.global.execute(() => {
               Thread.sleep(300000) // 5 minutes
               pendingScreenshots.remove(pendingKey)
@@ -369,7 +364,6 @@ object ButtonHandler extends StrictLogging {
         val messageId = event.getInteraction.getMessage.getId
         val currentIndex = buttonParts(5).toInt
 
-        // Get world from guild configuration
         val worldOpt = streamState.worldsData.get(guild.getId).flatMap(_.headOption).map(_.name)
 
         worldOpt.foreach { world =>
@@ -384,7 +378,7 @@ object ButtonHandler extends StrictLogging {
 
             val currentScreenshot = screenshots(newIndex)
 
-            // Preserve the original death message embed and just update the image
+            // Copy the existing death embed, only swapping the image/footer
             val originalEmbed = event.getMessage.getEmbeds.get(0)
             val embed = new EmbedBuilder(originalEmbed)
               .setImage(currentScreenshot.screenshotUrl)
@@ -424,19 +418,15 @@ object ButtonHandler extends StrictLogging {
         val user = event.getUser
         val originalMessage = event.getMessage
 
-        // Get current screenshots to find the URL of the screenshot to delete
         val screenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
         if (screenshots.nonEmpty && currentIndex < screenshots.length) {
           val screenshotToDelete = screenshots(currentIndex)
 
-          // Attempt to delete the screenshot
           if (BotApp.deleteDeathScreenshot(guild.getId, guild.getName, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
-            // Successfully deleted, update the embed
             val updatedScreenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
             val embeds = originalMessage.getEmbeds
 
             if (embeds.size() > 0 && updatedScreenshots.nonEmpty) {
-              // Still have screenshots, show another one
               val newIndex = Math.min(currentIndex, updatedScreenshots.length - 1)
               val newCurrentScreenshot = updatedScreenshots(newIndex)
 
@@ -463,7 +453,7 @@ object ButtonHandler extends StrictLogging {
 
               event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(components: _*).queue()
             } else {
-              // No more screenshots, remove image and show only add button
+              // No screenshots left: drop the image and show only the add button
               val originalEmbed = embeds.get(0)
               val updatedEmbed = new EmbedBuilder(originalEmbed)
                 .setImage(null)
@@ -474,7 +464,7 @@ object ButtonHandler extends StrictLogging {
               event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(addButton: _*).queue()
             }
           } else {
-            // Failed to delete - not the author or other error
+            // deleteDeathScreenshot rejects anyone but the uploader or a server admin
             event.getHook.sendMessage(s"${Config.noEmoji} You can only delete screenshots you uploaded.").setEphemeral(true).queue()
           }
         } else {

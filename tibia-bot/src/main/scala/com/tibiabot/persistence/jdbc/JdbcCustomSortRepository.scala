@@ -6,9 +6,7 @@ import com.tibiabot.persistence.{ConnectionProvider, CustomSortRepository}
 import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of CustomSortRepository. Bodies moved verbatim from
- *  BotApp's customSortConfig and the *OnlineListCategory*ToDatabase methods,
- *  with the Guild parameter reduced to guildId and routed through
+/** JDBC implementation of CustomSortRepository, routed through
  *  JdbcSupport.withConnection so the connection is always released. */
 final class JdbcCustomSortRepository(connectionProvider: ConnectionProvider) extends CustomSortRepository {
 
@@ -16,12 +14,10 @@ final class JdbcCustomSortRepository(connectionProvider: ConnectionProvider) ext
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
       val statement = conn.createStatement()
 
-      // Check if the table already exists in bot_configuration
       val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'online_list_categories'")
       val tableExists = tableExistsQuery.next()
       tableExistsQuery.close()
 
-      // Create the table if it doesn't exist
       if (!tableExists) {
         val createCustomSortTable =
           s"""CREATE TABLE online_list_categories (

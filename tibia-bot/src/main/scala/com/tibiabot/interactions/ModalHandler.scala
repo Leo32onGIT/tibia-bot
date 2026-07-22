@@ -65,7 +65,8 @@ object ModalHandler {
                  editedMessage = presentation.GalthenEmbeds.truncate(fullList)
                }
              }
-           case None => //
+           case None =>
+
          }
          val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **added**."
          newEmbed.setDescription(editedMessage + replyMessage)

@@ -4,7 +4,7 @@ import com.tibiabot.{BotApp, Config}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
-/** Handles `/exiva`: lists recent deaths for exiva tracking. */
+/** Handles `/exiva`: toggles whether the exiva list is shown on death posts. */
 object ExivaCommands {
   def handle(event: SlashCommandInteractionEvent): Unit = {
     event.getInteraction.getSubcommandName match {

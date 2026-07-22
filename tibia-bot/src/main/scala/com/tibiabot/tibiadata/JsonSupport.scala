@@ -28,7 +28,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
 
   implicit val housesFormat: RootJsonFormat[Houses] = jsonFormat4(Houses)
   implicit val guildFormat: RootJsonFormat[Guild] = jsonFormat2(Guild)
-  // required because TibiaData returns an empty object instead of null when a player has no guild
+  // TibiaData returns an empty object instead of null when a player has no guild
   implicit val optGuildFormat: RootJsonFormat[Option[Guild]] = new RootJsonFormat[Option[Guild]] {
     override def read(json: JsValue): Option[Guild] = json match {
       case JsObject.empty => None
@@ -41,7 +41,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val killersFormat: RootJsonFormat[Killers] = jsonFormat4(Killers)
   implicit val deathsFormat: RootJsonFormat[Deaths] = jsonFormat5(Deaths)
   implicit val accountInformationFormat: RootJsonFormat[AccountInformation] = jsonFormat3(AccountInformation)
-  // required because TibiaData returns an empty object instead of null when a player has no account info
+  // TibiaData returns an empty object instead of null when a player has no account info
   implicit val optAccountInformationFormat: RootJsonFormat[Option[AccountInformation]] = new RootJsonFormat[Option[AccountInformation]] {
     override def read(json: JsValue): Option[AccountInformation] = json match {
       case JsObject.empty => None
@@ -74,7 +74,8 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val highscoresResponseFormat: RootJsonFormat[HighscoresResponse] = jsonFormat2(HighscoresResponse)
 }
 
-// This is needed because you can't just call json.convertTo[String] inside strFormat above because you get a stack overflow because it calls back on itself
+// Calling json.convertTo[String] directly inside strFormat.read would recurse into
+// itself and stack-overflow, so the default String format is resolved here instead.
 object JsonConvertNoCustomImplicits extends SprayJsonSupport with DefaultJsonProtocol {
   def convert(json: JsValue): String = json.convertTo[String]
 }

@@ -130,7 +130,6 @@ object BotApp extends App with StrictLogging {
   // single read-side seam over JDA (guild/user lookups, identity, presence)
   val discordGateway: discord.DiscordGateway = new discord.JdaDiscordGateway(jda)
 
-  // get the discord servers the bot is in
   private val guilds: List[Guild] = discordGateway.guilds
 
   // per-world stream lifecycle
@@ -200,10 +199,11 @@ object BotApp extends App with StrictLogging {
   def modifyCharacterCache(f: Map[String, ZonedDateTime] => Map[String, ZonedDateTime]): Unit =
     streamState.modifyCharacterCache(f)
 
-  // R1: warm the Date-header character cache from the last Redis snapshot so a
-  // restart doesn't re-baseline ~8000 characters against the rate-limited API,
-  // then snapshot it every 60s. Whole-map snapshot keeps the per-character hot
-  // path off Redis entirely; no-op + empty load when Redis is disabled.
+  // Warm the Date-header character cache from the last Redis snapshot so a
+  // restart doesn't re-baseline every character against the rate-limited API,
+  // then snapshot it every 60s (configurable). Whole-map snapshot keeps the
+  // per-character hot path off Redis entirely; no-op + empty load when Redis
+  // is disabled.
   private val charCachePersistence =
     new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
   charCachePersistence.load().foreach { loaded =>
@@ -215,10 +215,9 @@ object BotApp extends App with StrictLogging {
   private val snapshotInterval = Config.Cache.characterSnapshotInterval
   actorSystem.scheduler.scheduleWithFixedDelay(snapshotInterval, snapshotInterval)(() => { charCachePersistence.save(characterCache); () })(ex)
 
-  // Per-guild channel/role setup lifecycle (extraction of the channel ops from
-  // BotApp is in progress; currently holds discordJoin/discordLeave and
-  // createChannels/`setup`). State mutation for join/leave stays in BotApp via
-  // the forgetGuild callback; createChannels reads/writes streamState directly.
+  // Per-guild channel/role setup lifecycle (create/repair/remove, join/leave).
+  // State mutation for join/leave stays in BotApp via the forgetGuild callback;
+  // ChannelService reads/writes streamState directly for everything else.
   val channelService = new setup.ChannelService(
     streamSupervisor,
     schemaInitializer,
@@ -255,7 +254,6 @@ object BotApp extends App with StrictLogging {
   @volatile var dreamScarLastCheck: String = System.currentTimeMillis().toString
   @volatile var dromeTime = domain.time.DromeCycle.initial // 27 May 2026 server save - increment 2 weeks from here
 
-  // Boosted Boss
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
   val bossFuture: Future[List[String]] = boostedBosses.map {
     case Right(boostedResponse) =>
@@ -266,7 +264,6 @@ object BotApp extends App with StrictLogging {
       List.empty[String]
   }
 
-  // Combine both futures and send the message
   private var updateOnOdd = 0
 
   val bossesFutures: Future[List[String]] = for {
@@ -278,16 +275,15 @@ object BotApp extends App with StrictLogging {
   // Slash command schemas live in commands.CommandSchemas
   lazy val commands = com.tibiabot.commands.CommandSchemas.commands
 
-  // create the deaths/levels cache db
   createCacheDatabase()
 
-  // initialize the database
+  // Register slash commands per guild: the bot's own support servers get the
+  // extra /admin command set, every other guild gets the regular set.
   guilds.foreach{g =>
     if (g.getIdLong == 867319250708463628L || g.getIdLong == 1082484147492237515L) { // Violent Bot Discords
       val adminCommands = com.tibiabot.commands.CommandSchemas.adminCommands
       g.updateCommands().addCommands(adminCommands.asJava).complete()
     } else {
-      // update the commands
       g.updateCommands().addCommands(commands.asJava).complete()
     }
   }
@@ -308,8 +304,9 @@ object BotApp extends App with StrictLogging {
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
   // body makes blocking API calls at server save — can't pile up behind itself.
   actorSystem.scheduler.scheduleWithFixedDelay(60.seconds, 30.seconds)(() => {
-    // set activity status
-    // only do this every second cycle
+    // Rotate the watching-status text and run the periodic cache cleanups
+    // (deaths/levels/hunted-list/galthen/online-list) once every 10 ticks
+    // (~5 minutes at the 30s tick interval), not every tick.
     if (updateOnOdd >= 10) {
       try {
         val randomActivity = List(
@@ -329,7 +326,7 @@ object BotApp extends App with StrictLogging {
       cleanHuntedList()
       galthenService.cleanExpired()
       cleanOnlineListCache(30)
-      updateOnOdd = 0 // Toggle the flag
+      updateOnOdd = 0
     } else {
       updateOnOdd += 1
     }
@@ -356,7 +353,6 @@ object BotApp extends App with StrictLogging {
           val bossChanged = boostedBossAndCreature.bossChanged
           val creatureChanged = boostedBossAndCreature.creatureChanged
 
-          // Boosted Boss
           val boostedBoss: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
           val bossEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedBoss.map {
             case Right(boostedResponse) =>
@@ -374,7 +370,6 @@ object BotApp extends App with StrictLogging {
               throw new Exception(s"Failed to load boosted boss.")
           }
 
-          // Boosted Creature
           val boostedCreature: Future[Either[String, CreatureResponse]] = tibiaDataClient.getBoostedCreature()
           val creatureEmbedFuture: Future[(MessageEmbed, Boolean, String)] = boostedCreature.map {
             case Right(creatureResponse) =>
@@ -401,7 +396,6 @@ object BotApp extends App with StrictLogging {
           combinedFutures.map { boostedInfoList =>
             if (bossChanged == "1" && creatureChanged == "1") {
               boostedService.boostedMonsterUpdate("", "", "0", "0")
-              // Do something if at least one of the embeds changed
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
               val notificationsList: List[BoostedStamp] = boostedService.boostedAll()
               notificationsList.foreach { entry =>
@@ -462,7 +456,6 @@ object BotApp extends App with StrictLogging {
                         rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
                         rashidEmbed.setColor(BrandColor)
 
-                        // Drome Timer
                         val now = Instant.now()
                         val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
                         val dromeEmbed = new EmbedBuilder()
@@ -521,35 +514,27 @@ object BotApp extends App with StrictLogging {
   private def loadGuildState(g: Guild): List[Worlds] = {
     val guildId = g.getId
 
-    // get hunted Players
     val huntedPlayers = playerConfig(g, "hunted_players")
     modifyHuntedPlayersData(_ + (guildId -> huntedPlayers))
 
-    // get allied Players
     val alliedPlayers = playerConfig(g, "allied_players")
     modifyAlliedPlayersData(_ + (guildId -> alliedPlayers))
 
-    // get hunted guilds
     val huntedGuilds = guildConfig(g, "hunted_guilds")
     modifyHuntedGuildsData(_ + (guildId -> huntedGuilds))
 
-    // get allied guilds
     val alliedGuilds = guildConfig(g, "allied_guilds")
     modifyAlliedGuildsData(_ + (guildId -> alliedGuilds))
 
-    // get worlds
     val worldsInfo = worldConfig(g)
     modifyWorldsData(_ + (guildId -> worldsInfo))
 
-    // get tracked activity characters
     val activityInfo = activityConfig(g, "tracked_activity")
     modifyActivityData(_ + (guildId -> activityInfo))
 
-    // get customSort Data
     val customSortInfo = customSortConfig(g, "online_list_categories")
     modifyCustomSortData(_ + (guildId -> customSortInfo))
 
-    // set default activityCommandBlocker state
     modifyActivityCommandBlocker(_ + (guildId -> false))
 
     worldsInfo
@@ -587,7 +572,6 @@ object BotApp extends App with StrictLogging {
         }
       }
     } else {
-      // build guild specific data map
       guilds.foreach{g =>
         val guildId = g.getId
 
@@ -603,7 +587,7 @@ object BotApp extends App with StrictLogging {
       }
       discordsData.foreach { case (worldName, discordsList) =>
         streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender).stream.run(), discordsList)
-        Thread.sleep(5500) // space each stream out 3 seconds
+        Thread.sleep(5500) // space each stream out 5.5 seconds
       }
       startUpComplete = true
     }
@@ -687,14 +671,6 @@ object BotApp extends App with StrictLogging {
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
 
-  /** Generic guarded update for a single per-world setting stored on `Worlds`:
-   *  returns an "already set" embed if the value is unchanged or the world
-   *  isn't configured (currentValue yields None), otherwise updates the
-   *  in-memory cache, persists, posts an admin-log entry, and returns a
-   *  "now set" embed. Used by the toggle-shaped world settings (auto-hunt
-   *  detection, deaths/levels visibility, exiva list, minimum level).
-   *  Settings with additional side effects (e.g. fullbless level, which also
-   *  edits a live Discord embed) implement their own, not this helper. */
   private def customSortConfig(guild: Guild, query: String): List[CustomSort] =
     customSortRepository.getAll(guild.getId)
 

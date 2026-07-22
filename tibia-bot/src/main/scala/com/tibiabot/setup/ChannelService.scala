@@ -24,12 +24,11 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 
-/** Per-guild channel/role setup lifecycle, being extracted from BotApp
- *  incrementally. Currently holds the guild-join/leave handlers and
- *  `createChannels` (`/setup`); `repairChannel`/`removeChannels` will move
- *  here next. State mutation for join/leave stays in BotApp via the
- *  `forgetGuild` callback; `createChannels` reads/writes `streamState`
- *  directly since it now lives here.
+/** Per-guild channel/role setup lifecycle, extracted from BotApp. Holds the
+ *  guild-join/leave handlers plus the /setup, /repair and /remove channel
+ *  management (`createChannels`, `repairChannel`, `removeChannels`), all of
+ *  which read/write `streamState` directly. State mutation for join/leave
+ *  itself stays in BotApp via the `forgetGuild` callback.
  *
  *  @param forgetGuild         drops a guild's in-memory state (worldsData/discordsData)
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
@@ -93,7 +92,8 @@ final class ChannelService(
   }
 
   /** Reuse the guild's existing role of this name, or create it with the given
-   *  colour. Used by /setup and /repair to (re)build the per-world poke roles. */
+   *  colour. Used by /setup only; /repair looks up roles by stored id instead
+   *  and creates its own replacements inline if they're missing. */
   private def getOrCreateRole(guild: Guild, name: String, color: Color): Role = {
     val existing = guild.getRolesByName(name, true)
     if (!existing.isEmpty) existing.get(0)
@@ -101,8 +101,9 @@ final class ChannelService(
   }
 
   /** Apply the standard per-world channel/category permissions: grant the bot
-   *  the channel-management set and deny @everyone the ability to post. Used for
-   *  the world category and each world channel in /setup and /repair. */
+   *  the channel-management set and deny @everyone the ability to post. Used
+   *  for the world category and each world channel by /setup, /repair, and
+   *  /onlinelist whenever they (re)create world channels. */
   def grantWorldPerms(entity: IPermissionContainer, botRole: Role, publicRole: Role): Unit = {
     entity.upsertPermissionOverride(botRole)
       .grant(Permission.VIEW_CHANNEL)
@@ -140,7 +141,8 @@ final class ChannelService(
 
   /** Build the boosted boss + creature + server-save embeds and post them to a
    *  guild's notifications channel with the server-save button, storing the
-   *  message id so the daily scheduler can edit it later. Used when /setup or
+   *  message id (used by /repair to confirm the message still exists, and by
+   *  the daily scheduler to delete-and-replace it). Used when /setup or
    *  /repair (re)creates the notifications channel. */
   private def postBoostedNotifications(channel: TextChannel, guild: Guild, world: String): Unit = {
     val combinedFutures: Future[List[MessageEmbed]] = for {
@@ -180,7 +182,6 @@ final class ChannelService(
       .build()
 
   def createChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
-    // get guild & world information from the slash interaction
     val world: String = com.tibiabot.domain.WorldName.formal(event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim())
     // The role/category/channel/permission creation below is a long sequence of
     // blocking .complete() calls. If any one throws (missing permission, Discord
@@ -188,10 +189,9 @@ final class ChannelService(
     // would otherwise hang with no reply — so report it cleanly and point at /repair.
     val embedText = try {
       if (Config.worldList.contains(world)) {
-      // get guild id
       val guild = event.getGuild
 
-      // assume initial run on this server and attempt to create core databases
+      // no-op if the guild's database already exists (initGuild checks first)
       createConfigDatabase(guild)
 
       val botRole = guild.getBotRole
@@ -214,7 +214,7 @@ final class ChannelService(
           .complete()
         adminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategory).complete()
-        // restrict the channel so only roles with Permission.MANAGE_MESSAGES can write to the channels
+        // hide this channel from @everyone; only the bot can view/post
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_EMBED_LINKS).complete()
@@ -257,7 +257,7 @@ final class ChannelService(
           discordUpdateConfig(guild, "", adminChannel.getId, "", "", world)
         }
         if (boostedChannelCheck == null) {
-          // admin category still exists
+          // adminCategoryCheck is guaranteed non-null here (created above if missing)
           val boostedChannel = guild.createTextChannel("👑・ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴs", adminCategoryCheck).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
           boostedChannel.upsertPermissionOverride(botRole).grant(Permission.VIEW_CHANNEL).complete()
@@ -270,14 +270,11 @@ final class ChannelService(
           postBoostedNotifications(boostedChannel, guild, world)
         }
       }
-      // check is world has already been setup
+      // check if world has already been setup
       val worldConfigData = worldRetrieveConfig(guild, world)
-      // it it doesn't create it
       if (worldConfigData.isEmpty) {
-        // create the category
         val newCategory = guild.createCategory(world).complete()
         grantWorldPerms(newCategory, botRole, guild.getPublicRole)
-        // create the channels
         val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
 
         val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
@@ -294,7 +291,6 @@ final class ChannelService(
         if (notificationsChannel != null) {
           if (notificationsChannel.canTalk()) {
 
-            // Fullbless Role
             notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, 250))
               .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
@@ -309,16 +305,14 @@ final class ChannelService(
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
 
-        // post initial embeds in the levels / deaths / activity channels
         postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
         postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
-        // update the database
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         startBot(Some(guild), Some(world))
 
-        // audit the setup in the command-log channel, matching /repair and /remove
+        // matches the audit pattern used by /repair and /remove
         val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 

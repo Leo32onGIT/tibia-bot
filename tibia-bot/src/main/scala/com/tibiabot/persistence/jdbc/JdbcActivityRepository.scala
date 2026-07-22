@@ -8,22 +8,18 @@ import java.sql.Timestamp
 import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of ActivityRepository. Bodies moved verbatim from BotApp's
- *  activityConfig/addActivityToDatabase/updateActivityToDatabase/
- *  removePlayerActivityfromDatabase/removeGuildActivityfromDatabase, with the
- *  Guild parameter reduced to guildId. */
+/** JDBC implementation of ActivityRepository, ported verbatim from BotApp
+ *  (Guild parameter reduced to guildId). */
 final class JdbcActivityRepository(connectionProvider: ConnectionProvider) extends ActivityRepository {
 
   def getActivity(guildId: String): List[PlayerCache] =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val statement = conn.createStatement()
 
-    // Check if the table already exists in bot_configuration
     val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'tracked_activity'")
     val tableExists = tableExistsQuery.next()
     tableExistsQuery.close()
 
-    // Create the table if it doesn't exist
     if (!tableExists) {
       val createActivityTable =
         s"""CREATE TABLE tracked_activity (
@@ -95,7 +91,6 @@ final class JdbcActivityRepository(connectionProvider: ConnectionProvider) exten
         deleteStatement.executeUpdate()
         deleteStatement.close()
 
-        // Retry the update
         val retryStatement = conn.prepareStatement("UPDATE tracked_activity SET name = ?, former_names = ?, guild_name = ?, updated = ? WHERE LOWER(name) = LOWER(?);")
         retryStatement.setString(1, newName)
         retryStatement.setString(2, formerNames.mkString(","))

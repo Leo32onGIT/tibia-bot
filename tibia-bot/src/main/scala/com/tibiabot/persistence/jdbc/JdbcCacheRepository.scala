@@ -8,10 +8,9 @@ import java.time.temporal.ChronoUnit
 import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of CacheRepository (deaths + levels). Bodies moved
- *  verbatim from BotApp's getDeathsCache/addDeathsCache/removeDeathsCache and
- *  the levels equivalents, then wrapped in JdbcSupport.withConnection so the
- *  connection is always released (no leak on the SQL error path). */
+/** JDBC implementation of CacheRepository: deaths, levels, list and
+ *  boosted_info caches in the shared bot_cache database, each routed through
+ *  JdbcSupport.withConnection so the connection is always released. */
 final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends CacheRepository {
 
   def getDeaths(world: String): List[DeathsCache] =
@@ -118,12 +117,10 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.createStatement()
 
-      // Check if the table already exists in bot_configuration
       val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'list'")
       val tableExists = tableExistsQuery.next()
       tableExistsQuery.close()
 
-      // Create the table if it doesn't exist
       if (!tableExists) {
         val createListTable =
           s"""CREATE TABLE list (
@@ -175,7 +172,6 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       val resultSet = selectStatement.executeQuery()
 
       if (resultSet.next()) {
-        // Update existing row
         val updateStatement = conn.prepareStatement(
           s"""
              |UPDATE list
@@ -195,7 +191,6 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
         updateStatement.executeUpdate()
         updateStatement.close()
       } else {
-        // Insert new row
         val insertStatement = conn.prepareStatement(
           s"""
              |INSERT INTO list(name, former_names, world, former_worlds, guild_name, level, vocation, last_login, time)
@@ -220,7 +215,6 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
 
   def removeExpiredList(now: ZonedDateTime): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      // Modify the DELETE statement to include a WHERE clause with the condition for time
       val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
       deleteStatement.setTimestamp(1, Timestamp.from(now.minus(7, ChronoUnit.DAYS).toInstant))
       deleteStatement.executeUpdate()
@@ -235,7 +229,6 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       val tableExists = tableExistsQuery.next()
       tableExistsQuery.close()
 
-      // Create the table if it doesn't exist
       if (!tableExists) {
         val createListTable =
           s"""CREATE TABLE boosted_info (
@@ -249,22 +242,18 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
         statement.executeUpdate(createListTable)
       }
 
-      // Check if the column already exists in the table
       val bossChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'bosschanged'")
       val bossChangedExists = bossChangedExistsQuery.next()
       bossChangedExistsQuery.close()
 
-      // Check if the column already exists in the table
       val creatureChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'creaturechanged'")
       val creatureChangedExists = creatureChangedExistsQuery.next()
       creatureChangedExistsQuery.close()
 
-      // Add the column if it doesn't exist
       if (!bossChangedExists) {
         statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
       }
 
-      // Add the column if it doesn't exist
       if (!creatureChangedExists) {
         statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
       }
@@ -280,10 +269,10 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       }
 
       if (results.isEmpty) {
-        // If the result list is empty, insert default values
+        // Table exists but has no row yet; seed the singleton default row
         val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-        insertStatement.setString(1, "None") // Default value for boss
-        insertStatement.setString(2, "None") // Default value for creature
+        insertStatement.setString(1, "None")
+        insertStatement.setString(2, "None")
         insertStatement.setString(3, "0")
         insertStatement.setString(4, "0")
         insertStatement.executeUpdate()
@@ -314,17 +303,16 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       statement.close()
 
       if (results.isEmpty) {
-        // If the result list is empty, insert default values
+        // Table exists but has no row yet; seed the singleton default row
         val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-        insertStatement.setString(1, "None") // Default value for boss
-        insertStatement.setString(2, "None") // Default value for creature
+        insertStatement.setString(1, "None")
+        insertStatement.setString(2, "None")
         insertStatement.setString(3, "0")
         insertStatement.setString(4, "0")
         insertStatement.executeUpdate()
         insertStatement.close()
       }
 
-      // update category if exists
       if (boss != "") {
         val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
         statement.setString(1, boss)

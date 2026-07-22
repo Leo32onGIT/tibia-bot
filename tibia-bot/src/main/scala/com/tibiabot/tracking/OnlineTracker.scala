@@ -3,19 +3,10 @@ package com.tibiabot.tracking
 import java.time.ZonedDateTime
 import scala.collection.mutable
 
-/** Online-presence state extracted from `TibiaBot.currentOnline`.
- *
- *  OPTIMIZED implementation: keyed by player name in an insertion-ordered map,
- *  so lookups/updates are O(1) instead of the original O(n) linear scans over a
- *  `mutable.Set`. The full-cycle rebuild is O(n) instead of O(n^2). Public API
- *  and observable behaviour are identical to the baseline — locked in by
- *  OnlineTrackerSpec.
- *
- *  Mirrors TibiaBot.scala:
- *    - updateFromOnline -> lines 94-105 (duration carry-over + clear/addAll)
- *    - find             -> lines 95, 204, 572, 646
- *    - setGuild         -> lines 204-208
- *    - setFlag          -> lines 646-648
+/** Online-presence state used by TibiaBot each tracking cycle: who's online,
+ *  their guild/flag, and how long they've been online. Keyed by player name
+ *  in an insertion-ordered map for O(1) lookups/updates; behaviour is pinned
+ *  by OnlineTrackerSpec.
  */
 final case class OnlinePlayer(
   name: String,
@@ -57,16 +48,16 @@ final class OnlineTracker {
     state ++= rebuilt
   }
 
-  /** Exact, case-sensitive lookup by name (matches `.find(_.name == x)`). */
+  /** Exact, case-sensitive lookup by name. */
   def find(name: String): Option[OnlinePlayer] = state.get(name)
 
-  /** Update a player's guild only if it actually changed (lines 204-208). */
+  /** Update a player's guild only if it actually changed. */
   def setGuild(name: String, guildName: String): Unit =
     state.get(name).foreach { p =>
       if (p.guildName != guildName) state.update(name, p.copy(guildName = guildName))
     }
 
-  /** Set a player's flag, e.g. the level-up marker (lines 646-648). */
+  /** Set a player's flag, e.g. the level-up marker. */
   def setFlag(name: String, flag: String): Unit =
     state.get(name).foreach { p => state.update(name, p.copy(flag = flag)) }
 }

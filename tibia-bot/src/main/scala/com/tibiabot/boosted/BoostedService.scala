@@ -14,9 +14,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 /**
  * Per-user boosted boss/creature notification subscriptions
  * (the boosted_notifications table), the /boosted command logic, and the
- * "boosted boss/creature today" cache + embeds (the boosted_info table).
- * Moved verbatim from BotApp; name capitalisation is shared via
- * presentation.Names and the private creatureWikiUrl mirrors BotApp's.
+ * "boosted boss/creature today" cache + embeds (backed by cacheRepository).
  */
 final class BoostedService(
   connectionProvider: ConnectionProvider,
@@ -64,9 +62,9 @@ final class BoostedService(
         com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Tenacity"), "The boosted creature today failed to load?")
     }
 
-  // User-facing /boosted notification-list status messages, shared so the wording
-  // stays consistent. They were duplicated inline ~6x and had already drifted: a
-  // misspelling of "bosses" had crept into several copies but not others.
+  // User-facing /boosted notification-list status messages, centralized here
+  // after the same wording had drifted (misspellings, inconsistent phrasing)
+  // across ~6 inline duplicates.
   private def filterListMessage(list: String): String =
     s"${Config.letterEmoji} You will be messaged if any of the following **bosses** or **creatures** are boosted:\n\n$list"
   private val allBoostedMessage: String =
@@ -107,13 +105,11 @@ final class BoostedService(
 
     val statement = conn.createStatement()
 
-    // Check if the table already exists in bot_configuration
     val tableExistsQuery =
       statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_notifications'")
     val tableExists = tableExistsQuery.next()
     tableExistsQuery.close()
 
-    // Create the table if it doesn't exist
     if (!tableExists) {
       val createListTable =
         s"""CREATE TABLE boosted_notifications (
@@ -169,10 +165,8 @@ final class BoostedService(
             preparedStatement.close()
             embedMessage = s"${Config.yesEmoji} you have enabled notifications for **all** bosses and creatures."
           } else {
-            // Check if sanitizedName exists in boostedBossesList
             val isBoostedBoss = boostedBosses().exists(_.equalsIgnoreCase(sanitizedName))
 
-            // Check if sanitizedName is a valid creature
             val dreamcourtCheck: Boolean = com.tibiabot.domain.time.DreamScarCycle.isDreamCourtBoss(sanitizedName)
             val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
             val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
@@ -203,10 +197,8 @@ final class BoostedService(
           }
         }
       } else {
-        // Check if sanitizedName exists in boostedBossesList
         val isBoostedBoss = boostedBosses().exists(_.equalsIgnoreCase(sanitizedName))
 
-        // Check if sanitizedName is a valid creature
         val creatureCheck: Boolean = if (Config.creaturesList.contains(sanitizedName.toLowerCase)) true else false
         val monsterType = if (isBoostedBoss) "boss" else if (creatureCheck) "creature" else "all"
         val listSetting = existingNames.exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
@@ -275,7 +267,7 @@ final class BoostedService(
 
     replyEmbed.setDescription(embedMessage).build()
     } finally {
-      conn.close() // always release the connection, even if a query above threw
+      conn.close()
     }
   }
 }

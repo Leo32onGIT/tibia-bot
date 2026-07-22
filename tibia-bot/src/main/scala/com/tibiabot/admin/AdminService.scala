@@ -9,9 +9,8 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
 
 /**
- * Bot-creator-only `/admin` operations, moved from BotApp. The shared `dreamScar`
- * write stays in BotApp via the injected `resyncDreamScar` thunk; guild config
- * lookup is injected too, so this is JDA-gateway + function deps only.
+ * Bot-creator-only `/admin` operations. The actual dreamScar resync and guild
+ * config lookup live in BotApp and are injected here as thunks/functions.
  */
 final class AdminService(
   discordGateway: DiscordGateway,
@@ -21,7 +20,8 @@ final class AdminService(
 ) extends StrictLogging {
 
   /** Post a "bot creator ran a command" notice to a guild's admin/command-log
-   *  channel. No-op if the channel is missing or the bot can't talk there. */
+   *  channel. No-op if the channel is missing, or if the bot lacks permission
+   *  to post there (that check is skipped outside prod). */
   private def postCreatorLog(adminChannel: TextChannel, description: String, thumbnail: String): Unit =
     if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
       try {
@@ -79,8 +79,8 @@ final class AdminService(
           "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
         embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
       } else {
-        // Previously a trailing assignment overwrote this, so the "channel deleted"
-        // feedback was unreachable and /admin message always reported success.
+        // Previously a later assignment clobbered this, making the "channel deleted"
+        // message unreachable and /admin message always reported success.
         embedMessage = s"${Config.noEmoji} The Guild: **${guild.getName()}** has deleted the `command-log` channel, so a message cannot be sent."
       }
     }

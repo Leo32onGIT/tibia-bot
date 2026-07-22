@@ -53,8 +53,8 @@ final class HuntedAlliedService(
 
   /** Fetch a character and reduce it to the (name, world, vocation-emoji, level)
    *  summary the add/remove player commands render. On lookup failure yields the
-   *  empty/"does not exist" summary (name == ""). Shared by those commands, and
-   *  by BotApp's custom-tagging command (not yet extracted). */
+   *  empty/"does not exist" summary (name == ""). Also used by
+   *  [[com.tibiabot.customsort.CustomSortService]]'s player-tagging command. */
   def fetchPlayerSummary(name: String): Future[(String, String, String, Int)] =
     tibiaDataClient.getCharacter(name).map {
       case Right(charResponse) =>
@@ -546,7 +546,7 @@ final class HuntedAlliedService(
   }
 
   def addAlly(event: SlashCommandInteractionEvent, subCommand: String, subOptionValue: String, subOptionReason: String, callback: MessageEmbed => Unit): Unit = {
-    // same structure as addHunted, use comments there for understanding
+    // mirrors addHunted's structure, targeting the allied lists instead
     val subOptionValueLower = subOptionValue.toLowerCase()
     val reason = if (subOptionReason == "none") "false" else "true"
     val guild = event.getGuild

@@ -110,7 +110,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
-      // cache bypass for Seanera
+      // cache bypass for Noctera
       if (worldResponse.world.name == "Noctera") {
         // Remove existing online chars from the list...
         recentOnlineBypass.filterInPlace { i =>
@@ -133,14 +133,12 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       }
     case Left(warning) =>
       if (world == "Noctera") {
-        // use data from previous online list check
         val charsToCheck: Set[String] = recentOnlineBypass.map(_.char).toSet
         Source(charsToCheck)
           .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
           .runWith(Sink.collection)
           .map(_.toSet)
       } else {
-        // use data from previous online list check
         val charsToCheck: Set[String] = recentOnline.map(_.char).toSet
         Source(charsToCheck)
           .mapAsyncUnordered(32)(tibiaDataClient.getCharacter)
@@ -158,7 +156,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
     // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
     val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
 
-    // gather guild icons data for online player list
     val newDeaths = characterResponses.flatMap {
       case Right(char) =>
         val charName = char.character.character.name
@@ -166,7 +163,8 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
 
         val formerNamesList: List[String] = char.character.character.former_names.map(_.toList).getOrElse(Nil)
 
-        // Caching attempt
+        // Refresh the shared hunted/allied lookup cache at most once per 6 minutes
+        // per world (gated per-world, not per-character).
         val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
         if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
           val cacheWorld = char.character.character.world
@@ -211,14 +209,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
               var skipJoinLeave = false
               var buggedName = false
 
-              // Check formerNames
               var nameChangeCheck = false
               formerNamesList.foreach { formerName =>
                 if (charName != "") {
-                  // Hotfix for this:
-                  // Unsure how this occurs, maybe namelock/manual cipsoft intervention
-                  // Name:	         Trombadinha De Rua
-                  // Former Names:	 Trombadinha De Rua
+                  // Some characters have their current name duplicated in former_names
+                  // (cause unclear, possibly a namelock) — treat that as not a real rename.
                   if (charName.toLowerCase == formerName.toLowerCase) {
                     buggedName = true
                   }
@@ -228,12 +223,10 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                 }
               }
 
-              // Player has changed their name
               if (nameChangeCheck && !buggedName) {
                 var oldName = ""
                 var timeDelay: Option[ZonedDateTime] = None
                 val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
-                // update activity cache
                 val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
                   val updatedActivity = if (formerNamesList.exists(_.toLowerCase == activity.name.toLowerCase)) {
                     oldName = activity.name
@@ -254,7 +247,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                     if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))) {
                       // if player is in hunted or allied 'players' list, update information there too
                       if (huntedPlayerCheck) {
-                        // change name in hunted players cache and db
                         BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
                         val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
                           if (player.name.toLowerCase == oldName.toLowerCase) {
@@ -266,7 +258,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
                       }
                       if (allyPlayerCheck) {
-                        // change name in allied players cache and db
                         BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
                         val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
                           if (player.name.toLowerCase == oldName.toLowerCase) {
@@ -279,7 +270,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                       }
                       if (activityTextChannel != null) {
                         if (activityTextChannel.canTalk() || (!Config.prod)) {
-                          // send message to activity channel
                           val activityEmbed = new EmbedBuilder()
                           activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
                           activityEmbed.setColor(playerType)
@@ -326,7 +316,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         val guildType = presentation.GuildActivity.guildType(wasInHuntedGuild, wasInAlliedGuild)
                         // No guild now
                         if (newGuildLess) {
-                          // send message to activity channel
                           if (activityTextChannel != null) {
                             if (activityTextChannel.canTalk() || (!Config.prod)) {
                               val activityEmbed = new EmbedBuilder()
@@ -338,7 +327,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                           }
                         } else { // Left a tracked guild, but joined a new one in the same turn
                           val colorType = presentation.GuildActivity.activityColor(huntedGuildCheck, allyGuildCheck)
-                          // send message to activity channel
                           if (activityTextChannel != null) {
                             if (activityTextChannel.canTalk() || (!Config.prod)) {
                               val activityEmbed = new EmbedBuilder()
@@ -360,7 +348,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
                               if (adminTextChannel.canTalk() || (!Config.prod)) {
-                                // send embed to admin channel
                                 val commandUser = s"<@${BotApp.botUser}>"
                                 val adminEmbed = new EmbedBuilder()
                                 adminEmbed.setTitle(":robot: enemy joined an allied guild:")
@@ -376,13 +363,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         // if he was in hunted guild add to hunted players list
                         if (wasInHuntedGuild) {
                           if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
-                            // add them to cached huntedPlayersData list
                             BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
                               if (adminTextChannel.canTalk() || (!Config.prod)) {
-                                // send embed to admin channel
                                 val commandUser = s"<@${BotApp.botUser}>"
                                 val adminEmbed = new EmbedBuilder()
                                 adminEmbed.setTitle(":robot: enemy automatically detected:")
@@ -407,14 +392,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         val guildType = presentation.GuildActivity.guildType(huntedGuildCheck, allyGuildCheck)
                         // joined a hunted guild
                         if (huntedGuildCheck) {
-                          // remove from hunted 'Player' cache and db
                           BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                           BotApp.huntedAlliedService.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                          // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
                             if (adminTextChannel.canTalk() || (!Config.prod)) {
-                              // send embed to admin channel
                               val commandUser = s"<@${BotApp.botUser}>"
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: hunted list cleanup:")
@@ -425,14 +407,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                             }
                           }
                         } else if (allyGuildCheck) {
-                          // remove from hunted 'Player' cache and db
                           BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                           BotApp.huntedAlliedService.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                          // send message to admin channel
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
                             if (adminTextChannel.canTalk() || (!Config.prod)) {
-                              // send embed to admin channel
                               val commandUser = s"<@${BotApp.botUser}>"
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: hunted list cleanup:")
@@ -443,7 +422,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                             }
                           }
                         }
-                        // send message to activity channel
                         if (activityTextChannel != null) {
                           if (activityTextChannel.canTalk() || (!Config.prod)) {
                             val activityEmbed = new EmbedBuilder()
@@ -479,14 +457,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                   // joined a hunted guild
                   if (huntedGuildCheck) {
                     if (huntedPlayerCheck) { // was he originally in hunted 'player' list?
-                      // remove from hunted 'Player' cache and db
                       BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                       BotApp.huntedAlliedService.removeHuntedFromDatabase(guild, "player", charName.toLowerCase())
-                      // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
                         if (adminTextChannel.canTalk() || (!Config.prod)) {
-                          // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: hunted list cleanup:")
@@ -502,11 +477,9 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                       // remove from allied 'Player' cache and db
                       BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m.updated(guildId, m.getOrElse(guildId, List.empty).filterNot(_.name.toLowerCase == charName.toLowerCase)))
                       BotApp.huntedAlliedService.removeAllyFromDatabase(guild, "player", charName.toLowerCase())
-                      // send message to admin channel
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
                         if (adminTextChannel.canTalk() || (!Config.prod)) {
-                          // send embed to admin channel
                           val commandUser = s"<@${BotApp.botUser}>"
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: allied list cleanup:")
@@ -842,11 +815,9 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                           }
                           if (guildCheck) { // player is not in a guild or is in a guild that is not tracked
                             if (alliedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase()) || huntedPlayersData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == killerName.toLowerCase())) {
-                              // char is already on ally/hunted lis
+                              // already tracked, nothing to do
                             } else {
-                              // char is not on hunted list
                               if (!huntedBuffer.exists(_._1.toLowerCase == killerName.toLowerCase)) {
-                                // add them to hunted list
                                 huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
                               }
                             }
@@ -860,11 +831,9 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
                         if (adminTextChannel != null) {
                           huntedBuffer.foreach { case (player, world, vocation, level) =>
                             val playerString = player.toLowerCase()
-                            // add them to cached huntedPlayersData list
                             BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             // add them to the database
                             BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
-                            // send embed to admin channel
                             val commandUser = s"<@${BotApp.botUser}>"
                             val adminEmbed = new EmbedBuilder()
                             adminEmbed.setTitle(":robot: enemy automatically detected:")
@@ -1134,7 +1103,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
           val combinedList = presentation.OnlineListGrouping.combinedChannelBody(
             alliesList, enemiesList, neutralsList, flattenedNeutralsList, Config.ally, Config.enemy)
 
-          // allow for custom channel names
           val channelName = combinedTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "online")
           renameOnlineChannelIfDue(combinedTextChannel, s"$customName-$totalCount", "online list channel", guildId, guild.getName)
@@ -1149,22 +1117,18 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
         if (neutralsTextChannel.canTalk() || (!Config.prod)) {
-          // allow for custom channel names
           val channelName = neutralsTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "neutrals")
           renameOnlineChannelIfDue(neutralsTextChannel, s"$customName-0", "disabled neutral channel", guildId, guild.getName)
-          // placeholder message
           updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), neutralsTextChannel, "neutrals", guildId, guild.getName)
         }
       }
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
         if (enemiesTextChannel.canTalk() || (!Config.prod)) {
-          // allow for custom channel names
           val channelName = enemiesTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "enemies")
           renameOnlineChannelIfDue(enemiesTextChannel, s"$customName-0", "disabled enemies channel", guildId, guild.getName)
-          // placeholder message
           updateMultiFields(List("*This channel is `disabled` and can be deleted.*"), enemiesTextChannel, "enemies", guildId, guild.getName)
         }
       }
@@ -1199,7 +1163,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       if (alliesTextChannel != null) {
         if (alliesTextChannel.canTalk() || (!Config.prod)) {
-          // allow for custom channel names
           val channelName = alliesTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "allies")
           renameOnlineChannelIfDue(alliesTextChannel, s"$customName-$alliesCount", "allies channel", guildId, guild.getName)
@@ -1223,7 +1186,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
         if (neutralsTextChannel.canTalk() || (!Config.prod)) {
-          // allow for custom channel names
           val channelName = neutralsTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "neutrals")
           renameOnlineChannelIfDue(neutralsTextChannel, s"$customName-$neutralsCount", "neutrals channel", guildId, guild.getName)
@@ -1247,7 +1209,6 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
         if (enemiesTextChannel.canTalk() || (!Config.prod)) {
-          // allow for custom channel names
           val channelName = enemiesTextChannel.getName
           val customName = presentation.OnlineListEmbeds.baseName(channelName, "enemies")
           renameOnlineChannelIfDue(enemiesTextChannel, s"$customName-$enemiesCount", "enemies channel", guildId, guild.getName)

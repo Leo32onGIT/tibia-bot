@@ -25,7 +25,7 @@ object DreamScarCycle {
     current.map { case (world, boss) =>
       val nextBoss = indexOfBoss.get(boss) match {
         case Some(idx) => bossCycle((idx + 1) % bossCycle.length)
-        case None      => boss // fallback: keep unchanged
+        case None      => boss
       }
       world -> nextBoss
     }

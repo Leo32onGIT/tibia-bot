@@ -1,18 +1,17 @@
 package com.tibiabot.tracking
 
 /** Pure masslog threshold: how many recently-logged-in enemies (`zapCount`) it
- *  takes, relative to the total enemies online, to flag a "masslog".
- *
- *  Extracted verbatim from the formula in `TibiaBot.onlineList`. `sensitivity`
- *  is fixed at 0 in the current code; the full table is preserved so behaviour
- *  is unchanged if it ever becomes configurable. Non-exhaustive cases (matching
- *  the original) are intentional.
+ *  takes, relative to the total enemies online, to flag a "masslog". Used by
+ *  `TibiaBot.onlineList`, which currently always calls it with `sensitivity = 0`;
+ *  the rest of the sensitivity table is kept ready for when that becomes
+ *  configurable.
  */
 object MasslogDetector {
 
   val DefaultFloor = 3
 
-  /** Multiplier applied to the base percentage; lower = more sensitive. */
+  /** Multiplier applied to the base percentage; lower = more sensitive.
+   *  Only 0-4 are handled; other values throw MatchError. */
   def sensitivityModifier(sensitivity: Int): Double = sensitivity match {
     case 0 => 1.20 // stricter
     case 1 => 1.10

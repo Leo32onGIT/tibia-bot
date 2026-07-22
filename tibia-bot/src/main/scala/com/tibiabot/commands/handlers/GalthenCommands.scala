@@ -58,7 +58,7 @@ object GalthenCommands {
               Button.danger("galthenRemoveAll", "Clear All").asDisabled
             )).queue()
           }
-        } else if (tagOption.nonEmpty && tagList.nonEmpty) { // tag picked up
+        } else if (tagOption.nonEmpty && tagList.nonEmpty) { // this tag already has a tracked cooldown
           embed.setFooter(s"Tag: ${tagOption.toLowerCase}")
           embed.setDescription(tagList.mkString("\n"))
           embed.setColor(9855533)

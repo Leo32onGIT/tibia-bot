@@ -21,14 +21,14 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 
 /**
  * Per-world setting slash commands: auto-hunt detection, deaths/levels
- * visibility, exiva-on-death, minimum level, fullbless level, and
- * leaderboards. Extracted verbatim from BotApp (detectHunted/
+ * visibility, exiva-on-death, minimum level, fullbless level, online-list
+ * layout, and leaderboards. Extracted from BotApp (detectHunted/
  * deathsLevelsHideShow/exivaList/minLevel/fullblessLevel + the generic
  * updateWorldSetting[T] helper from a prior de-duplication pass, plus
  * leaderboards).
  *
- * onlineListConfig is NOT here yet (it needs ChannelService's
- * channel-mutation helpers, moved in a later step of this same extraction).
+ * onlineListConfig does its own channel/category mutation through the
+ * injected ChannelService rather than the updateWorldSetting[T] helper.
  */
 final class WorldSettingsService(
   worldConfigRepository: WorldConfigRepository,
@@ -74,12 +74,13 @@ final class WorldSettingsService(
     worldConfigRepository.updateWorldInt(guild.getId, world, columnName, level)
   }
 
-  /** Generic guarded update for a single per-world setting stored on `Worlds`:
-   *  returns an "already set" embed if the value is unchanged or the world
-   *  isn't configured (currentValue yields None), otherwise updates the
-   *  in-memory cache, persists, posts an admin-log entry, and returns a
-   *  "now set" embed. Used by the toggle-shaped world settings (auto-hunt
-   *  detection, deaths/levels visibility, exiva list, minimum level). */
+  /** Generic guarded update for a single per-world setting stored on `Worlds`.
+   *  Returns notConfiguredMessage if the world isn't set up (currentValue
+   *  yields None), alreadySetMessage if the value is unchanged, otherwise
+   *  updates the in-memory cache, persists, posts an admin-log entry, and
+   *  returns nowSetMessage. Used by the toggle-shaped world settings
+   *  (auto-hunt detection, deaths/levels visibility, exiva list, minimum
+   *  level). */
   private def updateWorldSetting[T](
     guild: Guild,
     world: String,
@@ -238,11 +239,9 @@ final class WorldSettingsService(
     val levelSetting = cache.headOption.map(_.fullblessLevel).getOrElse(null)
     if (levelSetting != null) {
       if (levelSetting == level) {
-        // embed reply
         embedBuild.setDescription(s"${Config.noEmoji} The level to poke for **enemy fullblesses**\nis already set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
-        // set the setting here
         val modifiedWorlds = streamState.worldsData(guild.getId).map { w =>
           if (w.name.toLowerCase() == world.toLowerCase()) {
             w.copy(fullblessLevel = level)
@@ -253,7 +252,7 @@ final class WorldSettingsService(
         streamState.modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         fullblessLevelToDatabase(guild, worldFormal, level)
 
-        // edit the fullblesschannel embeds
+        // find and update the existing notification embed to reflect the new level
         val worldConfigData = worldRetrieveConfig(guild, world)
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
@@ -269,7 +268,6 @@ final class WorldSettingsService(
               val allyPkRole = worldConfigData("allypk_role")
               val masslogRole = worldConfigData("masslog_role")
 
-              // Fullbless Role
               message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level))
                 .setComponents(ActionRow.of(channelService.fullblessRoleButtons.asJava))
                 .queue()
@@ -293,10 +291,8 @@ final class WorldSettingsService(
     embedBuild.setColor(BrandColor)
 
     if (Config.worldList.exists(_.equalsIgnoreCase(world))) {
-      // Get the high scores
       val highScores: Future[Either[String, HighscoresResponse]] = tibiaDataClient.getHighscores(worldFormal, 1)
 
-      // Handle the Future result asynchronously
       highScores.onComplete {
         case scala.util.Success(Right(highscoreResponse)) =>
           val currentPage = highscoreResponse.highscores.highscore_page.current_page
@@ -330,7 +326,6 @@ final class WorldSettingsService(
     val existingSetting = cache.headOption.map(_.onlineCombined)
     if (existingSetting.isDefined) {
       if (existingSetting.get == settingType) {
-        // embed reply
         embedBuild.setDescription(s"${Config.noEmoji} The online list is already set to **$setting** for the world **$worldFormal**.")
         embedBuild.build()
       } else {
@@ -392,16 +387,14 @@ final class WorldSettingsService(
             }
           }
 
-          // Now that separate channels are deleted, create a new 'online' channel
+          // now that the separate channels are deleted, create the combined 'online' channel
           try {
             if (category == null) {
-              // create the category
               val newCategory = guild.createCategory(worldFormal).complete()
               channelService.grantWorldPerms(newCategory, botRole, publicRole)
               category = newCategory
               channelService.worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
-              // update the record in worldsData
               if (streamState.worldsData.contains(guild.getId)) {
                 val worldsList = streamState.worldsData(guild.getId)
                 val updatedWorldsList = worldsList.map { world =>
@@ -414,10 +407,8 @@ final class WorldSettingsService(
                 streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
               }
             }
-            // create the online channel
             val recreateAlliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", category).complete()
             channelService.worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
-            // update the record in worldsData
             if (streamState.worldsData.contains(guild.getId)) {
               val worldsList = streamState.worldsData(guild.getId)
               val updatedWorldsList = worldsList.map { world =>
@@ -429,7 +420,6 @@ final class WorldSettingsService(
               }
               streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
-            // apply permissions to created channel
             channelService.grantWorldPerms(recreateAlliesChannel, botRole, publicRole)
             disclaimer += s"\n- *You may want to move the new <#${recreateAlliesChannel.getId}> channel.*"
           } catch {
@@ -444,16 +434,13 @@ final class WorldSettingsService(
             return embedBuild.build()
           }
 
-          // get the bots main roles
           try {
             if (category == null) {
-              // create the category
               val newCategory = guild.createCategory(worldFormal).complete()
               channelService.grantWorldPerms(newCategory, botRole, publicRole)
               category = newCategory
               channelService.worldRepairConfig(guild, worldFormal, "category", newCategory.getId)
 
-              // update the record in worldsData
               if (streamState.worldsData.contains(guild.getId)) {
                 val worldsList = streamState.worldsData(guild.getId)
                 val updatedWorldsList = worldsList.map { world =>
@@ -478,7 +465,7 @@ final class WorldSettingsService(
             }
             val channelList = ListBuffer[(TextChannel, Boolean)]()
 
-            // delete the combined 'online' channel
+            // alliesChannel here is the old combined 'online' channel being replaced
             if (alliesChannel != null) {
               try {
                 alliesChannel.delete().queue()
@@ -492,7 +479,6 @@ final class WorldSettingsService(
             val recreateAlliesChannel = guild.createTextChannel("🤍・ᴀʟʟɪᴇs", category).complete()
             channelList += ((recreateAlliesChannel, false))
             channelService.worldRepairConfig(guild, worldFormal, "allies_channel", recreateAlliesChannel.getId)
-            // update the record in worldsData
             if (streamState.worldsData.contains(guild.getId)) {
               val worldsList = streamState.worldsData(guild.getId)
               val updatedWorldsList = worldsList.map { world =>
@@ -510,7 +496,6 @@ final class WorldSettingsService(
               val recreateEnemiesChannel = guild.createTextChannel("☠️・ᴇɴᴇᴍɪᴇs", category).complete()
               channelList += ((recreateEnemiesChannel, false))
               channelService.worldRepairConfig(guild, worldFormal, "enemies_channel", recreateEnemiesChannel.getId)
-              // update the record in worldsData
               if (streamState.worldsData.contains(guild.getId)) {
                 val worldsList = streamState.worldsData(guild.getId)
                 val updatedWorldsList = worldsList.map { world =>
@@ -529,7 +514,6 @@ final class WorldSettingsService(
               val recreateNeutralsChannel = guild.createTextChannel("📈・ɴᴇᴜᴛʀᴀʟs", category).complete()
               channelList += ((recreateNeutralsChannel, false))
               channelService.worldRepairConfig(guild, worldFormal, "neutrals_channel", recreateNeutralsChannel.getId)
-              // update the record in worldsData
               if (streamState.worldsData.contains(guild.getId)) {
                 val worldsList = streamState.worldsData(guild.getId)
                 val updatedWorldsList = worldsList.map { world =>
@@ -543,7 +527,6 @@ final class WorldSettingsService(
               }
               disclaimer += s"\n- *The channel <#${recreateNeutralsChannel.getId}> has been recreated (you may want to move it).*"
             }
-            // apply required permissions to the new channel(s)
             if (channelList.nonEmpty) {
               channelList.foreach { case (channel, _) =>
                 channelService.grantWorldPerms(channel, botRole, publicRole)
@@ -554,7 +537,6 @@ final class WorldSettingsService(
           }
         }
 
-        // set the setting here
         val modifiedWorlds = streamState.worldsData(guild.getId).map { w =>
           if (w.name.toLowerCase() == world.toLowerCase()) {
             w.copy(onlineCombined = settingType)

@@ -27,8 +27,9 @@ object ListEmbeds {
   /** Accumulate lines (newline-joined) into description chunks of at most `limit`
    *  chars. The first chunk keeps the leading newline from the empty seed; each
    *  subsequent one begins with the line that overflowed the previous. Always
-   *  returns at least one chunk. Shared by [[paginate]] and the /admin guild
-   *  list, which build embeds from the chunks differently. */
+   *  returns at least one chunk. Shared by [[paginate]] and other chunking call
+   *  sites (the /admin guild list, the level-up message flush), which each
+   *  build their own embeds/messages from the chunks. */
   def pack(values: List[String], limit: Int): List[String] = {
     val fields = ListBuffer.empty[String]
     var field = ""

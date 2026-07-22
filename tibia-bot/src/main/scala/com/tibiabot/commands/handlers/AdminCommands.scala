@@ -15,7 +15,6 @@ object AdminCommands {
     val reasonOption = options.getOrElse("reason", "")
     val messageOption = options.getOrElse("message", "")
 
-    // Only the bot creator (the Discord application owner) may use /admin
     if (!Permissions.isBotCreator(event.getUser.getId, BotApp.botOwner)) {
       val embed = new EmbedBuilder()
         .setDescription(s"${Config.noEmoji} This command is only available to the bot creator.")

@@ -12,19 +12,16 @@ import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, Opti
  *  or `adminCommands` (it is unregistered today); preserved as-is. */
 object CommandSchemas {
 
-  // create the command to set up the bot
   val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be tracked")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to track")
     .setRequired(true))
 
-  // remove world command
   val removeCommand: SlashCommandData = Commands.slash("remove", "Remove a world from being tracked")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to remove")
     .setRequired(true))
 
-  // hunted command
   val huntedCommand: SlashCommandData = Commands.slash("hunted", "Manage the hunted list")
     .addSubcommands(
       new SubcommandData("guild", "Manage guilds in the hunted list")
@@ -80,7 +77,6 @@ object CommandSchemas {
         )
       )
 
-  // allies command
   val alliesCommand: SlashCommandData = Commands.slash("allies", "Manage the allies list")
     .addSubcommands(
       new SubcommandData("guild", "Manage guilds in the allies list")
@@ -126,7 +122,6 @@ object CommandSchemas {
         )
       )
 
-  // neutrals command
   val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Configuration options for neutrals")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -150,7 +145,6 @@ object CommandSchemas {
         )
     )
 
-  // fullbless command
   val fullblessCommand: SlashCommandData = Commands.slash("fullbless", "Modify the level at which enemy fullblesses poke")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addOptions(
@@ -160,13 +154,11 @@ object CommandSchemas {
         .setMaxValue(4000)
     )
 
-  // leaderboards command
   val leaderboardsCommand: SlashCommandData = Commands.slash("leaderboards", "Modify the level at which enemy fullblesses poke")
     .addOptions(
       new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
     )
 
-  // minimum levels/deaths command
   val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -186,7 +178,6 @@ object CommandSchemas {
       )
     )
 
-  // admin command
   val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -205,7 +196,6 @@ object CommandSchemas {
       )
     )
 
-  // exiva command
   val exivaCommand: SlashCommandData = Commands.slash("exiva", "Show or hide exiva lists on death posts")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -220,18 +210,15 @@ object CommandSchemas {
         )
     )
 
-  // help command
   val helpCommand: SlashCommandData = Commands.slash("help", "Resend the welcome message & basic getting started information")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
 
-  // recreate channel command
   val repairCommand: SlashCommandData = Commands.slash("repair", "Repair & recreate channels that have been deleted for a specific world")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
       .addOptions(
         new OptionData(OptionType.STRING, "world", "What world are you trying to recreate channels for?").setRequired(true),
       )
 
-  // set galthen satchel reminder
   val galthenCommand: SlashCommandData = Commands.slash("galthen", "Use this to set a galthen satchel cooldown timer")
     .addSubcommands(
       new SubcommandData("satchel", "Use this to set a galthen satchel cooldown timer")
@@ -240,7 +227,6 @@ object CommandSchemas {
       )
     )
 
-  // online list config  command
   val onlineCombineCommand: SlashCommandData = Commands.slash("online", "Configure how the online list is displayed")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
@@ -255,7 +241,6 @@ object CommandSchemas {
         )
     )
 
-  // boosted notifications command
   val boostedCommand: SlashCommandData = Commands.slash("boosted", "Turn off these notifications or filter them")
     .addOptions(
       new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)

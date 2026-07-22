@@ -25,14 +25,13 @@ object Config {
   val redisPassword: String = discord.getString("redis-password")
   val redisEnabled: Boolean = redisHost.nonEmpty
 
-  /** Cache freshness, all in one place — how long cached TibiaData API responses
-   *  are reused before re-fetching. Backed by the `cache { }` block in
-   *  discord.conf (overridable per-key by CACHE_* env vars). HOCON durations
-   *  (`30m`, `1h`, `7d`) are read as scala FiniteDurations.
+  /** TTLs for how long cached TibiaData API responses are reused before
+   *  re-fetching. Backed by the `cache { }` block in discord.conf
+   *  (overridable per-key via CACHE_* env vars).
    *
-   *  These are API-response cache TTLs ONLY. Behavioural dedup / notification
-   *  windows (death/level/online retention, DB cache cleanup) are intentionally
-   *  not here — they alter what gets posted and several are coupled pairs. */
+   *  API-response caching only — behavioural dedup/notification windows
+   *  (death/level/online retention, DB cache cleanup) live elsewhere, since
+   *  those affect what gets posted rather than just freshness. */
   object Cache {
     private def dur(key: String): FiniteDuration = discord.getDuration(s"cache.$key").toScala
     val boostedTtl: FiniteDuration = dur("boosted-ttl")
@@ -226,7 +225,7 @@ object Config {
     "Jaguna"
 
   )
-  // creatures - dynamically fetched from TibiaData API
+  // creatures - dynamically fetched from the Tibia Fandom wiki (not TibiaData)
   val creaturesListFromApi: List[String] = BotApp.fetchCreatureNames()
   val creaturesList: List[String] = creaturesListFromApi.map(_.toLowerCase.trim)
 }

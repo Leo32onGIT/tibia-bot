@@ -2,14 +2,10 @@ package com.tibiabot.tracking
 
 import scala.collection.mutable
 
-/** FIFO message queue with an optional size cap.
+/** FIFO message queue with an optional size cap. Backs
+ *  [[com.tibiabot.discord.RateLimitedSender]]'s outbound queue.
  *
- *  Production currently uses an unbounded `mutable.Queue` (TibiaBot.scala 1827)
- *  drained one item per tick — under a burst (server save / masslog) it can
- *  grow without bound. `capacity = Int.MaxValue` reproduces today's behaviour
- *  exactly; a finite capacity drops messages instead of leaking memory.
- *
- *  @param capacity   max retained items (default: unbounded == current behaviour)
+ *  @param capacity   max retained items (default: unbounded)
  *  @param dropNewest if true, reject the incoming item when full (tail drop);
  *                    if false, evict the oldest queued item to make room.
  */

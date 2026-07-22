@@ -35,12 +35,10 @@ final class GalthenService(
     val conn = connectionProvider.cache()
     try {
 
-    // Retrieve the data before deletion
     val selectStatement = conn.prepareStatement("SELECT userid,time,tag FROM satchel WHERE time < ?;")
     selectStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(SatchelCooldown.durationDays, ChronoUnit.DAYS).toInstant))
     val resultSet = selectStatement.executeQuery()
 
-    // Retrieve the data from the result set
     while (resultSet.next()) {
       val userId = resultSet.getString("userid")
       val tagId = Option(resultSet.getString("tag")).getOrElse("")
@@ -70,13 +68,12 @@ final class GalthenService(
 
     selectStatement.close()
 
-    // Now you have the list of userids and time before deletion, you can proceed with deletion
     val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE time < ?;")
     deleteStatement.setTimestamp(1, Timestamp.from(ZonedDateTime.now().minus(SatchelCooldown.durationDays, ChronoUnit.DAYS).toInstant))
     deleteStatement.executeUpdate()
     deleteStatement.close()
     } finally {
-      conn.close() // always release the connection, even if a query above threw
+      conn.close()
     }
   }
 }

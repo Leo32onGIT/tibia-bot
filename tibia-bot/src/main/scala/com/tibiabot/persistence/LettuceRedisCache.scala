@@ -48,17 +48,13 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
 /** Builds the single shared RedisCache from Config: a real Lettuce client when a
  *  redis host is configured, else the no-op so the bot runs unchanged.
  *
- *  Deliberately a JVM-wide singleton rather than a constructor-injected
- *  dependency (the way persistence repositories receive a ConnectionProvider).
- *  Its only consumer, CachingTibiaApi, is built independently at three sites —
- *  BotApp, WorldManager (an object) and each per-world TibiaBot, which all
- *  self-construct their TibiaApi — so threading one instance through them is not
- *  possible without de-objecting WorldManager and adding a TibiaApi param to
- *  TibiaBot. This singleton parallels how Config / WorldManager / TibiaDataClient
- *  are already wired in the tibiadata layer, and guarantees every per-world cache
- *  shares one Redis connection and the same keys. It lives for the whole process
- *  lifetime; teardown is delegated to process exit (hence close() is never
- *  driven in prod — it exists for the port contract and tests). */
+ *  Deliberately a JVM-wide singleton rather than constructor-injected: its only
+ *  consumer, CachingTibiaApi, is self-constructed independently at three sites
+ *  (BotApp, WorldManager, each per-world TibiaBot), so threading one instance
+ *  through them would require de-objecting WorldManager and adding a TibiaApi
+ *  param to TibiaBot. Guarantees every per-world cache shares one Redis
+ *  connection and the same keys. Lives for the process lifetime; close() exists
+ *  for the port contract and tests but is never driven in prod. */
 object RedisCacheProvider {
   lazy val cache: RedisCache =
     if (Config.redisEnabled)

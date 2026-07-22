@@ -158,7 +158,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
    *  getCharacterV2: when the response carries a Date no newer than the cached
    *  timestamp for `name`, skip unmarshalling (drain + report a cache hit);
    *  otherwise record the timestamp and unmarshal. The request URL differs
-   *  between callers (plain vs the level>=250 bypass), so it is built by the
+   *  between callers (plain vs the level>=1000 bypass), so it is built by the
    *  caller and passed in as `responseFuture`. */
   private def fetchCharacterCached(name: String, responseFuture: Future[HttpResponse]): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")

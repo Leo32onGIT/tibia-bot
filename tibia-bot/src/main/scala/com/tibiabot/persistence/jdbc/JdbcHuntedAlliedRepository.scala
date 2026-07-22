@@ -6,11 +6,9 @@ import org.postgresql.util.PSQLException
 
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of HuntedAlliedRepository. Bodies moved verbatim from
- *  BotApp's playerConfig/guildConfig/addHuntedToDatabase/addAllyToDatabase/
- *  removeHuntedFromDatabase/removeAllyFromDatabase/updateHuntedOrAllyNameToDatabase,
- *  with the Guild parameter reduced to guildId. Table names are selected by the
- *  same option logic as before (kept verbatim; not user input). */
+/** JDBC implementation of HuntedAlliedRepository. Table names are interpolated
+ *  directly into SQL, but are always drawn from a fixed option/table set chosen
+ *  by the caller, never from user input. */
 final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) extends HuntedAlliedRepository {
 
   def getPlayers(guildId: String, query: String): List[Players] =
@@ -107,13 +105,11 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
       statement.executeUpdate()
     } catch {
       case e: PSQLException if e.getMessage.contains("duplicate key value") =>
-        // Handle duplicate key error
         val deleteStatement = conn.prepareStatement(s"DELETE FROM $table WHERE LOWER(name) = LOWER(?);")
         deleteStatement.setString(1, newName)
         deleteStatement.executeUpdate()
         deleteStatement.close()
 
-        // Retry the update within the same transaction
         val retryStatement = conn.prepareStatement(s"UPDATE $table SET name = ? WHERE LOWER(name) = LOWER(?);")
         retryStatement.setString(1, newName)
         retryStatement.setString(2, oldName)

@@ -8,9 +8,9 @@ import java.sql.Timestamp
 import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of DeathScreenshotRepository. store/get bodies moved
- *  verbatim from BotApp; deleteIfPermitted is BotApp.deleteDeathScreenshot's DB
- *  logic with the JDA permission check replaced by the `permitted` predicate. */
+/** JDBC implementation of DeathScreenshotRepository. deleteIfPermitted takes a
+ *  `permitted` predicate instead of doing its own JDA permission check, so the
+ *  caller decides who may delete. */
 final class JdbcDeathScreenshotRepository(connectionProvider: ConnectionProvider)
     extends DeathScreenshotRepository with StrictLogging {
 
@@ -18,7 +18,6 @@ final class JdbcDeathScreenshotRepository(connectionProvider: ConnectionProvider
             screenshotUrl: String, addedBy: String, addedName: String, messageId: String): Unit = {
     val conn = connectionProvider.guild(guildId)
     try {
-      // Create table if it doesn't exist
       val createTableStatement = conn.createStatement()
       createTableStatement.execute(
         s"""CREATE TABLE IF NOT EXISTS death_screenshots (
@@ -35,7 +34,6 @@ final class JdbcDeathScreenshotRepository(connectionProvider: ConnectionProvider
            |)""".stripMargin)
       createTableStatement.close()
 
-      // Insert screenshot
       val insertStatement = conn.prepareStatement(
         "INSERT INTO death_screenshots (guild_id, world, character_name, death_time, screenshot_url, added_by, added_name, added_at, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )

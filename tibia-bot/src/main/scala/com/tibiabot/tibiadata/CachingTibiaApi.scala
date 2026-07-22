@@ -14,16 +14,16 @@ import scala.util.control.NonFatal
 
 /** Caching decorator over a TibiaApi.
  *
- *  Caches ONLY the freshness-tolerant, fan-out-heavy endpoints that hit the
+ *  Caches only the freshness-tolerant, fan-out-heavy endpoints that hit the
  *  rate-limited local instance: boosted boss/creature and highscores. These
  *  change at most daily/hourly yet fan out per-guild at server-save, so caching
  *  collapses N identical calls into one.
  *
- *  The per-cycle character firehose and the lvl>=250 bypass are deliberately
+ *  The per-cycle character firehose and the lvl>=1000 bypass are deliberately
  *  passed straight through: caching them would delay death detection, which is
- *  exactly what the bot exists to do quickly (see the local-bypass rationale).
+ *  exactly what the bot exists to do quickly.
  *
- *  The boosted boss/creature flip at the 10:00 Berlin server save, and the
+ *  Boosted boss/creature flip at the 10:00 Berlin server save, and the
  *  change-detection that fires the daily notification compares the API value to
  *  the DB-stored one — so a value cached just before the save must NOT survive
  *  past it. We therefore key those entries by the current "save day" (the date
@@ -31,12 +31,11 @@ import scala.util.control.NonFatal
  *  day rolls, turning any pre-save entry into a guaranteed miss regardless of
  *  remaining TTL. The TTL still applies, purely to self-evict stale day keys.
  *
- *  CAVEAT for future maintainers: JsonSupport.strFormat is asymmetric
- *  (unescape-on-read, plain-write), so a string carrying an HTML entity decodes
- *  differently on a cache hit vs a fresh fetch. Today's cached endpoints only
- *  carry fixed monster names / entity-free player names, so it cannot trigger;
- *  do NOT cache a free-form-text endpoint here without first making strFormat
- *  symmetric.
+ *  Caveat: JsonSupport.strFormat is asymmetric (unescape-on-read, plain-write),
+ *  so a string carrying an HTML entity would decode differently on a cache hit
+ *  vs a fresh fetch. Today's cached endpoints only carry fixed monster names /
+ *  entity-free player names, so it cannot trigger; do NOT cache a
+ *  free-form-text endpoint here without first making strFormat symmetric.
  *
  *  Cache misses, decode failures and cache errors all fall back to the
  *  underlying API, so Redis is strictly an optimisation. */

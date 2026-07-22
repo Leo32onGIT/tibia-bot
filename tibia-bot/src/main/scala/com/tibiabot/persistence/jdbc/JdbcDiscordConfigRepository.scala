@@ -5,9 +5,7 @@ import com.tibiabot.persistence.{ConnectionProvider, DiscordConfigRepository}
 import java.sql.Timestamp
 import java.time.ZonedDateTime
 
-/** JDBC implementation of DiscordConfigRepository. Bodies moved verbatim from
- *  BotApp's discordRetrieveConfig/discordCreateConfig/discordUpdateConfig, with
- *  the Guild parameter reduced to guildId and routed through
+/** JDBC implementation of DiscordConfigRepository, routed through
  *  JdbcSupport.withConnection so the connection is always released. */
 final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) extends DiscordConfigRepository {
 
@@ -19,7 +17,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       val channelExists = channelExistsQuery.next()
       channelExistsQuery.close()
 
-      // Add the column if it doesn't exist
       if (!channelExists) {
         statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_channel VARCHAR(255) DEFAULT '0'")
       }
@@ -28,7 +25,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       val lastWorldExists = lastWorldExistsQuery.next()
       lastWorldExistsQuery.close()
 
-      // Add the column if it doesn't exist
       if (!lastWorldExists) {
         statement.execute("ALTER TABLE discord_info ADD COLUMN last_world VARCHAR(255) DEFAULT '0'")
       }
@@ -37,7 +33,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       val messageExists = messageExistsQuery.next()
       messageExistsQuery.close()
 
-      // Add the column if it doesn't exist
       if (!messageExists) {
         statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_messageid VARCHAR(255) DEFAULT '0'")
       }
@@ -80,7 +75,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
   def update(guildId: String, adminCategory: String, adminChannel: String, boostedChannel: String,
              boostedMessage: String, lastWorld: String): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      // update category if exists
       if (adminCategory != "") {
         val statement = conn.prepareStatement("UPDATE discord_info SET admin_category = ?;")
         statement.setString(1, adminCategory)
@@ -88,7 +82,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
         statement.close()
       }
       if (adminChannel != "") {
-        // update channel
         val statement = conn.prepareStatement("UPDATE discord_info SET admin_channel = ?;")
         statement.setString(1, adminChannel)
         statement.executeUpdate()
@@ -96,7 +89,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       }
 
       if (boostedChannel != "") {
-        // update channel
         val statement = conn.prepareStatement("UPDATE discord_info SET boosted_channel = ?;")
         statement.setString(1, boostedChannel)
         statement.executeUpdate()
@@ -104,7 +96,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       }
 
       if (boostedMessage != "") {
-        // update channel
         val statement = conn.prepareStatement("UPDATE discord_info SET boosted_messageid = ?;")
         statement.setString(1, boostedMessage)
         statement.executeUpdate()
@@ -112,7 +103,6 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       }
 
       if (lastWorld != "") {
-        // update channel
         val statement = conn.prepareStatement("UPDATE discord_info SET last_world = ?;")
         statement.setString(1, lastWorld)
         statement.executeUpdate()

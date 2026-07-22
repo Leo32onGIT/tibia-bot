@@ -78,7 +78,8 @@ object GuildIcons {
   // List variant: the `/allies list` and `/hunted list` commands classify a row
   // differently depending on which list is being rendered (`arg`), so a guild's
   // ally/hunted status can cross with the list context. Extracted from the two
-  // identical matches in BotApp (the cached-row path and the fetched-char path).
+  // identical matches in HuntedAlliedService (the cached-row path and the
+  // fetched-char path).
   // ---------------------------------------------------------------------------
 
   sealed trait ListRelation
@@ -128,7 +129,7 @@ object GuildIcons {
   }
 
   /** Classify a list row and map to the configured icon in one call — the form
-   *  the two BotApp call sites use. */
+   *  the two HuntedAlliedService call sites use. */
   def listGuildIcon(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, arg: String): String =
     listIcon(classifyList(guildName, allyGuild, huntedGuild, arg))
 }

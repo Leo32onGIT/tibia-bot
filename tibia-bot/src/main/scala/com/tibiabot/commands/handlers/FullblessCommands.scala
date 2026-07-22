@@ -3,7 +3,7 @@ package com.tibiabot.commands.handlers
 import com.tibiabot.BotApp
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
-/** Handles `/fullbless`: shows the fullbless minimum-level config for a world. */
+/** Handles `/fullbless`: sets the minimum level for enemy fullbless pokes on a world. */
 object FullblessCommands {
 
   val DefaultLevel = 250

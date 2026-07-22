@@ -11,7 +11,7 @@ object HelpCommands {
     embed.setAuthor("Violent Beams", "https://www.tibia.com/community/?subtopic=characters&name=Violent+Beams", "https://github.com/Leo32onGIT.png")
     embed.setDescription(Config.helpText)
     embed.setThumbnail(Config.webHookAvatar)
-    embed.setColor(14397256) // orange for bot auto command
+    embed.setColor(14397256)
     event.getHook.sendMessageEmbeds(embed.build()).queue()
   }
 }

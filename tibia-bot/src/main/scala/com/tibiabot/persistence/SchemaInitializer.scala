@@ -67,7 +67,6 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
     if (needsTables) {
       JdbcSupport.withConnection(connectionProvider.premium) { newConn =>
         val newStatement = newConn.createStatement()
-        // create the tables in bot_configuration
         val createPaymentsTable =
           s"""CREATE TABLE payments (
              |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -189,7 +188,6 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
     if (needsTables) {
       JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { newConn =>
         val newStatement = newConn.createStatement()
-        // create the tables in bot_configuration
         val createDiscordInfoTable =
           s"""CREATE TABLE discord_info (
              |guild_name VARCHAR(255) NOT NULL,

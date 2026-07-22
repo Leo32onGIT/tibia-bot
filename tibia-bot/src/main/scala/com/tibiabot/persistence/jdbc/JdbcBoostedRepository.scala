@@ -5,11 +5,9 @@ import com.tibiabot.persistence.{BoostedRepository, ConnectionProvider}
 
 import scala.collection.mutable.ListBuffer
 
-/** JDBC implementation of BoostedRepository. Read bodies moved verbatim from
- *  BotApp's boostedAll/boostedList; the subscribe/unsubscribe SQL matches the
- *  inline statements in BotApp.boosted. The table is created on first use, as
- *  the originals did. Every method goes through JdbcSupport.withConnection so
- *  the connection is released even if a statement throws. */
+/** JDBC implementation of BoostedRepository. Every method goes through
+ *  JdbcSupport.withConnection so the connection is released even if a
+ *  statement throws, and ensures the backing table exists on first use. */
 final class JdbcBoostedRepository(connectionProvider: ConnectionProvider) extends BoostedRepository {
 
   private def ensureTable(statement: java.sql.Statement): Unit = {

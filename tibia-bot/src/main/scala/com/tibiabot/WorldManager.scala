@@ -24,7 +24,6 @@ object WorldManager extends StrictLogging {
   // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
   private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 
-  // Fallback static world list in case API fails
   private val fallbackWorldList = List(
     "Antica", "Astera", "Axera", "Belobra", "Bombra", "Bona", "Calmera", "Castela",
     "Celebra", "Celesta", "Collabra", "Damora", "Descubra", "Dia", "Epoca", "Etebra",

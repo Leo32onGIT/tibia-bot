@@ -18,24 +18,19 @@ import scala.jdk.CollectionConverters._
 object ScreenshotMessageHandler extends StrictLogging {
 
   def onMessage(event: MessageReceivedEvent, pendingScreenshots: mutable.Map[String, PendingScreenshot]): Unit = {
-    // Ignore bot messages
     if (!event.getAuthor.isBot) {
-      // Handle DM messages for screenshot uploads
       if (!event.isFromGuild) {
         handlePrivate(event, pendingScreenshots)
         return
       }
 
-      // Handle guild messages for screenshot uploads
       if (event.isFromGuild) {
         val guild = event.getGuild
         val user = event.getAuthor
         val pendingKey = s"${user.getId}_${guild.getId}"
 
-        // Check if this user has a pending screenshot request
         pendingScreenshots.get(pendingKey) match {
         case Some(pending) =>
-          // Check if message has attachments
           val attachments = event.getMessage.getAttachments.asScala
           val imageAttachments = attachments.filter { attachment =>
             val fileName = attachment.getFileName.toLowerCase
@@ -47,14 +42,11 @@ object ScreenshotMessageHandler extends StrictLogging {
             val attachment = imageAttachments.head
             val imageUrl = attachment.getUrl
 
-            // Remove the pending request
             pendingScreenshots.remove(pendingKey)
 
             try {
-              // Store the screenshot in database
               BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, user.getName, pending.messageId)
 
-              // Update the original death message with the screenshot
               val channel = guild.getTextChannelById(pending.channelId)
               if (channel != null) {
                 channel.retrieveMessageById(pending.messageId).queue(message => {
@@ -63,12 +55,10 @@ object ScreenshotMessageHandler extends StrictLogging {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
 
-                    // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
-                    val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
+                    val latestIndex = Math.max(0, screenshotCount - 1) // screenshots are stored oldest-first, so the last one is newest
 
-                    // Update embed to show the newest screenshot
                     val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                     if (latestScreenshot != null) {
                       updatedEmbed.setImage(latestScreenshot.screenshotUrl)
@@ -101,7 +91,7 @@ object ScreenshotMessageHandler extends StrictLogging {
 
                     message.editMessageEmbeds(updatedEmbed.build()).setComponents(ActionRow.of(buttons.asJava)).queue()
 
-                    // React to the user's message to confirm, then delete it
+                    // Confirm with a reaction, then remove the user's upload message
                     event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue(_ => {
                       event.getMessage.delete().queue()
                     })
@@ -117,7 +107,6 @@ object ScreenshotMessageHandler extends StrictLogging {
             }
           }
         case None =>
-          // No pending screenshot request for this user
         }
       }
     }
@@ -126,11 +115,9 @@ object ScreenshotMessageHandler extends StrictLogging {
   private def handlePrivate(event: MessageReceivedEvent, pendingScreenshots: mutable.Map[String, PendingScreenshot]): Unit = {
     val user = event.getAuthor
 
-    // Check if this user has a pending screenshot request for any guild
     val userPendingScreenshots = pendingScreenshots.filter(_._1.startsWith(user.getId + "_")).toMap
 
     if (userPendingScreenshots.nonEmpty) {
-      // Check if message has attachments
       val attachments = event.getMessage.getAttachments.asScala
       val imageAttachments = attachments.filter { attachment =>
         val fileName = attachment.getFileName.toLowerCase
@@ -142,16 +129,13 @@ object ScreenshotMessageHandler extends StrictLogging {
         val attachment = imageAttachments.head
         val imageUrl = attachment.getUrl
 
-        // Process all pending screenshots for this user (in case they have multiple)
+        // A DM upload may need to fill pending requests from more than one guild
         userPendingScreenshots.foreach { case (pendingKey, pending) =>
-          // Remove the pending request
           pendingScreenshots.remove(pendingKey)
 
           try {
-            // Store the screenshot in database
             BotApp.storeDeathScreenshot(pending.guildId, pending.world, pending.charName, pending.deathTime, imageUrl, pending.userId, user.getName, pending.messageId)
 
-            // Update the original death message with the screenshot
             val guild = event.getJDA.getGuildById(pending.guildId)
             if (guild != null) {
               val channel = guild.getTextChannelById(pending.channelId)
@@ -162,12 +146,10 @@ object ScreenshotMessageHandler extends StrictLogging {
                     val originalEmbed = embeds.get(0)
                     val updatedEmbed = new EmbedBuilder(originalEmbed)
 
-                    // Get existing screenshots to check if we need navigation buttons
                     val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
                     val screenshotCount = screenshots.length
-                    val latestIndex = Math.max(0, screenshotCount - 1) // Show the newest screenshot (last in ASC order)
+                    val latestIndex = Math.max(0, screenshotCount - 1) // screenshots are stored oldest-first, so the last one is newest
 
-                    // Update embed to show the newest screenshot
                     val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
                     if (latestScreenshot != null) {
                       updatedEmbed.setImage(latestScreenshot.screenshotUrl)
@@ -206,7 +188,6 @@ object ScreenshotMessageHandler extends StrictLogging {
               }
             }
 
-            // Send confirmation DM to user
             event.getChannel.sendMessage(s"${Config.yesEmoji} Screenshot uploaded successfully for **[${pending.charName}](${BotApp.charUrl(pending.charName)})**.").queue()
 
           } catch {
@@ -216,10 +197,8 @@ object ScreenshotMessageHandler extends StrictLogging {
           }
         }
       } else {
-        // Check if user is trying to cancel uploads
         val messageContent = event.getMessage.getContentRaw.toLowerCase.trim
         if (messageContent.contains("cancel")) {
-          // Cancel all pending uploads for this user
           val cancelledCount = userPendingScreenshots.size
           userPendingScreenshots.keys.foreach(pendingScreenshots.remove)
 
@@ -231,12 +210,10 @@ object ScreenshotMessageHandler extends StrictLogging {
 
           logger.info(s"User ${user.getName} (${user.getId}) cancelled ${cancelledCount} pending uploads via DM")
         } else {
-          // User sent a DM but no image attachment and not a cancel command
           event.getChannel.sendMessage("Please upload an image file (PNG, JPG, GIF, WebP) or paste an image from your clipboard.\nType `cancel` to cancel any pending upload requests.").queue()
         }
       }
     } else {
-      // No pending uploads, check if user is asking for help or trying to cancel
       val messageContent = event.getMessage.getContentRaw.toLowerCase.trim
       if (messageContent.contains("cancel")) {
         event.getChannel.sendMessage("You don't have any pending uploads to cancel.").queue()
