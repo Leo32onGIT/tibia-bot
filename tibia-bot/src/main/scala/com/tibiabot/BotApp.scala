@@ -110,10 +110,12 @@ object BotApp extends App with StrictLogging {
   // above with everything else.
   val onlineListSender = makeMonitoredSender("online-list", Config.onlineListMessageDelayMs)
 
-  // Per-world population/poll-timing/throughput counters and a bot-wide recent-
-  // activity feed, both read by the monitoring dashboard's /status endpoint.
+  // Per-world population/poll-timing/throughput counters and per-world recent-
+  // activity feeds, both read by the monitoring dashboard's /status endpoint.
+  // Per-world (not one shared bot-wide buffer) so a busy world's events can't
+  // push a quiet world's events out of the window.
   val worldMetricsRegistry = new tracking.WorldMetricsRegistry
-  val recentEvents = new tracking.RecentEvents()
+  val recentEventsRegistry = new tracking.RecentEventsRegistry
 
   // WorldMetrics' deaths/levels/edits counters are a fixed 15-minute window,
   // reset here rather than on read since the dashboard may poll far more often
@@ -206,7 +208,7 @@ object BotApp extends App with StrictLogging {
     mountPath = dashboardMountPath
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
-    discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEvents,
+    discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance
   )
   akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
@@ -625,7 +627,7 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEvents).stream.run(), List(discords))
+            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get)).stream.run(), List(discords))
           }
         }
       }
@@ -644,7 +646,7 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEvents).stream.run(), discordsList)
+        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName)).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 5.5 seconds
       }
       startUpComplete = true

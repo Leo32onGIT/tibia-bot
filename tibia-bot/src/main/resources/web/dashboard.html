@@ -377,7 +377,8 @@ function render() {
   renderDetail(worlds);
   renderLanes(lastData.rateLimitLanes);
   renderLogAlerts(lastData.logAlerts);
-  renderFeed(lastData.recentEvents.filter(ev => ev.world === selectedWorld));
+  const selected = worlds.find(w => w.name === selectedWorld);
+  renderFeed(selected ? selected.recentEvents : []);
 }
 
 async function poll() {

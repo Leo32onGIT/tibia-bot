@@ -19,7 +19,7 @@ final class StatusRoute(
   ownerId: String,
   streamSupervisor: app.StreamSupervisor,
   worldMetricsRegistry: tracking.WorldMetricsRegistry,
-  recentEvents: tracking.RecentEvents,
+  recentEventsRegistry: tracking.RecentEventsRegistry,
   outboundSender: discord.RateLimitedSender,
   onlineListSender: discord.RateLimitedSender,
   discordGateway: discord.DiscordGateway,
@@ -70,6 +70,13 @@ final class StatusRoute(
         val owner = Option(guild).flatMap(g => Option(g.getOwner)).map(_.getEffectiveName).getOrElse("Unknown")
         JsObject("id" -> JsString(d.id), "name" -> JsString(name), "owner" -> JsString(owner))
       }
+      val recentEventsJson = recentEventsRegistry.forWorld(world).recent().map { ev =>
+        JsObject(
+          "at" -> JsString(ev.at.toString),
+          "tag" -> JsString(ev.tag),
+          "text" -> JsString(ev.text)
+        ): JsValue
+      }
       JsObject(
         "name" -> JsString(world),
         "population" -> JsNumber(snap.population),
@@ -80,7 +87,8 @@ final class StatusRoute(
         "edits15m" -> JsNumber(snap.edits),
         "battleyeGreen" -> JsBoolean(snap.battleyeGreen),
         "pvpType" -> JsString(snap.pvpType),
-        "discords" -> JsArray(discordsJson.toVector)
+        "discords" -> JsArray(discordsJson.toVector),
+        "recentEvents" -> JsArray(recentEventsJson.toVector)
       )
     }
 
@@ -90,14 +98,6 @@ final class StatusRoute(
         "background" -> laneJson(outboundSender),
         "online-list" -> laneJson(onlineListSender)
       ),
-      "recentEvents" -> JsArray(recentEvents.recent().map { ev =>
-        JsObject(
-          "at" -> JsString(ev.at.toString),
-          "tag" -> JsString(ev.tag),
-          "world" -> JsString(ev.world),
-          "text" -> JsString(ev.text)
-        ): JsValue
-      }.toVector),
       "logAlerts" -> buildLogAlertsJson()
     )
   }

@@ -632,7 +632,7 @@ class TibiaBot(
       }
       val summary = if (lines.size == 1) "1 player leveled up" else s"${lines.size} players leveled up"
       val discordLabel = s"""<span class="muted" title="Discord ID: ${channel.getGuild.getId}">&middot; ${channel.getGuild.getName}</span>"""
-      recentEvents.record("level-up", world, s"$summary $discordLabel")
+      recentEvents.record("level-up", s"$summary $discordLabel")
     }
 
     // update online lists
@@ -936,7 +936,7 @@ class TibiaBot(
               // identifying which one, the feed shows what looks like duplicate rows —
               // this is the enclosing discordsList.foreach's discord, not a repeat.
               val discordLabel = s"""<span class="muted" title="Discord ID: $guildId">&middot; ${guild.getName}</span>"""
-              recentEvents.record("death", world, s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
+              recentEvents.record("death", s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
             }
             validEmbeds.foreach { embed =>
               try {
