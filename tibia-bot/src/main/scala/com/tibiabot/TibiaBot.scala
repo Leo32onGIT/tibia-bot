@@ -69,10 +69,16 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
   private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
   private val cooldownMinutes = 30L
-  // Benign, operator-side send failures (channel deleted / perms removed) — ignore instead
-  // of letting JDA's default handler spam them on every cycle; other errors still log.
+  // Benign, operator-side failures (channel/message deleted, perms removed) —
+  // ignore instead of letting JDA's default handler log an ERROR stack trace
+  // for each one; other errors still log. UNKNOWN_MESSAGE matters especially
+  // for the rate-limited lanes: an edit/rename is captured against a specific
+  // message/channel at enqueue time but may not dispatch until well after
+  // (queue depth + pace delay), so the target can legitimately be gone by
+  // then — e.g. a later online-list update purging a now-excess message
+  // before an earlier queued edit for that same message fires.
   private val ignoreDeletedTarget = new ErrorHandler()
-    .ignore(ErrorResponse.UNKNOWN_CHANNEL, ErrorResponse.MISSING_PERMISSIONS, ErrorResponse.MISSING_ACCESS)
+    .ignore(ErrorResponse.UNKNOWN_CHANNEL, ErrorResponse.UNKNOWN_MESSAGE, ErrorResponse.MISSING_PERMISSIONS, ErrorResponse.MISSING_ACCESS)
 
   private val logAndResumeDecider: Supervision.Decider = { e =>
     logger.error("An exception has occurred in the TibiaBot:", e)
@@ -1300,7 +1306,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
             }
             onlineListSender.enqueue("edit") { () =>
               try {
-                message.editMessageEmbeds(embed.build()).queue()
+                message.editMessageEmbeds(embed.build()).queue(null, ignoreDeletedTarget)
               } catch {
                 case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
               }
@@ -1316,7 +1322,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
           }
           onlineListSender.enqueue("send") { () =>
             try {
-              channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
+              channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue(null, ignoreDeletedTarget)
             } catch {
               case ex: Throwable => logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
             }
@@ -1438,7 +1444,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
           onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
           outboundSender.enqueue("rename") { () =>
             try {
-              category.getManager.setName(s"$baseName$masslogIcon").queue()
+              category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
             } catch {
               case ex: Throwable => logger.warn(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
             }
@@ -1463,7 +1469,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
         onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
         outboundSender.enqueue("rename") { () =>
           try {
-            channel.getManager.setName(targetName).queue()
+            channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)
           } catch {
             case ex: Throwable => logger.warn(s"Failed to rename the $label for Guild ID: '$guildId' Guild Name: '$guildName'", ex)
           }
