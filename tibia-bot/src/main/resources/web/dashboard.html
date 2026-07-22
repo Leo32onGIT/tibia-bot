@@ -76,10 +76,19 @@
 
   main { flex: 1; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 
-  .kpis-strip { display: flex; gap: 28px; }
-  .kpi { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .kpi i { font-size: 20px; color: var(--accent); }
-  .kpi .value { font-size: 18px; font-weight: 600; color: var(--text-strong); }
+  .kpis-strip { display: flex; gap: 14px; }
+  .kpi {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 6px 14px 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .kpi i { font-size: 15px; color: var(--muted); }
+  .kpi .label { color: var(--muted); font-size: 12px; }
+  .kpi .value { color: var(--text-strong); font-size: 14px; font-weight: 600; }
 
   .panel {
     background: var(--panel);
@@ -112,12 +121,16 @@
   .discord-item i { color: var(--muted); font-size: 14px; }
   .discord-item .gid { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-  .lanes { display: flex; gap: 20px; padding: 16px; flex-wrap: wrap; }
+  .lanes { display: flex; gap: 24px; padding: 16px; flex-wrap: wrap; }
   .lane { flex: 1; min-width: 220px; }
-  .lane-name { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-  .lane-stats { display: flex; gap: 16px; }
-  .lane-stats .num { font-size: 18px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
-  .lane-stats .num-label { font-size: 11px; color: var(--muted); }
+  .lane-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .lane-name { font-size: 13px; font-weight: 600; color: var(--text-strong); }
+  .lane-pill { font-size: 10px; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .lane-bar-track { background: var(--panel-border); border-radius: 4px; height: 6px; margin-bottom: 10px; overflow: hidden; }
+  .lane-bar-fill { height: 100%; }
+  .lane-summary { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+  .lane-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lane-chip { font-size: 11px; padding: 3px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; }
 
   .feed { max-height: 320px; overflow-y: auto; }
   .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; }
@@ -139,9 +152,9 @@
 </aside>
 <main>
   <div class="kpis-strip">
-    <div class="kpi" title="Worlds tracked" aria-label="Worlds tracked"><i class="ti ti-world" aria-hidden="true"></i><div class="value" id="kpi-worlds">–</div></div>
-    <div class="kpi" title="Discords" aria-label="Discords"><i class="ti ti-brand-discord" aria-hidden="true"></i><div class="value" id="kpi-discords">–</div></div>
-    <div class="kpi" title="Tracked players" aria-label="Tracked players"><i class="ti ti-users" aria-hidden="true"></i><div class="value" id="kpi-population">–</div></div>
+    <div class="kpi"><i class="ti ti-world" aria-hidden="true"></i><span class="label">Worlds</span><span class="value" id="kpi-worlds">–</span></div>
+    <div class="kpi"><i class="ti ti-brand-discord" aria-hidden="true"></i><span class="label">Discords</span><span class="value" id="kpi-discords">–</span></div>
+    <div class="kpi"><i class="ti ti-users" aria-hidden="true"></i><span class="label">Tracked Players</span><span class="value" id="kpi-population">–</span></div>
   </div>
 
   <div class="panel">
@@ -223,19 +236,42 @@ function renderDetail(worlds) {
     : '<div class="muted">No discords tracking this world</div>';
 }
 
+// Queue depth is what "backed up" actually means for a lane — a healthy lane
+// drains close to as fast as it fills. Fixed threshold, not relative, so the
+// pill means the same thing regardless of how busy the bot is overall.
+function laneHealthVar(queueDepth) {
+  return queueDepth > 20 ? '--bad' : '--good';
+}
+
+// Avg wait is the "effect on sends" signal per label — how long something
+// sits queued before it actually goes out.
+function waitVar(avgWaitMs) {
+  if (avgWaitMs < 300) return '--good';
+  if (avgWaitMs < 1000) return '--warn';
+  return '--bad';
+}
+
 function renderLanes(lanes) {
   const el = document.getElementById('lanes');
   el.innerHTML = '';
   Object.entries(lanes).forEach(([name, lane]) => {
+    const healthVar = laneHealthVar(lane.queueDepth);
+    const barPct = Math.min(100, lane.queueDepth);
+    const chips = Object.entries(lane.labels).map(([label, stats]) => {
+      const v = waitVar(stats.avgWaitMs);
+      return `<span class="lane-chip" style="background:color-mix(in srgb, var(${v}) 15%, transparent); color:var(${v});">${label} ${Math.round(stats.avgWaitMs)}ms</span>`;
+    }).join('') || '<span class="muted" style="font-size:11px;">No traffic yet</span>';
+
     const div = document.createElement('div');
     div.className = 'lane';
     div.innerHTML = `
-      <div class="lane-name">${name}</div>
-      <div class="lane-stats">
-        <div><div class="num">${lane.queueDepth}</div><div class="num-label">Queue depth</div></div>
-        <div><div class="num">${lane.totalDropped}</div><div class="num-label">Dropped</div></div>
-        <div><div class="num">${lane.totalSuperseded}</div><div class="num-label">Superseded</div></div>
+      <div class="lane-header">
+        <span class="lane-name">${name}</span>
+        <span class="lane-pill" style="background:color-mix(in srgb, var(${healthVar}) 15%, transparent); color:var(${healthVar});">${healthVar === '--bad' ? 'Backed up' : 'Healthy'}</span>
       </div>
+      <div class="lane-bar-track"><div class="lane-bar-fill" style="width:${barPct}%; background:var(${healthVar});"></div></div>
+      <div class="lane-summary">${lane.queueDepth} queued &middot; ${lane.totalDropped} dropped &middot; ${lane.totalSuperseded} superseded</div>
+      <div class="lane-chips">${chips}</div>
     `;
     el.appendChild(div);
   });
