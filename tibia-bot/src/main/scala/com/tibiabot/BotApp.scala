@@ -207,7 +207,7 @@ object BotApp extends App with StrictLogging {
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEvents,
-    outboundSender, onlineListSender, discordGateway
+    outboundSender, onlineListSender, discordGateway, web.LogCapture.instance
   )
   akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
     .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") { statusRoute.routes })

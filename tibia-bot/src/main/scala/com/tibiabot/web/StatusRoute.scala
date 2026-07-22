@@ -22,7 +22,8 @@ final class StatusRoute(
   recentEvents: tracking.RecentEvents,
   outboundSender: discord.RateLimitedSender,
   onlineListSender: discord.RateLimitedSender,
-  discordGateway: discord.DiscordGateway
+  discordGateway: discord.DiscordGateway,
+  logCapture: LogCapture
 ) extends StrictLogging {
 
   /** Read fresh on every request (not cached) so editing the file on disk —
@@ -95,6 +96,27 @@ final class StatusRoute(
           "tag" -> JsString(ev.tag),
           "world" -> JsString(ev.world),
           "text" -> JsString(ev.text)
+        ): JsValue
+      }.toVector),
+      "logAlerts" -> buildLogAlertsJson()
+    )
+  }
+
+  private def buildLogAlertsJson(): JsObject = {
+    val events = logCapture.recent()
+    // Total occurrences (summing repeat counts), not distinct rows — a
+    // repeating warning collapsed to one row in `recent` below shouldn't
+    // make the header undercount how often it's actually firing.
+    JsObject(
+      "errorCount" -> JsNumber(events.filter(_.level == "ERROR").map(_.count).sum),
+      "warnCount" -> JsNumber(events.filter(_.level == "WARN").map(_.count).sum),
+      "recent" -> JsArray(events.map { ev =>
+        JsObject(
+          "at" -> JsString(ev.at.toString),
+          "level" -> JsString(ev.level),
+          "logger" -> JsString(ev.logger),
+          "message" -> JsString(ev.message),
+          "count" -> JsNumber(ev.count)
         ): JsValue
       }.toVector)
     )

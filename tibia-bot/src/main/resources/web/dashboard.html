@@ -138,6 +138,14 @@
   .lane-mini-fill { height: 100%; }
   .lane-mini-ms { font-size: 10px; width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
 
+  .log-alerts-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .log-alert-count i { font-size: 14px; }
+  .log-alert-count.error { color: var(--bad); }
+  .log-alert-count.warn { color: var(--warn); }
+  #log-alerts-chevron { color: var(--muted); font-size: 14px; transition: transform 0.15s ease; }
+  #log-alerts-chevron.expanded { transform: rotate(180deg); }
+
   .feed { max-height: 320px; overflow-y: auto; }
   .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; }
   .feed-row a { color: var(--accent); text-decoration: none; }
@@ -148,6 +156,10 @@
   .tag.death { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
   .tag.level-up { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.edit { background: rgba(91, 140, 255, 0.15); color: var(--accent); }
+  .tag.error { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
+  .tag.warn { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
+  .log-alert-logger { color: var(--muted); }
+  .log-alert-repeat { background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 10px; padding: 1px 7px; border-radius: 10px; font-variant-numeric: tabular-nums; }
 
   .muted { color: var(--muted); }
   .stale { color: var(--warn); }
@@ -169,6 +181,17 @@
     <div class="lanes-compact">
       <div class="lanes-rows" id="lanes"></div>
     </div>
+    <div class="kpi-divider"></div>
+    <div class="log-alerts-summary" id="log-alerts-summary">
+      <span class="log-alert-count error"><i class="ti ti-alert-circle" aria-hidden="true"></i><span id="log-error-count">0 errors</span></span>
+      <span class="log-alert-count warn"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span id="log-warn-count">0 warnings</span></span>
+      <i class="ti ti-chevron-down" id="log-alerts-chevron" aria-hidden="true"></i>
+    </div>
+  </div>
+
+  <div class="panel" id="log-alerts-panel" style="display:none;">
+    <div class="panel-title">Log Alerts</div>
+    <div class="feed" id="log-alerts-list"></div>
   </div>
 
   <div class="panel">
@@ -308,6 +331,39 @@ function renderFeed(events) {
   });
 }
 
+function renderLogAlerts(logAlerts) {
+  document.getElementById('log-error-count').textContent = `${logAlerts.errorCount} ${logAlerts.errorCount === 1 ? 'error' : 'errors'}`;
+  document.getElementById('log-warn-count').textContent = `${logAlerts.warnCount} ${logAlerts.warnCount === 1 ? 'warning' : 'warnings'}`;
+
+  const el = document.getElementById('log-alerts-list');
+  el.innerHTML = '';
+  if (logAlerts.recent.length === 0) {
+    el.innerHTML = '<div class="feed-row muted">No warnings or errors captured</div>';
+    return;
+  }
+  logAlerts.recent.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'feed-row';
+    const repeatBadge = ev.count > 1 ? `<span class="log-alert-repeat">&times;${ev.count}</span>` : '';
+    row.innerHTML = `
+      <div class="feed-time">${timeAgo(ev.at)}</div>
+      <span class="tag ${ev.level.toLowerCase()}">${ev.level}</span>
+      <span class="log-alert-logger">${ev.logger}</span>
+      <div style="flex:1;">${ev.message}</div>
+      ${repeatBadge}
+    `;
+    el.appendChild(row);
+  });
+}
+
+document.getElementById('log-alerts-summary').addEventListener('click', () => {
+  const panel = document.getElementById('log-alerts-panel');
+  const chevron = document.getElementById('log-alerts-chevron');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  chevron.classList.toggle('expanded', isHidden);
+});
+
 function render() {
   if (!lastData) return;
   const worlds = lastData.worlds;
@@ -320,6 +376,7 @@ function render() {
   renderSidebar(worlds);
   renderDetail(worlds);
   renderLanes(lastData.rateLimitLanes);
+  renderLogAlerts(lastData.logAlerts);
   document.getElementById('feed-world').textContent = selectedWorld || '';
   renderFeed(lastData.recentEvents.filter(ev => ev.world === selectedWorld));
 }

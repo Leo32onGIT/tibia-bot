@@ -30,8 +30,17 @@
   </appender>
 -->
 
+  <!-- Feeds the dashboard's log-alerts widget (see StatusRoute/LogCapture) —
+       every WARN+ event across the app, independent of what CONSOLE prints. -->
+  <appender name="DASHBOARD" class="com.tibiabot.web.DashboardLogAppender">
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+      <level>WARN</level>
+    </filter>
+  </appender>
+
   <logger name="club.minnced.discord.webhook.WebhookClient" level="ERROR" additivity="false">
     <appender-ref ref="CONSOLE" />
+    <appender-ref ref="DASHBOARD" />
   </logger>
 
   <!-- JDA logs a WARN every time it hits a 429 and auto-retries internally —
@@ -48,6 +57,7 @@
   <root level="INFO">
     <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
     <appender-ref ref="CONSOLE" />
+    <appender-ref ref="DASHBOARD" />
   </root>
 
 </configuration>
