@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Violent Bot — Status</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
   :root {
     --bg: #0b0d12;
@@ -34,9 +35,9 @@
   header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
   header h1 span { color: var(--muted); font-weight: 400; }
   .kpis { display: flex; gap: 28px; }
-  .kpi { text-align: left; }
-  .kpi .value { font-size: 20px; font-weight: 600; }
-  .kpi .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .kpi { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .kpi i { font-size: 20px; color: var(--accent); }
+  .kpi .value { font-size: 18px; font-weight: 600; }
   main { padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; }
   .panel {
     background: var(--panel);
@@ -111,9 +112,9 @@
 <header>
   <h1>Violent Bot <span>/ status</span></h1>
   <div class="kpis">
-    <div class="kpi"><div class="value" id="kpi-worlds">–</div><div class="label">Worlds</div></div>
-    <div class="kpi"><div class="value" id="kpi-discords">–</div><div class="label">Discords</div></div>
-    <div class="kpi"><div class="value" id="kpi-population">–</div><div class="label">Online</div></div>
+    <div class="kpi" title="Worlds tracked" aria-label="Worlds tracked"><i class="ti ti-world" aria-hidden="true"></i><div class="value" id="kpi-worlds">–</div></div>
+    <div class="kpi" title="Discords" aria-label="Discords"><i class="ti ti-brand-discord" aria-hidden="true"></i><div class="value" id="kpi-discords">–</div></div>
+    <div class="kpi" title="Tracked players" aria-label="Tracked players"><i class="ti ti-users" aria-hidden="true"></i><div class="value" id="kpi-population">–</div></div>
   </div>
 </header>
 <main>
