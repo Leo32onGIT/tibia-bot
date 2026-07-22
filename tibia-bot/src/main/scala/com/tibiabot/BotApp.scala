@@ -61,39 +61,52 @@ object BotApp extends App with StrictLogging {
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
 
-  // Shared, bot-wide background lane for low-priority outbound sends (activity/admin
-  // embeds, batched level-ups, boosted-DM notifications) — one instance across every
-  // world stream so the aggregate send rate is bounded bot-wide, not per world. Deaths
-  // and the boosted-channel server-save post are top priority and bypass this entirely.
-  val outboundSender = new discord.RateLimitedSender(drain => {
-    val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
-      0.seconds,
-      Config.globalMessageDelayMs.milliseconds
-    )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
-    () => cancellable.cancel()
-  })
+  /** Build a RateLimitedSender ticking every `delayMs`, plus a periodic
+   *  monitoring log tagged `[rate-limit:name]`: queue depth (and its trend
+   *  since the last log) shows whether the lane is keeping up or backing up;
+   *  the per-label breakdown shows which traffic is consuming the lane's
+   *  budget and how long it's waiting. */
+  private def makeMonitoredSender(name: String, delayMs: Int): discord.RateLimitedSender = {
+    val sender = new discord.RateLimitedSender(drain => {
+      val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
+        0.seconds,
+        delayMs.milliseconds
+      )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
+      () => cancellable.cancel()
+    })
+    var lastLoggedQueueDepth = 0
+    actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
+      val depth = sender.queueDepth
+      val delta = depth - lastLoggedQueueDepth
+      lastLoggedQueueDepth = depth
+      val trend =
+        if (delta > 0) s"+$delta, growing"
+        else if (delta < 0) s"$delta, draining"
+        else "unchanged"
+      val perLabel = sender.snapshotAndReset()
+      val breakdown =
+        if (perLabel.isEmpty) "no traffic"
+        else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
+          s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
+        }.mkString(" | ")
+      logger.info(s"[rate-limit:$name] depth: $depth ($trend vs 5m ago) | dropped total: ${sender.totalDropped} | last 5m -- $breakdown")
+    })(ex)
+    sender
+  }
 
-  // Periodic visibility into the background lane while tuning the rate-limit
-  // changes: queue depth (and its trend since the last log) shows whether the
-  // lane is keeping up or backing up; the per-label breakdown shows which
-  // traffic is actually consuming the shared budget and how long it's waiting.
-  private var lastLoggedQueueDepth = 0
-  actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
-    val depth = outboundSender.queueDepth
-    val delta = depth - lastLoggedQueueDepth
-    lastLoggedQueueDepth = depth
-    val trend =
-      if (delta > 0) s"+$delta, growing"
-      else if (delta < 0) s"$delta, draining"
-      else "unchanged"
-    val perLabel = outboundSender.snapshotAndReset()
-    val breakdown =
-      if (perLabel.isEmpty) "no background-lane traffic"
-      else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
-        s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
-      }.mkString(" | ")
-    logger.info(s"[rate-limit] background lane depth: $depth ($trend vs 5m ago) | dropped total: ${outboundSender.totalDropped} | last 5m -- $breakdown")
-  })(ex)
+  // Shared, bot-wide background lane for low-priority outbound sends (renames,
+  // activity/admin embeds, batched level-ups, boosted-DM notifications) — one
+  // instance across every world stream so the aggregate send rate is bounded
+  // bot-wide, not per world. Deaths and the boosted-channel server-save post
+  // are top priority and bypass this entirely.
+  val outboundSender = makeMonitoredSender("background", Config.globalMessageDelayMs)
+
+  // Separate, much slower lane just for online-list message edits/sends —
+  // Discord groups these into a "shared" bucket across many channels for this
+  // bot, tighter than the general REST budget (confirmed via live 429s with
+  // Retry-After 5-6s), so it needs its own pace instead of sharing the lane
+  // above with everything else.
+  val onlineListSender = makeMonitoredSender("online-list", Config.onlineListMessageDelayMs)
 
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
@@ -567,7 +580,7 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender).stream.run(), List(discords))
+            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender).stream.run(), List(discords))
           }
         }
       }
@@ -586,7 +599,7 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender).stream.run(), discordsList)
+        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 5.5 seconds
       }
       startUpComplete = true

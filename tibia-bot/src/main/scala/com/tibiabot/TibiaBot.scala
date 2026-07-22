@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
-class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineListSender: discord.RateLimitedSender)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
@@ -1256,17 +1256,21 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
       // Pack the lines into embed-sized descriptions, then reconcile against the
       // existing messages: edit in place where one exists, otherwise post. Only
       // the trailing embed carries the "Last updated" footer + timestamp. Sends
-      // go through the shared background lane (outboundSender) — guilds sharing
-      // a world all become due in the same tick, so this smooths that burst
-      // instead of firing every channel's edit/send at once.
+      // go through their own dedicated lane (onlineListSender), separate from
+      // the general background lane — Discord groups message-edit PATCH calls
+      // into a "shared" bucket across many channels for this bot, tighter than
+      // the general REST budget (confirmed via live 429s), so this traffic
+      // needs a slower, isolated pace. Guilds sharing a world all become due in
+      // the same tick, so this also smooths that burst instead of firing every
+      // channel's edit/send at once.
       //
       // An existing message is only re-edited when its description actually
       // changed — this runs every ~90-120s per guild regardless of whether the
       // online list moved at all, so without this guard it unconditionally
-      // resends on every check (observed growing the shared queue unbounded at
-      // ~50 guilds: this was by far the largest source of background-lane
-      // traffic). "Last updated" only refreshes when content changes, same as
-      // the online-list rename guard above.
+      // resends on every check (previously the largest source of background-
+      // lane traffic, before this got its own lane). "Last updated" only
+      // refreshes when content changes, same as the online-list rename guard
+      // above.
       //
       // Every line embeds a live "how long online" duration (e.g. `5min`,
       // `1hr 23min`) that ticks up roughly every minute, so a raw text compare
@@ -1294,7 +1298,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
               embed.setFooter("Last updated")
               embed.setTimestamp(OffsetDateTime.now())
             }
-            outboundSender.enqueue("online-list") { () =>
+            onlineListSender.enqueue("edit") { () =>
               try {
                 message.editMessageEmbeds(embed.build()).queue()
               } catch {
@@ -1310,7 +1314,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender)(implici
             embed.setFooter("Last updated")
             embed.setTimestamp(OffsetDateTime.now())
           }
-          outboundSender.enqueue("online-list") { () =>
+          onlineListSender.enqueue("send") { () =>
             try {
               channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue()
             } catch {

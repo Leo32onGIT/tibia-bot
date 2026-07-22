@@ -109,6 +109,7 @@ object Config {
  val dromeEmoji: String = discord.getString("drome-emoji")
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
+  val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")
 
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
