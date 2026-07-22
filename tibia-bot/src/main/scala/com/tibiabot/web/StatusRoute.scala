@@ -25,10 +25,21 @@ final class StatusRoute(
   discordGateway: discord.DiscordGateway
 ) extends StrictLogging {
 
-  private val dashboardHtml: String = {
-    val stream = getClass.getClassLoader.getResourceAsStream("web/dashboard.html")
-    try scala.io.Source.fromInputStream(stream, "UTF-8").mkString
-    finally stream.close()
+  /** Read fresh on every request (not cached) so editing the file on disk —
+   *  e.g. a volume-mounted `web/` directory in Docker — takes effect
+   *  immediately, without rebuilding or restarting the bot. Prefers a
+   *  filesystem copy at the relative path used by that mount; falls back to
+   *  the copy baked into the jar (a plain `sbt run` with no mount, or the
+   *  packaged default if nothing is mounted). */
+  private def dashboardHtml(): String = {
+    val overridePath = java.nio.file.Paths.get("web/dashboard.html")
+    if (java.nio.file.Files.isReadable(overridePath)) {
+      new String(java.nio.file.Files.readAllBytes(overridePath), "UTF-8")
+    } else {
+      val stream = getClass.getClassLoader.getResourceAsStream("web/dashboard.html")
+      try scala.io.Source.fromInputStream(stream, "UTF-8").mkString
+      finally stream.close()
+    }
   }
 
   private def requireOwner(userId: String): Directive0 =
@@ -98,7 +109,7 @@ final class StatusRoute(
       get {
         discordAuth.authenticatedUser { userId =>
           requireOwner(userId) {
-            complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, dashboardHtml))
+            complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, dashboardHtml()))
           }
         }
       }

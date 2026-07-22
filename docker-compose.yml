@@ -24,6 +24,11 @@ services:
     # expected and harmless. It is NOT wired to depends_on postgres so that a
     # pre-existing/external database works without starting the local one.
     restart: unless-stopped
+    volumes:
+      # StatusRoute reads dashboard.html fresh on every request, preferring
+      # this path over the copy baked into the jar — so editing this file
+      # (then just refreshing the browser) never needs a rebuild or restart.
+      - ./tibia-bot/src/main/resources/web:/opt/docker/web:ro
     # Status dashboard (see StatusRoute.scala) — internal-only, reached via
     # Caddy below. Deliberately no `ports:` here: the host never talks to the
     # bot directly, only through the reverse proxy that terminates TLS.
