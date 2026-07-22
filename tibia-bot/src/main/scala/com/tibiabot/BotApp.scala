@@ -18,6 +18,8 @@ import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.utils.TimeFormat
+import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
+import net.dv8tion.jda.api.requests.ErrorResponse
 
 import java.awt.Color
 import java.time.{Instant, ZonedDateTime}
@@ -429,7 +431,18 @@ object BotApp extends App with StrictLogging {
                           val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
                           privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
                             Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )).queue()
+                          )).queue(null, new ErrorHandler().handle(
+                            List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
+                            new java.util.function.Consumer[ErrorResponseException] {
+                              // The bot can never DM this user again (no shared guild left, or
+                              // DMs closed) — drop their subscription instead of retrying every
+                              // server save forever.
+                              def accept(ex: ErrorResponseException): Unit = {
+                                boostedService.boosted(entry.user, "disable", "")
+                                logger.info(s"Removed boosted-DM subscription for user '${entry.user}': can no longer be DMed")
+                              }
+                            }
+                          ))
                         }
                       } catch {
                         case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
