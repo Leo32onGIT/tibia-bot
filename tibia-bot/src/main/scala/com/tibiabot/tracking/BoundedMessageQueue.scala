@@ -35,4 +35,11 @@ final class BoundedMessageQueue[T](capacity: Int = Int.MaxValue, dropNewest: Boo
 
   /** Remove and return the head, or None if empty (FIFO). */
   def dequeueOption(): Option[T] = if (q.isEmpty) None else Some(q.dequeue())
+
+  /** Remove every queued item matching `predicate`. Returns the count removed. */
+  def removeWhere(predicate: T => Boolean): Int = {
+    val before = q.size
+    q.filterInPlace(!predicate(_))
+    before - q.size
+  }
 }

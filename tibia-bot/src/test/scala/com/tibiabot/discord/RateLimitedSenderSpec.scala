@@ -93,4 +93,46 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     // window resets: nothing new happened since the snapshot
     sender.snapshotAndReset() shouldBe empty
   }
+
+  test("enqueueing under the same key supersedes the earlier pending item") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    val sent = ListBuffer.empty[String]
+
+    sender.enqueue("test", Some("channel-1"))(() => sent += "stale")
+    sender.enqueue("test", Some("channel-1"))(() => sent += "fresh")
+    sender.queueDepth shouldBe 1
+    sender.totalSuperseded shouldBe 1
+
+    ticker.tick()
+    sent.toList shouldBe List("fresh")
+  }
+
+  test("different keys never supersede each other") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    val sent = ListBuffer.empty[String]
+
+    sender.enqueue("test", Some("channel-1"))(() => sent += "a")
+    sender.enqueue("test", Some("channel-2"))(() => sent += "b")
+    sender.queueDepth shouldBe 2
+    sender.totalSuperseded shouldBe 0
+
+    ticker.tick(); ticker.tick()
+    sent.toList shouldBe List("a", "b")
+  }
+
+  test("no key means every enqueue is kept, even for identical labels") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    val sent = ListBuffer.empty[String]
+
+    sender.enqueue("test")(() => sent += "a")
+    sender.enqueue("test")(() => sent += "b")
+    sender.queueDepth shouldBe 2
+    sender.totalSuperseded shouldBe 0
+
+    ticker.tick(); ticker.tick()
+    sent.toList shouldBe List("a", "b")
+  }
 }

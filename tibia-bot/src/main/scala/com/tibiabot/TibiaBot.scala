@@ -1266,9 +1266,13 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
       // the general background lane — Discord groups message-edit PATCH calls
       // into a "shared" bucket across many channels for this bot, tighter than
       // the general REST budget (confirmed via live 429s), so this traffic
-      // needs a slower, isolated pace. Guilds sharing a world all become due in
-      // the same tick, so this also smooths that burst instead of firing every
-      // channel's edit/send at once.
+      // needs a slower, isolated pace. Each send is keyed by (channel id,
+      // message index): demand here can exceed what that slower pace can
+      // drain, so without keying, a backed-up queue fills with many stale
+      // updates to the same handful of channels, each superseded by the next
+      // before it ever sends (observed depth in the thousands, 25+ minute
+      // average wait). Keying caps the backlog at one pending update per
+      // channel/message and guarantees whatever finally sends is current.
       //
       // An existing message is only re-edited when its description actually
       // changed — this runs every ~90-120s per guild regardless of whether the
@@ -1304,7 +1308,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
               embed.setFooter("Last updated")
               embed.setTimestamp(OffsetDateTime.now())
             }
-            onlineListSender.enqueue("edit") { () =>
+            onlineListSender.enqueue("edit", Some(s"${channel.getId}:$currentMessage")) { () =>
               try {
                 message.editMessageEmbeds(embed.build()).queue(null, ignoreDeletedTarget)
               } catch {
@@ -1320,7 +1324,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
             embed.setFooter("Last updated")
             embed.setTimestamp(OffsetDateTime.now())
           }
-          onlineListSender.enqueue("send") { () =>
+          onlineListSender.enqueue("send", Some(s"${channel.getId}:$currentMessage")) { () =>
             try {
               channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue(null, ignoreDeletedTarget)
             } catch {
@@ -1431,9 +1435,11 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
    *  The name-change guard intentionally ignores the ⚡ suffix, matching the
    *  original — so the category re-renames once after a mass-log toggle.
    *  The actual send goes through the shared bot-wide background lane
-   *  (`outboundSender`) so a burst of many entities coming due at once (many
-   *  guilds sharing a world) drains at a safe shared pace instead of firing
-   *  all at once. */
+   *  (`outboundSender`), keyed by category id so a burst of many entities
+   *  coming due at once (many guilds sharing a world) drains at a safe
+   *  shared pace instead of firing all at once — and if this category
+   *  somehow gets re-queued before an earlier rename for it has sent, the
+   *  older one is superseded rather than both firing. */
   private def renameOnlineCategoryIfDue(guild: Guild, categoryId: String, world: String, alliesCount: Int, enemiesCount: Int, masslogIcon: String): Unit = {
     val category = guild.getCategoryById(categoryId)
     if (category != null) {
@@ -1442,7 +1448,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
         val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
         if (category.getName != baseName) {
           onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
-          outboundSender.enqueue("rename") { () =>
+          outboundSender.enqueue("rename", Some(categoryId)) { () =>
             try {
               category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
             } catch {
@@ -1459,15 +1465,15 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
    *  onlineListCategoryTimer, only advanced when a rename is genuinely
    *  dispatched — see renameOnlineCategoryIfDue) and skipped when the name is
    *  already correct. The actual send goes through the shared bot-wide
-   *  background lane (`outboundSender`), same reasoning as above. Rename
-   *  failures (e.g. missing Manage Channels) are logged, not fatal — `label`
-   *  names the channel in the log line. */
+   *  background lane (`outboundSender`), keyed by channel id, same reasoning
+   *  as above. Rename failures (e.g. missing Manage Channels) are logged,
+   *  not fatal — `label` names the channel in the log line. */
   private def renameOnlineChannelIfDue(channel: TextChannel, targetName: String, label: String, guildId: String, guildName: String): Unit = {
     val lastRename = onlineListCategoryTimer.getOrElse(channel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
     if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
       if (channel.getName != targetName) {
         onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
-        outboundSender.enqueue("rename") { () =>
+        outboundSender.enqueue("rename", Some(channel.getId)) { () =>
           try {
             channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)
           } catch {

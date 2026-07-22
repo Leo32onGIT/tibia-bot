@@ -89,7 +89,7 @@ object BotApp extends App with StrictLogging {
         else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
           s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
         }.mkString(" | ")
-      logger.info(s"[rate-limit:$name] depth: $depth ($trend vs 5m ago) | dropped total: ${sender.totalDropped} | last 5m -- $breakdown")
+      logger.info(s"[rate-limit:$name] depth: $depth ($trend vs 5m ago) | dropped total: ${sender.totalDropped} | superseded total: ${sender.totalSuperseded} | last 5m -- $breakdown")
     })(ex)
     sender
   }
