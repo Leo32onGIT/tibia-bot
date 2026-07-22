@@ -1,0 +1,15 @@
+{$STATUS_DOMAIN} {
+	# The bot's OAuth-gated monitoring dashboard.
+	handle /dashboard* {
+		reverse_proxy bot:8080
+	}
+
+	# Everything else: pass through to the existing GitHub Pages landing page
+	# (Leo32onGIT/tibia-bot-resources) completely unauthenticated. Caddy
+	# preserves the original Host header by default, which is exactly what
+	# GitHub Pages needs to pick the right custom-domain repo — no path
+	# rewriting or header overrides required.
+	handle {
+		reverse_proxy https://leo32ongit.github.io
+	}
+}

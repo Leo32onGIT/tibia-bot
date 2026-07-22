@@ -111,6 +111,15 @@ object Config {
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
   val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")
 
+  /** Monitoring dashboard: Discord OAuth2 + session signing + reverse-proxy domain. */
+  object Web {
+    private val web = discord.getConfig("web")
+    val discordClientSecret: String = web.getString("discord-client-secret")
+    val sessionSecret: String = web.getString("session-secret")
+    val statusDomain: String = web.getString("status-domain")
+    val statusPort: Int = web.getInt("status-port")
+  }
+
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
   val primalCreatures: List[String] = mappings.getStringList("primal-creatures").asScala.toList

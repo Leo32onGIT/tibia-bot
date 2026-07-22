@@ -6,6 +6,9 @@ scalaVersion := "2.13.18"
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
 dockerExposedPorts += 443
+// Status dashboard: internal-only, reached via Caddy on the docker-compose
+// network — never published to the host directly (see docker-compose.yml).
+dockerExposedPorts += 8080
 dockerBaseImage := "eclipse-temurin:8-jre"
 // Also tag the built image `:latest` so docker-compose.yml can reference a
 // stable tag (otherwise only the version tag is created).

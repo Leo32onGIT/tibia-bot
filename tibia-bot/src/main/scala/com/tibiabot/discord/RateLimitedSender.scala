@@ -83,6 +83,12 @@ final class RateLimitedSender(
     stats = Map.empty
     snapshot
   }
+
+  /** Same data as [[snapshotAndReset]] without clearing the window. For a
+   *  reader that doesn't own the window (e.g. a status endpoint that may be
+   *  polled far more often than the periodic log resets it) — reading this
+   *  never disturbs [[snapshotAndReset]]'s own accounting. */
+  def snapshot(): Map[String, RateLimitedSender.LabelStats] = synchronized { stats }
 }
 
 object RateLimitedSender {

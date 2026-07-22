@@ -30,7 +30,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
-class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineListSender: discord.RateLimitedSender)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
+class TibiaBot(
+  world: String,
+  outboundSender: discord.RateLimitedSender,
+  onlineListSender: discord.RateLimitedSender,
+  worldMetrics: tracking.WorldMetrics,
+  recentEvents: tracking.RecentEvents
+)(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
@@ -100,6 +106,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
       // get online data with durations (carries over guild/duration/flag, drops log-offs)
       onlineTracker.updateFromOnline(online.map(player => (player.name, player.level.toInt, player.vocation)), now)
       val onlineWithVocLvlAndDuration = onlineTracker.snapshot
+      worldMetrics.recordPoll(onlineWithVocLvlAndDuration.size, now.toInstant, now.plusSeconds(60).toInstant)
 
       // Update online list table every 5 minutes for killer level lookups
       if (now.isAfter(onlineListTableUpdateTimer.plusMinutes(5))) {
@@ -608,6 +615,10 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
     // Flush this tick's buffered level-ups: one combined message per channel instead
     // of one message per level-up, chunked to stay within Discord's message length limit.
     levelUpBuffer.values.foreach { case (channel, lines) =>
+      lines.foreach { line =>
+        worldMetrics.incrementLevels()
+        recentEvents.record("level-up", world, line)
+      }
       presentation.ListEmbeds.pack(lines.toList, 1900).foreach { chunk =>
         sendMessageWithRateLimit(channel, "level-up", message = chunk.stripPrefix("\n"))
       }
@@ -895,6 +906,10 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
             // burst of 20), which only worked against the "post fast" goal without
             // buying any real additional protection.
             val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
+            def recordDeath(charName: String, level: Int): Unit = {
+              worldMetrics.incrementDeaths()
+              recentEvents.record("death", world, s"$charName died (Lvl $level)")
+            }
             validEmbeds.foreach { embed =>
               try {
                 // Create screenshot button
@@ -915,6 +930,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .queue()
                   }
+                  recordDeath(embed._3, embed._5)
                 } else if (embed._2 == "allypk") {
                   if (embed._5 >= minimumLevel) {
                     val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
@@ -926,6 +942,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .queue()
                     }
+                    recordDeath(embed._3, embed._5)
                   }
                 } else if (embed._2 == "fullbless") {
                   if (embed._5 >= minimumLevel) {
@@ -940,12 +957,14 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
                       deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
                         .queue()
                     }
+                    recordDeath(embed._3, embed._5)
                   }
                 } else if (embed._2 == "screenshot") {
                   if (embed._5 >= minimumLevel) {
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .setComponents(actionRow)
                       .queue()
+                    recordDeath(embed._3, embed._5)
                     }
                 } else {
                   // for regular deaths check if level > /filter deaths <level>
@@ -953,6 +972,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .setSuppressedNotifications(true)
                       .queue()
+                    recordDeath(embed._3, embed._5)
                   }
                 }
               } catch {
@@ -1308,6 +1328,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
               embed.setFooter("Last updated")
               embed.setTimestamp(OffsetDateTime.now())
             }
+            worldMetrics.incrementEdits()
             onlineListSender.enqueue("edit", Some(s"${channel.getId}:$currentMessage")) { () =>
               try {
                 message.editMessageEmbeds(embed.build()).queue(null, ignoreDeletedTarget)
@@ -1324,6 +1345,7 @@ class TibiaBot(world: String, outboundSender: discord.RateLimitedSender, onlineL
             embed.setFooter("Last updated")
             embed.setTimestamp(OffsetDateTime.now())
           }
+          worldMetrics.incrementEdits()
           onlineListSender.enqueue("send", Some(s"${channel.getId}:$currentMessage")) { () =>
             try {
               channel.sendMessageEmbeds(embed.build()).setSuppressedNotifications(true).queue(null, ignoreDeletedTarget)

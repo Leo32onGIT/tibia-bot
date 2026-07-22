@@ -24,6 +24,32 @@ services:
     # expected and harmless. It is NOT wired to depends_on postgres so that a
     # pre-existing/external database works without starting the local one.
     restart: unless-stopped
+    # Status dashboard (see StatusRoute.scala) — internal-only, reached via
+    # Caddy below. Deliberately no `ports:` here: the host never talks to the
+    # bot directly, only through the reverse proxy that terminates TLS.
+
+  # Reverse proxy in front of STATUS_DOMAIN (the bot's public apex domain, also
+  # the existing GitHub Pages landing page's domain): automatic Let's Encrypt
+  # HTTPS, /dashboard* proxied to the bot's internal status port, everything
+  # else passed through unauthenticated to GitHub Pages (see Caddyfile).
+  # Requires STATUS_DOMAIN's DNS to point at this host instead of GitHub
+  # Pages' IPs, and ports 80/443 forwarded to it (80 for the Let's Encrypt
+  # HTTP-01 challenge).
+  caddy:
+    image: caddy:2
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - violentbot
+    depends_on:
+      - bot
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -63,6 +89,8 @@ services:
 volumes:
   redis-data:
   pgdata:
+  caddy-data:
+  caddy-config:
 
 networks:
   violentbot:

@@ -94,6 +94,21 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     sender.snapshotAndReset() shouldBe empty
   }
 
+  test("snapshot() reports the same data as snapshotAndReset() but does not clear it") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+
+    sender.enqueue("rename")(() => ())
+    ticker.tick()
+
+    sender.snapshot()("rename").count shouldBe 1
+    sender.snapshot()("rename").count shouldBe 1 // still there, unlike snapshotAndReset()
+
+    val reset = sender.snapshotAndReset()
+    reset("rename").count shouldBe 1
+    sender.snapshot() shouldBe empty // now actually cleared
+  }
+
   test("enqueueing under the same key supersedes the earlier pending item") {
     val ticker = new ManualTicker
     val sender = new RateLimitedSender(ticker.start)

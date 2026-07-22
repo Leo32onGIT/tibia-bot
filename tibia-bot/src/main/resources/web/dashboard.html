@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Violent Bot — Status</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151c;
+    --panel-border: #1f2430;
+    --text: #d7dce3;
+    --muted: #7c8698;
+    --accent: #5b8cff;
+    --good: #3ecf8e;
+    --warn: #e0a93e;
+    --bad: #e0563e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .kpis { display: flex; gap: 28px; }
+  .kpi { text-align: right; }
+  .kpi .value { font-size: 20px; font-weight: 600; }
+  .kpi .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  main { padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .panel-title {
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--panel-border);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 16px; text-align: left; font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tbody tr { border-top: 1px solid var(--panel-border); cursor: pointer; }
+  tbody tr:hover { background: rgba(91, 140, 255, 0.06); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .lanes { display: flex; gap: 20px; padding: 16px; flex-wrap: wrap; }
+  .lane { flex: 1; min-width: 220px; }
+  .lane-name { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .lane-stats { display: flex; gap: 16px; }
+  .lane-stats .num { font-size: 18px; font-weight: 600; }
+  .lane-stats .num-label { font-size: 11px; color: var(--muted); }
+  .feed { max-height: 320px; overflow-y: auto; }
+  .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; }
+  .feed-row:first-child { border-top: none; }
+  .feed-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tag.death { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
+  .tag.level-up { background: rgba(62, 207, 142, 0.15); color: var(--good); }
+  .tag.edit { background: rgba(91, 140, 255, 0.15); color: var(--accent); }
+
+  .modal-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    width: min(520px, 90vw);
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px; border-bottom: 1px solid var(--panel-border);
+  }
+  .modal-header h2 { font-size: 15px; margin: 0; }
+  .modal-close { cursor: pointer; color: var(--muted); font-size: 18px; background: none; border: none; }
+  .modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .modal-row { display: flex; justify-content: space-between; font-size: 13px; }
+  .modal-row .label { color: var(--muted); }
+  .discord-list { display: flex; flex-direction: column; gap: 6px; }
+  .discord-item { display: flex; justify-content: space-between; font-size: 12px; background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 6px; }
+  .discord-item .gid { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .muted { color: var(--muted); }
+  .stale { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Violent Bot <span>/ status</span></h1>
+  <div class="kpis">
+    <div class="kpi"><div class="value" id="kpi-worlds">–</div><div class="label">Worlds</div></div>
+    <div class="kpi"><div class="value" id="kpi-discords">–</div><div class="label">Discords</div></div>
+    <div class="kpi"><div class="value" id="kpi-population">–</div><div class="label">Online</div></div>
+  </div>
+</header>
+<main>
+  <div class="panel">
+    <div class="panel-title">Worlds</div>
+    <table>
+      <thead>
+        <tr>
+          <th>World</th>
+          <th class="num">Population</th>
+          <th class="num">Discords</th>
+          <th class="num">Deaths (15m)</th>
+          <th class="num">Levels (15m)</th>
+          <th class="num">Edits (15m)</th>
+          <th>Last poll</th>
+        </tr>
+      </thead>
+      <tbody id="worlds-body"></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Rate-limit lanes</div>
+    <div class="lanes" id="lanes"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Recent activity</div>
+    <div class="feed" id="feed"></div>
+  </div>
+</main>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">World</h2>
+      <button class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+let lastData = null;
+
+function timeAgo(iso) {
+  if (!iso) return '–';
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
+function renderWorlds(worlds) {
+  const body = document.getElementById('worlds-body');
+  body.innerHTML = '';
+  worlds.slice().sort((a, b) => a.name.localeCompare(b.name)).forEach(w => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${w.name}</td>
+      <td class="num">${w.population}</td>
+      <td class="num">${w.discords.length}</td>
+      <td class="num">${w.deaths15m}</td>
+      <td class="num">${w.levels15m}</td>
+      <td class="num">${w.edits15m}</td>
+      <td class="${w.lastPollAt ? '' : 'stale'}">${timeAgo(w.lastPollAt)}</td>
+    `;
+    tr.addEventListener('click', () => openModal(w));
+    body.appendChild(tr);
+  });
+}
+
+function renderLanes(lanes) {
+  const el = document.getElementById('lanes');
+  el.innerHTML = '';
+  Object.entries(lanes).forEach(([name, lane]) => {
+    const div = document.createElement('div');
+    div.className = 'lane';
+    div.innerHTML = `
+      <div class="lane-name">${name}</div>
+      <div class="lane-stats">
+        <div><div class="num">${lane.queueDepth}</div><div class="num-label">Queue depth</div></div>
+        <div><div class="num">${lane.totalDropped}</div><div class="num-label">Dropped</div></div>
+        <div><div class="num">${lane.totalSuperseded}</div><div class="num-label">Superseded</div></div>
+      </div>
+    `;
+    el.appendChild(div);
+  });
+}
+
+function renderFeed(events) {
+  const el = document.getElementById('feed');
+  el.innerHTML = '';
+  events.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'feed-row';
+    row.innerHTML = `
+      <div class="feed-time">${timeAgo(ev.at)}</div>
+      <span class="tag ${ev.tag}">${ev.tag}</span>
+      <div class="muted">${ev.world}</div>
+      <div>${ev.text}</div>
+    `;
+    el.appendChild(row);
+  });
+}
+
+function openModal(world) {
+  document.getElementById('modal-title').textContent = world.name;
+  const body = document.getElementById('modal-body');
+  const discords = world.discords.map(d => `
+    <div class="discord-item"><span>${d.name}</span><span class="gid">${d.id}</span></div>
+  `).join('');
+  body.innerHTML = `
+    <div class="modal-row"><span class="label">Population</span><span>${world.population}</span></div>
+    <div class="modal-row"><span class="label">Last poll</span><span>${timeAgo(world.lastPollAt)}</span></div>
+    <div class="modal-row"><span class="label">Next poll</span><span>${timeAgo(world.nextPollAt)}</span></div>
+    <div class="modal-row"><span class="label">Deaths / Levels / Edits (15m)</span><span>${world.deaths15m} / ${world.levels15m} / ${world.edits15m}</span></div>
+    <div class="modal-row"><span class="label">Discords tracking ${world.name}</span><span></span></div>
+    <div class="discord-list">${discords || '<div class="muted">None</div>'}</div>
+  `;
+  document.getElementById('modal-backdrop').classList.add('open');
+}
+
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-backdrop').classList.remove('open');
+});
+document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-backdrop') e.target.classList.remove('open');
+});
+
+async function poll() {
+  try {
+    const res = await fetch('/dashboard/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    lastData = data;
+    document.getElementById('kpi-worlds').textContent = data.worlds.length;
+    document.getElementById('kpi-discords').textContent = new Set(data.worlds.flatMap(w => w.discords.map(d => d.id))).size;
+    document.getElementById('kpi-population').textContent = data.worlds.reduce((sum, w) => sum + w.population, 0);
+    renderWorlds(data.worlds);
+    renderLanes(data.rateLimitLanes);
+    renderFeed(data.recentEvents);
+  } catch (e) {
+    console.error('status poll failed', e);
+  }
+}
+
+poll();
+setInterval(poll, 10000);
+</script>
+</body>
+</html>

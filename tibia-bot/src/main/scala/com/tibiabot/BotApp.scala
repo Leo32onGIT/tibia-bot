@@ -110,6 +110,16 @@ object BotApp extends App with StrictLogging {
   // above with everything else.
   val onlineListSender = makeMonitoredSender("online-list", Config.onlineListMessageDelayMs)
 
+  // Per-world population/poll-timing/throughput counters and a bot-wide recent-
+  // activity feed, both read by the monitoring dashboard's /status endpoint.
+  val worldMetricsRegistry = new tracking.WorldMetricsRegistry
+  val recentEvents = new tracking.RecentEvents()
+
+  // WorldMetrics' deaths/levels/edits counters are a fixed 15-minute window,
+  // reset here rather than on read since the dashboard may poll far more often
+  // than the window itself resets.
+  actorSystem.scheduler.scheduleWithFixedDelay(15.minutes, 15.minutes)(() => worldMetricsRegistry.resetAllCounters())(ex)
+
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
@@ -180,6 +190,28 @@ object BotApp extends App with StrictLogging {
     discordRetrieveConfig _,
     () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap }
   )
+
+  // Monitoring dashboard: Discord-OAuth-gated /status endpoint + static shell,
+  // mounted at /dashboard on the bot's public domain (which also serves an
+  // unrelated, unauthenticated landing page at its root via Caddy passing
+  // through to GitHub Pages — see Caddyfile). The OAuth client id is the bot's
+  // own application id, which for a standard bot is the same snowflake as its
+  // user id.
+  private val dashboardMountPath = "/dashboard"
+  private val discordAuth = new web.DiscordAuth(
+    clientId = botUser,
+    clientSecret = Config.Web.discordClientSecret,
+    sessionSecret = Config.Web.sessionSecret,
+    redirectUri = s"https://${Config.Web.statusDomain}$dashboardMountPath/auth/callback",
+    mountPath = dashboardMountPath
+  )(actorSystem, ex)
+  private val statusRoute = new web.StatusRoute(
+    discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEvents,
+    outboundSender, onlineListSender, discordGateway
+  )
+  akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
+    .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") { statusRoute.routes })
+  logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
 
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.
@@ -593,7 +625,7 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender).stream.run(), List(discords))
+            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEvents).stream.run(), List(discords))
           }
         }
       }
@@ -612,7 +644,7 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender).stream.run(), discordsList)
+        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEvents).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 5.5 seconds
       }
       startUpComplete = true
