@@ -34,6 +34,17 @@
     <appender-ref ref="CONSOLE" />
   </logger>
 
+  <!-- JDA logs a WARN every time it hits a 429 and auto-retries internally —
+       not a failure our code ever sees (the request still succeeds once the
+       Retry-After elapses), just noise from the online-list lane's "shared"
+       bucket occasionally getting hit despite its own slower pace + dedup.
+       Left disabled for now — want the 429s still visible while we look at
+       fixing the actual cause rather than just muting the symptom.
+  <logger name="net.dv8tion.jda.api.requests.RestRateLimiter" level="ERROR" additivity="false">
+    <appender-ref ref="CONSOLE" />
+  </logger>
+  -->
+
   <root level="INFO">
     <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
     <appender-ref ref="CONSOLE" />
