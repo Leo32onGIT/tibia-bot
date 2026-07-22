@@ -175,11 +175,6 @@ class TibiaBot(
     // message per channel below, instead of one message per level-up. Safe as a plain
     // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
     val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
-    // Names collected alongside levelUpBuffer purely for one combined RecentEvents
-    // row per world per tick (see the flush below) — every channel in
-    // levelUpBuffer already belongs to this same world, since a TibiaBot only
-    // ever tracks one.
-    val levelUpNames = ListBuffer.empty[String]
 
     val newDeaths = characterResponses.flatMap {
       case Right(char) =>
@@ -594,7 +589,6 @@ class TibiaBot(
                       if (levelTracker.shouldRecord(charName, onlinePlayer.level, sheetLastLogin)) {
                         if (levelsCheck) {
                           levelUpBuffer.getOrElseUpdate(levelsTextChannel.getId, (levelsTextChannel, ListBuffer.empty[String]))._2 += webhookMessage
-                          levelUpNames += charName
                         }
                       }
                     }
@@ -627,17 +621,18 @@ class TibiaBot(
 
     // Flush this tick's buffered level-ups: one combined message per channel instead
     // of one message per level-up, chunked to stay within Discord's message length limit.
+    // One RecentEvents row per channel (not per character, and not combined across
+    // channels) — the same world can be tracked by multiple discords, each with its
+    // own levels channel, so a row per channel identifies which discord it went to
+    // instead of silently merging separate discords' counts into one misleading total.
     levelUpBuffer.values.foreach { case (channel, lines) =>
       lines.foreach(_ => worldMetrics.incrementLevels())
       presentation.ListEmbeds.pack(lines.toList, 1900).foreach { chunk =>
         sendMessageWithRateLimit(channel, "level-up", message = chunk.stripPrefix("\n"))
       }
-    }
-    // One combined RecentEvents row per world per tick, not one per character —
-    // a burst of level-ups would otherwise flood the dashboard's activity feed.
-    if (levelUpNames.nonEmpty) {
-      val summary = if (levelUpNames.size == 1) "1 player leveled up" else s"${levelUpNames.size} players leveled up"
-      recentEvents.record("level-up", world, summary)
+      val summary = if (lines.size == 1) "1 player leveled up" else s"${lines.size} players leveled up"
+      val discordLabel = s"""<span class="muted" title="Discord ID: ${channel.getGuild.getId}">&middot; ${channel.getGuild.getName}</span>"""
+      recentEvents.record("level-up", world, s"$summary $discordLabel")
     }
 
     // update online lists
@@ -937,7 +932,11 @@ class TibiaBot(
                 case _          => ""
               }
               val nameLink = s"""<a href="${charUrl(charName)}" target="_blank">$charName</a>"""
-              recentEvents.record("death", world, s"$vocationEmoji $nameLink died at level $level by $killer")
+              // The same death posts once per discord tracking this world, so without
+              // identifying which one, the feed shows what looks like duplicate rows —
+              // this is the enclosing discordsList.foreach's discord, not a repeat.
+              val discordLabel = s"""<span class="muted" title="Discord ID: $guildId">&middot; ${guild.getName}</span>"""
+              recentEvents.record("death", world, s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
             }
             validEmbeds.foreach { embed =>
               try {
