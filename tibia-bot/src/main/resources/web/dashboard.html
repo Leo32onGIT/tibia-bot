@@ -8,9 +8,11 @@
 <style>
   :root {
     --bg: #0b0d12;
+    --sidebar-bg: #0f1218;
     --panel: #12151c;
     --panel-border: #1f2430;
     --text: #d7dce3;
+    --text-strong: #e8ebf0;
     --muted: #7c8698;
     --accent: #5b8cff;
     --good: #3ecf8e;
@@ -18,27 +20,60 @@
     --bad: #e0563e;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
-  }
-  header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 28px;
-    border-bottom: 1px solid var(--panel-border);
   }
-  header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
-  header h1 span { color: var(--muted); font-weight: 400; }
-  .kpis { display: flex; gap: 28px; }
+  .sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+  }
+  .sidebar-header {
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+  .sidebar-header span { color: var(--muted); font-weight: 400; display: block; font-size: 11px; margin-top: 2px; }
+  .world-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .world-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .world-item i { font-size: 16px; }
+  .world-item .name { flex: 1; font-size: 13px; }
+  .world-item .pop { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .world-item:hover { background: rgba(255, 255, 255, 0.03); }
+  .world-item.active {
+    background: rgba(91, 140, 255, 0.1);
+    border-left-color: var(--accent);
+    color: var(--text-strong);
+  }
+  .world-item.active i { color: var(--accent); }
+
+  main { flex: 1; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+  .kpis-strip { display: flex; gap: 28px; }
   .kpi { display: flex; flex-direction: column; align-items: center; gap: 2px; }
   .kpi i { font-size: 20px; color: var(--accent); }
-  .kpi .value { font-size: 18px; font-weight: 600; }
-  main { padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; }
+  .kpi .value { font-size: 18px; font-weight: 600; color: var(--text-strong); }
+
   .panel {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -53,21 +88,32 @@
     letter-spacing: 0.05em;
     color: var(--muted);
     border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 10px 16px; text-align: left; font-size: 13px; }
-  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-  tbody tr { border-top: 1px solid var(--panel-border); cursor: pointer; }
-  tbody tr:hover { background: rgba(91, 140, 255, 0.06); }
-  td.num { text-align: left; font-variant-numeric: tabular-nums; }
+  .panel-title .stale { color: var(--warn); text-transform: none; letter-spacing: normal; font-weight: 400; }
+
+  .detail-stats { display: flex; gap: 24px; padding: 16px; flex-wrap: wrap; }
+  .detail-stat { display: flex; align-items: center; gap: 8px; }
+  .detail-stat i { font-size: 18px; }
+  .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .detail-stat .num-label { font-size: 11px; color: var(--muted); }
+
+  .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; }
+  .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; }
+  .discord-item i { color: var(--muted); font-size: 14px; }
+  .discord-item .gid { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
   .lanes { display: flex; gap: 20px; padding: 16px; flex-wrap: wrap; }
   .lane { flex: 1; min-width: 220px; }
   .lane-name { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .lane-stats { display: flex; gap: 16px; }
-  .lane-stats .num { font-size: 18px; font-weight: 600; }
+  .lane-stats .num { font-size: 18px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
   .lane-stats .num-label { font-size: 11px; color: var(--muted); }
+
   .feed { max-height: 320px; overflow-y: auto; }
-  .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; }
+  .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; }
   .feed-row:first-child { border-top: none; }
   .feed-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -75,65 +121,26 @@
   .tag.level-up { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.edit { background: rgba(91, 140, 255, 0.15); color: var(--accent); }
 
-  .modal-backdrop {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6);
-    align-items: center; justify-content: center;
-    z-index: 10;
-  }
-  .modal-backdrop.open { display: flex; }
-  .modal {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    width: min(520px, 90vw);
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-  .modal-header {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 16px 20px; border-bottom: 1px solid var(--panel-border);
-  }
-  .modal-header h2 { font-size: 15px; margin: 0; }
-  .modal-close { cursor: pointer; color: var(--muted); font-size: 18px; background: none; border: none; }
-  .modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
-  .modal-row { display: flex; justify-content: space-between; font-size: 13px; }
-  .modal-row .label { color: var(--muted); }
-  .discord-list { display: flex; flex-direction: column; gap: 6px; }
-  .discord-item { display: flex; justify-content: space-between; font-size: 12px; background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 6px; }
-  .discord-item .gid { color: var(--muted); font-variant-numeric: tabular-nums; }
-
   .muted { color: var(--muted); }
   .stale { color: var(--warn); }
 </style>
 </head>
 <body>
-<header>
-  <h1>Violent Bot <span>/ status</span></h1>
-  <div class="kpis">
+<aside class="sidebar">
+  <div class="sidebar-header">Violent Bot<span>/ status</span></div>
+  <div class="world-list" id="world-list"></div>
+</aside>
+<main>
+  <div class="kpis-strip">
     <div class="kpi" title="Worlds tracked" aria-label="Worlds tracked"><i class="ti ti-world" aria-hidden="true"></i><div class="value" id="kpi-worlds">–</div></div>
     <div class="kpi" title="Discords" aria-label="Discords"><i class="ti ti-brand-discord" aria-hidden="true"></i><div class="value" id="kpi-discords">–</div></div>
     <div class="kpi" title="Tracked players" aria-label="Tracked players"><i class="ti ti-users" aria-hidden="true"></i><div class="value" id="kpi-population">–</div></div>
   </div>
-</header>
-<main>
+
   <div class="panel">
-    <div class="panel-title">Worlds</div>
-    <table>
-      <thead>
-        <tr>
-          <th>World</th>
-          <th class="num">Population</th>
-          <th class="num">Discords</th>
-          <th class="num">Deaths (15m)</th>
-          <th class="num">Levels (15m)</th>
-          <th class="num">Edits (15m)</th>
-          <th>Last poll</th>
-        </tr>
-      </thead>
-      <tbody id="worlds-body"></tbody>
-    </table>
+    <div class="panel-title"><span id="detail-title">World</span><span class="stale" id="detail-stale"></span></div>
+    <div class="detail-stats" id="detail-stats"></div>
+    <div class="discord-list" id="detail-discords"></div>
   </div>
 
   <div class="panel">
@@ -147,18 +154,9 @@
   </div>
 </main>
 
-<div class="modal-backdrop" id="modal-backdrop">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="modal-title">World</h2>
-      <button class="modal-close" id="modal-close">&times;</button>
-    </div>
-    <div class="modal-body" id="modal-body"></div>
-  </div>
-</div>
-
 <script>
 let lastData = null;
+let selectedWorld = null;
 
 function timeAgo(iso) {
   if (!iso) return '–';
@@ -169,23 +167,40 @@ function timeAgo(iso) {
   return `${Math.floor(minutes / 60)}h ago`;
 }
 
-function renderWorlds(worlds) {
-  const body = document.getElementById('worlds-body');
-  body.innerHTML = '';
-  worlds.slice().sort((a, b) => a.name.localeCompare(b.name)).forEach(w => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${w.name}</td>
-      <td class="num">${w.population}</td>
-      <td class="num">${w.discords.length}</td>
-      <td class="num">${w.deaths15m}</td>
-      <td class="num">${w.levels15m}</td>
-      <td class="num">${w.edits15m}</td>
-      <td class="${w.lastPollAt ? '' : 'stale'}">${timeAgo(w.lastPollAt)}</td>
-    `;
-    tr.addEventListener('click', () => openModal(w));
-    body.appendChild(tr);
+function sortedWorlds(worlds) {
+  return worlds.slice().sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderSidebar(worlds) {
+  const el = document.getElementById('world-list');
+  el.innerHTML = '';
+  sortedWorlds(worlds).forEach(w => {
+    const div = document.createElement('div');
+    div.className = 'world-item' + (w.name === selectedWorld ? ' active' : '');
+    div.innerHTML = `<i class="ti ti-world" aria-hidden="true"></i><span class="name">${w.name}</span><span class="pop">${w.population}</span>`;
+    div.addEventListener('click', () => { selectedWorld = w.name; render(); });
+    el.appendChild(div);
   });
+}
+
+function renderDetail(worlds) {
+  const world = worlds.find(w => w.name === selectedWorld) || sortedWorlds(worlds)[0];
+  if (!world) return;
+
+  document.getElementById('detail-title').textContent = world.name;
+  document.getElementById('detail-stale').textContent = world.lastPollAt ? '' : 'no data yet';
+
+  document.getElementById('detail-stats').innerHTML = `
+    <div class="detail-stat"><i class="ti ti-users" style="color:var(--accent)" aria-hidden="true"></i><div><div class="num">${world.population}</div><div class="num-label">Population</div></div></div>
+    <div class="detail-stat"><i class="ti ti-skull" style="color:var(--bad)" aria-hidden="true"></i><div><div class="num">${world.deaths15m}</div><div class="num-label">Deaths (15m)</div></div></div>
+    <div class="detail-stat"><i class="ti ti-arrow-big-up-lines" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${world.levels15m}</div><div class="num-label">Levels (15m)</div></div></div>
+    <div class="detail-stat"><i class="ti ti-edit" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${world.edits15m}</div><div class="num-label">Edits (15m)</div></div></div>
+    <div class="detail-stat"><i class="ti ti-clock" style="color:var(--muted)" aria-hidden="true"></i><div><div class="num">${timeAgo(world.lastPollAt)}</div><div class="num-label">Last poll</div></div></div>
+  `;
+
+  document.getElementById('detail-discords').innerHTML = world.discords.length
+    ? world.discords.map(d => `<div class="discord-item"><i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="gid">${d.id}</span></div>`).join('')
+    : '<div class="muted">No discords tracking this world</div>';
 }
 
 function renderLanes(lanes) {
@@ -222,42 +237,27 @@ function renderFeed(events) {
   });
 }
 
-function openModal(world) {
-  document.getElementById('modal-title').textContent = world.name;
-  const body = document.getElementById('modal-body');
-  const discords = world.discords.map(d => `
-    <div class="discord-item"><span>${d.name}</span><span class="gid">${d.id}</span></div>
-  `).join('');
-  body.innerHTML = `
-    <div class="modal-row"><span class="label">Population</span><span>${world.population}</span></div>
-    <div class="modal-row"><span class="label">Last poll</span><span>${timeAgo(world.lastPollAt)}</span></div>
-    <div class="modal-row"><span class="label">Next poll</span><span>${timeAgo(world.nextPollAt)}</span></div>
-    <div class="modal-row"><span class="label">Deaths / Levels / Edits (15m)</span><span>${world.deaths15m} / ${world.levels15m} / ${world.edits15m}</span></div>
-    <div class="modal-row"><span class="label">Discords tracking ${world.name}</span><span></span></div>
-    <div class="discord-list">${discords || '<div class="muted">None</div>'}</div>
-  `;
-  document.getElementById('modal-backdrop').classList.add('open');
-}
+function render() {
+  if (!lastData) return;
+  const worlds = lastData.worlds;
+  if (!selectedWorld && worlds.length) selectedWorld = sortedWorlds(worlds)[0].name;
 
-document.getElementById('modal-close').addEventListener('click', () => {
-  document.getElementById('modal-backdrop').classList.remove('open');
-});
-document.getElementById('modal-backdrop').addEventListener('click', (e) => {
-  if (e.target.id === 'modal-backdrop') e.target.classList.remove('open');
-});
+  document.getElementById('kpi-worlds').textContent = worlds.length;
+  document.getElementById('kpi-discords').textContent = new Set(worlds.flatMap(w => w.discords.map(d => d.id))).size;
+  document.getElementById('kpi-population').textContent = worlds.reduce((sum, w) => sum + w.population, 0);
+
+  renderSidebar(worlds);
+  renderDetail(worlds);
+  renderLanes(lastData.rateLimitLanes);
+  renderFeed(lastData.recentEvents);
+}
 
 async function poll() {
   try {
     const res = await fetch('/dashboard/status');
     if (!res.ok) return;
-    const data = await res.json();
-    lastData = data;
-    document.getElementById('kpi-worlds').textContent = data.worlds.length;
-    document.getElementById('kpi-discords').textContent = new Set(data.worlds.flatMap(w => w.discords.map(d => d.id))).size;
-    document.getElementById('kpi-population').textContent = data.worlds.reduce((sum, w) => sum + w.population, 0);
-    renderWorlds(data.worlds);
-    renderLanes(data.rateLimitLanes);
-    renderFeed(data.recentEvents);
+    lastData = await res.json();
+    render();
   } catch (e) {
     console.error('status poll failed', e);
   }
