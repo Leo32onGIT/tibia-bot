@@ -5,11 +5,21 @@
 	}
 
 	# Everything else: pass through to the existing GitHub Pages landing page
-	# (Leo32onGIT/tibia-bot-resources) completely unauthenticated. Caddy
-	# preserves the original Host header by default, which is exactly what
-	# GitHub Pages needs to pick the right custom-domain repo — no path
-	# rewriting or header overrides required.
+	# (Leo32onGIT/tibia-bot-resources), completely unauthenticated. GitHub's
+	# custom-domain routing (matching the CNAME file in that repo) is keyed to
+	# requests that arrive at GitHub Pages' own edge IPs with the right Host
+	# header and TLS SNI — connecting to the bare leo32ongit.github.io
+	# hostname instead routes by URL path (serving nothing useful at "/"), so
+	# the upstream here is one of GitHub Pages' documented edge IPs
+	# (185.199.108-111.153 are all equivalent) with SNI explicitly set to
+	# whatever Host the visitor requested.
 	handle {
-		reverse_proxy https://leo32ongit.github.io
+		reverse_proxy 185.199.108.153:443 {
+			header_up Host {http.request.host}
+			transport http {
+				tls
+				tls_server_name {http.request.host}
+			}
+		}
 	}
 }
