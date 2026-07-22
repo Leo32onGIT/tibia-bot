@@ -905,7 +905,7 @@ class TibiaBot(
               val embed = presentation.DeathEmbeds.build(charName, charDeath.char.character.character.vocation, embedText, embedThumbnail, embedColor)
 
               // return embed + poke
-              (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond)
+              (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond, charDeath.char.character.character.vocation, killer)
             }
             val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
             val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
@@ -915,9 +915,22 @@ class TibiaBot(
             // burst of 20), which only worked against the "post fast" goal without
             // buying any real additional protection.
             val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
-            def recordDeath(charName: String, level: Int): Unit = {
+            def recordDeath(charName: String, level: Int, vocation: String, killer: String): Unit = {
               worldMetrics.incrementDeaths()
-              recentEvents.record("death", world, s"$charName died (Lvl $level)")
+              // Plain Unicode here, not vocEmoji's Discord shortcode text (":shield:" etc.) —
+              // Discord auto-renders shortcodes as emoji, but a browser won't. Real HTML
+              // markup (not Discord markdown) since the dashboard injects this text as-is.
+              val vocationEmoji = vocation.toLowerCase.split(' ').last match {
+                case "knight"   => "🛡️"
+                case "druid"    => "❄️"
+                case "sorcerer" => "🔥"
+                case "paladin"  => "🏹"
+                case "monk"     => "👊🏽"
+                case "none"     => "🐣"
+                case _          => ""
+              }
+              val nameLink = s"""<a href="${charUrl(charName)}" target="_blank">$charName</a>"""
+              recentEvents.record("death", world, s"$vocationEmoji $nameLink died at level $level by $killer")
             }
             validEmbeds.foreach { embed =>
               try {
@@ -939,7 +952,7 @@ class TibiaBot(
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .queue()
                   }
-                  recordDeath(embed._3, embed._5)
+                  recordDeath(embed._3, embed._5, embed._8, embed._9)
                 } else if (embed._2 == "allypk") {
                   if (embed._5 >= minimumLevel) {
                     val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
@@ -951,7 +964,7 @@ class TibiaBot(
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .queue()
                     }
-                    recordDeath(embed._3, embed._5)
+                    recordDeath(embed._3, embed._5, embed._8, embed._9)
                   }
                 } else if (embed._2 == "fullbless") {
                   if (embed._5 >= minimumLevel) {
@@ -966,14 +979,14 @@ class TibiaBot(
                       deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
                         .queue()
                     }
-                    recordDeath(embed._3, embed._5)
+                    recordDeath(embed._3, embed._5, embed._8, embed._9)
                   }
                 } else if (embed._2 == "screenshot") {
                   if (embed._5 >= minimumLevel) {
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .setComponents(actionRow)
                       .queue()
-                    recordDeath(embed._3, embed._5)
+                    recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                 } else {
                   // for regular deaths check if level > /filter deaths <level>
@@ -981,7 +994,7 @@ class TibiaBot(
                     deathsTextChannel.sendMessageEmbeds(embed._1.build())
                       .setSuppressedNotifications(true)
                       .queue()
-                    recordDeath(embed._3, embed._5)
+                    recordDeath(embed._3, embed._5, embed._8, embed._9)
                   }
                 }
               } catch {
