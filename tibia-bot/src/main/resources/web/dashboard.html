@@ -201,7 +201,7 @@
   </div>
 
   <div class="panel">
-    <div class="panel-title">Recent activity &mdash; <span id="feed-world"></span></div>
+    <div class="panel-title">Recent activity</div>
     <div class="feed" id="feed"></div>
   </div>
 </main>
@@ -377,7 +377,6 @@ function render() {
   renderDetail(worlds);
   renderLanes(lastData.rateLimitLanes);
   renderLogAlerts(lastData.logAlerts);
-  document.getElementById('feed-world').textContent = selectedWorld || '';
   renderFeed(lastData.recentEvents.filter(ev => ev.world === selectedWorld));
 }
 
