@@ -58,7 +58,32 @@ class LogCaptureSpec extends AnyFunSuite with Matchers {
 
   test("stays bounded at capacity, dropping the oldest entries first") {
     val log = new LogCapture(capacity = 3)
-    (1 to 5).foreach(i => log.record("WARN", "com.example.Loop", i.toString))
-    log.recent().map(_.message) shouldBe List("5", "4", "3")
+    // Distinct wording, not just a distinct number — normalize() blanks out
+    // digits, so numeric-only messages would all collapse into one repeat
+    // instead of testing eviction at all.
+    List("alpha", "beta", "gamma", "delta", "epsilon").foreach(msg => log.record("WARN", "com.example.Loop", msg))
+    log.recent().map(_.message) shouldBe List("epsilon", "delta", "gamma")
+  }
+
+  test("messages that only differ by a quoted value collapse as the same shape") {
+    val log = new LogCapture()
+    log.record("WARN", "com.example.TibiaDataClient", "Failed to get character: 'Exorcit' with status: '503 Service Unavailable'")
+    log.record("WARN", "com.example.TibiaDataClient", "Failed to get character: 'Someone Else' with status: '503 Service Unavailable'")
+
+    val recent = log.recent()
+    recent should have size 1
+    recent.head.count shouldBe 2
+    // Shows the latest occurrence's actual message, not a generic placeholder
+    recent.head.message shouldBe "Failed to get character: 'Someone Else' with status: '503 Service Unavailable'"
+  }
+
+  test("messages that only differ by an embedded number collapse as the same shape") {
+    val log = new LogCapture()
+    log.record("WARN", "com.example.RestRateLimiter", "Encountered 429 on route PATCH, channel_id=1346131642275594344 Retry-After: 5000 ms")
+    log.record("WARN", "com.example.RestRateLimiter", "Encountered 429 on route PATCH, channel_id=1429505784471097456 Retry-After: 6000 ms")
+
+    val recent = log.recent()
+    recent should have size 1
+    recent.head.count shouldBe 2
   }
 }
