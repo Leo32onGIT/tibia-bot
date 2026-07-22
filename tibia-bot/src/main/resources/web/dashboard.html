@@ -171,13 +171,26 @@ function sortedWorlds(worlds) {
   return worlds.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Edits (15m) is what actually feeds the online-list rate-limit lane, so it
+// stands in for per-world queue pressure — there's no true per-world queue
+// depth tracked today, only bot-wide lane totals (see renderLanes). Fixed
+// bands rather than relative-to-max, so "great" always means the same thing
+// regardless of how busy the bot is overall.
+function heatColor(edits) {
+  if (edits < 50) return 'var(--good)';
+  if (edits < 100) return 'var(--accent)';
+  if (edits < 250) return 'var(--warn)';
+  return 'var(--bad)';
+}
+
 function renderSidebar(worlds) {
   const el = document.getElementById('world-list');
   el.innerHTML = '';
   sortedWorlds(worlds).forEach(w => {
     const div = document.createElement('div');
     div.className = 'world-item' + (w.name === selectedWorld ? ' active' : '');
-    div.innerHTML = `<i class="ti ti-world" aria-hidden="true"></i><span class="name">${w.name}</span><span class="pop">${w.population}</span>`;
+    const nameColor = heatColor(w.edits15m);
+    div.innerHTML = `<i class="ti ti-world" aria-hidden="true"></i><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
     div.addEventListener('click', () => { selectedWorld = w.name; render(); });
     el.appendChild(div);
   });
