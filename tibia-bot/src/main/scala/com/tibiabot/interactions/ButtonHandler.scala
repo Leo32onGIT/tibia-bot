@@ -473,6 +473,29 @@ object ButtonHandler extends StrictLogging {
       } else {
         event.getHook.sendMessage(s"${Config.noEmoji} Invalid button format.").setEphemeral(true).queue()
       }
+    } else if (button.startsWith("paywall_reassign_yes_")) {
+      event.deferEdit().queue()
+      val world = button.stripPrefix("paywall_reassign_yes_")
+      val guildId = guild.getId
+      // Re-checked here, not just trusted from when /setup was run — guards
+      // against a race (someone else reassigns first, or the clicker's own
+      // seat count changes) in the window between the prompt and the click.
+      if (BotApp.paywallService.canReassignSeat(user.getId, guildId, world)) {
+        BotApp.paywallService.reassignSeat(user.getId, user.getName, guildId, world)
+        val embed = new EmbedBuilder()
+          .setDescription(s":gear: Tracking for **`$world`** has been reassigned to <@${user.getId}> and resumed.")
+          .setColor(presentation.Embeds.BrandColor)
+          .build()
+        event.getHook.editOriginalEmbeds(embed).setComponents().queue()
+      } else {
+        val embed = new EmbedBuilder()
+          .setDescription(s"${Config.noEmoji} This world can no longer be reassigned to you — you may be at your Patreon seat limit, or someone else already took it over.")
+          .build()
+        event.getHook.editOriginalEmbeds(embed).setComponents().queue()
+      }
+    } else if (button == "paywall_reassign_no") {
+      event.deferEdit().queue()
+      event.getHook.editOriginalComponents().queue()
     } else {
       // Any component not matched above is from a superseded message layout;
       // acknowledge it gracefully instead of leaving the interaction to time out.

@@ -25,6 +25,11 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 
+/** createChannels' result: an embed always, plus confirm/cancel buttons only
+ *  when it's prompting to reassign a paused world's seat (see
+ *  ChannelCommands.setup). */
+final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
+
 /** Per-guild channel/role setup lifecycle, extracted from BotApp. Holds the
  *  guild-join/leave handlers plus the /setup, /repair and /remove channel
  *  management (`createChannels`, `repairChannel`, `removeChannels`), all of
@@ -183,8 +188,9 @@ final class ChannelService(
       .setDescription(s"The bot will poke:\n${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n${Config.masslogEmoji}<@&$masslogRoleId> If enemies masslog on **$world**")
       .build()
 
-  def createChannels(event: SlashCommandInteractionEvent): MessageEmbed = {
+  def createChannels(event: SlashCommandInteractionEvent): SetupResult = {
     val world: String = com.tibiabot.domain.WorldName.formal(event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim())
+    var buttons: List[Button] = Nil
     // The role/category/channel/permission creation below is a long sequence of
     // blocking .complete() calls. If any one throws (missing permission, Discord
     // error, channel cap) the server is left half-built and the slash interaction
@@ -326,6 +332,18 @@ final class ChannelService(
 
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*"
         }
+      } else if (!paywallService.isActive(guild.getId, world)) {
+        // channels already exist, but tracking is paused — offer to hand the
+        // seat to this caller instead of the plain "already been setup" reply
+        if (paywallService.canReassignSeat(event.getUser.getId, guild.getId, world)) {
+          buttons = List(
+            Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
+            Button.secondary("paywall_reassign_no", "Cancel")
+          )
+          s":warning: Tracking for **$world** is currently paused — the Patreon subscription tied to it lapsed.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
+        } else {
+          s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
+        }
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
@@ -343,7 +361,7 @@ final class ChannelService(
         s"${Config.noEmoji} Something went wrong while setting up **$world**, so it may be only partially configured. Wait a moment, then run `/repair $world` (or `/setup` again) to finish."
     }
     // embed reply
-    com.tibiabot.presentation.Embeds.response(embedText)
+    SetupResult(com.tibiabot.presentation.Embeds.response(embedText), buttons)
   }
 
   def repairChannel(event: SlashCommandInteractionEvent, world: String): MessageEmbed = {

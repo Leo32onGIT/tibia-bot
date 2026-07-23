@@ -84,6 +84,34 @@ final class PaywallService(
   def releaseSeat(guildId: String, world: String): Unit =
     patreonSeatRepository.releaseSeat(guildId, world)
 
+  /** Only reachable when (guildId, world) is currently paused. The new
+   *  claimant needs no relation to the lapsed owner — just room under their
+   *  own seat limit. Reclaiming a seat you already (still) own is always
+   *  allowed, even at the limit — same "no net change" reasoning as
+   *  [[canAssignSeatPure]]'s idempotent-reclaim case. Deliberately not a
+   *  relaxed [[canAssignSeatPure]]: that method's "someone else owns it ->
+   *  blocked" rule is what stops a plain `/setup` from stealing an *active*
+   *  seat, but reassignment only ever runs against a *paused* one — the
+   *  lapsed owner having it isn't a block condition here, it's the whole
+   *  point. */
+  private[paywall] def canReassignSeatPure(newUserAlreadyOwnsIt: Boolean, newUserSeatCount: Int): Boolean =
+    newUserAlreadyOwnsIt || newUserSeatCount < seatLimit
+
+  /** The `/setup`-on-a-paused-world reassignment-availability check. */
+  def canReassignSeat(newUserId: String, guildId: String, world: String): Boolean =
+    !isActive(guildId, world) && canReassignSeatPure(
+      patreonSeatRepository.seatFor(guildId, world).exists(_.userId == newUserId),
+      patreonSeatRepository.seatsForUser(newUserId).size
+    )
+
+  /** Reassigns and reactivates immediately, rather than waiting for the next
+   *  periodic [[refreshAll]] sweep — [[canReassignSeat]] already confirmed
+   *  the new owner's live subscription status moments before this runs. */
+  def reassignSeat(newUserId: String, newUserName: String, guildId: String, world: String): Unit = {
+    patreonSeatRepository.assignSeat(newUserId, newUserName, guildId, world, ZonedDateTime.now())
+    activeStatus.put((guildId, world), true)
+  }
+
   /** Given each seat's (guildId, world, userId) and a way to check a user's
    *  live status, updates the active-status map and returns the (guildId,
    *  world) pairs that just flipped active -> inactive on *this* call — not

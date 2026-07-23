@@ -58,6 +58,18 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     service(seatLimit = 3).canAssignSeatPure(Some("someone-else"), 0, "user-1") shouldBe false
   }
 
+  test("canReassignSeatPure: already owning it is allowed even at the limit") {
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = true, newUserSeatCount = 3) shouldBe true
+  }
+
+  test("canReassignSeatPure: under the limit with no prior relation to the seat is allowed") {
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 2) shouldBe true
+  }
+
+  test("canReassignSeatPure: at the limit and not the owner is blocked") {
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 3) shouldBe false
+  }
+
   test("a (guild, world) pair whose owner fails the check becomes inactive and is reported as lapsed") {
     val svc = service()
     svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => false) shouldBe List(("guild-1", "Antica"))
