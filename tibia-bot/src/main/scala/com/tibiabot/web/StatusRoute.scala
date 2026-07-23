@@ -3,7 +3,8 @@ package com.tibiabot.web
 import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
 import akka.http.scaladsl.server.{Directive0, Route}
 import akka.http.scaladsl.server.Directives._
-import com.tibiabot.{app, discord, paywall, tracking, Config}
+import com.tibiabot.domain.PatreonMember
+import com.tibiabot.{app, discord, paywall, persistence, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -24,7 +25,8 @@ final class StatusRoute(
   onlineListSender: discord.RateLimitedSender,
   discordGateway: discord.DiscordGateway,
   logCapture: LogCapture,
-  paywallService: paywall.PaywallService
+  paywallService: paywall.PaywallService,
+  patreonMemberRepository: persistence.PatreonMemberRepository
 ) extends StrictLogging {
 
   /** Read fresh on every request (not cached) so editing the file on disk —
@@ -142,16 +144,42 @@ final class StatusRoute(
     )
   }
 
+  /** A synced Patreon member's status/pledge, spliced onto a supporter entry
+   *  when a cross-reference exists — absent (empty map) for seat-only
+   *  supporters the Patreon sync hasn't (or can't) match. */
+  private def patreonMemberFields(member: PatreonMember): Map[String, JsValue] = Map(
+    "patreonMemberId" -> JsString(member.patreonMemberId),
+    "patronStatus" -> member.patronStatus.map(s => JsString(s): JsValue).getOrElse(JsNull),
+    "pledgeCents" -> JsNumber(member.pledgeCents)
+  )
+
   /** One entry per supporter (not per seat), each carrying their seats — the
    *  dashboard's Option-B grouped view. Guild names are resolved via
    *  `guildById` (an in-memory JDA cache read, not a REST call — same as
    *  `buildStatusJson`'s per-world discord names above) so this stays cheap
    *  on the 10s poll; `userName` uses the stored snapshot rather than a live
    *  `retrieveUser` REST lookup for the same reason — a live lookup only
-   *  happens once, in PatreonAdminRoute, when a seat is actually assigned. */
+   *  happens once, in PatreonAdminRoute, when a seat is actually assigned.
+   *
+   *  Additively merges in patreonMemberRepository's synced snapshot (see
+   *  patreonapi.PatreonApiClient) — purely informational, never affects
+   *  paywallService's own Discord-role gate:
+   *   - a seat-holding supporter whose Discord id matches a synced member
+   *     gets that member's patronStatus/pledgeCents spliced on;
+   *   - a synced member with a linked Discord id but no seat becomes its own
+   *     entry (userId set, empty seats — the existing add/remove-seat flow
+   *     still targets a real Discord id, just starting from zero seats);
+   *   - a synced member never linked to Discord at all also becomes its own
+   *     entry, but with `userId: null` — the dashboard has no Discord id to
+   *     act on, so it renders informational-only, no seat-management
+   *     buttons. */
   private def buildPatreonJson(): JsArray = {
     val bySupporter = paywallService.allSeats().groupBy(_.userId)
-    val supportersJson = bySupporter.toList.sortBy { case (_, seats) => seats.headOption.map(_.userName).getOrElse("") }.map { case (userId, seats) =>
+    val patreonMembers = patreonMemberRepository.snapshot()
+    val patreonByDiscordId = patreonMembers.flatMap(m => m.discordUserId.map(_ -> m)).toMap
+    val unlinkedMembers = patreonMembers.filter(_.discordUserId.isEmpty)
+
+    val seatSupporters = bySupporter.toList.map { case (userId, seats) =>
       val seatsJson = seats.map { seat =>
         val guild = discordGateway.guildById(seat.guildId)
         val guildName = Option(guild).map(_.getName).getOrElse("Unknown")
@@ -163,14 +191,39 @@ final class StatusRoute(
           "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world))
         ): JsValue
       }
-      JsObject(
-        "userId" -> JsString(userId),
-        "userName" -> JsString(seats.headOption.map(_.userName).getOrElse("")),
-        "seatLimit" -> JsNumber(Config.Patreon.seatsPerUser),
-        "seats" -> JsArray(seatsJson.toVector)
-      ): JsValue
+      val displayName = seats.headOption.map(_.userName).getOrElse("")
+      val base = Map(
+        "userId" -> (JsString(userId): JsValue),
+        "userName" -> (JsString(displayName): JsValue),
+        "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
+        "seats" -> (JsArray(seatsJson.toVector): JsValue)
+      )
+      val enriched = patreonByDiscordId.get(userId).map(patreonMemberFields).getOrElse(Map.empty)
+      displayName -> JsObject(base ++ enriched)
     }
-    JsArray(supportersJson.toVector)
+
+    val linkedNoSeat = patreonByDiscordId.toList.filterNot { case (userId, _) => bySupporter.contains(userId) }.map { case (userId, member) =>
+      val entry = Map(
+        "userId" -> (JsString(userId): JsValue),
+        "userName" -> (JsString(member.fullName): JsValue),
+        "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
+        "seats" -> (JsArray(Vector.empty): JsValue)
+      ) ++ patreonMemberFields(member)
+      member.fullName -> JsObject(entry)
+    }
+
+    val unlinked = unlinkedMembers.map { member =>
+      val entry = Map(
+        "userId" -> (JsNull: JsValue),
+        "userName" -> (JsString(member.fullName): JsValue),
+        "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
+        "seats" -> (JsArray(Vector.empty): JsValue)
+      ) ++ patreonMemberFields(member)
+      member.fullName -> JsObject(entry)
+    }
+
+    val all = (seatSupporters ++ linkedNoSeat ++ unlinked).sortBy(_._1).map(_._2)
+    JsArray(all.toVector)
   }
 
   private def logEventJson(ev: LogEvent): JsValue = JsObject(

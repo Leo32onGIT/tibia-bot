@@ -153,6 +153,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
   private val renameCooldownRepository: persistence.RenameCooldownRepository =
     new persistence.jdbc.JdbcRenameCooldownRepository(connectionProvider)
+  private val patreonMemberRepository: persistence.PatreonMemberRepository =
+    new persistence.jdbc.JdbcPatreonMemberRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -179,6 +181,11 @@ object BotApp extends App with StrictLogging {
   // their seats to that (guild, world) pair; that pair's activity keeps
   // posting only while its seat's owner still holds the support-guild role.
   val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
+
+  // Direct Patreon API access, purely additive to the dashboard's supporters
+  // panel — see Config.PatreonApi and syncPatreonMembers below. Never touches
+  // paywallService's own Discord-role gate.
+  private val patreonApiClient = new patreonapi.PatreonApiClient()(actorSystem, ex)
 
   // Per-guild hunted/allied player and guild list CRUD
   val huntedAlliedService = new hunted.HuntedAlliedService(
@@ -221,7 +228,7 @@ object BotApp extends App with StrictLogging {
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
-    outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService
+    outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService, discordGateway)(ex)
   akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
@@ -672,6 +679,28 @@ object BotApp extends App with StrictLogging {
       }
     }
   }
+
+  // Own independent schedule (same reasoning as the prune sweep above) —
+  // guarded by Config.PatreonApi.enabled so this is a no-op until real
+  // Patreon API credentials are configured.
+  if (Config.PatreonApi.enabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
+      try syncPatreonMembers()
+      catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
+    })(ex)
+  }
+
+  /** Best-effort periodic snapshot of the Patreon campaign's member list
+   *  (see patreonapi.PatreonApiClient), purely for the dashboard's
+   *  supporters panel — never affects paywallService's own Discord-role
+   *  gate. Fire-and-forget: a failed fetch just leaves the last snapshot in
+   *  place until the next tick, same degrade-gracefully shape as everything
+   *  else here. */
+  private def syncPatreonMembers(): Unit =
+    patreonApiClient.fetchAllMembers().foreach { members =>
+      try patreonMemberRepository.replaceSnapshot(members, ZonedDateTime.now())
+      catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
+    }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()

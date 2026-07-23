@@ -207,6 +207,8 @@
   .patreon-sup-head i { color: var(--warn); font-size: 14px; }
   .patreon-sup-name { color: var(--text-strong); font-weight: 600; font-size: 12px; }
   .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .patreon-sup-pledge { color: var(--good); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); }
   .patreon-seat i { color: var(--muted); font-size: 13px; }
   .patreon-seat-text { color: var(--text); }
@@ -549,6 +551,17 @@ function renderLogAlerts(logAlerts) {
   renderLogList('log-warnings-list', logAlerts.warnings, 'No warnings captured');
 }
 
+function patronStatusLabel(status) {
+  if (status === 'active_patron') return 'Active patron';
+  if (status === 'former_patron') return 'Former patron';
+  if (status === 'declined_patron') return 'Payment declined';
+  return 'No status';
+}
+
+function formatPledge(cents) {
+  return `$${(cents / 100).toFixed(2)}/mo`;
+}
+
 function renderPatreon(patreon) {
   const allSeats = patreon.flatMap(s => s.seats);
   const activeSeats = allSeats.filter(s => s.active).length;
@@ -566,25 +579,51 @@ function renderPatreon(patreon) {
     return;
   }
   patreon.forEach(supporter => {
-    // Reuses the same per-seat "active" flag the periodic role recheck already
-    // maintains (see PaywallService.refreshAll) — a supporter counts as
-    // confirmed only while every seat they hold still passes that check.
-    const confirmed = supporter.seats.every(s => s.active);
+    // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
+    // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
+    const hasPatreonInfo = supporter.patronStatus !== undefined;
+    // Seat-holders' confirmed/unconfirmed status is untouched by the Patreon
+    // sync — still driven purely by the per-seat "active" flag from the
+    // existing Discord-role recheck (see PaywallService.refreshAll). Only a
+    // seatless, Patreon-sourced entry falls back to patronStatus, since it
+    // has no seats to check at all.
+    const confirmed = supporter.seats.length > 0
+      ? supporter.seats.every(s => s.active)
+      : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
 
     const sup = document.createElement('div');
     sup.className = confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed';
 
     const head = document.createElement('div');
     head.className = 'patreon-sup-head';
-    const confirmBadge = confirmed ? '' : '<span class="tag unconfirmed">Not confirmed</span>';
-    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId}</span>${confirmBadge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
-    const clearBtn = document.createElement('button');
-    clearBtn.className = 'patreon-btn danger';
-    clearBtn.style.marginLeft = 'auto';
-    clearBtn.textContent = 'Clear all';
-    clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
-    head.appendChild(clearBtn);
+    let statusBadge = '';
+    if (supporter.seats.length === 0 && hasPatreonInfo) {
+      statusBadge = confirmed
+        ? `<span class="tag active">${patronStatusLabel(supporter.patronStatus)}</span>`
+        : `<span class="tag unconfirmed">${patronStatusLabel(supporter.patronStatus)}</span>`;
+    } else if (!confirmed) {
+      statusBadge = '<span class="tag unconfirmed">Not confirmed</span>';
+    }
+    const pledge = supporter.pledgeCents ? `<span class="patreon-sup-pledge">${formatPledge(supporter.pledgeCents)}</span>` : '';
+    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+    if (supporter.userId) {
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'patreon-btn danger';
+      clearBtn.style.marginLeft = 'auto';
+      clearBtn.textContent = 'Clear all';
+      clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
+      head.appendChild(clearBtn);
+    }
     sup.appendChild(head);
+
+    if (supporter.seats.length === 0) {
+      const note = document.createElement('div');
+      note.className = 'patreon-empty';
+      note.innerHTML = supporter.userId
+        ? '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter, no seats assigned yet'
+        : '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter with no linked Discord account &mdash; can\'t assign a seat until they connect one';
+      sup.appendChild(note);
+    }
 
     supporter.seats.forEach(seat => {
       const row = document.createElement('div');

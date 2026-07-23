@@ -130,6 +130,22 @@ object Config {
     val seatsPerUser: Int = patreon.getInt("seats-per-user")
   }
 
+  /** Direct Patreon API access (patreonapi.PatreonApiClient) — periodically
+   *  syncs the campaign's member list for the dashboard's supporters panel.
+   *  Purely additive: does not affect the paywall's own Discord-role check.
+   *  `enabled` mirrors `redisEnabled`'s shape — everything downstream no-ops
+   *  cleanly while this is unconfigured. */
+  object PatreonApi {
+    private val patreonApi = discord.getConfig("patreon-api")
+    val clientId: String = patreonApi.getString("client-id")
+    val clientSecret: String = patreonApi.getString("client-secret")
+    val accessToken: String = patreonApi.getString("access-token")
+    val refreshToken: String = patreonApi.getString("refresh-token")
+    val campaignId: String = patreonApi.getString("campaign-id")
+    val syncInterval: FiniteDuration = patreonApi.getDuration("sync-interval").toScala
+    val enabled: Boolean = accessToken.nonEmpty
+  }
+
   /** Auto-leave a guild with no worlds tracked for this many days, unless a
    *  command's been run there within activityDays — see BotApp.pruneInactiveGuilds. */
   object InactiveGuild {
