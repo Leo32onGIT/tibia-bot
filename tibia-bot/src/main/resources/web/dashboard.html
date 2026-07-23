@@ -163,6 +163,7 @@
   .lane-card-label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px; }
   .lane-card-depth { font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
   .lane-card-ms { color: var(--muted); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .lane-card-refresh { color: var(--muted); font-size: 9px; margin-top: 1px; font-variant-numeric: tabular-nums; }
 
   .log-alerts-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; justify-self: end; }
   .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; }
@@ -368,6 +369,10 @@ function laneDisplayName(key) {
   return key;
 }
 
+function formatRefreshInterval(seconds) {
+  return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}min`;
+}
+
 function renderLanes(lanes) {
   const el = document.getElementById('lanes');
   el.innerHTML = '';
@@ -384,6 +389,12 @@ function renderLanes(lanes) {
     const maxWaitMs = Object.values(lane.labels).reduce((max, s) => Math.max(max, s.avgWaitMs), 0);
     const labelDetail = Object.entries(lane.labels).map(([label, s]) => `${label}: ${Math.round(s.avgWaitMs)}ms`).join(', ') || 'no traffic yet';
 
+    // Only online-list has an adaptive refresh cycle (general has no refresh
+    // timer to back off) — the field is only present on that lane's JSON.
+    const refreshLine = lane.refreshIntervalSeconds != null
+      ? `<div class="lane-card-refresh">refresh: ${formatRefreshInterval(lane.refreshIntervalSeconds)}</div>`
+      : '';
+
     const card = document.createElement('div');
     card.className = 'lane-card';
     card.title = `${laneDisplayName(name)} — ${lane.queueDepth} queued, ${lane.totalDropped} dropped, ${lane.totalSuperseded} superseded\n${labelDetail}`;
@@ -391,6 +402,7 @@ function renderLanes(lanes) {
       <div class="lane-card-label">${laneDisplayName(name)}</div>
       <div class="lane-card-depth" style="color:${depthColor};">${lane.queueDepth}</div>
       <div class="lane-card-ms">${Math.round(maxWaitMs)}ms</div>
+      ${refreshLine}
     `;
     el.appendChild(card);
   });

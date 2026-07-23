@@ -46,13 +46,15 @@ final class StatusRoute(
   private def requireOwner(userId: String): Directive0 =
     if (userId == ownerId) pass else complete(StatusCodes.Forbidden -> "Forbidden")
 
-  private def laneJson(sender: discord.RateLimitedSender): JsObject = JsObject(
-    "queueDepth" -> JsNumber(sender.queueDepth),
-    "totalDropped" -> JsNumber(sender.totalDropped),
-    "totalSuperseded" -> JsNumber(sender.totalSuperseded),
-    "labels" -> JsObject(sender.snapshot().map { case (label, stats) =>
-      label -> JsObject("count" -> JsNumber(stats.count), "avgWaitMs" -> JsNumber(stats.avgWaitMs)): (String, JsValue)
-    })
+  private def laneJson(sender: discord.RateLimitedSender, adaptiveRefresh: Boolean = false): JsObject = JsObject(
+    Map(
+      "queueDepth" -> JsNumber(sender.queueDepth),
+      "totalDropped" -> JsNumber(sender.totalDropped),
+      "totalSuperseded" -> JsNumber(sender.totalSuperseded),
+      "labels" -> JsObject(sender.snapshot().map { case (label, stats) =>
+        label -> JsObject("count" -> JsNumber(stats.count), "avgWaitMs" -> JsNumber(stats.avgWaitMs)): (String, JsValue)
+      })
+    ) ++ (if (adaptiveRefresh) Map("refreshIntervalSeconds" -> JsNumber(discord.AdaptiveRefreshInterval.intervalSeconds(sender.queueDepth))) else Map.empty)
   )
 
   private def buildStatusJson(): JsObject = {
@@ -96,7 +98,7 @@ final class StatusRoute(
       "worlds" -> JsArray(worldsJson.toVector),
       "rateLimitLanes" -> JsObject(
         "background" -> laneJson(outboundSender),
-        "online-list" -> laneJson(onlineListSender)
+        "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
       ),
       "logAlerts" -> buildLogAlertsJson()
     )

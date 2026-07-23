@@ -641,9 +641,12 @@ class TibiaBot(
       discordsList.foreach { discords =>
         val guildId = discords.id
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
-        // update online list every 5 minutes
+        // update online list, backing off the refresh interval when the shared
+        // online-list lane is congested instead of always checking every 90s —
+        // see AdaptiveRefreshInterval for the queueDepth -> interval mapping.
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusSeconds(90))) {
+        val refreshIntervalSeconds = discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth)
+        if (ZonedDateTime.now().isAfter(onlineTimer.plusSeconds(refreshIntervalSeconds))) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
