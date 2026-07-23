@@ -429,7 +429,7 @@ object BotApp extends App with StrictLogging {
                 user.openPrivateChannel().queue { pc =>
                   val dmEmbed = new EmbedBuilder()
                   dmEmbed.setTitle(s":warning: Violent Bot has been paused")
-                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the [Violent Bot Discord](https://discord.gg/qjSzsbjZx6), so the subscription check can't find you. [Resubscribe](https://www.patreon.com/violentbot) and join the discord to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
+                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the [Violent Bot Discord](https://discord.gg/qjSzsbjZx6), so the subscription check can't find you. If this was unintentional, simply rejoin the discord to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
                   dmEmbed.setColor(presentation.Embeds.NemesisPurple)
                   pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
                     List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
@@ -827,6 +827,17 @@ object BotApp extends App with StrictLogging {
     channelIds.filterNot(_ == "0").distinct.foreach { channelId =>
       val channel = guild.getTextChannelById(channelId)
       if (channel != null && (channel.canTalk() || !Config.prod)) {
+        // Swap the "-<online count>" suffix for a warning icon, same base-name
+        // recovery TibiaBot's own renameOnlineChannelIfDue uses — one-off
+        // rename (only runs on the pause transition, not a recurring tick),
+        // so no throttling needed: nothing else renames this channel while
+        // it's paywall-paused (TibiaBot's own online-list update is already
+        // gated on paywallService.isActive and skips it entirely).
+        val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-⚠️"
+        if (channel.getName != pausedName) {
+          channel.getManager.setName(pausedName).queue(null, (ex: Throwable) =>
+            logger.warn(s"Failed to rename paused online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex))
+        }
         channel.getHistory.retrievePast(100).queue { history =>
           try {
             val existing = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
