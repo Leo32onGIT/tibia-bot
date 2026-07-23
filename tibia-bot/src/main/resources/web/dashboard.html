@@ -212,9 +212,13 @@
   .patreon-btn { background: transparent; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--muted); font-size: 11px; padding: 3px 8px; cursor: pointer; }
   .patreon-btn:hover { color: var(--text-strong); border-color: var(--muted); }
   .patreon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
-  .patreon-add-form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .patreon-add-toggle { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; text-transform: none; letter-spacing: normal; }
+  .patreon-add-toggle:hover { background: #343d51; }
+  .patreon-add-form { display: none; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .patreon-add-form.open { display: flex; }
   .patreon-add-form input { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font-size: 12px; padding: 6px 10px; flex: 1; min-width: 120px; }
-  .patreon-add-form button { background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+  .patreon-add-form button[type="submit"] { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+  .patreon-add-form button[type="submit"]:hover { background: #343d51; }
 
   /* Below this, the fixed 200px side-by-side sidebar and the single-row KPI
      strip both stop working: the sidebar eats half a phone screen, and the
@@ -297,7 +301,7 @@
   </div>
 
   <div class="panel">
-    <div class="panel-title">Patreon supporters</div>
+    <div class="panel-title">Patreon supporters<button class="patreon-add-toggle" id="patreon-add-toggle" type="button">+ Add seat</button></div>
     <div class="detail-stats" id="patreon-stats"></div>
     <div class="patreon-list" id="patreon-list"></div>
     <form class="patreon-add-form" id="patreon-add-form">
@@ -627,6 +631,10 @@ async function clearSeats(userId, userName) {
   }
 }
 
+document.getElementById('patreon-add-toggle').addEventListener('click', () => {
+  document.getElementById('patreon-add-form').classList.toggle('open');
+});
+
 document.getElementById('patreon-add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const userId = document.getElementById('patreon-add-userid').value.trim();
@@ -636,6 +644,7 @@ document.getElementById('patreon-add-form').addEventListener('submit', async (e)
   try {
     await patreonAction('POST', '/dashboard/patreon/seats', { userId, guildId, world });
     e.target.reset();
+    e.target.classList.remove('open');
     poll();
   } catch (err) {
     alert(err.message);
