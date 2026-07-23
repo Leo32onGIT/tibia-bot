@@ -2,6 +2,12 @@
 This branch is intended for hosting dedicated instances of Violent Bot.    
 You can run this locally `free/m` or on a vps for `vps hosting cost/m`
 
+## License
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). You're free to
+view, run, and modify this code for noncommercial purposes. Commercial use — including
+running a paid or monetized service based on this code — requires a separate agreement;
+reach out via the links below.
+
 # Patreon
 Join Patreon as a **paid supporter** and I will send you an invite link for the bot I am running myself.    
 This is the best option if you are non-technical and simply wish to use Violent Bot.
