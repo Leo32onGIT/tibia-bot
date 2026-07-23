@@ -251,14 +251,16 @@ object CommandSchemas {
     )
 
   /** Visible immediately when the bot joins a guild, before any world's been
-   *  set up — /setup itself, plus commands that don't depend on a world
-   *  existing (galthen/boosted are personal, self-service commands; repair/
-   *  remove stay useful even after a partial/failed /setup). */
-  val initialCommands: List[SlashCommandData] = List(setupCommand, removeCommand, repairCommand, galthenCommand, boostedCommand)
+   *  set up — /setup itself, /help (how do I use this bot, including how to
+   *  run /setup in the first place), and galthen/boosted (personal,
+   *  self-service commands unrelated to any specific world). */
+  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, galthenCommand, boostedCommand)
 
   /** Only meaningful once at least one world is tracked in the guild — added
-   *  on top of initialCommands once /setup first succeeds there. */
-  val worldConfigCommands: List[SlashCommandData] = List(huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, onlineCombineCommand)
+   *  on top of initialCommands once /setup first succeeds there. remove/
+   *  repair move here too: both act on a world's channels, which don't
+   *  exist until /setup has run at least once. */
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands

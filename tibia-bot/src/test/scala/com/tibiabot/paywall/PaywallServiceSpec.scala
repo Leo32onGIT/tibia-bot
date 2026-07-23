@@ -29,8 +29,8 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def allSeats(): List[PatreonSeat] = Nil
   }
 
-  private def service(seatLimit: Int = 3) =
-    new PaywallService(new FakeGateway, new FakeSeatRepository, "support-guild", "patreon-role", seatLimit)
+  private def service(seatLimit: Int = 3, ownerId: String = "owner-id") =
+    new PaywallService(new FakeGateway, new FakeSeatRepository, "support-guild", "patreon-role", seatLimit, ownerId)
 
   test("isActive defaults true for a (guild, world) pair that's never been checked") {
     service().isActive("unknown-guild", "Antica") shouldBe true
@@ -40,6 +40,18 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     val svc = service()
     svc.hasPatreonRole(List("other-role", "patreon-role")) shouldBe true
     svc.hasPatreonRole(List("other-role")) shouldBe false
+  }
+
+  test("callerIsSubscribed always passes for the configured owner, bypassing the role check entirely") {
+    val svc = service(ownerId = "owner-id")
+    svc.callerIsSubscribed("owner-id") shouldBe true
+  }
+
+  test("callerIsSubscribed still runs the normal role check for everyone else") {
+    val svc = service(ownerId = "owner-id")
+    // FakeGateway.guildById always returns null, so a non-owner reads as
+    // "not subscribed" (the real not-a-member-of-the-support-guild path).
+    svc.callerIsSubscribed("someone-else") shouldBe false
   }
 
   test("canAssignSeatPure: under the limit with no existing owner is allowed") {

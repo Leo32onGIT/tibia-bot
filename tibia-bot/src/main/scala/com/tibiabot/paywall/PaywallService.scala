@@ -20,7 +20,8 @@ final class PaywallService(
   patreonSeatRepository: PatreonSeatRepository,
   supportGuildId: String,
   patreonRoleId: String,
-  seatLimit: Int
+  seatLimit: Int,
+  ownerId: String
 ) {
   private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
 
@@ -37,20 +38,26 @@ final class PaywallService(
 
   /** Blocking REST lookup against the support guild — the `/setup` command
    *  gate calls this directly; `refreshAll` calls it once per distinct seat
-   *  owner. Not a member of the support guild (or a lookup failure) reads as
+   *  owner. The bot owner always passes, regardless of role — so they can
+   *  always `/setup`, and any seat assigned to them never lapses via the
+   *  periodic recheck either, since that reuses this same check. Otherwise:
+   *  not a member of the support guild (or a lookup failure) reads as
    *  "not subscribed", never as an error to propagate. A REST lookup rather
    *  than JDA's member cache deliberately — caching every member of the
    *  support guild would need the privileged GUILD_MEMBERS intent (Discord's
    *  bot-verification process past 100 guilds) for what's an infrequent,
    *  low-volume check. */
   def callerIsSubscribed(userId: String): Boolean = {
-    val supportGuild = discordGateway.guildById(supportGuildId)
-    if (supportGuild == null) false
-    else try {
-      val member = supportGuild.retrieveMemberById(userId).complete()
-      member != null && hasPatreonRole(member.getRoles.asScala.map(_.getId).toList)
-    } catch {
-      case _: Throwable => false
+    if (userId == ownerId) true
+    else {
+      val supportGuild = discordGateway.guildById(supportGuildId)
+      if (supportGuild == null) false
+      else try {
+        val member = supportGuild.retrieveMemberById(userId).complete()
+        member != null && hasPatreonRole(member.getRoles.asScala.map(_.getId).toList)
+      } catch {
+        case _: Throwable => false
+      }
     }
   }
 
@@ -67,9 +74,11 @@ final class PaywallService(
       case None => currentSeatCount < seatLimit
     }
 
-  /** The `/setup` seat-availability check — reads live seat state. */
+  /** The `/setup` seat-availability check — reads live seat state. The bot
+   *  owner always passes: unlimited seats, same reasoning as
+   *  [[callerIsSubscribed]]'s bypass. */
   def canAssignSeat(userId: String, guildId: String, world: String): Boolean =
-    canAssignSeatPure(
+    userId == ownerId || canAssignSeatPure(
       patreonSeatRepository.seatFor(guildId, world).map(_.userId),
       patreonSeatRepository.seatsForUser(userId).size,
       userId
@@ -97,12 +106,15 @@ final class PaywallService(
   private[paywall] def canReassignSeatPure(newUserAlreadyOwnsIt: Boolean, newUserSeatCount: Int): Boolean =
     newUserAlreadyOwnsIt || newUserSeatCount < seatLimit
 
-  /** The `/setup`-on-a-paused-world reassignment-availability check. */
+  /** The `/setup`-on-a-paused-world reassignment-availability check. The
+   *  paused gate still applies to the bot owner (reassignment is only ever
+   *  meaningful for a paused seat regardless of who's claiming it) — only
+   *  the seat-limit portion is bypassed for them, same as [[canAssignSeat]]. */
   def canReassignSeat(newUserId: String, guildId: String, world: String): Boolean =
-    !isActive(guildId, world) && canReassignSeatPure(
+    !isActive(guildId, world) && (newUserId == ownerId || canReassignSeatPure(
       patreonSeatRepository.seatFor(guildId, world).exists(_.userId == newUserId),
       patreonSeatRepository.seatsForUser(newUserId).size
-    )
+    ))
 
   /** Reassigns and reactivates immediately, rather than waiting for the next
    *  periodic [[refreshAll]] sweep — [[canReassignSeat]] already confirmed

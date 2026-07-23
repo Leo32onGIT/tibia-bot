@@ -174,7 +174,7 @@ object BotApp extends App with StrictLogging {
   // paywall.PaywallService): /setup checks the caller, then assigns one of
   // their seats to that (guild, world) pair; that pair's activity keeps
   // posting only while its seat's owner still holds the support-guild role.
-  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser)
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
 
   // Per-guild hunted/allied player and guild list CRUD
   val huntedAlliedService = new hunted.HuntedAlliedService(
@@ -337,7 +337,11 @@ object BotApp extends App with StrictLogging {
   // everyone else gets the full config set once they have a world tracked,
   // or just the minimal set (setup/remove/repair/galthen/boosted) until then.
   guilds.foreach{g =>
-    val hasWorldConfigured = worldConfig(g).nonEmpty
+    // A guild that's never run /setup has no per-guild database yet at all
+    // (only created lazily by /setup itself) — checkConfigDatabase must gate
+    // worldConfig, not just the world-list query inside it, or this throws
+    // instead of returning empty.
+    val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
     g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured).asJava).complete()
   }
 

@@ -37,7 +37,7 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
 
   test("initialCommands is the minimal set visible before any world is configured") {
     CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
-      List("setup", "remove", "repair", "galthen", "boosted")
+      List("setup", "help", "galthen", "boosted")
   }
 
   test("commands is exactly initialCommands plus worldConfigCommands") {
