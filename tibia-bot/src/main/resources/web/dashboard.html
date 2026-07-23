@@ -199,6 +199,7 @@
   .sep { color: var(--muted); }
   .tag.active { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
+  .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 
   .patreon-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; }
   .patreon-sup { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
@@ -208,6 +209,10 @@
   .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); }
   .patreon-seat i { color: var(--muted); font-size: 13px; }
+  .patreon-seat-text { color: var(--text); }
+  .patreon-sup.unconfirmed .patreon-sup-name,
+  .patreon-sup.unconfirmed .patreon-sup-head i,
+  .patreon-sup.unconfirmed .patreon-seat-text { color: var(--muted); }
   .patreon-seat-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .patreon-btn { background: transparent; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--muted); font-size: 11px; padding: 3px 8px; cursor: pointer; }
   .patreon-btn:hover { color: var(--text-strong); border-color: var(--muted); }
@@ -561,12 +566,18 @@ function renderPatreon(patreon) {
     return;
   }
   patreon.forEach(supporter => {
+    // Reuses the same per-seat "active" flag the periodic role recheck already
+    // maintains (see PaywallService.refreshAll) — a supporter counts as
+    // confirmed only while every seat they hold still passes that check.
+    const confirmed = supporter.seats.every(s => s.active);
+
     const sup = document.createElement('div');
-    sup.className = 'patreon-sup';
+    sup.className = confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed';
 
     const head = document.createElement('div');
     head.className = 'patreon-sup-head';
-    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId}</span><span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+    const confirmBadge = confirmed ? '' : '<span class="tag unconfirmed">Not confirmed</span>';
+    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId}</span>${confirmBadge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
     const clearBtn = document.createElement('button');
     clearBtn.className = 'patreon-btn danger';
     clearBtn.style.marginLeft = 'auto';
@@ -578,7 +589,7 @@ function renderPatreon(patreon) {
     supporter.seats.forEach(seat => {
       const row = document.createElement('div');
       row.className = 'patreon-seat';
-      row.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i><span>${seat.guildName}</span><span class="sep">&middot;</span><i class="ti ti-world" aria-hidden="true"></i><span>${seat.world}</span>`;
+      row.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i><span class="patreon-seat-text">${seat.guildName}</span><span class="sep">&middot;</span><i class="ti ti-world" aria-hidden="true"></i><span class="patreon-seat-text">${seat.world}</span>`;
       const right = document.createElement('span');
       right.className = 'patreon-seat-right';
       right.innerHTML = seat.active ? '<span class="tag active">Active</span>' : '<span class="tag paused">Paused</span>';
