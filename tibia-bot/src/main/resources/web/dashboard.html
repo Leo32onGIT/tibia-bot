@@ -18,13 +18,6 @@
     --good: #3ecf8e;
     --warn: #e0a93e;
     --bad: #e0563e;
-    /* Dedicated 4-step scale for the sidebar edits heat map — kept separate
-       from --warn/--bad above so retuning it doesn't also recolor the
-       deaths/edits icons and tag pills that reuse those. */
-    --heat-great: #3ecf8e;
-    --heat-good: #e0c23e;
-    --heat-medium: #cf7a2e;
-    --heat-hot: #a8362a;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -74,6 +67,33 @@
     color: var(--text-strong);
   }
 
+  /* Mobile-only: a menu button to open the sidebar as a slide-in drawer, and
+     the backdrop behind it. Both display:none here; the media query below
+     turns them on — see .sidebar's mobile override for the actual drawer. */
+  .mobile-topbar { display: none; align-items: center; gap: 10px; }
+  .mobile-menu-btn {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text-strong);
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .mobile-topbar-title { font-size: 14px; font-weight: 600; color: var(--text-strong); }
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 25;
+  }
+  .sidebar-backdrop.open { display: block; }
+
   main { flex: 1; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 
   .kpis-strip {
@@ -81,11 +101,12 @@
     border: 1px solid var(--panel-border);
     border-radius: 8px;
     padding: 8px 16px;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
+    gap: 16px;
   }
-  .kpi-group { display: flex; gap: 20px; }
-  .kpi-divider { width: 1px; height: 24px; background: var(--panel-border); margin-left: auto; margin-right: 20px; }
+  .kpi-group { display: flex; gap: 20px; justify-self: center; }
   .kpi { display: flex; align-items: center; gap: 6px; }
   .kpi i { font-size: 14px; color: var(--muted); }
   .kpi .label { color: var(--muted); font-size: 11px; }
@@ -129,16 +150,21 @@
      KPI group (see .kpis-strip above) — rate-limit health is bot-wide, not
      tied to the selected world's details, so it doesn't belong in the
      world-detail panel below. */
-  .lanes-compact { min-width: 190px; }
-  .lanes-compact-title { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
-  .lanes-rows { display: flex; flex-direction: column; gap: 5px; }
-  .lane-mini-row { display: flex; align-items: center; gap: 6px; }
-  .lane-mini-label { color: var(--muted); font-size: 10px; width: 68px; flex-shrink: 0; }
-  .lane-mini-track { flex: 1; background: var(--panel-border); border-radius: 3px; height: 4px; overflow: hidden; }
-  .lane-mini-fill { height: 100%; }
-  .lane-mini-ms { font-size: 10px; width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  .lanes-compact { justify-self: start; }
+  .lanes-rows { display: flex; gap: 8px; }
+  .lane-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    text-align: center;
+    min-width: 76px;
+  }
+  .lane-card-label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px; }
+  .lane-card-depth { font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .lane-card-ms { color: var(--muted); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 
-  .log-alerts-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .log-alerts-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; justify-self: end; }
   .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; }
   .log-alert-count i { font-size: 14px; }
   .log-alert-count.error { color: var(--bad); }
@@ -147,7 +173,8 @@
   #log-alerts-chevron.expanded { transform: rotate(180deg); }
 
   .feed { max-height: 320px; overflow-y: auto; }
-  .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; }
+  .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .feed-row > div:last-child { min-width: 0; word-break: break-word; }
   .feed-row a { color: var(--accent); text-decoration: none; }
   .feed-row a:hover { text-decoration: underline; }
   .feed-row:first-child { border-top: none; }
@@ -163,25 +190,60 @@
 
   .muted { color: var(--muted); }
   .stale { color: var(--warn); }
+
+  /* Below this, the fixed 200px side-by-side sidebar and the single-row KPI
+     strip both stop working: the sidebar eats half a phone screen, and the
+     KPI strip's three grid columns have nowhere to shrink to. The sidebar
+     becomes an off-canvas drawer (opened via .mobile-topbar's button,
+     closed via the backdrop or picking a world) instead of taking any
+     permanent screen space; the KPI strip drops to one stacked, centered
+     column instead of three fixed side-by-side ones. */
+  @media (max-width: 720px) {
+    .mobile-topbar { display: flex; }
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 260px;
+      max-width: 80vw;
+      z-index: 30;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+    }
+    .sidebar.open { transform: translateX(0); }
+
+    main { padding: 12px; gap: 14px; }
+
+    .kpis-strip { grid-template-columns: 1fr; gap: 12px; }
+    .lanes-compact, .kpi-group, .log-alerts-summary { justify-self: center; }
+    .kpi-group { flex-wrap: wrap; justify-content: center; }
+
+    .detail-stats { gap: 12px 20px; padding: 12px; }
+    .discord-item { flex-wrap: wrap; }
+    .discord-item .gid { margin-left: 0; width: 100%; }
+  }
 </style>
 </head>
 <body>
-<aside class="sidebar">
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-header">Violent Bot<span>/ status</span></div>
   <div class="world-list" id="world-list"></div>
 </aside>
 <main>
+  <div class="mobile-topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle world list"><i class="ti ti-menu-2" aria-hidden="true"></i></button>
+    <span class="mobile-topbar-title">Violent Bot</span>
+  </div>
   <div class="kpis-strip">
+    <div class="lanes-compact">
+      <div class="lanes-rows" id="lanes"></div>
+    </div>
     <div class="kpi-group">
       <div class="kpi"><i class="ti ti-world" aria-hidden="true"></i><span class="label">Worlds</span><span class="value" id="kpi-worlds">–</span></div>
       <div class="kpi"><i class="ti ti-brand-discord" aria-hidden="true"></i><span class="label">Discords</span><span class="value" id="kpi-discords">–</span></div>
       <div class="kpi"><i class="ti ti-users" aria-hidden="true"></i><span class="label">Tracked Players</span><span class="value" id="kpi-population">–</span></div>
     </div>
-    <div class="kpi-divider"></div>
-    <div class="lanes-compact">
-      <div class="lanes-rows" id="lanes"></div>
-    </div>
-    <div class="kpi-divider"></div>
     <div class="log-alerts-summary" id="log-alerts-summary">
       <span class="log-alert-count error"><i class="ti ti-alert-circle" aria-hidden="true"></i><span id="log-error-count">0 errors</span></span>
       <span class="log-alert-count warn"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span id="log-warn-count">0 warnings</span></span>
@@ -223,16 +285,41 @@ function sortedWorlds(worlds) {
   return worlds.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Shared 10-level heat ramp (green -> yellow -> orange -> red), used for both
+// the sidebar's per-world edits heat and the rate-limit lane bars/labels —
+// one gradient, two different 0-1 ratios fed into it. Quantized to exactly
+// 10 discrete steps (not a smooth continuous gradient) so the color a given
+// value maps to is stable and predictable, not a slightly-different shade
+// every time the underlying number wiggles by one.
+const HEAT_STOPS = [
+  [62, 207, 142],  // green
+  [224, 194, 62],  // yellow
+  [207, 122, 46],  // orange
+  [168, 54, 42]    // red
+];
+
+function heatColorForRatio(ratio) {
+  const clamped = Math.min(1, Math.max(0, ratio));
+  const level = Math.min(9, Math.floor(clamped * 10)); // 10 discrete levels: 0-9
+  const t = level / 9;
+  const segments = HEAT_STOPS.length - 1;
+  const segPos = t * segments;
+  const segIndex = Math.min(segments - 1, Math.floor(segPos));
+  const segT = segPos - segIndex;
+  const [r1, g1, b1] = HEAT_STOPS[segIndex];
+  const [r2, g2, b2] = HEAT_STOPS[segIndex + 1];
+  const lerp = (a, b) => Math.round(a + (b - a) * segT);
+  return `rgb(${lerp(r1, r2)}, ${lerp(g1, g2)}, ${lerp(b1, b2)})`;
+}
+
 // Edits (15m) is what actually feeds the online-list rate-limit lane, so it
 // stands in for per-world queue pressure — there's no true per-world queue
-// depth tracked today, only bot-wide lane totals (see renderLanes). Fixed
-// bands rather than relative-to-max, so "great" always means the same thing
-// regardless of how busy the bot is overall.
-function heatColor(edits) {
-  if (edits < 50) return 'var(--heat-great)';
-  if (edits < 100) return 'var(--heat-good)';
-  if (edits < 250) return 'var(--heat-medium)';
-  return 'var(--heat-hot)';
+// depth tracked today, only bot-wide lane totals (see renderLanes). Ratio
+// against a fixed max (not relative to the busiest world shown), so a given
+// edit count always means the same thing regardless of how busy the bot is
+// overall.
+function heatColorForEdits(edits) {
+  return heatColorForRatio(edits / 250);
 }
 
 const BE_ICON_GREEN = 'https://static.wikia.nocookie.net/tibia/images/a/a6/Be_icon_green.gif/revision/latest?cb=20170829131556&path-prefix=en&format=original';
@@ -244,11 +331,11 @@ function renderSidebar(worlds) {
   sortedWorlds(worlds).forEach(w => {
     const div = document.createElement('div');
     div.className = 'world-item' + (w.name === selectedWorld ? ' active' : '');
-    const nameColor = heatColor(w.edits15m);
+    const nameColor = heatColorForEdits(w.edits15m);
     const beIcon = w.battleyeGreen ? BE_ICON_GREEN : BE_ICON_YELLOW;
     const beLabel = w.battleyeGreen ? 'Green BattlEye' : 'Yellow BattlEye';
     div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
-    div.addEventListener('click', () => { selectedWorld = w.name; render(); });
+    div.addEventListener('click', () => { selectedWorld = w.name; render(); closeSidebar(); });
     el.appendChild(div);
   });
 }
@@ -273,13 +360,6 @@ function renderDetail(worlds) {
     : '<div class="muted">No discords tracking this world</div>';
 }
 
-// Queue depth is what "backed up" actually means for a lane — a healthy lane
-// drains close to as fast as it fills. Fixed threshold, not relative, so the
-// pill means the same thing regardless of how busy the bot is overall.
-function laneHealthVar(queueDepth) {
-  return queueDepth > 20 ? '--bad' : '--good';
-}
-
 // Display names only — the JSON keys ("background", "online-list") stay as
 // the actual lane identifiers, matching RateLimitedSender's own labels.
 function laneDisplayName(key) {
@@ -292,23 +372,27 @@ function renderLanes(lanes) {
   const el = document.getElementById('lanes');
   el.innerHTML = '';
   Object.entries(lanes).forEach(([name, lane]) => {
-    const healthVar = laneHealthVar(lane.queueDepth);
-    const barPct = Math.min(100, lane.queueDepth);
+    // "general" tends to stay small so 0-100 shows real movement; online-list
+    // can genuinely back up into the hundreds/thousands under load, so it
+    // needs the wider 0-1000 scale to stay meaningful instead of pinning at 100%.
+    const barMax = name === 'background' ? 100 : 1000;
+    const ratio = Math.min(1, lane.queueDepth / barMax);
+    const depthColor = heatColorForRatio(ratio);
     // The single worst avg wait across this lane's labels — full per-label
     // detail (count, individual wait times) is available on hover only, to
     // keep this compact enough to sit in the KPI strip.
     const maxWaitMs = Object.values(lane.labels).reduce((max, s) => Math.max(max, s.avgWaitMs), 0);
     const labelDetail = Object.entries(lane.labels).map(([label, s]) => `${label}: ${Math.round(s.avgWaitMs)}ms`).join(', ') || 'no traffic yet';
 
-    const row = document.createElement('div');
-    row.className = 'lane-mini-row';
-    row.title = `${laneDisplayName(name)} — ${lane.queueDepth} queued, ${lane.totalDropped} dropped, ${lane.totalSuperseded} superseded\n${labelDetail}`;
-    row.innerHTML = `
-      <span class="lane-mini-label">${laneDisplayName(name)}</span>
-      <div class="lane-mini-track"><div class="lane-mini-fill" style="width:${barPct}%; background:var(${healthVar});"></div></div>
-      <span class="lane-mini-ms" style="color:var(${healthVar});">${Math.round(maxWaitMs)}ms</span>
+    const card = document.createElement('div');
+    card.className = 'lane-card';
+    card.title = `${laneDisplayName(name)} — ${lane.queueDepth} queued, ${lane.totalDropped} dropped, ${lane.totalSuperseded} superseded\n${labelDetail}`;
+    card.innerHTML = `
+      <div class="lane-card-label">${laneDisplayName(name)}</div>
+      <div class="lane-card-depth" style="color:${depthColor};">${lane.queueDepth}</div>
+      <div class="lane-card-ms">${Math.round(maxWaitMs)}ms</div>
     `;
-    el.appendChild(row);
+    el.appendChild(card);
   });
 }
 
@@ -363,6 +447,18 @@ document.getElementById('log-alerts-summary').addEventListener('click', () => {
   panel.style.display = isHidden ? 'block' : 'none';
   chevron.classList.toggle('expanded', isHidden);
 });
+
+// Mobile-only drawer — a no-op on desktop, where .sidebar never gets the
+// "open" transform in the first place (see the max-width: 720px block).
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+document.getElementById('mobile-menu-btn').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-backdrop').classList.add('open');
+});
+document.getElementById('sidebar-backdrop').addEventListener('click', closeSidebar);
 
 function render() {
   if (!lastData) return;
