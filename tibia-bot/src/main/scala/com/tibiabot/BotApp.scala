@@ -413,8 +413,36 @@ object BotApp extends App with StrictLogging {
             val pausedEmbed = new EmbedBuilder()
             pausedEmbed.setTitle(s":warning: Violent Bot paused for `$world`")
             pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active. [Resubscribe](https://www.patreon.com/violentbot), or run `/setup` again after freeing a seat, to resume tracking.")
-            pausedEmbed.setColor(presentation.Embeds.BrandColor)
-            adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue()
+            pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
+            adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
+              postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
+            }
+          }
+
+          // Low priority (rare, one DM per lapse) — goes through the shared
+          // background lane so it can't compete with deaths/boosted-channel
+          // posts for REST slots. Mirrors the boosted-DM notification pattern.
+          outboundSender.enqueue("paywall-lapse-dm") { () =>
+            val user = discordGateway.retrieveUser(userId)
+            if (user != null) {
+              try {
+                user.openPrivateChannel().queue { pc =>
+                  val dmEmbed = new EmbedBuilder()
+                  dmEmbed.setTitle(":warning: Violent Bot paused")
+                  dmEmbed.setDescription(s"Violent Bot is paused for **`$world`** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the Violent Bot support Discord, so the subscription check can't find you. [Resubscribe](https://www.patreon.com/violentbot) or rejoin to resume tracking.")
+                  dmEmbed.setColor(presentation.Embeds.NemesisPurple)
+                  pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
+                    List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
+                    new java.util.function.Consumer[ErrorResponseException] {
+                      def accept(ex: ErrorResponseException): Unit =
+                        logger.info(s"Could not DM paywall-lapse notice to user '$userId': no shared guild / DMs closed")
+                    }
+                  ))
+                }
+              } catch {
+                case ex: Exception => logger.warn(s"Failed to DM paywall-lapse notice to user: '$userId'", ex)
+              }
+            }
           }
         }
       } catch {
@@ -774,6 +802,46 @@ object BotApp extends App with StrictLogging {
 
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
+
+  /** Called once, from the Patreon paywall's lapse handler: clears whatever
+   *  online-list content is currently posted for this world and replaces it
+   *  with a paused notice linking back to the admin-channel explanation.
+   *  Targets just the combined channel in combined mode, or all three
+   *  allies/neutrals/enemies channels that still exist in separate mode —
+   *  same channels/columns TibiaBot's own recurring online-list update
+   *  reads (see TibiaBot.onlineList). No explicit "resumed" cleanup is
+   *  needed: once the world's active again, that recurring update's normal
+   *  fetch-existing-bot-messages-and-edit-in-place logic (updateMultiFields)
+   *  naturally overwrites this embed with real content on its next tick.
+   *
+   *  Called from inside the admin-message send's own .queue() callback, so
+   *  every JDA call here must stay non-blocking (.queue(), never
+   *  .complete()) — JDA refuses nested .complete() calls from a callback
+   *  thread as a deadlock guard. */
+  private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: String): Unit = {
+    val worldConfig = worldRetrieveConfig(guild, world)
+    val combined = worldConfig.getOrElse("combined_online", "false") == "true"
+    val channelIds =
+      if (combined) List(worldConfig.getOrElse("allies_channel", "0"))
+      else List("allies_channel", "neutrals_channel", "enemies_channel").map(worldConfig.getOrElse(_, "0"))
+    channelIds.filterNot(_ == "0").distinct.foreach { channelId =>
+      val channel = guild.getTextChannelById(channelId)
+      if (channel != null && (channel.canTalk() || !Config.prod)) {
+        channel.getHistory.retrievePast(100).queue { history =>
+          try {
+            val existing = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
+            if (!existing.isEmpty) channel.purgeMessages(existing)
+            val pausedEmbed = new EmbedBuilder()
+            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently **paused**.\n\n[View details]($adminMessageUrl)")
+            pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
+            channel.sendMessageEmbeds(pausedEmbed.build()).queue()
+          } catch {
+            case ex: Throwable => logger.warn(s"Failed to post paused notice to online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex)
+          }
+        }
+      }
+    }
+  }
 
   private def customSortConfig(guild: Guild, query: String): List[CustomSort] =
     customSortRepository.getAll(guild.getId)

@@ -762,7 +762,7 @@ class TibiaBot(
               val poke = Config.notableCreatures.contains(killer.toLowerCase())
               if (poke) {
                 notablePoke = "nemesis"
-                embedColor = 11563775 // bright purple
+                embedColor = presentation.Embeds.NemesisPurple
               }
 
               if (killerList.nonEmpty) {
