@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
+import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
 import akka.http.scaladsl.server.{Directive0, Route}
 import akka.http.scaladsl.server.Directives._
 import com.tibiabot.{app, discord, paywall, tracking, Config}
@@ -43,6 +43,30 @@ final class StatusRoute(
       finally stream.close()
     }
   }
+
+  /** Dashboard-local static images (currently just the BattlEye status icons —
+   *  previously hotlinked from the Tibia Fandom wiki, now vendored into the
+   *  repo so the dashboard doesn't depend on a third party staying up).
+   *  Same filesystem-override-then-classpath lookup as `dashboardHtml`. An
+   *  explicit allow-list, not a raw path segment read, so this can't be used
+   *  to read arbitrary files from the image directory. */
+  private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif")
+
+  private def dashboardImage(filename: String): HttpResponse =
+    if (!dashboardImages.contains(filename)) {
+      HttpResponse(StatusCodes.NotFound)
+    } else {
+      val overridePath = java.nio.file.Paths.get(s"web/images/$filename")
+      val bytes =
+        if (java.nio.file.Files.isReadable(overridePath)) {
+          java.nio.file.Files.readAllBytes(overridePath)
+        } else {
+          val stream = getClass.getClassLoader.getResourceAsStream(s"web/images/$filename")
+          try stream.readAllBytes()
+          finally stream.close()
+        }
+      HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`image/gif`), bytes))
+    }
 
   private def requireOwner(userId: String): Directive0 =
     if (userId == ownerId) pass else complete(StatusCodes.Forbidden -> "Forbidden")
@@ -166,6 +190,15 @@ final class StatusRoute(
         discordAuth.authenticatedUser { userId =>
           requireOwner(userId) {
             complete(HttpEntity(ContentTypes.`application/json`, buildStatusJson().compactPrint))
+          }
+        }
+      }
+    } ~
+    path("images" / Segment) { filename =>
+      get {
+        discordAuth.authenticatedUser { userId =>
+          requireOwner(userId) {
+            complete(dashboardImage(filename))
           }
         }
       }
