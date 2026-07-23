@@ -35,7 +35,8 @@ class TibiaBot(
   outboundSender: discord.RateLimitedSender,
   onlineListSender: discord.RateLimitedSender,
   worldMetrics: tracking.WorldMetrics,
-  recentEvents: tracking.RecentEvents
+  recentEvents: tracking.RecentEvents,
+  paywallService: paywall.PaywallService
 )(implicit system: ActorSystem, ex: ExecutionContextExecutor, mat: Materializer) extends StrictLogging {
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
@@ -559,8 +560,9 @@ class TibiaBot(
               if (discordsData.contains(world)) {
                 val discordsList = discordsData(world)
                 discordsList.foreach { discords =>
-                  val guild = BotApp.discordGateway.guildById(discords.id)
                   val guildId = discords.id
+                  if (paywallService.isActive(guildId, world)) {
+                  val guild = BotApp.discordGateway.guildById(discords.id)
 
                   // get appropriate guildIcon
                   val allyGuildCheck = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.toLowerCase() == guildName.toLowerCase())
@@ -592,6 +594,7 @@ class TibiaBot(
                         }
                       }
                     }
+                  }
                   }
                 }
               }
@@ -646,7 +649,7 @@ class TibiaBot(
         // see AdaptiveRefreshInterval for the queueDepth -> interval mapping.
         val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
         val refreshIntervalSeconds = discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth)
-        if (ZonedDateTime.now().isAfter(onlineTimer.plusSeconds(refreshIntervalSeconds))) {
+        if (paywallService.isActive(guildId, world) && ZonedDateTime.now().isAfter(onlineTimer.plusSeconds(refreshIntervalSeconds))) {
           // did the online list api call fail?
           val alliesChannel = worldData.headOption.map(_.alliesChannel).getOrElse("0")
           val neutralsChannel = worldData.headOption.map(_.neutralsChannel).getOrElse("0")
@@ -667,8 +670,9 @@ class TibiaBot(
     if (discordsData.contains(world)) {
       val discordsList = discordsData(world)
       discordsList.foreach { discords =>
-        val guild = BotApp.discordGateway.guildById(discords.id)
         val guildId = discords.id
+        if (paywallService.isActive(guildId, world)) {
+        val guild = BotApp.discordGateway.guildById(discords.id)
         val adminChannel = discords.adminChannel
         val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.toLowerCase() == world.toLowerCase())
         val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
@@ -1012,6 +1016,7 @@ class TibiaBot(
               }
             }
           }
+        }
         }
       }
     }

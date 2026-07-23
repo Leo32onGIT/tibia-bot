@@ -1,0 +1,113 @@
+package com.tibiabot.paywall
+
+import com.tibiabot.discord.DiscordGateway
+import com.tibiabot.persistence.PatreonSeatRepository
+import net.dv8tion.jda.api.entities.Guild
+
+import java.time.ZonedDateTime
+import java.util.concurrent.ConcurrentHashMap
+import scala.jdk.CollectionConverters._
+
+/** Ties ongoing bot activity to a Patreon subscription via a seat system:
+ *  each supporter gets `seatLimit` seats, and running `/setup` for a (guild,
+ *  world) pair assigns one — see [[com.tibiabot.setup.ChannelService]]. A
+ *  (guild, world) pair with no assigned seat (everything that existed before
+ *  this feature, or a world nobody's set up under this model yet) is always
+ *  treated as active — the grandfather case, so pre-existing tracking is
+ *  unaffected. */
+final class PaywallService(
+  discordGateway: DiscordGateway,
+  patreonSeatRepository: PatreonSeatRepository,
+  supportGuildId: String,
+  patreonRoleId: String,
+  seatLimit: Int
+) {
+  private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
+
+  /** Cheap, synchronous — consulted on every send-loop iteration in
+   *  TibiaBot. Defaults true (fail-open): a (guild, world) pair not yet
+   *  checked, or one whose check errored transiently, is never silently cut
+   *  off. */
+  def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
+
+  /** Does this member's role list include the Patreon role? Pure, so it's
+   *  testable without a live JDA Member. */
+  private[paywall] def hasPatreonRole(memberRoleIds: List[String]): Boolean =
+    memberRoleIds.contains(patreonRoleId)
+
+  /** Blocking REST lookup against the support guild — the `/setup` command
+   *  gate calls this directly; `refreshAll` calls it once per distinct seat
+   *  owner. Not a member of the support guild (or a lookup failure) reads as
+   *  "not subscribed", never as an error to propagate. A REST lookup rather
+   *  than JDA's member cache deliberately — caching every member of the
+   *  support guild would need the privileged GUILD_MEMBERS intent (Discord's
+   *  bot-verification process past 100 guilds) for what's an infrequent,
+   *  low-volume check. */
+  def callerIsSubscribed(userId: String): Boolean = {
+    val supportGuild = discordGateway.guildById(supportGuildId)
+    if (supportGuild == null) false
+    else try {
+      val member = supportGuild.retrieveMemberById(userId).complete()
+      member != null && hasPatreonRole(member.getRoles.asScala.map(_.getId).toList)
+    } catch {
+      case _: Throwable => false
+    }
+  }
+
+  /** Pure — can this user claim a seat for (guildId, world)? If someone
+   *  already owns that pair, only that same person may (re-)claim it
+   *  (idempotent re-`/setup`, always allowed even at the limit) — a
+   *  different user is blocked outright, regardless of their own seat
+   *  count. If nobody owns it yet, allowed only if they're under their seat
+   *  limit. Split from [[canAssignSeat]] so this logic is testable without a
+   *  database. */
+  private[paywall] def canAssignSeatPure(existingOwner: Option[String], currentSeatCount: Int, userId: String): Boolean =
+    existingOwner match {
+      case Some(owner) => owner == userId
+      case None => currentSeatCount < seatLimit
+    }
+
+  /** The `/setup` seat-availability check — reads live seat state. */
+  def canAssignSeat(userId: String, guildId: String, world: String): Boolean =
+    canAssignSeatPure(
+      patreonSeatRepository.seatFor(guildId, world).map(_.userId),
+      patreonSeatRepository.seatsForUser(userId).size,
+      userId
+    )
+
+  /** Assigns (or idempotently reassigns) a seat. Call only after
+   *  [[canAssignSeat]] confirmed true. */
+  def assignSeat(userId: String, guildId: String, world: String): Unit =
+    patreonSeatRepository.assignSeat(userId, guildId, world, ZonedDateTime.now())
+
+  /** Frees the seat assigned to (guildId, world), if any. */
+  def releaseSeat(guildId: String, world: String): Unit =
+    patreonSeatRepository.releaseSeat(guildId, world)
+
+  /** Given each seat's (guildId, world, userId) and a way to check a user's
+   *  live status, updates the active-status map and returns the (guildId,
+   *  world) pairs that just flipped active -> inactive on *this* call — not
+   *  pairs that were already inactive. Pure aside from the map mutation, so
+   *  the transition-detection logic (the part worth getting right) is
+   *  testable with a fake `checkUser`, no JDA or database involved. */
+  private[paywall] def applyRefresh(seats: List[(String, String, String)], checkUser: String => Boolean): List[(String, String)] =
+    seats.flatMap { case (guildId, world, userId) =>
+      val key = (guildId, world)
+      val wasActive = isActive(guildId, world)
+      val nowActive = checkUser(userId)
+      activeStatus.put(key, nowActive)
+      if (wasActive && !nowActive) Some(key) else None
+    }
+
+  /** Periodic background re-check across every assigned seat. Fires
+   *  `onLapsed` once per (guild, world) that just transitioned to inactive,
+   *  not on every recheck of an already-lapsed pair. */
+  def refreshAll(onLapsed: (Guild, String) => Unit): Unit = {
+    val seats = patreonSeatRepository.allSeats()
+    val lapsed = applyRefresh(seats.map(s => (s.guildId, s.world, s.userId)), callerIsSubscribed)
+    lapsed.foreach { case (guildId, world) =>
+      val guild = discordGateway.guildById(guildId)
+      if (guild != null) onLapsed(guild, world)
+    }
+  }
+}

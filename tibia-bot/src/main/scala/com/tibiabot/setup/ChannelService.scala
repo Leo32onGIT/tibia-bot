@@ -3,6 +3,7 @@ package com.tibiabot.setup
 import com.tibiabot.Config
 import com.tibiabot.app.StreamSupervisor
 import com.tibiabot.boosted.BoostedService
+import com.tibiabot.paywall.PaywallService
 import com.tibiabot.domain.{Discords, Worlds}
 import com.tibiabot.persistence.{DiscordConfigRepository, SchemaInitializer, WorldConfigRepository}
 import com.tibiabot.presentation.Embeds.BrandColor
@@ -42,6 +43,7 @@ final class ChannelService(
   discordConfigRepository: DiscordConfigRepository,
   streamState: StreamState,
   boostedService: BoostedService,
+  paywallService: PaywallService,
   botUser: String,
   startBot: (Option[Guild], Option[String]) => Unit,
   serverSaveExtraEmbeds: String => List[MessageEmbed],
@@ -188,7 +190,9 @@ final class ChannelService(
     // error, channel cap) the server is left half-built and the slash interaction
     // would otherwise hang with no reply — so report it cleanly and point at /repair.
     val embedText = try {
-      if (Config.worldList.contains(world)) {
+      if (!paywallService.callerIsSubscribed(event.getUser.getId)) {
+        s"${Config.noEmoji} `/setup` requires an active **Patreon** subscription. Join the Violent Bot support Discord and subscribe there, then run `/setup` again."
+      } else if (Config.worldList.contains(world)) {
       val guild = event.getGuild
 
       // no-op if the guild's database already exists (initGuild checks first)
@@ -273,6 +277,9 @@ final class ChannelService(
       // check if world has already been setup
       val worldConfigData = worldRetrieveConfig(guild, world)
       if (worldConfigData.isEmpty) {
+        if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+          s"${Config.noEmoji} You've used all **${Config.Patreon.seatsPerUser}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
+        } else {
         val newCategory = guild.createCategory(world).complete()
         grantWorldPerms(newCategory, botRole, guild.getPublicRole)
         val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
@@ -310,6 +317,7 @@ final class ChannelService(
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
+        paywallService.assignSeat(event.getUser.getId, guild.getId, world)
         startBot(Some(guild), Some(world))
 
         // matches the audit pattern used by /repair and /remove
@@ -317,6 +325,7 @@ final class ChannelService(
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*"
+        }
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
@@ -920,6 +929,7 @@ final class ChannelService(
 
         // update the database
         worldRemoveConfig(guild, world)
+        paywallService.releaseSeat(guild.getId, world)
 
         // If that was the guild's last world, the guild-level command-log and
         // notifications channels (and the "Violent Bot" category) would be left

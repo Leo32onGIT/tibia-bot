@@ -147,6 +147,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcWorldConfigRepository(connectionProvider, Config.mergedWorlds)
   private val discordConfigRepository: persistence.DiscordConfigRepository =
     new persistence.jdbc.JdbcDiscordConfigRepository(connectionProvider)
+  private val patreonSeatRepository: persistence.PatreonSeatRepository =
+    new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -167,6 +169,12 @@ object BotApp extends App with StrictLogging {
 
   // Per-user boosted boss/creature notification subscriptions
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
+
+  // Ties bot activity to a Patreon subscription via a 3-seat system (see
+  // paywall.PaywallService): /setup checks the caller, then assigns one of
+  // their seats to that (guild, world) pair; that pair's activity keeps
+  // posting only while its seat's owner still holds the support-guild role.
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser)
 
   // Per-guild hunted/allied player and guild list CRUD
   val huntedAlliedService = new hunted.HuntedAlliedService(
@@ -274,6 +282,7 @@ object BotApp extends App with StrictLogging {
     discordConfigRepository,
     streamState,
     boostedService,
+    paywallService,
     botUser,
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
@@ -314,6 +323,7 @@ object BotApp extends App with StrictLogging {
   }
 
   private var updateOnOdd = 0
+  private var paywallCheckCounter = 0
 
   val bossesFutures: Future[List[String]] = for {
     bosses <- bossFuture
@@ -378,6 +388,29 @@ object BotApp extends App with StrictLogging {
       updateOnOdd = 0
     } else {
       updateOnOdd += 1
+    }
+    // Patreon paywall: recheck every assigned seat's owner against the
+    // support guild every ~30 minutes (60 ticks at the 30s tick interval) —
+    // see paywall.PaywallService. A much lower-urgency check than
+    // updateOnOdd's ~5-minute cache cleanup, so it gets its own, longer cadence.
+    if (paywallCheckCounter >= 60) {
+      paywallCheckCounter = 0
+      try {
+        paywallService.refreshAll { (guild, world) =>
+          val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
+          if (adminChannel != null) {
+            presentation.AdminLog.post(
+              adminChannel,
+              s"Activity tracking has been **paused** for **$world**: the Patreon subscription tied to whoever ran `/setup` for it is no longer active. Resubscribe, or run `/setup` again after freeing a seat, to resume tracking.",
+              Config.webHookAvatar
+            )
+          }
+        }
+      } catch {
+        case ex: Throwable => logger.warn("Failed to refresh Patreon paywall status", ex)
+      }
+    } else {
+      paywallCheckCounter += 1
     }
     // Updating boosted creature/boss at server save
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
@@ -627,7 +660,7 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get)).stream.run(), List(discords))
+            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get), paywallService).stream.run(), List(discords))
           }
         }
       }
@@ -646,7 +679,7 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName)).stream.run(), discordsList)
+        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 5.5 seconds
       }
       startUpComplete = true

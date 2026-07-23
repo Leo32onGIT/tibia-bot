@@ -120,6 +120,15 @@ object Config {
     val statusPort: Int = web.getInt("status-port")
   }
 
+  /** Patreon paywall: the support Discord + role Patreon assigns to active
+   *  subscribers, and how many (guild, world) seats each subscriber gets. */
+  object Patreon {
+    private val patreon = discord.getConfig("patreon")
+    val supportGuildId: String = patreon.getString("support-guild-id")
+    val roleId: String = patreon.getString("role-id")
+    val seatsPerUser: Int = patreon.getInt("seats-per-user")
+  }
+
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
   val primalCreatures: List[String] = mappings.getStringList("primal-creatures").asScala.toList
