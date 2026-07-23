@@ -14,6 +14,7 @@ import scala.jdk.CollectionConverters._
 import com.tibiabot.domain.PendingScreenshot
 import com.tibiabot.commands.{CommandRouter, SlashRouting}
 
+import java.time.ZonedDateTime
 import java.util.concurrent.{Executors, ThreadFactory}
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -50,6 +51,16 @@ class BotListener extends ListenerAdapter with StrictLogging {
     if (BotApp.startUpComplete) {
       commandExecutor.execute(() => {
         try {
+          // Feeds BotApp's daily inactive-guild prune sweep — any command
+          // counts, not just world-related ones (someone using /galthen or
+          // /boosted is genuinely using the bot). Must never block or break
+          // the actual command, so its own failure is swallowed here rather
+          // than left to the outer catch below.
+          try {
+            Option(event.getGuild).foreach(g => BotApp.guildActivityRepository.recordCommandRun(g.getId, ZonedDateTime.now()))
+          } catch {
+            case ex: Throwable => logger.warn(s"Failed to record guild activity for command '${event.getName}'", ex)
+          }
           slashRouter.route(event.getName, event)
         } catch {
           case ex: Throwable =>

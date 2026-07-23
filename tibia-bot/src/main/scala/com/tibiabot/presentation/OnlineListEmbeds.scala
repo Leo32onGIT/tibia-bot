@@ -20,14 +20,24 @@ object OnlineListEmbeds {
     s"`$durationStr`"
   }
 
-  // Strips a trailing "-<count>" suffix; the regex always matches, so for any
-  // real channel name the capture group is what's returned.
-  private val namePattern = "^(.*?)(?:-[0-9]+)?$".r
+  /** The paywall's paused-online-list channel suffix (see BotApp.
+   *  postPausedOnlineListNotice) — a single shared constant so the "strip
+   *  the bot-appended suffix" regex below can never drift out of sync with
+   *  what actually gets appended when a world pauses. */
+  val pausedSuffix = "⚠️"
+
+  // Strips a trailing "-<count>" or "-<pausedSuffix>" suffix; the regex
+  // always matches, so for any real channel name the capture group is what's
+  // returned. Both suffixes need stripping here, not just the numeric one —
+  // otherwise resuming from paused appends the new count after the warning
+  // icon instead of replacing it (e.g. "online-⚠️-64" instead of "online-64").
+  private val namePattern = ("^(.*?)(?:-(?:[0-9]+|" + java.util.regex.Pattern.quote(pausedSuffix) + "))?$").r
 
   /** Recover a user's custom channel base name by dropping the bot-appended
-   *  "-<count>" suffix (e.g. "ɴᴇᴍᴇsɪs-42" -> "ɴᴇᴍᴇsɪs"). Falls back to `default`
-   *  only in the degenerate case where the pattern fails to match. Moved
-   *  verbatim from TibiaBot.onlineList. */
+   *  "-<count>" or "-<pausedSuffix>" suffix (e.g. "ɴᴇᴍᴇsɪs-42" -> "ɴᴇᴍᴇsɪs").
+   *  Falls back to `default` only in the degenerate case where the pattern
+   *  fails to match. Moved verbatim from TibiaBot.onlineList (numeric-suffix
+   *  stripping only; the pausedSuffix case was added for the paywall). */
   def baseName(channelName: String, default: String): String =
     namePattern.findFirstMatchIn(channelName).map(_.group(1)).getOrElse(default)
 

@@ -32,6 +32,18 @@ class OnlineListEmbedsSpec extends AnyFunSuite with Matchers {
     OnlineListEmbeds.baseName("online-", "online") shouldBe "online-"
   }
 
+  test("baseName strips the bot-appended paused-suffix, same as a count suffix") {
+    OnlineListEmbeds.baseName(s"online-${OnlineListEmbeds.pausedSuffix}", "online") shouldBe "online"
+  }
+
+  test("baseName round-trips through pause then resume without stacking suffixes") {
+    // Regression: resuming from paused must replace "-<pausedSuffix>" with
+    // "-<count>", not append after it (e.g. "online-⚠️-64").
+    val paused = s"online-${OnlineListEmbeds.pausedSuffix}"
+    val resumed = s"${OnlineListEmbeds.baseName(paused, "online")}-64"
+    resumed shouldBe "online-64"
+  }
+
   test("categoryName shows both counts with the separator when both are positive") {
     OnlineListEmbeds.categoryName("Antica", 5, 2) shouldBe "Antica・🤍5💀2"
   }

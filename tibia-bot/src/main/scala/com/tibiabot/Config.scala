@@ -129,6 +129,14 @@ object Config {
     val seatsPerUser: Int = patreon.getInt("seats-per-user")
   }
 
+  /** Auto-leave a guild with no worlds tracked for this many days, unless a
+   *  command's been run there within activityDays — see BotApp.pruneInactiveGuilds. */
+  object InactiveGuild {
+    private val inactiveGuild = discord.getConfig("inactive-guild")
+    val worldlessDays: Int = inactiveGuild.getInt("worldless-days")
+    val activityDays: Int = inactiveGuild.getInt("activity-days")
+  }
+
   // creature mappings
   val notableCreatures: List[String] = mappings.getStringList("notable-creatures").asScala.toList
   val primalCreatures: List[String] = mappings.getStringList("primal-creatures").asScala.toList

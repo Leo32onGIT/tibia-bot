@@ -268,7 +268,9 @@ object CommandSchemas {
   /** Commands registered in the bot-owner guilds (adds /admin). */
   val adminCommands: List[SlashCommandData] = commands :+ adminCommand
 
-  private val supportGuildIds: Set[Long] = Set(867319250708463628L, 1082484147492237515L)
+  /** The bot's own support Discords — also reused by BotApp's inactive-guild
+   *  prune sweep, which must never auto-leave either of these. */
+  val supportGuildIds: Set[Long] = Set(867319250708463628L, 1082484147492237515L)
 
   /** The single place this decision is made — reused by the boot-time
    *  registration loop, onGuildJoin, and ChannelService's post-/setup

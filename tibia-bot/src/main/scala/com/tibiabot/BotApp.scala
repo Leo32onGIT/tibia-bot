@@ -149,6 +149,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcDiscordConfigRepository(connectionProvider)
   private val patreonSeatRepository: persistence.PatreonSeatRepository =
     new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
+  val guildActivityRepository: persistence.GuildActivityRepository =
+    new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -628,6 +630,44 @@ object BotApp extends App with StrictLogging {
     }
   })
 
+  // Once a day: leave any guild that's tracked no worlds for a while and
+  // hasn't run any command recently either — see pruneInactiveGuilds. Its
+  // own independent schedule (24h is too long to piggyback on the shared
+  // 30s-tick counter above the way the paywall check does).
+  actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => {
+    try pruneInactiveGuilds()
+    catch { case ex: Throwable => logger.warn("Failed to run the inactive-guild prune sweep", ex) }
+  })(ex)
+
+  /** A guild with no worlds tracked (its own per-guild database may not even
+   *  exist yet, if /setup has never run there — see checkConfigDatabase)
+   *  leaves once worldless for Config.InactiveGuild.worldlessDays, unless a
+   *  command's been run there within Config.InactiveGuild.activityDays
+   *  (personal commands like /galthen or /boosted count — someone's still
+   *  genuinely using the bot, just not for world tracking). The two support
+   *  guilds are never auto-left. */
+  private def pruneInactiveGuilds(): Unit = {
+    val now = ZonedDateTime.now()
+    discordGateway.guilds.foreach { guild =>
+      if (!com.tibiabot.commands.CommandSchemas.supportGuildIds.contains(guild.getIdLong)) {
+        val hasWorlds = checkConfigDatabase(guild) && worldConfig(guild).nonEmpty
+        if (hasWorlds) {
+          guildActivityRepository.clearWorldless(guild.getId)
+        } else {
+          val worldlessSince = guildActivityRepository.markWorldlessIfUnset(guild.getId, now)
+          val lastCommandAt = guildActivityRepository.lastCommandAt(guild.getId)
+          if (scheduler.GuildPruneRule.shouldLeave(worldlessSince, lastCommandAt, now, Config.InactiveGuild.worldlessDays, Config.InactiveGuild.activityDays)) {
+            try {
+              adminService.leave(guild.getId, "This server hasn't tracked any worlds and hasn't used any commands in a while, so I'm leaving to keep things tidy. Feel free to invite me back anytime you'd like to use Violent Bot again.")
+            } catch {
+              case ex: Throwable => logger.warn(s"Failed to auto-leave inactive Guild ID: '${guild.getId}'", ex)
+            }
+          }
+        }
+      }
+    }
+  }
+
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()
 
@@ -831,7 +871,7 @@ object BotApp extends App with StrictLogging {
         // so no throttling needed: nothing else renames this channel while
         // it's paywall-paused (TibiaBot's own online-list update is already
         // gated on paywallService.isActive and skips it entirely).
-        val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-⚠️"
+        val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-${presentation.OnlineListEmbeds.pausedSuffix}"
         if (channel.getName != pausedName) {
           channel.getManager.setName(pausedName).queue(null, (ex: Throwable) =>
             logger.warn(s"Failed to rename paused online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex))
