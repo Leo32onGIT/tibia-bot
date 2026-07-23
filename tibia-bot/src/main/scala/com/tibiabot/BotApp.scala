@@ -411,8 +411,8 @@ object BotApp extends App with StrictLogging {
             val mention = s"<@$userId>"
             val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
             val pausedEmbed = new EmbedBuilder()
-            pausedEmbed.setTitle(s":warning: Violent Bot paused for `$world`")
-            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active. [Resubscribe](https://www.patreon.com/violentbot), or run `/setup` again after freeing a seat, to resume tracking.")
+            pausedEmbed.setTitle(s":warning: Violent Bot paused for $world")
+            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active or *cannot be verified*. [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.")
             pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
             adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
               postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
@@ -428,8 +428,8 @@ object BotApp extends App with StrictLogging {
               try {
                 user.openPrivateChannel().queue { pc =>
                   val dmEmbed = new EmbedBuilder()
-                  dmEmbed.setTitle(":warning: Violent Bot paused")
-                  dmEmbed.setDescription(s"Violent Bot is paused for **`$world`** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the Violent Bot support Discord, so the subscription check can't find you. [Resubscribe](https://www.patreon.com/violentbot) or rejoin to resume tracking.")
+                  dmEmbed.setTitle(s":warning: Violent Bot has been paused")
+                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the Violent Bot Discord, so the subscription check can't find you. [Resubscribe](https://www.patreon.com/violentbot) to patreon and join the [Violent Bot Discord](https://discord.gg/qjSzsbjZx6) to resume tracking.")
                   dmEmbed.setColor(presentation.Embeds.NemesisPurple)
                   pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
                     List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
