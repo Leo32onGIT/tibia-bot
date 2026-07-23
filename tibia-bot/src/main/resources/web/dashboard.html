@@ -165,13 +165,13 @@
   .lane-card-ms { color: var(--muted); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .lane-card-refresh { color: var(--muted); font-size: 9px; margin-top: 1px; font-variant-numeric: tabular-nums; }
 
-  .log-alerts-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; justify-self: end; }
-  .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .log-alerts-summary { display: flex; align-items: center; gap: 12px; justify-self: end; }
+  .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
   .log-alert-count i { font-size: 14px; }
   .log-alert-count.error { color: var(--bad); }
   .log-alert-count.warn { color: var(--warn); }
-  #log-alerts-chevron { color: var(--muted); font-size: 14px; transition: transform 0.15s ease; }
-  #log-alerts-chevron.expanded { transform: rotate(180deg); }
+  .log-alerts-chevron { color: var(--muted); font-size: 14px; transition: transform 0.15s ease; }
+  .log-alerts-chevron.expanded { transform: rotate(180deg); }
 
   .feed { max-height: 320px; overflow-y: auto; }
   .feed-row { padding: 8px 16px; border-top: 1px solid var(--panel-border); font-size: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -180,6 +180,11 @@
   .feed-row a:hover { text-decoration: underline; }
   .feed-row:first-child { border-top: none; }
   .feed-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .feed-row.grouped { cursor: pointer; }
+  .feed-group-chevron { color: var(--muted); font-size: 12px; transition: transform 0.15s ease; }
+  .feed-group-chevron.expanded { transform: rotate(180deg); }
+  .feed-subgroup { padding-left: 24px; }
+  .feed-subgroup .feed-row { opacity: 0.8; }
   .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
   .tag.death { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
   .tag.level-up { background: rgba(62, 207, 142, 0.15); color: var(--good); }
@@ -245,16 +250,20 @@
       <div class="kpi"><i class="ti ti-brand-discord" aria-hidden="true"></i><span class="label">Discords</span><span class="value" id="kpi-discords">–</span></div>
       <div class="kpi"><i class="ti ti-users" aria-hidden="true"></i><span class="label">Tracked Players</span><span class="value" id="kpi-population">–</span></div>
     </div>
-    <div class="log-alerts-summary" id="log-alerts-summary">
-      <span class="log-alert-count error"><i class="ti ti-alert-circle" aria-hidden="true"></i><span id="log-error-count">0 errors</span></span>
-      <span class="log-alert-count warn"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span id="log-warn-count">0 warnings</span></span>
-      <i class="ti ti-chevron-down" id="log-alerts-chevron" aria-hidden="true"></i>
+    <div class="log-alerts-summary">
+      <span class="log-alert-count error" id="log-error-toggle"><i class="ti ti-alert-circle" aria-hidden="true"></i><span id="log-error-count">0 errors</span><i class="ti ti-chevron-down log-alerts-chevron" id="log-error-chevron" aria-hidden="true"></i></span>
+      <span class="log-alert-count warn" id="log-warn-toggle"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span id="log-warn-count">0 warnings</span><i class="ti ti-chevron-down log-alerts-chevron" id="log-warn-chevron" aria-hidden="true"></i></span>
     </div>
   </div>
 
-  <div class="panel" id="log-alerts-panel" style="display:none;">
-    <div class="panel-title">Log Alerts</div>
-    <div class="feed" id="log-alerts-list"></div>
+  <div class="panel" id="log-errors-panel" style="display:none;">
+    <div class="panel-title">Errors</div>
+    <div class="feed" id="log-errors-list"></div>
+  </div>
+
+  <div class="panel" id="log-warnings-panel" style="display:none;">
+    <div class="panel-title">Warnings</div>
+    <div class="feed" id="log-warnings-list"></div>
   </div>
 
   <div class="panel">
@@ -349,7 +358,7 @@ function renderDetail(worlds) {
   document.getElementById('detail-stale').textContent = world.lastPollAt ? '' : 'no data yet';
 
   document.getElementById('detail-stats').innerHTML = `
-    <div class="detail-stat"><i class="ti ti-users" style="color:var(--accent)" aria-hidden="true"></i><div><div class="num">${world.population}</div><div class="num-label">Population</div></div></div>
+    <div class="detail-stat"><i class="ti ti-users" style="color:var(--accent)" aria-hidden="true"></i><div><div class="num">${world.population}</div><div class="num-label">Online</div></div></div>
     <div class="detail-stat"><i class="ti ti-skull" style="color:var(--bad)" aria-hidden="true"></i><div><div class="num">${world.deaths15m}</div><div class="num-label">Deaths (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-arrow-big-up-lines" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${world.levels15m}</div><div class="num-label">Levels (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-edit" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${world.edits15m}</div><div class="num-label">Edits (15m)</div></div></div>
@@ -408,6 +417,41 @@ function renderLanes(lanes) {
   });
 }
 
+function renderFeedRow(ev, groupCount) {
+  const row = document.createElement('div');
+  row.className = 'feed-row';
+  const badgeAndChevron = groupCount
+    ? `<span class="log-alert-repeat">&times;${groupCount}</span><i class="ti ti-chevron-down feed-group-chevron" aria-hidden="true"></i>`
+    : '';
+  row.innerHTML = `
+    <div class="feed-time">${timeAgo(ev.at)}</div>
+    <span class="tag ${ev.tag}">${ev.tag}</span>
+    <div>${ev.text}</div>
+    ${badgeAndChevron}
+  `;
+  return row;
+}
+
+// Consecutive level-ups posted to the same discord collapse into one row
+// (badge shows the count, click to expand) — a busy world can otherwise
+// bury everything else under a wall of near-identical "N players leveled
+// up" lines, one per polling tick. Only adjacent same-discord level-ups
+// group; anything else (including a level-up to a different discord, or
+// any other tag) always starts a fresh row.
+function groupFeedEvents(events) {
+  const groups = [];
+  events.forEach(ev => {
+    const discordKey = ev.tag === 'level-up' ? (ev.text.match(/Discord ID: (\d+)/) || [])[1] : null;
+    const last = groups[groups.length - 1];
+    if (last && discordKey && last.discordKey === discordKey) {
+      last.items.push(ev);
+    } else {
+      groups.push({ discordKey, items: [ev] });
+    }
+  });
+  return groups;
+}
+
 function renderFeed(events) {
   const el = document.getElementById('feed');
   el.innerHTML = '';
@@ -415,29 +459,35 @@ function renderFeed(events) {
     el.innerHTML = '<div class="feed-row muted">No recent activity for this world</div>';
     return;
   }
-  events.forEach(ev => {
-    const row = document.createElement('div');
-    row.className = 'feed-row';
-    row.innerHTML = `
-      <div class="feed-time">${timeAgo(ev.at)}</div>
-      <span class="tag ${ev.tag}">${ev.tag}</span>
-      <div>${ev.text}</div>
-    `;
+  groupFeedEvents(events).forEach(group => {
+    if (group.items.length === 1) {
+      el.appendChild(renderFeedRow(group.items[0]));
+      return;
+    }
+    const row = renderFeedRow(group.items[0], group.items.length);
+    row.classList.add('grouped');
+    const subList = document.createElement('div');
+    subList.className = 'feed-subgroup';
+    subList.style.display = 'none';
+    group.items.forEach(ev => subList.appendChild(renderFeedRow(ev)));
+    row.addEventListener('click', () => {
+      const isHidden = subList.style.display === 'none';
+      subList.style.display = isHidden ? 'block' : 'none';
+      row.querySelector('.feed-group-chevron').classList.toggle('expanded', isHidden);
+    });
     el.appendChild(row);
+    el.appendChild(subList);
   });
 }
 
-function renderLogAlerts(logAlerts) {
-  document.getElementById('log-error-count').textContent = `${logAlerts.errorCount} ${logAlerts.errorCount === 1 ? 'error' : 'errors'}`;
-  document.getElementById('log-warn-count').textContent = `${logAlerts.warnCount} ${logAlerts.warnCount === 1 ? 'warning' : 'warnings'}`;
-
-  const el = document.getElementById('log-alerts-list');
+function renderLogList(elementId, events, emptyMessage) {
+  const el = document.getElementById(elementId);
   el.innerHTML = '';
-  if (logAlerts.recent.length === 0) {
-    el.innerHTML = '<div class="feed-row muted">No warnings or errors captured</div>';
+  if (events.length === 0) {
+    el.innerHTML = `<div class="feed-row muted">${emptyMessage}</div>`;
     return;
   }
-  logAlerts.recent.forEach(ev => {
+  events.forEach(ev => {
     const row = document.createElement('div');
     row.className = 'feed-row';
     const repeatBadge = ev.count > 1 ? `<span class="log-alert-repeat">&times;${ev.count}</span>` : '';
@@ -452,13 +502,24 @@ function renderLogAlerts(logAlerts) {
   });
 }
 
-document.getElementById('log-alerts-summary').addEventListener('click', () => {
-  const panel = document.getElementById('log-alerts-panel');
-  const chevron = document.getElementById('log-alerts-chevron');
-  const isHidden = panel.style.display === 'none';
-  panel.style.display = isHidden ? 'block' : 'none';
-  chevron.classList.toggle('expanded', isHidden);
-});
+function renderLogAlerts(logAlerts) {
+  document.getElementById('log-error-count').textContent = `${logAlerts.errorCount} ${logAlerts.errorCount === 1 ? 'error' : 'errors'}`;
+  document.getElementById('log-warn-count').textContent = `${logAlerts.warnCount} ${logAlerts.warnCount === 1 ? 'warning' : 'warnings'}`;
+  renderLogList('log-errors-list', logAlerts.errors, 'No errors captured');
+  renderLogList('log-warnings-list', logAlerts.warnings, 'No warnings captured');
+}
+
+function setupLogToggle(toggleId, panelId, chevronId) {
+  document.getElementById(toggleId).addEventListener('click', () => {
+    const panel = document.getElementById(panelId);
+    const chevron = document.getElementById(chevronId);
+    const isHidden = panel.style.display === 'none';
+    panel.style.display = isHidden ? 'block' : 'none';
+    chevron.classList.toggle('expanded', isHidden);
+  });
+}
+setupLogToggle('log-error-toggle', 'log-errors-panel', 'log-error-chevron');
+setupLogToggle('log-warn-toggle', 'log-warnings-panel', 'log-warn-chevron');
 
 // Mobile-only drawer — a no-op on desktop, where .sidebar never gets the
 // "open" transform in the first place (see the max-width: 720px block).

@@ -104,23 +104,25 @@ final class StatusRoute(
     )
   }
 
+  private def logEventJson(ev: LogEvent): JsValue = JsObject(
+    "at" -> JsString(ev.at.toString),
+    "level" -> JsString(ev.level),
+    "logger" -> JsString(ev.logger),
+    "message" -> JsString(ev.message),
+    "count" -> JsNumber(ev.count)
+  )
+
   private def buildLogAlertsJson(): JsObject = {
-    val events = logCapture.recent()
+    val errors = logCapture.recentErrors()
+    val warnings = logCapture.recentWarnings()
     // Total occurrences (summing repeat counts), not distinct rows — a
-    // repeating warning collapsed to one row in `recent` below shouldn't
-    // make the header undercount how often it's actually firing.
+    // repeating warning collapsed to one row below shouldn't make the
+    // header undercount how often it's actually firing.
     JsObject(
-      "errorCount" -> JsNumber(events.filter(_.level == "ERROR").map(_.count).sum),
-      "warnCount" -> JsNumber(events.filter(_.level == "WARN").map(_.count).sum),
-      "recent" -> JsArray(events.map { ev =>
-        JsObject(
-          "at" -> JsString(ev.at.toString),
-          "level" -> JsString(ev.level),
-          "logger" -> JsString(ev.logger),
-          "message" -> JsString(ev.message),
-          "count" -> JsNumber(ev.count)
-        ): JsValue
-      }.toVector)
+      "errorCount" -> JsNumber(errors.map(_.count).sum),
+      "warnCount" -> JsNumber(warnings.map(_.count).sum),
+      "errors" -> JsArray(errors.map(logEventJson).toVector),
+      "warnings" -> JsArray(warnings.map(logEventJson).toVector)
     )
   }
 
