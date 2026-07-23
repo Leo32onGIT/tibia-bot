@@ -52,6 +52,18 @@ final class StatusRoute(
    *  to read arbitrary files from the image directory. */
   private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif")
 
+  /** InputStream.readAllBytes() is Java 9+; this project targets Java 8. */
+  private def readAllBytes(stream: java.io.InputStream): Array[Byte] = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val chunk = new Array[Byte](4096)
+    var n = stream.read(chunk)
+    while (n != -1) {
+      buffer.write(chunk, 0, n)
+      n = stream.read(chunk)
+    }
+    buffer.toByteArray
+  }
+
   private def dashboardImage(filename: String): HttpResponse =
     if (!dashboardImages.contains(filename)) {
       HttpResponse(StatusCodes.NotFound)
@@ -62,7 +74,7 @@ final class StatusRoute(
           java.nio.file.Files.readAllBytes(overridePath)
         } else {
           val stream = getClass.getClassLoader.getResourceAsStream(s"web/images/$filename")
-          try stream.readAllBytes()
+          try readAllBytes(stream)
           finally stream.close()
         }
       HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`image/gif`), bytes))
