@@ -1,6 +1,6 @@
 package com.tibiabot
 
-import com.tibiabot.commands.CommandSchemas.commands
+import com.tibiabot.commands.CommandSchemas
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
@@ -67,7 +67,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
-    guild.updateCommands().addCommands(commands.asJava).queue()
+    guild.updateCommands().addCommands(CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = false).asJava).queue()
     BotApp.channelService.discordJoin(event)
   }
 

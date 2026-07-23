@@ -331,20 +331,14 @@ object BotApp extends App with StrictLogging {
 
   val boostedBossesList: List[String] = Await.result(bossesFutures, 10.seconds)
 
-  // Slash command schemas live in commands.CommandSchemas
-  lazy val commands = com.tibiabot.commands.CommandSchemas.commands
-
   createCacheDatabase()
 
-  // Register slash commands per guild: the bot's own support servers get the
-  // extra /admin command set, every other guild gets the regular set.
+  // Register slash commands per guild: support servers get the admin set,
+  // everyone else gets the full config set once they have a world tracked,
+  // or just the minimal set (setup/remove/repair/galthen/boosted) until then.
   guilds.foreach{g =>
-    if (g.getIdLong == 867319250708463628L || g.getIdLong == 1082484147492237515L) { // Violent Bot Discords
-      val adminCommands = com.tibiabot.commands.CommandSchemas.adminCommands
-      g.updateCommands().addCommands(adminCommands.asJava).complete()
-    } else {
-      g.updateCommands().addCommands(commands.asJava).complete()
-    }
+    val hasWorldConfigured = worldConfig(g).nonEmpty
+    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured).asJava).complete()
   }
 
   // Start all world streams

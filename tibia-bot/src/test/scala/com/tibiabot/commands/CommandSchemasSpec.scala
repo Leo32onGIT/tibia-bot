@@ -34,4 +34,27 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
     CommandSchemas.commands.map(_.getName) should not contain "leaderboards"
     CommandSchemas.adminCommands.map(_.getName) should not contain "leaderboards"
   }
+
+  test("initialCommands is the minimal set visible before any world is configured") {
+    CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
+      List("setup", "remove", "repair", "galthen", "boosted")
+  }
+
+  test("commands is exactly initialCommands plus worldConfigCommands") {
+    CommandSchemas.commands.map(_.getName) should contain theSameElementsAs
+      (CommandSchemas.initialCommands ++ CommandSchemas.worldConfigCommands).map(_.getName)
+  }
+
+  test("commandsFor: a support guild always gets adminCommands, regardless of world-config state") {
+    CommandSchemas.commandsFor(867319250708463628L, hasWorldConfigured = false) shouldBe CommandSchemas.adminCommands
+    CommandSchemas.commandsFor(1082484147492237515L, hasWorldConfigured = true) shouldBe CommandSchemas.adminCommands
+  }
+
+  test("commandsFor: a non-support guild with no world configured gets the minimal set") {
+    CommandSchemas.commandsFor(111L, hasWorldConfigured = false) shouldBe CommandSchemas.initialCommands
+  }
+
+  test("commandsFor: a non-support guild with a world configured gets the full set") {
+    CommandSchemas.commandsFor(111L, hasWorldConfigured = true) shouldBe CommandSchemas.commands
+  }
 }

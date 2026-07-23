@@ -250,9 +250,30 @@ object CommandSchemas {
         )
     )
 
-  /** Commands registered in normal guilds. */
-  val commands: List[SlashCommandData] = List(setupCommand, removeCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, repairCommand, onlineCombineCommand, boostedCommand, galthenCommand)
+  /** Visible immediately when the bot joins a guild, before any world's been
+   *  set up — /setup itself, plus commands that don't depend on a world
+   *  existing (galthen/boosted are personal, self-service commands; repair/
+   *  remove stay useful even after a partial/failed /setup). */
+  val initialCommands: List[SlashCommandData] = List(setupCommand, removeCommand, repairCommand, galthenCommand, boostedCommand)
+
+  /** Only meaningful once at least one world is tracked in the guild — added
+   *  on top of initialCommands once /setup first succeeds there. */
+  val worldConfigCommands: List[SlashCommandData] = List(huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, helpCommand, onlineCombineCommand)
+
+  /** Commands registered in normal guilds once a world has been set up. */
+  val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands
 
   /** Commands registered in the bot-owner guilds (adds /admin). */
   val adminCommands: List[SlashCommandData] = commands :+ adminCommand
+
+  private val supportGuildIds: Set[Long] = Set(867319250708463628L, 1082484147492237515L)
+
+  /** The single place this decision is made — reused by the boot-time
+   *  registration loop, onGuildJoin, and ChannelService's post-/setup
+   *  upgrade, so a support guild with no world yet configured (were that to
+   *  ever happen) still correctly gets adminCommands, not just commands. */
+  def commandsFor(guildId: Long, hasWorldConfigured: Boolean): List[SlashCommandData] =
+    if (supportGuildIds.contains(guildId)) adminCommands
+    else if (hasWorldConfigured) commands
+    else initialCommands
 }

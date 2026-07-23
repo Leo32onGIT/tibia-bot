@@ -286,6 +286,9 @@ final class ChannelService(
         if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
           s"${Config.noEmoji} You've used all **${Config.Patreon.seatsPerUser}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
         } else {
+        // captured before worldCreateConfig runs below, since afterward this
+        // would never be empty — gates the one-time command-set expansion
+        val isFirstWorldForGuild = worldConfig(guild).isEmpty
         val newCategory = guild.createCategory(world).complete()
         grantWorldPerms(newCategory, botRole, guild.getPublicRole)
         val alliesChannel = guild.createTextChannel("📈・ᴏɴʟɪɴᴇ", newCategory).complete()
@@ -324,6 +327,9 @@ final class ChannelService(
 
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
+        if (isFirstWorldForGuild) {
+          guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true).asJava).queue()
+        }
         startBot(Some(guild), Some(world))
 
         // matches the audit pattern used by /repair and /remove
