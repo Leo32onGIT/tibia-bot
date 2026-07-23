@@ -102,6 +102,15 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
       statement.close()
     }
 
+  def releaseAllSeatsForUser(userId: String): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      ensureTable(conn)
+      val statement = conn.prepareStatement("DELETE FROM patreon_seats WHERE user_id = ?")
+      statement.setString(1, userId)
+      statement.executeUpdate()
+      statement.close()
+    }
+
   def allSeats(): List[PatreonSeat] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)

@@ -196,6 +196,25 @@
 
   .muted { color: var(--muted); }
   .stale { color: var(--warn); }
+  .sep { color: var(--muted); }
+  .tag.active { background: rgba(62, 207, 142, 0.15); color: var(--good); }
+  .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
+
+  .patreon-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; }
+  .patreon-sup { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
+  .patreon-sup-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(255, 255, 255, 0.02); }
+  .patreon-sup-head i { color: var(--warn); font-size: 14px; }
+  .patreon-sup-name { color: var(--text-strong); font-weight: 600; font-size: 12px; }
+  .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); }
+  .patreon-seat i { color: var(--muted); font-size: 13px; }
+  .patreon-seat-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .patreon-btn { background: transparent; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--muted); font-size: 11px; padding: 3px 8px; cursor: pointer; }
+  .patreon-btn:hover { color: var(--text-strong); border-color: var(--muted); }
+  .patreon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
+  .patreon-add-form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .patreon-add-form input { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font-size: 12px; padding: 6px 10px; flex: 1; min-width: 120px; }
+  .patreon-add-form button { background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
 
   /* Below this, the fixed 200px side-by-side sidebar and the single-row KPI
      strip both stop working: the sidebar eats half a phone screen, and the
@@ -275,6 +294,18 @@
   <div class="panel">
     <div class="panel-title">Recent activity</div>
     <div class="feed" id="feed"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Patreon supporters</div>
+    <div class="detail-stats" id="patreon-stats"></div>
+    <div class="patreon-list" id="patreon-list"></div>
+    <form class="patreon-add-form" id="patreon-add-form">
+      <input type="text" id="patreon-add-userid" placeholder="Discord user ID" required>
+      <input type="text" id="patreon-add-guildid" placeholder="Guild ID" required>
+      <input type="text" id="patreon-add-world" placeholder="World" required>
+      <button type="submit">Add seat</button>
+    </form>
   </div>
 </main>
 
@@ -509,6 +540,108 @@ function renderLogAlerts(logAlerts) {
   renderLogList('log-warnings-list', logAlerts.warnings, 'No warnings captured');
 }
 
+function renderPatreon(patreon) {
+  const allSeats = patreon.flatMap(s => s.seats);
+  const activeSeats = allSeats.filter(s => s.active).length;
+
+  document.getElementById('patreon-stats').innerHTML = `
+    <div class="detail-stat"><i class="ti ti-crown" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${patreon.length}</div><div class="num-label">Supporters</div></div></div>
+    <div class="detail-stat"><i class="ti ti-armchair" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${activeSeats}</div><div class="num-label">Active seats</div></div></div>
+    <div class="detail-stat"><i class="ti ti-player-pause" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${allSeats.length - activeSeats}</div><div class="num-label">Paused seats</div></div></div>
+  `;
+
+  const el = document.getElementById('patreon-list');
+  el.innerHTML = '';
+  if (patreon.length === 0) {
+    el.innerHTML = '<div class="muted">No Patreon seats assigned</div>';
+    return;
+  }
+  patreon.forEach(supporter => {
+    const sup = document.createElement('div');
+    sup.className = 'patreon-sup';
+
+    const head = document.createElement('div');
+    head.className = 'patreon-sup-head';
+    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId}</span><span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'patreon-btn danger';
+    clearBtn.style.marginLeft = 'auto';
+    clearBtn.textContent = 'Clear all';
+    clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
+    head.appendChild(clearBtn);
+    sup.appendChild(head);
+
+    supporter.seats.forEach(seat => {
+      const row = document.createElement('div');
+      row.className = 'patreon-seat';
+      row.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i><span>${seat.guildName}</span><span class="sep">&middot;</span><i class="ti ti-world" aria-hidden="true"></i><span>${seat.world}</span>`;
+      const right = document.createElement('span');
+      right.className = 'patreon-seat-right';
+      right.innerHTML = seat.active ? '<span class="tag active">Active</span>' : '<span class="tag paused">Paused</span>';
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'patreon-btn danger';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => removeSeat(seat.guildId, seat.world, seat.guildName));
+      right.appendChild(removeBtn);
+      row.appendChild(right);
+      sup.appendChild(row);
+    });
+
+    el.appendChild(sup);
+  });
+}
+
+async function patreonAction(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const parsed = await res.json();
+      if (parsed.error) message = parsed.error;
+    } catch (e) { /* body wasn't JSON — keep the default message */ }
+    throw new Error(message);
+  }
+}
+
+async function removeSeat(guildId, world, guildName) {
+  if (!confirm(`Remove the seat for ${guildName} · ${world}?`)) return;
+  try {
+    await patreonAction('DELETE', '/dashboard/patreon/seats', { guildId, world });
+    poll();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function clearSeats(userId, userName) {
+  if (!confirm(`Clear ALL seats for ${userName || userId}?`)) return;
+  try {
+    await patreonAction('DELETE', `/dashboard/patreon/users/${encodeURIComponent(userId)}/seats`);
+    poll();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+document.getElementById('patreon-add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const userId = document.getElementById('patreon-add-userid').value.trim();
+  const guildId = document.getElementById('patreon-add-guildid').value.trim();
+  const world = document.getElementById('patreon-add-world').value.trim();
+  if (!userId || !guildId || !world) return;
+  try {
+    await patreonAction('POST', '/dashboard/patreon/seats', { userId, guildId, world });
+    e.target.reset();
+    poll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 function setupLogToggle(toggleId, panelId, chevronId) {
   document.getElementById(toggleId).addEventListener('click', () => {
     const panel = document.getElementById(panelId);
@@ -546,6 +679,7 @@ function render() {
   renderDetail(worlds);
   renderLanes(lastData.rateLimitLanes);
   renderLogAlerts(lastData.logAlerts);
+  renderPatreon(lastData.patreon || []);
   const selected = worlds.find(w => w.name === selectedWorld);
   renderFeed(selected ? selected.recentEvents : []);
 }

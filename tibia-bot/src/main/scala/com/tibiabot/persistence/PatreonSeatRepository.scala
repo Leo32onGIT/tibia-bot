@@ -20,6 +20,8 @@ trait PatreonSeatRepository {
   def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit
   /** Free the seat assigned to this (guildId, world) pair, if any — a no-op otherwise. */
   def releaseSeat(guildId: String, world: String): Unit
+  /** Free every seat owned by this user, across every guild — a no-op if they own none. */
+  def releaseAllSeatsForUser(userId: String): Unit
   /** Every seat, for the periodic subscription-status sweep. */
   def allSeats(): List[PatreonSeat]
 }

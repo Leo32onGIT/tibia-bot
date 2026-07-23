@@ -26,6 +26,7 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def seatFor(guildId: String, world: String): Option[PatreonSeat] = None
     def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit = ()
     def releaseSeat(guildId: String, world: String): Unit = ()
+    def releaseAllSeatsForUser(userId: String): Unit = ()
     def allSeats(): List[PatreonSeat] = Nil
   }
 

@@ -221,10 +221,13 @@ object BotApp extends App with StrictLogging {
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
-    outboundSender, onlineListSender, discordGateway, web.LogCapture.instance
+    outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService
   )
+  private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService, discordGateway)(ex)
   akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
-    .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") { statusRoute.routes })
+    .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
+      akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
+    })
   logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
 
   // streamState is declared above (before tibiaDataClient). BotApp delegates so

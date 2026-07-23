@@ -3,7 +3,7 @@ package com.tibiabot.web
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
 import akka.http.scaladsl.server.{Directive0, Route}
 import akka.http.scaladsl.server.Directives._
-import com.tibiabot.{app, discord, tracking}
+import com.tibiabot.{app, discord, paywall, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -23,7 +23,8 @@ final class StatusRoute(
   outboundSender: discord.RateLimitedSender,
   onlineListSender: discord.RateLimitedSender,
   discordGateway: discord.DiscordGateway,
-  logCapture: LogCapture
+  logCapture: LogCapture,
+  paywallService: paywall.PaywallService
 ) extends StrictLogging {
 
   /** Read fresh on every request (not cached) so editing the file on disk —
@@ -100,8 +101,40 @@ final class StatusRoute(
         "background" -> laneJson(outboundSender),
         "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
       ),
-      "logAlerts" -> buildLogAlertsJson()
+      "logAlerts" -> buildLogAlertsJson(),
+      "patreon" -> buildPatreonJson()
     )
+  }
+
+  /** One entry per supporter (not per seat), each carrying their seats — the
+   *  dashboard's Option-B grouped view. Guild names are resolved via
+   *  `guildById` (an in-memory JDA cache read, not a REST call — same as
+   *  `buildStatusJson`'s per-world discord names above) so this stays cheap
+   *  on the 10s poll; `userName` uses the stored snapshot rather than a live
+   *  `retrieveUser` REST lookup for the same reason — a live lookup only
+   *  happens once, in PatreonAdminRoute, when a seat is actually assigned. */
+  private def buildPatreonJson(): JsArray = {
+    val bySupporter = paywallService.allSeats().groupBy(_.userId)
+    val supportersJson = bySupporter.toList.sortBy { case (_, seats) => seats.headOption.map(_.userName).getOrElse("") }.map { case (userId, seats) =>
+      val seatsJson = seats.map { seat =>
+        val guild = discordGateway.guildById(seat.guildId)
+        val guildName = Option(guild).map(_.getName).getOrElse("Unknown")
+        JsObject(
+          "guildId" -> JsString(seat.guildId),
+          "guildName" -> JsString(guildName),
+          "world" -> JsString(seat.world),
+          "created" -> JsString(seat.created.toString),
+          "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world))
+        ): JsValue
+      }
+      JsObject(
+        "userId" -> JsString(userId),
+        "userName" -> JsString(seats.headOption.map(_.userName).getOrElse("")),
+        "seatLimit" -> JsNumber(Config.Patreon.seatsPerUser),
+        "seats" -> JsArray(seatsJson.toVector)
+      ): JsValue
+    }
+    JsArray(supportersJson.toVector)
   }
 
   private def logEventJson(ev: LogEvent): JsValue = JsObject(

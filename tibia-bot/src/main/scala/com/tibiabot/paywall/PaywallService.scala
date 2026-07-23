@@ -93,6 +93,14 @@ final class PaywallService(
   def releaseSeat(guildId: String, world: String): Unit =
     patreonSeatRepository.releaseSeat(guildId, world)
 
+  /** Frees every seat owned by this user. */
+  def releaseAllSeats(userId: String): Unit =
+    patreonSeatRepository.releaseAllSeatsForUser(userId)
+
+  /** Every seat, for the dashboard's supporters panel — same source
+   *  [[refreshAll]] sweeps, just exposed for reading. */
+  def allSeats(): List[com.tibiabot.domain.PatreonSeat] = patreonSeatRepository.allSeats()
+
   /** Only reachable when (guildId, world) is currently paused. The new
    *  claimant needs no relation to the lapsed owner — just room under their
    *  own seat limit. Reclaiming a seat you already (still) own is always

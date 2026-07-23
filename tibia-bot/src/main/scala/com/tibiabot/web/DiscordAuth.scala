@@ -153,7 +153,8 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                 path = Some(mountPath),
                 httpOnly = true,
                 secure = true,
-                maxAge = Some(sessionTtl.toSeconds)
+                maxAge = Some(sessionTtl.toSeconds),
+                extension = Some("SameSite=Strict")
               )) {
                 redirect(mountPath, StatusCodes.Found)
               }

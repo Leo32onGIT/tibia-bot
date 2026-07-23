@@ -46,6 +46,35 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
     repo.allSeats().map(s => s.userId -> s.world).toSet shouldBe Set("user-1" -> "Antica", "user-2" -> "Secura")
   }
 
+  test("releaseAllSeatsForUser frees every seat owned by that user, leaving other users untouched") {
+    val provider = pgOrCancel()
+    ensureCacheDatabase(provider)
+    val repo = new JdbcPatreonSeatRepository(provider)
+    clearSeats(provider)
+
+    repo.assignSeat("user-1", "User One", "guild-1", "Antica", created)
+    repo.assignSeat("user-1", "User One", "guild-2", "Secura", created)
+    repo.assignSeat("user-1", "User One", "guild-3", "Junera", created)
+    repo.assignSeat("user-2", "User Two", "guild-4", "Vunira", created)
+
+    repo.releaseAllSeatsForUser("user-1")
+
+    repo.seatsForUser("user-1") shouldBe empty
+    repo.seatsForUser("user-2").map(_.world) shouldBe List("Vunira")
+    repo.allSeats().map(_.userId).toSet shouldBe Set("user-2")
+  }
+
+  test("releaseAllSeatsForUser is a no-op for a user who owns no seats") {
+    val provider = pgOrCancel()
+    ensureCacheDatabase(provider)
+    val repo = new JdbcPatreonSeatRepository(provider)
+    clearSeats(provider)
+
+    repo.assignSeat("user-1", "User One", "guild-1", "Antica", created)
+    noException should be thrownBy repo.releaseAllSeatsForUser("nobody")
+    repo.seatsForUser("user-1") should have size 1
+  }
+
   private def clearSeats(provider: JdbcConnectionProvider): Unit = {
     val conn = provider.cache()
     try {
