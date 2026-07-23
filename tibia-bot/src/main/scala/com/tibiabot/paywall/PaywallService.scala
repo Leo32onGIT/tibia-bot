@@ -77,8 +77,8 @@ final class PaywallService(
 
   /** Assigns (or idempotently reassigns) a seat. Call only after
    *  [[canAssignSeat]] confirmed true. */
-  def assignSeat(userId: String, guildId: String, world: String): Unit =
-    patreonSeatRepository.assignSeat(userId, guildId, world, ZonedDateTime.now())
+  def assignSeat(userId: String, userName: String, guildId: String, world: String): Unit =
+    patreonSeatRepository.assignSeat(userId, userName, guildId, world, ZonedDateTime.now())
 
   /** Frees the seat assigned to (guildId, world), if any. */
   def releaseSeat(guildId: String, world: String): Unit =
@@ -101,13 +101,17 @@ final class PaywallService(
 
   /** Periodic background re-check across every assigned seat. Fires
    *  `onLapsed` once per (guild, world) that just transitioned to inactive,
-   *  not on every recheck of an already-lapsed pair. */
-  def refreshAll(onLapsed: (Guild, String) => Unit): Unit = {
+   *  not on every recheck of an already-lapsed pair — with the seat owner's
+   *  id and username snapshot, for the lapse notice. */
+  def refreshAll(onLapsed: (Guild, String, String, String) => Unit): Unit = {
     val seats = patreonSeatRepository.allSeats()
     val lapsed = applyRefresh(seats.map(s => (s.guildId, s.world, s.userId)), callerIsSubscribed)
     lapsed.foreach { case (guildId, world) =>
       val guild = discordGateway.guildById(guildId)
-      if (guild != null) onLapsed(guild, world)
+      val seat = seats.find(s => s.guildId == guildId && s.world == world)
+      val userId = seat.map(_.userId).getOrElse("")
+      val userName = seat.map(_.userName).getOrElse("")
+      if (guild != null) onLapsed(guild, world, userId, userName)
     }
   }
 }

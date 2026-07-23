@@ -317,7 +317,7 @@ final class ChannelService(
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
-        paywallService.assignSeat(event.getUser.getId, guild.getId, world)
+        paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         startBot(Some(guild), Some(world))
 
         // matches the audit pattern used by /repair and /remove

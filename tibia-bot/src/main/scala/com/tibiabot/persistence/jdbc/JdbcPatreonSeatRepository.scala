@@ -24,18 +24,29 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
         """CREATE TABLE patreon_seats (
           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
           |user_id VARCHAR(255) NOT NULL,
+          |user_name VARCHAR(255) NOT NULL,
           |guild_id VARCHAR(255) NOT NULL,
           |world VARCHAR(255) NOT NULL,
           |created TIMESTAMP NOT NULL,
           |CONSTRAINT unique_guild_world UNIQUE (guild_id, world)
           |);""".stripMargin)
     }
+
+    val userNameExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'patreon_seats' AND COLUMN_NAME = 'user_name'")
+    val userNameExists = userNameExistsQuery.next()
+    userNameExistsQuery.close()
+
+    if (!userNameExists) {
+      statement.execute("ALTER TABLE patreon_seats ADD COLUMN user_name VARCHAR(255) NOT NULL DEFAULT ''")
+    }
+
     statement.close()
   }
 
   private def toSeat(rs: ResultSet): PatreonSeat =
     PatreonSeat(
       rs.getString("user_id"),
+      rs.getString("user_name"),
       rs.getString("guild_id"),
       rs.getString("world"),
       ZonedDateTime.ofInstant(rs.getTimestamp("created").toInstant, ZoneOffset.UTC)
@@ -44,7 +55,7 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
   def seatsForUser(userId: String): List[PatreonSeat] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
-      val statement = conn.prepareStatement("SELECT user_id, guild_id, world, created FROM patreon_seats WHERE user_id = ?")
+      val statement = conn.prepareStatement("SELECT user_id, user_name, guild_id, world, created FROM patreon_seats WHERE user_id = ?")
       statement.setString(1, userId)
       val result = statement.executeQuery()
       val seats = new ListBuffer[PatreonSeat]()
@@ -56,7 +67,7 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
   def seatFor(guildId: String, world: String): Option[PatreonSeat] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
-      val statement = conn.prepareStatement("SELECT user_id, guild_id, world, created FROM patreon_seats WHERE guild_id = ? AND world = ?")
+      val statement = conn.prepareStatement("SELECT user_id, user_name, guild_id, world, created FROM patreon_seats WHERE guild_id = ? AND world = ?")
       statement.setString(1, guildId)
       statement.setString(2, world)
       val result = statement.executeQuery()
@@ -65,17 +76,18 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
       seat
     }
 
-  def assignSeat(userId: String, guildId: String, world: String, created: ZonedDateTime): Unit =
+  def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
       val statement = conn.prepareStatement(
-        "INSERT INTO patreon_seats (user_id, guild_id, world, created) VALUES (?, ?, ?, ?) " +
-        "ON CONFLICT (guild_id, world) DO UPDATE SET user_id = EXCLUDED.user_id, created = EXCLUDED.created;"
+        "INSERT INTO patreon_seats (user_id, user_name, guild_id, world, created) VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT (guild_id, world) DO UPDATE SET user_id = EXCLUDED.user_id, user_name = EXCLUDED.user_name, created = EXCLUDED.created;"
       )
       statement.setString(1, userId)
-      statement.setString(2, guildId)
-      statement.setString(3, world)
-      statement.setTimestamp(4, Timestamp.from(created.toInstant))
+      statement.setString(2, userName)
+      statement.setString(3, guildId)
+      statement.setString(4, world)
+      statement.setTimestamp(5, Timestamp.from(created.toInstant))
       statement.executeUpdate()
       statement.close()
     }
@@ -94,7 +106,7 @@ final class JdbcPatreonSeatRepository(connectionProvider: ConnectionProvider) ex
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
       val statement = conn.createStatement()
-      val result = statement.executeQuery("SELECT user_id, guild_id, world, created FROM patreon_seats")
+      val result = statement.executeQuery("SELECT user_id, user_name, guild_id, world, created FROM patreon_seats")
       val seats = new ListBuffer[PatreonSeat]()
       while (result.next()) seats += toSeat(result)
       statement.close()

@@ -14,8 +14,10 @@ trait PatreonSeatRepository {
   def seatsForUser(userId: String): List[PatreonSeat]
   /** The seat assigned to this (guildId, world) pair, if any. */
   def seatFor(guildId: String, world: String): Option[PatreonSeat]
-  /** Assign (or reassign, idempotently, if it already belongs to this user) a seat. */
-  def assignSeat(userId: String, guildId: String, world: String, created: ZonedDateTime): Unit
+  /** Assign (or reassign, idempotently, if it already belongs to this user) a
+   *  seat. `userName` is a snapshot of the caller's Discord username at this
+   *  moment, for the lapse notice — see [[com.tibiabot.domain.PatreonSeat]]. */
+  def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit
   /** Free the seat assigned to this (guildId, world) pair, if any — a no-op otherwise. */
   def releaseSeat(guildId: String, world: String): Unit
   /** Every seat, for the periodic subscription-status sweep. */

@@ -17,15 +17,16 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
-    repo.assignSeat("user-1", "guild-1", "Antica", created)
-    repo.assignSeat("user-1", "guild-2", "Secura", created)
+    repo.assignSeat("user-1", "User One", "guild-1", "Antica", created)
+    repo.assignSeat("user-1", "User One", "guild-2", "Secura", created)
 
     repo.seatsForUser("user-1").map(_.world).toSet shouldBe Set("Antica", "Secura")
     repo.seatFor("guild-1", "Antica").map(_.userId) shouldBe Some("user-1")
+    repo.seatFor("guild-1", "Antica").map(_.userName) shouldBe Some("User One")
     repo.seatFor("guild-3", "Nowhere") shouldBe None
 
     // reassigning the same (guild, world) to the same user is idempotent, not a second row
-    repo.assignSeat("user-1", "guild-1", "Antica", created)
+    repo.assignSeat("user-1", "User One", "guild-1", "Antica", created)
     repo.seatsForUser("user-1") should have size 2
 
     repo.releaseSeat("guild-1", "Antica")
@@ -39,8 +40,8 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
-    repo.assignSeat("user-1", "guild-1", "Antica", created)
-    repo.assignSeat("user-2", "guild-2", "Secura", created)
+    repo.assignSeat("user-1", "User One", "guild-1", "Antica", created)
+    repo.assignSeat("user-2", "User Two", "guild-2", "Secura", created)
 
     repo.allSeats().map(s => s.userId -> s.world).toSet shouldBe Set("user-1" -> "Antica", "user-2" -> "Secura")
   }

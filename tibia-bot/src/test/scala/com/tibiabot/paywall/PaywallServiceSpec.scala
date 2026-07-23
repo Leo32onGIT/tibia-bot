@@ -24,7 +24,7 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
   private class FakeSeatRepository extends PatreonSeatRepository {
     def seatsForUser(userId: String): List[PatreonSeat] = Nil
     def seatFor(guildId: String, world: String): Option[PatreonSeat] = None
-    def assignSeat(userId: String, guildId: String, world: String, created: ZonedDateTime): Unit = ()
+    def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit = ()
     def releaseSeat(guildId: String, world: String): Unit = ()
     def allSeats(): List[PatreonSeat] = Nil
   }

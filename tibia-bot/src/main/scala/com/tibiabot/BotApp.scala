@@ -396,14 +396,25 @@ object BotApp extends App with StrictLogging {
     if (paywallCheckCounter >= 60) {
       paywallCheckCounter = 0
       try {
-        paywallService.refreshAll { (guild, world) =>
+        paywallService.refreshAll { (guild, world, userId, userName) =>
           val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
-          if (adminChannel != null) {
-            presentation.AdminLog.post(
-              adminChannel,
-              s"Activity tracking has been **paused** for **$world**: the Patreon subscription tied to whoever ran `/setup` for it is no longer active. Resubscribe, or run `/setup` again after freeing a seat, to resume tracking.",
-              Config.webHookAvatar
-            )
+          // Not routed through AdminLog.post — that helper's title ("a command
+          // was run") is shared/fixed across every other caller, and this
+          // isn't a command audit, it's a system-triggered notice.
+          if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
+            // userName is a snapshot taken at /setup time — empty for seats
+            // assigned before that field existed. An empty `` `` `` pair
+            // breaks the rest of this message's markdown (Discord treats the
+            // next stray backtick, in "`/setup`" below, as its closing one),
+            // so the username only renders when non-empty; the mention is
+            // always current regardless of username staleness.
+            val mention = s"<@$userId>"
+            val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
+            val pausedEmbed = new EmbedBuilder()
+            pausedEmbed.setTitle(s":warning: Violent Bot paused for `$world`")
+            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active. [Resubscribe](https://www.patreon.com/violentbot), or run `/setup` again after freeing a seat, to resume tracking.")
+            pausedEmbed.setColor(presentation.Embeds.BrandColor)
+            adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue()
           }
         }
       } catch {
