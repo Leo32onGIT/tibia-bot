@@ -47,12 +47,14 @@
        not a failure our code ever sees (the request still succeeds once the
        Retry-After elapses), just noise from the online-list lane's "shared"
        bucket occasionally getting hit despite its own slower pace + dedup.
-       Left disabled for now — want the 429s still visible while we look at
-       fixing the actual cause rather than just muting the symptom.
+       Suppressed now that the online-list lane has its own pace, dedup, and
+       adaptive refresh backoff (AdaptiveRefreshInterval) to keep it from
+       saturating in the first place — genuine ERROR-level events from this
+       logger, if any, still surface on both console and the dashboard. -->
   <logger name="net.dv8tion.jda.api.requests.RestRateLimiter" level="ERROR" additivity="false">
     <appender-ref ref="CONSOLE" />
+    <appender-ref ref="DASHBOARD" />
   </logger>
-  -->
 
   <root level="INFO">
     <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
