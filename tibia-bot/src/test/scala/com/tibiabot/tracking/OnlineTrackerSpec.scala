@@ -88,6 +88,42 @@ class OnlineTrackerSpec extends AnyFunSuite with Matchers {
     tr.size shouldBe 1
   }
 
+  test("restore seeds an empty tracker, stamping time to restoreTime rather than the snapshot's original time") {
+    val tr = new OnlineTracker
+    val restoreTime = at(1000)
+    tr.restore(List(OnlinePlayer("Restored", 80, "Knight", "Some Guild", at(0), duration = 500L, flag = ":arrow_up:")), restoreTime)
+
+    val p = tr.find("Restored").value
+    p.level shouldBe 80
+    p.guildName shouldBe "Some Guild"
+    p.duration shouldBe 500L
+    p.flag shouldBe ":arrow_up:"
+    p.time shouldBe restoreTime
+  }
+
+  test("restore does not clobber a player a live poll already updated (existing wins)") {
+    val tr = new OnlineTracker
+    tr.updateFromOnline(Seq(("Live", 10, "None")), at(0))  // a real poll landed first
+
+    tr.restore(List(OnlinePlayer("Live", 999, "Stale", "Stale Guild", at(0), duration = 12345L)), at(5))
+
+    val p = tr.find("Live").value
+    p.level shouldBe 10
+    p.guildName shouldBe ""
+    p.duration shouldBe 0L
+  }
+
+  test("a real update after restore computes a small delta from the restore moment, not the downtime gap") {
+    val tr = new OnlineTracker
+    val restoreTime = at(0)
+    tr.restore(List(OnlinePlayer("Restored", 80, "Knight", "", at(-100000), duration = 500L)), restoreTime)
+
+    tr.updateFromOnline(Seq(("Restored", 81, "Knight")), at(60))
+
+    val p = tr.find("Restored").value
+    p.duration shouldBe 560L  // 500 + (60 - 0), not inflated by the huge pre-restart `time` gap
+  }
+
   // tiny .value helper for Option without importing OptionValues
   private implicit class OptOps[A](o: Option[A]) {
     def value: A = o.getOrElse(fail("expected Some but was None"))

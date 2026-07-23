@@ -39,6 +39,7 @@ object Config {
     val worldListTtl: FiniteDuration = dur("world-list-ttl")
     val characterSnapshotTtl: FiniteDuration = dur("character-snapshot-ttl")
     val characterSnapshotInterval: FiniteDuration = dur("character-snapshot-interval")
+    val onlineDurationTtl: FiniteDuration = dur("online-duration-ttl")
   }
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString

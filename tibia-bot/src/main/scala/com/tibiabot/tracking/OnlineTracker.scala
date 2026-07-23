@@ -51,6 +51,17 @@ final class OnlineTracker {
   /** Exact, case-sensitive lookup by name. */
   def find(name: String): Option[OnlinePlayer] = state.get(name)
 
+  /** Seed state from a pre-restart snapshot without clobbering any player a
+   *  live poll already updated (existing wins — guards the load-vs-first-poll
+   *  race, since the snapshot loads asynchronously). Each restored entry's
+   *  `time` is stamped to `restoreTime`, not its original value, so the next
+   *  real `updateFromOnline` delta reflects only time actually elapsed since
+   *  restart, not the whole downtime gap. */
+  def restore(entries: Iterable[OnlinePlayer], restoreTime: ZonedDateTime): Unit =
+    entries.foreach { p =>
+      if (!state.contains(p.name)) state.put(p.name, p.copy(time = restoreTime))
+    }
+
   /** Update a player's guild only if it actually changed. */
   def setGuild(name: String, guildName: String): Unit =
     state.get(name).foreach { p =>

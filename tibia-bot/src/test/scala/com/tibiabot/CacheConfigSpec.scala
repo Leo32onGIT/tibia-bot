@@ -22,5 +22,6 @@ class CacheConfigSpec extends AnyFunSuite with Matchers {
     cache.getDuration("world-list-ttl").toScala.toHours shouldBe 1
     cache.getDuration("character-snapshot-ttl").toScala.toDays shouldBe 7
     cache.getDuration("character-snapshot-interval").toScala.toSeconds shouldBe 60
+    cache.getDuration("online-duration-ttl").toScala.toMinutes shouldBe 20
   }
 }

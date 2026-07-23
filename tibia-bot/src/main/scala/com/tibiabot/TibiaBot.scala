@@ -51,6 +51,7 @@ class TibiaBot(
   private val recentOnline = mutable.Set.empty[CharKey]
   private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private val onlineTracker = new tracking.OnlineTracker
+  private val onlineDurationPersistence = new persistence.OnlineDurationPersistence(persistence.RedisCacheProvider.cache, world, Config.Cache.onlineDurationTtl)
   val masspokeCooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
 
   // Dedicated online list table for killer level lookups - updated every 5 minutes
@@ -60,8 +61,26 @@ class TibiaBot(
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
   levelTracker.load(BotApp.getLevelsCache(world).map(levelsCache => tracking.LevelRecord(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time))))
 
+  // Best-effort warm restore of online-duration state from a pre-restart
+  // Redis snapshot (see OnlineDurationPersistence) — async, so it may race a
+  // live poll; OnlineTracker.restore never clobbers an entry the live poll
+  // already wrote.
+  onlineDurationPersistence.load().foreach { snapshot =>
+    if (snapshot.nonEmpty) {
+      val restoreTime = ZonedDateTime.now()
+      val entries = snapshot.map { case (name, s) =>
+        tracking.OnlinePlayer(name, s.level, s.vocation, s.guildName, restoreTime, s.duration, s.flag)
+      }
+      onlineTracker.restore(entries, restoreTime)
+      logger.info(s"Warmed online-duration cache for world '$world' from Redis snapshot: ${entries.size} entries")
+    }
+  }
+
   private var onlineListTimer: Map[String, ZonedDateTime] = Map.empty
-  private var onlineListCategoryTimer: Map[String, ZonedDateTime] = Map.empty
+  // Seeded from bot_cache.rename_cooldowns so a channel renamed moments before
+  // a restart isn't immediately eligible for another rename (see
+  // renameOnlineCategoryIfDue/renameOnlineChannelIfDue).
+  private var onlineListCategoryTimer: Map[String, ZonedDateTime] = BotApp.getRenameCooldowns(world)
   private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -107,6 +126,9 @@ class TibiaBot(
       // get online data with durations (carries over guild/duration/flag, drops log-offs)
       onlineTracker.updateFromOnline(online.map(player => (player.name, player.level.toInt, player.vocation)), now)
       val onlineWithVocLvlAndDuration = onlineTracker.snapshot
+      // Best-effort, fire-and-forget: piggybacks on this world's existing poll
+      // cadence instead of a separate schedule (see OnlineDurationPersistence).
+      onlineDurationPersistence.save(onlineWithVocLvlAndDuration)
       // battleye_date is the literal string "release" for a world protected since
       // launch (green BattlEye); any actual date means protection was added later
       // (yellow BattlEye) — confirmed against the live TibiaData API, not documented.
@@ -1505,7 +1527,9 @@ class TibiaBot(
       if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
         val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
         if (category.getName != baseName) {
-          onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> ZonedDateTime.now())
+          val renamedAt = ZonedDateTime.now()
+          onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> renamedAt)
+          BotApp.recordRenameCooldown(world, categoryId, renamedAt)
           outboundSender.enqueue("rename", Some(categoryId)) { () =>
             try {
               category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
@@ -1530,7 +1554,9 @@ class TibiaBot(
     val lastRename = onlineListCategoryTimer.getOrElse(channel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
     if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
       if (channel.getName != targetName) {
-        onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> ZonedDateTime.now())
+        val renamedAt = ZonedDateTime.now()
+        onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> renamedAt)
+        BotApp.recordRenameCooldown(world, channel.getId, renamedAt)
         outboundSender.enqueue("rename", Some(channel.getId)) { () =>
           try {
             channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)

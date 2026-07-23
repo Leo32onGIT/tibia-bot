@@ -151,6 +151,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
   val guildActivityRepository: persistence.GuildActivityRepository =
     new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
+  private val renameCooldownRepository: persistence.RenameCooldownRepository =
+    new persistence.jdbc.JdbcRenameCooldownRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -819,6 +821,11 @@ object BotApp extends App with StrictLogging {
 
   private def removeLevelsCache(time: ZonedDateTime): Unit =
     cacheRepository.removeExpiredLevels(time)
+
+  def getRenameCooldowns(world: String): Map[String, ZonedDateTime] = renameCooldownRepository.loadForWorld(world)
+
+  def recordRenameCooldown(world: String, channelId: String, at: ZonedDateTime): Unit =
+    renameCooldownRepository.recordRename(world, channelId, at)
 
   private def playerConfig(guild: Guild, query: String): List[Players] =
     huntedAlliedRepository.getPlayers(guild.getId, query)
