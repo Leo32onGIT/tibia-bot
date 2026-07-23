@@ -843,8 +843,9 @@ object BotApp extends App with StrictLogging {
             val existing = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
             if (!existing.isEmpty) channel.purgeMessages(existing)
             val pausedEmbed = new EmbedBuilder()
-            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently **paused**.\n\n[View details]($adminMessageUrl)")
-            pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
+            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently **[paused]($adminMessageUrl)**.")
+            pausedEmbed.setThumbnail(Config.webHookAvatar)
+            pausedEmbed.setColor(13773097)
             channel.sendMessageEmbeds(pausedEmbed.build()).queue()
           } catch {
             case ex: Throwable => logger.warn(s"Failed to post paused notice to online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex)
