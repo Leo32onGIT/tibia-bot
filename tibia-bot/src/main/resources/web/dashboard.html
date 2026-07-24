@@ -138,8 +138,8 @@
   .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
   .detail-stat .num-label { font-size: 11px; color: var(--muted); }
 
-  .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; }
-  .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; }
+  .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; max-height: 320px; overflow-y: auto; }
+  .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; flex-shrink: 0; }
   .discord-item i { color: var(--muted); font-size: 14px; }
   .discord-item .owner-icon { color: var(--warn); font-size: 13px; }
   .discord-item .sep { color: var(--muted); }
@@ -201,19 +201,18 @@
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 
-  .patreon-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; }
-  .patreon-sup { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
-  .patreon-sup-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(255, 255, 255, 0.02); }
+  .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
+  .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
+  .patreon-status-filter:hover { background: #343d51; }
+  .patreon-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; max-height: 400px; overflow-y: auto; }
+  .patreon-sup { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+  .patreon-sup-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(255, 255, 255, 0.02); flex-wrap: wrap; }
   .patreon-sup-head i { color: var(--warn); font-size: 14px; }
   .patreon-sup-name { color: var(--text-strong); font-weight: 600; font-size: 12px; }
   .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .patreon-sup-pledge { color: var(--good); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .patreon-past-toggle { display: flex; align-items: center; gap: 6px; padding: 8px 16px; font-size: 11px; color: var(--muted); cursor: pointer; border-top: 1px solid var(--panel-border); }
-  .patreon-past-toggle:hover { color: var(--text-strong); }
-  .patreon-past-chevron { font-size: 12px; transition: transform 0.15s ease; }
-  .patreon-past-chevron.expanded { transform: rotate(180deg); }
-  .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); }
+  .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
   .patreon-seat i { color: var(--muted); font-size: 13px; }
   .patreon-seat-text { color: var(--text); }
   .patreon-sup.unconfirmed .patreon-sup-name,
@@ -223,7 +222,11 @@
   .patreon-btn { background: transparent; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--muted); font-size: 11px; padding: 3px 8px; cursor: pointer; }
   .patreon-btn:hover { color: var(--text-strong); border-color: var(--muted); }
   .patreon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
-  .patreon-add-toggle { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; text-transform: none; letter-spacing: normal; }
+  .patreon-add-toggle {
+    background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong);
+    cursor: pointer; width: 26px; height: 26px; padding: 0; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
   .patreon-add-toggle:hover { background: #343d51; }
   .patreon-add-form { display: none; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
   .patreon-add-form.open { display: flex; }
@@ -261,6 +264,13 @@
     .detail-stats { gap: 12px 20px; padding: 12px; }
     .discord-item { flex-wrap: wrap; }
     .discord-item .gid { margin-left: 0; width: 100%; }
+
+    .panel-title { flex-wrap: wrap; gap: 8px; }
+
+    .feed, .discord-list, .patreon-list { max-height: 260px; }
+
+    .patreon-sup-head .patreon-btn { margin-left: 0; }
+    .patreon-seat-right { margin-left: 0; width: 100%; justify-content: flex-end; }
   }
 </style>
 </head>
@@ -312,14 +322,20 @@
   </div>
 
   <div class="panel">
-    <div class="panel-title">Patreon supporters<button class="patreon-add-toggle" id="patreon-add-toggle" type="button">+ Add seat</button></div>
+    <div class="panel-title">
+      Patreon supporters
+      <div class="patreon-title-actions">
+        <select class="patreon-status-filter" id="patreon-status-filter" aria-label="Filter supporters by status">
+          <option value="active">Active</option>
+          <option value="all">All</option>
+          <option value="former_patron">Former</option>
+          <option value="declined_patron">Declined</option>
+        </select>
+        <button class="patreon-add-toggle" id="patreon-add-toggle" type="button" aria-label="Add seat" title="Add seat"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      </div>
+    </div>
     <div class="detail-stats" id="patreon-stats"></div>
     <div class="patreon-list" id="patreon-list"></div>
-    <div class="patreon-past-toggle" id="patreon-past-toggle" style="display:none;">
-      <i class="ti ti-chevron-down patreon-past-chevron" id="patreon-past-chevron" aria-hidden="true"></i>
-      <span id="patreon-past-count"></span>
-    </div>
-    <div class="patreon-list" id="patreon-past-list" style="display:none;"></div>
     <form class="patreon-add-form" id="patreon-add-form">
       <input type="text" id="patreon-add-userid" placeholder="Discord user ID" required>
       <input type="text" id="patreon-add-guildid" placeholder="Guild ID" required>
@@ -571,15 +587,18 @@ function formatPledge(cents) {
   return `$${(cents / 100).toFixed(2)}/mo`;
 }
 
-// True for a Patreon-sourced entry whose subscription has already lapsed or
-// failed — "former" or "declined", as opposed to null/"no status" (already
-// dropped entirely server-side, see StatusRoute.buildPatreonJson) or
-// "active_patron". Applies regardless of whether the supporter also holds a
-// seat, since collapsing them is purely about dashboard clutter, not seat
-// state — a lapsed seat-holder still shows their seats' own Active/Paused
-// tags once expanded.
-function isPastPatreonStatus(supporter) {
-  return supporter.patronStatus === 'former_patron' || supporter.patronStatus === 'declined_patron';
+// Driven by the #patreon-status-filter <select>. A supporter with no
+// patronStatus at all (a seat with no Patreon cross-reference — see
+// StatusRoute.buildPatreonJson) always matches, regardless of the filter:
+// it's not part of the "Patreon subscription status" dimension the filter
+// controls, it's just plain seat/bot-config data.
+let patreonStatusFilter = 'active';
+
+function matchesPatreonFilter(supporter) {
+  if (supporter.patronStatus === undefined) return true;
+  if (patreonStatusFilter === 'all') return true;
+  if (patreonStatusFilter === 'active') return supporter.patronStatus === 'active_patron';
+  return supporter.patronStatus === patreonStatusFilter;
 }
 
 function buildSupporterCard(supporter) {
@@ -664,27 +683,19 @@ function renderPatreonList(elementId, supporters, emptyMessage) {
 function renderPatreon(patreon) {
   const allSeats = patreon.flatMap(s => s.seats);
   const activeSeats = allSeats.filter(s => s.active).length;
+  // Fixed at "active subscription" regardless of the interactive filter above
+  // — a stable count of real active patrons, not a reflection of whatever's
+  // currently being browsed.
+  const activeSupporters = patreon.filter(s => s.patronStatus === 'active_patron').length;
 
   document.getElementById('patreon-stats').innerHTML = `
-    <div class="detail-stat"><i class="ti ti-crown" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${patreon.length}</div><div class="num-label">Supporters</div></div></div>
+    <div class="detail-stat"><i class="ti ti-crown" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${activeSupporters}</div><div class="num-label">Supporters</div></div></div>
     <div class="detail-stat"><i class="ti ti-armchair" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${activeSeats}</div><div class="num-label">Active seats</div></div></div>
     <div class="detail-stat"><i class="ti ti-player-pause" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${allSeats.length - activeSeats}</div><div class="num-label">Paused seats</div></div></div>
   `;
 
-  const past = patreon.filter(isPastPatreonStatus);
-  const current = patreon.filter(s => !isPastPatreonStatus(s));
-
-  renderPatreonList('patreon-list', current, patreon.length === 0 ? 'No Patreon seats assigned' : null);
-  renderPatreonList('patreon-past-list', past, null);
-
-  const toggle = document.getElementById('patreon-past-toggle');
-  if (past.length === 0) {
-    toggle.style.display = 'none';
-    document.getElementById('patreon-past-list').style.display = 'none';
-  } else {
-    toggle.style.display = 'flex';
-    document.getElementById('patreon-past-count').textContent = `${past.length} former/declined supporter${past.length === 1 ? '' : 's'}`;
-  }
+  const visible = patreon.filter(matchesPatreonFilter);
+  renderPatreonList('patreon-list', visible, patreon.length === 0 ? 'No Patreon seats assigned' : 'No supporters match this filter');
 }
 
 async function patreonAction(method, path, body) {
@@ -727,11 +738,9 @@ document.getElementById('patreon-add-toggle').addEventListener('click', () => {
   document.getElementById('patreon-add-form').classList.toggle('open');
 });
 
-document.getElementById('patreon-past-toggle').addEventListener('click', () => {
-  const list = document.getElementById('patreon-past-list');
-  const isHidden = list.style.display === 'none';
-  list.style.display = isHidden ? 'flex' : 'none';
-  document.getElementById('patreon-past-chevron').classList.toggle('expanded', isHidden);
+document.getElementById('patreon-status-filter').addEventListener('change', (e) => {
+  patreonStatusFilter = e.target.value;
+  if (lastData) render();
 });
 
 document.getElementById('patreon-add-form').addEventListener('submit', async (e) => {
