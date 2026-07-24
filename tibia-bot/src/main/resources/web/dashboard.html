@@ -206,13 +206,21 @@
   .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
   .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
   .patreon-status-filter:hover { background: #343d51; }
+  .patreon-search-row { padding: 0 16px 12px; }
+  .patreon-search-input { width: 100%; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font-size: 12px; padding: 6px 10px; }
+  .patreon-search-input::placeholder { color: var(--muted); }
+  .patreon-search-input:focus { outline: none; border-color: var(--accent); }
   .patreon-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; max-height: 400px; overflow-y: auto; }
   .patreon-sup { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
-  .patreon-sup-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(255, 255, 255, 0.02); flex-wrap: wrap; }
+  .patreon-sup-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(255, 255, 255, 0.02); flex-wrap: wrap; cursor: pointer; }
   .patreon-sup-head i { color: var(--warn); font-size: 14px; }
+  .patreon-sup-chevron { color: var(--muted) !important; font-size: 12px; flex-shrink: 0; transition: transform 0.15s ease; }
+  .patreon-sup.expanded .patreon-sup-chevron { transform: rotate(90deg); }
   .patreon-sup-name { color: var(--text-strong); font-weight: 600; font-size: 12px; }
   .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .patreon-sup-pledge { color: var(--good); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .patreon-sup-details { display: none; }
+  .patreon-sup.expanded .patreon-sup-details { display: block; }
   .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
   .patreon-seat i { color: var(--muted); font-size: 13px; }
@@ -271,7 +279,6 @@
 
     .feed, .discord-list, .patreon-list { max-height: 260px; }
 
-    .patreon-sup-head .patreon-btn { margin-left: 0; }
     .patreon-seat-right { margin-left: 0; width: 100%; justify-content: flex-end; }
   }
 </style>
@@ -337,6 +344,9 @@
       </div>
     </div>
     <div class="detail-stats" id="patreon-stats"></div>
+    <div class="patreon-search-row">
+      <input type="search" id="patreon-search" class="patreon-search-input" placeholder="Search supporters by name or Discord username/ID…">
+    </div>
     <div class="patreon-list" id="patreon-list"></div>
     <form class="patreon-add-form" id="patreon-add-form">
       <input type="text" id="patreon-add-userid" placeholder="Discord user ID" required>
@@ -603,6 +613,25 @@ function matchesPatreonFilter(supporter) {
   return supporter.patronStatus === patreonStatusFilter;
 }
 
+// Driven by the #patreon-search box.
+let patreonSearchQuery = '';
+
+function matchesPatreonSearch(supporter) {
+  if (!patreonSearchQuery) return true;
+  const q = patreonSearchQuery.toLowerCase();
+  return (supporter.userName || '').toLowerCase().includes(q)
+    || (supporter.discordUsername || '').toLowerCase().includes(q)
+    || (supporter.userId || '').toLowerCase().includes(q);
+}
+
+// Which cards have their details expanded — keyed so it survives the poll
+// cycle re-rendering every card from scratch every 10s.
+const expandedSupporters = new Set();
+
+function supporterKey(supporter) {
+  return supporter.userId || supporter.patreonMemberId || supporter.userName;
+}
+
 function buildSupporterCard(supporter) {
   // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
   // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
@@ -616,8 +645,11 @@ function buildSupporterCard(supporter) {
     ? supporter.seats.every(s => s.active)
     : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
 
+  const key = supporterKey(supporter);
+  const expanded = expandedSupporters.has(key);
+
   const sup = document.createElement('div');
-  sup.className = confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed';
+  sup.className = (confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed') + (expanded ? ' expanded' : '');
 
   const head = document.createElement('div');
   head.className = 'patreon-sup-head';
@@ -630,16 +662,16 @@ function buildSupporterCard(supporter) {
     statusBadge = '<span class="tag unconfirmed">Not confirmed</span>';
   }
   const pledge = supporter.pledgeCents ? `<span class="patreon-sup-pledge">${formatPledge(supporter.pledgeCents)}</span>` : '';
-  head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
-  if (supporter.userId) {
-    const clearBtn = document.createElement('button');
-    clearBtn.className = 'patreon-btn danger';
-    clearBtn.style.marginLeft = 'auto';
-    clearBtn.textContent = 'Clear all';
-    clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
-    head.appendChild(clearBtn);
-  }
+  head.innerHTML = `<i class="ti ti-chevron-right patreon-sup-chevron" aria-hidden="true"></i><i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+  head.addEventListener('click', () => {
+    if (expandedSupporters.has(key)) expandedSupporters.delete(key);
+    else expandedSupporters.add(key);
+    sup.classList.toggle('expanded');
+  });
   sup.appendChild(head);
+
+  const details = document.createElement('div');
+  details.className = 'patreon-sup-details';
 
   if (supporter.seats.length === 0) {
     const note = document.createElement('div');
@@ -650,7 +682,7 @@ function buildSupporterCard(supporter) {
     } else {
       note.innerHTML = '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter with no linked Discord account &mdash; can\'t assign a seat until they connect one';
     }
-    sup.appendChild(note);
+    details.appendChild(note);
   }
 
   supporter.seats.forEach(seat => {
@@ -663,11 +695,13 @@ function buildSupporterCard(supporter) {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'patreon-btn danger';
     removeBtn.textContent = 'Remove';
-    removeBtn.addEventListener('click', () => removeSeat(seat.guildId, seat.world, seat.guildName));
+    removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeSeat(seat.guildId, seat.world, seat.guildName); });
     right.appendChild(removeBtn);
     row.appendChild(right);
-    sup.appendChild(row);
+    details.appendChild(row);
   });
+
+  sup.appendChild(details);
 
   return sup;
 }
@@ -696,7 +730,7 @@ function renderPatreon(patreon) {
     <div class="detail-stat"><i class="ti ti-player-pause" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${allSeats.length - activeSeats}</div><div class="num-label">Paused seats</div></div></div>
   `;
 
-  const visible = patreon.filter(matchesPatreonFilter);
+  const visible = patreon.filter(matchesPatreonFilter).filter(matchesPatreonSearch);
   renderPatreonList('patreon-list', visible, patreon.length === 0 ? 'No Patreon seats assigned' : 'No supporters match this filter');
 }
 
@@ -726,22 +760,17 @@ async function removeSeat(guildId, world, guildName) {
   }
 }
 
-async function clearSeats(userId, userName) {
-  if (!confirm(`Clear ALL seats for ${userName || userId}?`)) return;
-  try {
-    await patreonAction('DELETE', `/dashboard/patreon/users/${encodeURIComponent(userId)}/seats`);
-    poll();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
 document.getElementById('patreon-add-toggle').addEventListener('click', () => {
   document.getElementById('patreon-add-form').classList.toggle('open');
 });
 
 document.getElementById('patreon-status-filter').addEventListener('change', (e) => {
   patreonStatusFilter = e.target.value;
+  if (lastData) render();
+});
+
+document.getElementById('patreon-search').addEventListener('input', (e) => {
+  patreonSearchQuery = e.target.value;
   if (lastData) render();
 });
 
