@@ -133,6 +133,11 @@
     align-items: center;
   }
   .panel-title .stale { color: var(--warn); text-transform: none; letter-spacing: normal; font-weight: 400; }
+  .panel-title-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .panel-chevron { color: var(--muted); font-size: 12px; flex-shrink: 0; transition: transform 0.15s ease; }
+  .panel.collapsed .panel-chevron { transform: rotate(-90deg); }
+  .panel.collapsed > *:not(.panel-title) { display: none; }
+  .panel.collapsed .panel-title { border-bottom: none; }
 
   .detail-stats { display: flex; gap: 24px; padding: 16px; flex-wrap: wrap; }
   .detail-stat { display: flex; align-items: center; gap: 8px; }
@@ -320,19 +325,24 @@
   </div>
 
   <div class="panel">
-    <div class="panel-title"><span id="detail-title">World</span><span class="stale" id="detail-stale"></span></div>
+    <div class="panel-title">
+      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i><span id="detail-title">World</span></span>
+      <span class="stale" id="detail-stale"></span>
+    </div>
     <div class="detail-stats" id="detail-stats"></div>
     <div class="discord-list" id="detail-discords"></div>
   </div>
 
   <div class="panel">
-    <div class="panel-title">Recent activity</div>
+    <div class="panel-title">
+      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i>Recent activity</span>
+    </div>
     <div class="feed" id="feed"></div>
   </div>
 
   <div class="panel">
     <div class="panel-title">
-      Patreon supporters
+      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i>Patreon supporters</span>
       <div class="patreon-title-actions">
         <select class="patreon-status-filter" id="patreon-status-filter" aria-label="Filter supporters by status">
           <option value="active">Active</option>
@@ -801,6 +811,16 @@ function setupLogToggle(toggleId, panelId, chevronId) {
 }
 setupLogToggle('log-error-toggle', 'log-errors-panel', 'log-error-chevron');
 setupLogToggle('log-warn-toggle', 'log-warnings-panel', 'log-warn-chevron');
+
+// World Info / Recent Activity / Patreon Supporters — collapse the whole
+// panel body, leaving just the title bar. Plain classList toggle is enough
+// (no state tracking needed): these .panel elements are static in the
+// initial HTML and never rebuilt, unlike the per-supporter cards above.
+document.querySelectorAll('.panel-title-toggle').forEach(toggle => {
+  toggle.addEventListener('click', () => {
+    toggle.closest('.panel').classList.toggle('collapsed');
+  });
+});
 
 // Mobile-only drawer — a no-op on desktop, where .sidebar never gets the
 // "open" transform in the first place (see the max-width: 720px block).
