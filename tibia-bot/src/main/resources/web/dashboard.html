@@ -209,6 +209,10 @@
   .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .patreon-sup-pledge { color: var(--good); font-size: 11px; font-variant-numeric: tabular-nums; }
   .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .patreon-past-toggle { display: flex; align-items: center; gap: 6px; padding: 8px 16px; font-size: 11px; color: var(--muted); cursor: pointer; border-top: 1px solid var(--panel-border); }
+  .patreon-past-toggle:hover { color: var(--text-strong); }
+  .patreon-past-chevron { font-size: 12px; transition: transform 0.15s ease; }
+  .patreon-past-chevron.expanded { transform: rotate(180deg); }
   .patreon-seat { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 12px 7px 34px; border-top: 1px solid var(--panel-border); }
   .patreon-seat i { color: var(--muted); font-size: 13px; }
   .patreon-seat-text { color: var(--text); }
@@ -311,6 +315,11 @@
     <div class="panel-title">Patreon supporters<button class="patreon-add-toggle" id="patreon-add-toggle" type="button">+ Add seat</button></div>
     <div class="detail-stats" id="patreon-stats"></div>
     <div class="patreon-list" id="patreon-list"></div>
+    <div class="patreon-past-toggle" id="patreon-past-toggle" style="display:none;">
+      <i class="ti ti-chevron-down patreon-past-chevron" id="patreon-past-chevron" aria-hidden="true"></i>
+      <span id="patreon-past-count"></span>
+    </div>
+    <div class="patreon-list" id="patreon-past-list" style="display:none;"></div>
     <form class="patreon-add-form" id="patreon-add-form">
       <input type="text" id="patreon-add-userid" placeholder="Discord user ID" required>
       <input type="text" id="patreon-add-guildid" placeholder="Guild ID" required>
@@ -562,6 +571,96 @@ function formatPledge(cents) {
   return `$${(cents / 100).toFixed(2)}/mo`;
 }
 
+// True for a Patreon-sourced entry whose subscription has already lapsed or
+// failed — "former" or "declined", as opposed to null/"no status" (already
+// dropped entirely server-side, see StatusRoute.buildPatreonJson) or
+// "active_patron". Applies regardless of whether the supporter also holds a
+// seat, since collapsing them is purely about dashboard clutter, not seat
+// state — a lapsed seat-holder still shows their seats' own Active/Paused
+// tags once expanded.
+function isPastPatreonStatus(supporter) {
+  return supporter.patronStatus === 'former_patron' || supporter.patronStatus === 'declined_patron';
+}
+
+function buildSupporterCard(supporter) {
+  // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
+  // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
+  const hasPatreonInfo = supporter.patronStatus !== undefined;
+  // Seat-holders' confirmed/unconfirmed status is untouched by the Patreon
+  // sync — still driven purely by the per-seat "active" flag from the
+  // existing Discord-role recheck (see PaywallService.refreshAll). Only a
+  // seatless, Patreon-sourced entry falls back to patronStatus, since it
+  // has no seats to check at all.
+  const confirmed = supporter.seats.length > 0
+    ? supporter.seats.every(s => s.active)
+    : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
+
+  const sup = document.createElement('div');
+  sup.className = confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed';
+
+  const head = document.createElement('div');
+  head.className = 'patreon-sup-head';
+  let statusBadge = '';
+  if (supporter.seats.length === 0 && hasPatreonInfo) {
+    statusBadge = confirmed
+      ? `<span class="tag active">${patronStatusLabel(supporter.patronStatus)}</span>`
+      : `<span class="tag unconfirmed">${patronStatusLabel(supporter.patronStatus)}</span>`;
+  } else if (!confirmed) {
+    statusBadge = '<span class="tag unconfirmed">Not confirmed</span>';
+  }
+  const pledge = supporter.pledgeCents ? `<span class="patreon-sup-pledge">${formatPledge(supporter.pledgeCents)}</span>` : '';
+  head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+  if (supporter.userId) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'patreon-btn danger';
+    clearBtn.style.marginLeft = 'auto';
+    clearBtn.textContent = 'Clear all';
+    clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
+    head.appendChild(clearBtn);
+  }
+  sup.appendChild(head);
+
+  if (supporter.seats.length === 0) {
+    const note = document.createElement('div');
+    note.className = 'patreon-empty';
+    if (supporter.userId) {
+      const discordLabel = supporter.discordUsername ? `${supporter.discordUsername} (${supporter.userId})` : supporter.userId;
+      note.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i>Discord: ${discordLabel} &middot; no seats assigned yet`;
+    } else {
+      note.innerHTML = '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter with no linked Discord account &mdash; can\'t assign a seat until they connect one';
+    }
+    sup.appendChild(note);
+  }
+
+  supporter.seats.forEach(seat => {
+    const row = document.createElement('div');
+    row.className = 'patreon-seat';
+    row.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i><span class="patreon-seat-text">${seat.guildName}</span><span class="sep">&middot;</span><i class="ti ti-world" aria-hidden="true"></i><span class="patreon-seat-text">${seat.world}</span>`;
+    const right = document.createElement('span');
+    right.className = 'patreon-seat-right';
+    right.innerHTML = seat.active ? '<span class="tag active">Active</span>' : '<span class="tag paused">Paused</span>';
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'patreon-btn danger';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => removeSeat(seat.guildId, seat.world, seat.guildName));
+    right.appendChild(removeBtn);
+    row.appendChild(right);
+    sup.appendChild(row);
+  });
+
+  return sup;
+}
+
+function renderPatreonList(elementId, supporters, emptyMessage) {
+  const el = document.getElementById(elementId);
+  el.innerHTML = '';
+  if (supporters.length === 0) {
+    if (emptyMessage) el.innerHTML = `<div class="muted">${emptyMessage}</div>`;
+    return;
+  }
+  supporters.forEach(supporter => el.appendChild(buildSupporterCard(supporter)));
+}
+
 function renderPatreon(patreon) {
   const allSeats = patreon.flatMap(s => s.seats);
   const activeSeats = allSeats.filter(s => s.active).length;
@@ -572,77 +671,20 @@ function renderPatreon(patreon) {
     <div class="detail-stat"><i class="ti ti-player-pause" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${allSeats.length - activeSeats}</div><div class="num-label">Paused seats</div></div></div>
   `;
 
-  const el = document.getElementById('patreon-list');
-  el.innerHTML = '';
-  if (patreon.length === 0) {
-    el.innerHTML = '<div class="muted">No Patreon seats assigned</div>';
-    return;
+  const past = patreon.filter(isPastPatreonStatus);
+  const current = patreon.filter(s => !isPastPatreonStatus(s));
+
+  renderPatreonList('patreon-list', current, patreon.length === 0 ? 'No Patreon seats assigned' : null);
+  renderPatreonList('patreon-past-list', past, null);
+
+  const toggle = document.getElementById('patreon-past-toggle');
+  if (past.length === 0) {
+    toggle.style.display = 'none';
+    document.getElementById('patreon-past-list').style.display = 'none';
+  } else {
+    toggle.style.display = 'flex';
+    document.getElementById('patreon-past-count').textContent = `${past.length} former/declined supporter${past.length === 1 ? '' : 's'}`;
   }
-  patreon.forEach(supporter => {
-    // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
-    // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
-    const hasPatreonInfo = supporter.patronStatus !== undefined;
-    // Seat-holders' confirmed/unconfirmed status is untouched by the Patreon
-    // sync — still driven purely by the per-seat "active" flag from the
-    // existing Discord-role recheck (see PaywallService.refreshAll). Only a
-    // seatless, Patreon-sourced entry falls back to patronStatus, since it
-    // has no seats to check at all.
-    const confirmed = supporter.seats.length > 0
-      ? supporter.seats.every(s => s.active)
-      : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
-
-    const sup = document.createElement('div');
-    sup.className = confirmed ? 'patreon-sup' : 'patreon-sup unconfirmed';
-
-    const head = document.createElement('div');
-    head.className = 'patreon-sup-head';
-    let statusBadge = '';
-    if (supporter.seats.length === 0 && hasPatreonInfo) {
-      statusBadge = confirmed
-        ? `<span class="tag active">${patronStatusLabel(supporter.patronStatus)}</span>`
-        : `<span class="tag unconfirmed">${patronStatusLabel(supporter.patronStatus)}</span>`;
-    } else if (!confirmed) {
-      statusBadge = '<span class="tag unconfirmed">Not confirmed</span>';
-    }
-    const pledge = supporter.pledgeCents ? `<span class="patreon-sup-pledge">${formatPledge(supporter.pledgeCents)}</span>` : '';
-    head.innerHTML = `<i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
-    if (supporter.userId) {
-      const clearBtn = document.createElement('button');
-      clearBtn.className = 'patreon-btn danger';
-      clearBtn.style.marginLeft = 'auto';
-      clearBtn.textContent = 'Clear all';
-      clearBtn.addEventListener('click', () => clearSeats(supporter.userId, supporter.userName));
-      head.appendChild(clearBtn);
-    }
-    sup.appendChild(head);
-
-    if (supporter.seats.length === 0) {
-      const note = document.createElement('div');
-      note.className = 'patreon-empty';
-      note.innerHTML = supporter.userId
-        ? '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter, no seats assigned yet'
-        : '<i class="ti ti-info-circle" aria-hidden="true"></i>Patreon supporter with no linked Discord account &mdash; can\'t assign a seat until they connect one';
-      sup.appendChild(note);
-    }
-
-    supporter.seats.forEach(seat => {
-      const row = document.createElement('div');
-      row.className = 'patreon-seat';
-      row.innerHTML = `<i class="ti ti-brand-discord" aria-hidden="true"></i><span class="patreon-seat-text">${seat.guildName}</span><span class="sep">&middot;</span><i class="ti ti-world" aria-hidden="true"></i><span class="patreon-seat-text">${seat.world}</span>`;
-      const right = document.createElement('span');
-      right.className = 'patreon-seat-right';
-      right.innerHTML = seat.active ? '<span class="tag active">Active</span>' : '<span class="tag paused">Paused</span>';
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'patreon-btn danger';
-      removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', () => removeSeat(seat.guildId, seat.world, seat.guildName));
-      right.appendChild(removeBtn);
-      row.appendChild(right);
-      sup.appendChild(row);
-    });
-
-    el.appendChild(sup);
-  });
 }
 
 async function patreonAction(method, path, body) {
@@ -683,6 +725,13 @@ async function clearSeats(userId, userName) {
 
 document.getElementById('patreon-add-toggle').addEventListener('click', () => {
   document.getElementById('patreon-add-form').classList.toggle('open');
+});
+
+document.getElementById('patreon-past-toggle').addEventListener('click', () => {
+  const list = document.getElementById('patreon-past-list');
+  const isHidden = list.style.display === 'none';
+  list.style.display = isHidden ? 'flex' : 'none';
+  document.getElementById('patreon-past-chevron').classList.toggle('expanded', isHidden);
 });
 
 document.getElementById('patreon-add-form').addEventListener('submit', async (e) => {

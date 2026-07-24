@@ -6,11 +6,17 @@ package com.tibiabot.domain
  *  informational for the dashboard, keyed by Patreon's own member id (stable,
  *  unlike `fullName`, and present even when `discordUserId` isn't — a member
  *  who's never linked Discord to Patreon still gets synced, just without a
- *  Discord id to cross-reference against). */
+ *  Discord id to cross-reference against).
+ *
+ *  `discordUsername` is resolved separately from Patreon's own response (see
+ *  BotApp.syncPatreonMembers) — Patreon only gives us the linked Discord id,
+ *  not a display name — and is filled in once per sync (infrequent), not on
+ *  every dashboard poll. */
 case class PatreonMember(
   patreonMemberId: String,
   fullName: String,
   patronStatus: Option[String],
   pledgeCents: Int,
-  discordUserId: Option[String]
+  discordUserId: Option[String],
+  discordUsername: Option[String] = None
 )

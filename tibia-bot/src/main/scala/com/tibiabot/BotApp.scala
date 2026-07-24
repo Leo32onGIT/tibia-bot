@@ -693,6 +693,25 @@ object BotApp extends App with StrictLogging {
     logger.info("Patreon API sync disabled (no access token configured)")
   }
 
+  /** Patreon's own API only gives us a linked patron's Discord *id*, not a
+   *  display name — resolved here, once per sync (infrequent, unlike the
+   *  dashboard's 10s poll), via the same blocking JDA lookup PatreonAdminRoute
+   *  uses for a single user. A failed lookup just leaves that member's
+   *  username unresolved for this pass; it's retried on the next sync. */
+  private def resolveDiscordUsername(member: domain.PatreonMember): domain.PatreonMember =
+    member.discordUserId match {
+      case None => member
+      case Some(discordId) =>
+        try {
+          val user = discordGateway.retrieveUser(discordId)
+          if (user != null) member.copy(discordUsername = Some(user.getName)) else member
+        } catch {
+          case ex: Throwable =>
+            logger.warn(s"Failed to resolve Discord username for linked Patreon member '${member.patreonMemberId}' (Discord id '$discordId')", ex)
+            member
+        }
+    }
+
   /** Best-effort periodic snapshot of the Patreon campaign's member list
    *  (see patreonapi.PatreonApiClient), purely for the dashboard's
    *  supporters panel — never affects paywallService's own Discord-role
@@ -701,8 +720,9 @@ object BotApp extends App with StrictLogging {
    *  else here. */
   private def syncPatreonMembers(): Unit =
     patreonApiClient.fetchAllMembers().foreach { members =>
-      logger.info(s"Synced ${members.size} Patreon members (${members.count(_.discordUserId.isDefined)} with a linked Discord account)")
-      try patreonMemberRepository.replaceSnapshot(members, ZonedDateTime.now())
+      val enriched = members.map(resolveDiscordUsername)
+      logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account)")
+      try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
       catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
     }
 

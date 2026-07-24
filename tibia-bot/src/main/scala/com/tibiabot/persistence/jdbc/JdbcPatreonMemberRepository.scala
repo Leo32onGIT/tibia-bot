@@ -26,21 +26,33 @@ final class JdbcPatreonMemberRepository(connectionProvider: ConnectionProvider) 
           |patron_status VARCHAR(50),
           |pledge_cents INT NOT NULL,
           |discord_user_id VARCHAR(255),
+          |discord_username VARCHAR(255),
           |synced_at TIMESTAMP NOT NULL
           |);""".stripMargin)
     }
+
+    val discordUsernameExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'patreon_members' AND COLUMN_NAME = 'discord_username'")
+    val discordUsernameExists = discordUsernameExistsQuery.next()
+    discordUsernameExistsQuery.close()
+
+    if (!discordUsernameExists) {
+      statement.execute("ALTER TABLE patreon_members ADD COLUMN discord_username VARCHAR(255)")
+    }
+
     statement.close()
   }
 
   private def toMember(rs: ResultSet): PatreonMember = {
     val patronStatus = Option(rs.getString("patron_status"))
     val discordUserId = Option(rs.getString("discord_user_id"))
+    val discordUsername = Option(rs.getString("discord_username"))
     PatreonMember(
       rs.getString("patreon_member_id"),
       rs.getString("full_name"),
       patronStatus,
       rs.getInt("pledge_cents"),
-      discordUserId
+      discordUserId,
+      discordUsername
     )
   }
 
@@ -48,11 +60,12 @@ final class JdbcPatreonMemberRepository(connectionProvider: ConnectionProvider) 
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
       val upsert = conn.prepareStatement(
-        "INSERT INTO patreon_members (patreon_member_id, full_name, patron_status, pledge_cents, discord_user_id, synced_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO patreon_members (patreon_member_id, full_name, patron_status, pledge_cents, discord_user_id, discord_username, synced_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (patreon_member_id) DO UPDATE SET " +
         "full_name = EXCLUDED.full_name, patron_status = EXCLUDED.patron_status, " +
-        "pledge_cents = EXCLUDED.pledge_cents, discord_user_id = EXCLUDED.discord_user_id, synced_at = EXCLUDED.synced_at;"
+        "pledge_cents = EXCLUDED.pledge_cents, discord_user_id = EXCLUDED.discord_user_id, " +
+        "discord_username = EXCLUDED.discord_username, synced_at = EXCLUDED.synced_at;"
       )
       members.foreach { member =>
         upsert.setString(1, member.patreonMemberId)
@@ -60,7 +73,8 @@ final class JdbcPatreonMemberRepository(connectionProvider: ConnectionProvider) 
         upsert.setString(3, member.patronStatus.orNull)
         upsert.setInt(4, member.pledgeCents)
         upsert.setString(5, member.discordUserId.orNull)
-        upsert.setTimestamp(6, Timestamp.from(syncedAt.toInstant))
+        upsert.setString(6, member.discordUsername.orNull)
+        upsert.setTimestamp(7, Timestamp.from(syncedAt.toInstant))
         upsert.executeUpdate()
       }
       upsert.close()
@@ -75,7 +89,7 @@ final class JdbcPatreonMemberRepository(connectionProvider: ConnectionProvider) 
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       ensureTable(conn)
       val statement = conn.createStatement()
-      val result = statement.executeQuery("SELECT patreon_member_id, full_name, patron_status, pledge_cents, discord_user_id FROM patreon_members")
+      val result = statement.executeQuery("SELECT patreon_member_id, full_name, patron_status, pledge_cents, discord_user_id, discord_username FROM patreon_members")
       val members = new ListBuffer[PatreonMember]()
       while (result.next()) members += toMember(result)
       statement.close()

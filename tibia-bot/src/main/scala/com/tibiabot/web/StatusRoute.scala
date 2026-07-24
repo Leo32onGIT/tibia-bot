@@ -150,7 +150,8 @@ final class StatusRoute(
   private def patreonMemberFields(member: PatreonMember): Map[String, JsValue] = Map(
     "patreonMemberId" -> JsString(member.patreonMemberId),
     "patronStatus" -> member.patronStatus.map(s => JsString(s): JsValue).getOrElse(JsNull),
-    "pledgeCents" -> JsNumber(member.pledgeCents)
+    "pledgeCents" -> JsNumber(member.pledgeCents),
+    "discordUsername" -> member.discordUsername.map(s => JsString(s): JsValue).getOrElse(JsNull)
   )
 
   /** One entry per supporter (not per seat), each carrying their seats — the
@@ -172,10 +173,15 @@ final class StatusRoute(
    *   - a synced member never linked to Discord at all also becomes its own
    *     entry, but with `userId: null` — the dashboard has no Discord id to
    *     act on, so it renders informational-only, no seat-management
-   *     buttons. */
+   *     buttons.
+   *  Members with no patron_status at all (Patreon's own null state — never
+   *  completed becoming a patron, distinct from a real active/former/declined
+   *  status) are dropped before any of this, seat-holders included. */
   private def buildPatreonJson(): JsArray = {
     val bySupporter = paywallService.allSeats().groupBy(_.userId)
-    val patreonMembers = patreonMemberRepository.snapshot()
+    // A null patron_status (never completed becoming a patron, or a similar
+    // Patreon-side edge state) isn't worth surfacing on the dashboard.
+    val patreonMembers = patreonMemberRepository.snapshot().filter(_.patronStatus.isDefined)
     val patreonByDiscordId = patreonMembers.flatMap(m => m.discordUserId.map(_ -> m)).toMap
     val unlinkedMembers = patreonMembers.filter(_.discordUserId.isEmpty)
 

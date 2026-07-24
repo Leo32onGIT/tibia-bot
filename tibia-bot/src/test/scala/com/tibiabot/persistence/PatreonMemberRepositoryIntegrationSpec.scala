@@ -12,14 +12,14 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   private val syncedAt = ZonedDateTime.parse("2026-07-24T00:00:00Z")
 
-  test("replaceSnapshot round-trips members, including nullable patron_status/discord_user_id") {
+  test("replaceSnapshot round-trips members, including nullable patron_status/discord_user_id/discord_username") {
     val provider = pgOrCancel()
     ensureCacheDatabase(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
     val members = List(
-      PatreonMember("m1", "Alice", Some("active_patron"), 500, Some("111")),
+      PatreonMember("m1", "Alice", Some("active_patron"), 500, Some("111"), Some("alice#discord")),
       PatreonMember("m2", "Bob", None, 0, None)
     )
     repo.replaceSnapshot(members, syncedAt)
