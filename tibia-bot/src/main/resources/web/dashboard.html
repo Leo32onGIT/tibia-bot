@@ -18,6 +18,7 @@
     --good: #3ecf8e;
     --warn: #e0a93e;
     --bad: #e0563e;
+    --purple: #a78bfa;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -222,8 +223,8 @@
   .patreon-sup-chevron { color: var(--muted) !important; font-size: 12px; flex-shrink: 0; transition: transform 0.15s ease; }
   .patreon-sup.expanded .patreon-sup-chevron { transform: rotate(90deg); }
   .patreon-sup-name { color: var(--text-strong); font-weight: 600; font-size: 12px; }
-  .patreon-sup-seats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .patreon-sup-pledge { color: var(--good); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .patreon-sup-discord { color: var(--purple); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+  .patreon-sup-discord i { color: var(--purple) !important; font-size: 12px; }
   .patreon-sup-details { display: none; }
   .patreon-sup.expanded .patreon-sup-details { display: block; }
   .patreon-empty { padding: 8px 12px 10px 34px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -605,10 +606,6 @@ function patronStatusLabel(status) {
   return 'No status';
 }
 
-function formatPledge(cents) {
-  return `$${(cents / 100).toFixed(2)}/mo`;
-}
-
 // Driven by the #patreon-status-filter <select>. A supporter with no
 // patronStatus at all (a seat with no Patreon cross-reference — see
 // StatusRoute.buildPatreonJson) always matches, regardless of the filter:
@@ -663,16 +660,26 @@ function buildSupporterCard(supporter) {
 
   const head = document.createElement('div');
   head.className = 'patreon-sup-head';
+  // Always reflects the synced patronStatus when a cross-reference exists —
+  // regardless of seat count, and colored by patronStatus itself rather than
+  // `confirmed` (a seat-holder's seats can be active while their Patreon
+  // status has lapsed, or vice versa; the per-seat rows below already show
+  // each seat's own active/paused state once expanded).
   let statusBadge = '';
-  if (supporter.seats.length === 0 && hasPatreonInfo) {
-    statusBadge = confirmed
-      ? `<span class="tag active">${patronStatusLabel(supporter.patronStatus)}</span>`
-      : `<span class="tag unconfirmed">${patronStatusLabel(supporter.patronStatus)}</span>`;
+  if (hasPatreonInfo) {
+    const isActivePatron = supporter.patronStatus === 'active_patron';
+    statusBadge = `<span class="tag ${isActivePatron ? 'active' : 'unconfirmed'}">${patronStatusLabel(supporter.patronStatus)}</span>`;
   } else if (!confirmed) {
     statusBadge = '<span class="tag unconfirmed">Not confirmed</span>';
   }
-  const pledge = supporter.pledgeCents ? `<span class="patreon-sup-pledge">${formatPledge(supporter.pledgeCents)}</span>` : '';
-  head.innerHTML = `<i class="ti ti-chevron-right patreon-sup-chevron" aria-hidden="true"></i><i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${statusBadge}${pledge}<span class="patreon-sup-seats">${supporter.seats.length} / ${supporter.seatLimit} seats</span>`;
+  // Shown next to the name regardless of seat count, purple to flag a
+  // confirmed Discord link at a glance — the .patreon-empty note below only
+  // renders for seatless supporters, so this is the only place a seat-holder
+  // ever sees their linked Discord username.
+  const discordBadge = supporter.discordUsername
+    ? `<span class="patreon-sup-discord"><i class="ti ti-brand-discord" aria-hidden="true"></i>${supporter.discordUsername}</span>`
+    : '';
+  head.innerHTML = `<i class="ti ti-chevron-right patreon-sup-chevron" aria-hidden="true"></i><i class="ti ti-crown" aria-hidden="true"></i><span class="patreon-sup-name">${supporter.userName || supporter.userId || 'Unknown'}</span>${discordBadge}${statusBadge}`;
   head.addEventListener('click', () => {
     if (expandedSupporters.has(key)) expandedSupporters.delete(key);
     else expandedSupporters.add(key);
