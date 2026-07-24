@@ -684,10 +684,13 @@ object BotApp extends App with StrictLogging {
   // guarded by Config.PatreonApi.enabled so this is a no-op until real
   // Patreon API credentials are configured.
   if (Config.PatreonApi.enabled) {
+    logger.info(s"Patreon API sync enabled, campaign '${Config.PatreonApi.campaignId}', every ${Config.PatreonApi.syncInterval}")
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
       try syncPatreonMembers()
       catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
     })(ex)
+  } else {
+    logger.info("Patreon API sync disabled (no access token configured)")
   }
 
   /** Best-effort periodic snapshot of the Patreon campaign's member list
@@ -698,6 +701,7 @@ object BotApp extends App with StrictLogging {
    *  else here. */
   private def syncPatreonMembers(): Unit =
     patreonApiClient.fetchAllMembers().foreach { members =>
+      logger.info(s"Synced ${members.size} Patreon members (${members.count(_.discordUserId.isDefined)} with a linked Discord account)")
       try patreonMemberRepository.replaceSnapshot(members, ZonedDateTime.now())
       catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
     }
