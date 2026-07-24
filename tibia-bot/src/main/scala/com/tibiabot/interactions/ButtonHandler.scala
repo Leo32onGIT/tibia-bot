@@ -483,7 +483,7 @@ object ButtonHandler extends StrictLogging {
       if (BotApp.paywallService.canReassignSeat(user.getId, guildId, world)) {
         BotApp.paywallService.reassignSeat(user.getId, user.getName, guildId, world)
         val embed = new EmbedBuilder()
-          .setDescription(s":gear: Tracking for **`$world`** has been reassigned to <@${user.getId}> and resumed.")
+          .setDescription(s"${Config.yesEmoji} Tracking for **$world** has been reassigned to <@${user.getId}> and resumed.")
           .setColor(presentation.Embeds.BrandColor)
           .build()
         event.getHook.editOriginalEmbeds(embed).setComponents().queue()
@@ -494,6 +494,30 @@ object ButtonHandler extends StrictLogging {
         event.getHook.editOriginalEmbeds(embed).setComponents().queue()
       }
     } else if (button == "paywall_reassign_no") {
+      event.deferEdit().queue()
+      event.getHook.editOriginalComponents().queue()
+    } else if (button.startsWith("paywall_claim_yes_")) {
+      event.deferEdit().queue()
+      val world = button.stripPrefix("paywall_claim_yes_")
+      val guildId = guild.getId
+      // Re-checked here, not just trusted from when /setup was run — guards
+      // against a race (the clicker's own seat count changes, or someone
+      // else claims it first via /setup) in the window between the prompt
+      // and the click.
+      if (BotApp.paywallService.canAssignSeat(user.getId, guildId, world)) {
+        BotApp.paywallService.assignSeat(user.getId, user.getName, guildId, world)
+        val embed = new EmbedBuilder()
+          .setDescription(s"${Config.yesEmoji} **$world** has been assigned to <@${user.getId}>")
+          .setColor(presentation.Embeds.BrandColor)
+          .build()
+        event.getHook.editOriginalEmbeds(embed).setComponents().queue()
+      } else {
+        val embed = new EmbedBuilder()
+          .setDescription(s"${Config.noEmoji} This world can no longer be assigned to you — you may be at your Patreon seat limit, or someone else already claimed it.")
+          .build()
+        event.getHook.editOriginalEmbeds(embed).setComponents().queue()
+      }
+    } else if (button == "paywall_claim_no") {
       event.deferEdit().queue()
       event.getHook.editOriginalComponents().queue()
     } else {

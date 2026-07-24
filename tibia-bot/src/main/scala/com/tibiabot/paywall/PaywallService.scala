@@ -93,6 +93,14 @@ final class PaywallService(
   def releaseSeat(guildId: String, world: String): Unit =
     patreonSeatRepository.releaseSeat(guildId, world)
 
+  /** True once (guildId, world) has ever been tied to a seat. False means
+   *  either it's brand new, or it's a legacy setup from before the seat
+   *  system existed — see [[isActive]]'s grandfather rule, which treats both
+   *  the same (always active) but which `/setup` needs to tell apart to
+   *  offer claiming a legacy world onto a seat. */
+  def hasSeat(guildId: String, world: String): Boolean =
+    patreonSeatRepository.seatFor(guildId, world).isDefined
+
   /** Frees every seat owned by this user. */
   def releaseAllSeats(userId: String): Unit =
     patreonSeatRepository.releaseAllSeatsForUser(userId)

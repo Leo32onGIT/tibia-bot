@@ -350,6 +350,21 @@ final class ChannelService(
         } else {
           s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
         }
+      } else if (!paywallService.hasSeat(guild.getId, world)) {
+        // channels exist and tracking is active, but this (guild, world) was
+        // never tied to a seat — a legacy setup from before the seat system
+        // existed. isActive's grandfather rule leaves it running either way,
+        // but offer to claim it onto one of the caller's seats rather than
+        // leaving it ungated forever.
+        if (paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+          buttons = List(
+            Button.success(s"paywall_claim_yes_$world", "Assign as a seat"),
+            Button.secondary("paywall_claim_no", "Cancel")
+          )
+          s":warning: The channels for **$world** already exist, but this world isn't tied to one of your Patreon seats yet.\nAssign this world to a seat now?"
+        } else {
+          s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+        }
       } else {
         // channels already exist
         logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
