@@ -166,7 +166,8 @@ final class StatusRoute(
    *  patreonapi.PatreonApiClient) — purely informational, never affects
    *  paywallService's own Discord-role gate:
    *   - a seat-holding supporter whose Discord id matches a synced member
-   *     gets that member's patronStatus/pledgeCents spliced on;
+   *     gets that member's patronStatus/pledgeCents spliced on, and their
+   *     Patreon fullName supersedes the seat's own one-time stored name;
    *   - a synced member with a linked Discord id but no seat becomes its own
    *     entry (userId set, empty seats — the existing add/remove-seat flow
    *     still targets a real Discord id, just starting from zero seats);
@@ -197,14 +198,19 @@ final class StatusRoute(
           "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world))
         ): JsValue
       }
-      val displayName = seats.headOption.map(_.userName).getOrElse("")
+      // A confirmed Patreon cross-reference's fullName supersedes the seat's
+      // own stored name, which is just a one-time Discord lookup taken when
+      // the seat was assigned (see the class doc above) and can go stale or
+      // was never a real name to begin with.
+      val patreonMember = patreonByDiscordId.get(userId)
+      val displayName = patreonMember.map(_.fullName).getOrElse(seats.headOption.map(_.userName).getOrElse(""))
       val base = Map(
         "userId" -> (JsString(userId): JsValue),
         "userName" -> (JsString(displayName): JsValue),
         "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
         "seats" -> (JsArray(seatsJson.toVector): JsValue)
       )
-      val enriched = patreonByDiscordId.get(userId).map(patreonMemberFields).getOrElse(Map.empty)
+      val enriched = patreonMember.map(patreonMemberFields).getOrElse(Map.empty)
       displayName -> JsObject(base ++ enriched)
     }
 
