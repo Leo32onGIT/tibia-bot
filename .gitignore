@@ -1,9 +1,5 @@
 *guild-members.dat
 
-# Blue/Red -> central bot migration artifacts (real user data, never committed)
-/backups/
-/tibia-bot/*_export.json
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
