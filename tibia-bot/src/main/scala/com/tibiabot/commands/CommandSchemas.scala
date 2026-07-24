@@ -241,6 +241,8 @@ object CommandSchemas {
         )
     )
 
+  val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
+
   val boostedCommand: SlashCommandData = Commands.slash("boosted", "Turn off these notifications or filter them")
     .addOptions(
       new OptionData(OptionType.STRING, "option", "Would you like to add/remove a boss or creature?").setRequired(true)
@@ -252,9 +254,9 @@ object CommandSchemas {
 
   /** Visible immediately when the bot joins a guild, before any world's been
    *  set up — /setup itself, /help (how do I use this bot, including how to
-   *  run /setup in the first place), and galthen/boosted (personal,
+   *  run /setup in the first place), and galthen/boosted/patreon (personal,
    *  self-service commands unrelated to any specific world). */
-  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, galthenCommand, boostedCommand)
+  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, galthenCommand, boostedCommand, patreonCommand)
 
   /** Only meaningful once at least one world is tracked in the guild — added
    *  on top of initialCommands once /setup first succeeds there. remove/

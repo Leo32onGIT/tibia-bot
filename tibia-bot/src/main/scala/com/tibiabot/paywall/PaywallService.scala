@@ -105,6 +105,10 @@ final class PaywallService(
   def releaseAllSeats(userId: String): Unit =
     patreonSeatRepository.releaseAllSeatsForUser(userId)
 
+  /** Every seat owned by this user — the `/patreon` self-service view. */
+  def seatsForUser(userId: String): List[com.tibiabot.domain.PatreonSeat] =
+    patreonSeatRepository.seatsForUser(userId)
+
   /** Every seat, for the dashboard's supporters panel — same source
    *  [[refreshAll]] sweeps, just exposed for reading. */
   def allSeats(): List[com.tibiabot.domain.PatreonSeat] = patreonSeatRepository.allSeats()

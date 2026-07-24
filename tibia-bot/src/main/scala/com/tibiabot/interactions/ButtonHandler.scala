@@ -520,6 +520,23 @@ object ButtonHandler extends StrictLogging {
     } else if (button == "paywall_claim_no") {
       event.deferEdit().queue()
       event.getHook.editOriginalComponents().queue()
+    } else if (button.startsWith("patreon_release_")) {
+      event.deferEdit().queue()
+      // /patreon's own release button — unlike the /setup-flow buttons above,
+      // this can be clicked from a different guild than the seat itself (the
+      // command lists every seat across every server), so the target guildId
+      // has to travel in the payload rather than coming from event.getGuild.
+      // guildId is a pure-digit snowflake and world never contains an
+      // underscore (see PatreonCommands), so splitting on the first '_' is safe.
+      val payload = button.stripPrefix("patreon_release_")
+      val (targetGuildId, worldRaw) = payload.span(_ != '_')
+      val world = worldRaw.stripPrefix("_")
+      BotApp.paywallService.releaseSeat(targetGuildId, world)
+      val embed = new EmbedBuilder()
+        .setDescription(s"${Config.yesEmoji} Your seat for **$world** has been released. Use `/setup` to assign it to a different discord and/or world.")
+        .setColor(presentation.Embeds.BrandColor)
+        .build()
+      event.getHook.editOriginalEmbeds(embed).setComponents().queue()
     } else {
       // Any component not matched above is from a superseded message layout;
       // acknowledge it gracefully instead of leaving the interaction to time out.
