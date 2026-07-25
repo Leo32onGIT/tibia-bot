@@ -233,4 +233,27 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
 
     statement.close()
   }
+
+  def allTrackedWorldNames(): List[String] = {
+    val guildIds = JdbcSupport.withConnection(() => connectionProvider.admin()) { conn =>
+      val statement = conn.createStatement()
+      val result = statement.executeQuery("SELECT datname FROM pg_database WHERE datname ~ '^_[0-9]+$'")
+      val ids = Iterator.continually(result.next()).takeWhile(identity).map(_ => result.getString("datname").stripPrefix("_")).toList
+      statement.close()
+      ids
+    }
+    // One broken/mid-migration guild database shouldn't stop the primary from
+    // discovering every other guild's worlds.
+    guildIds.flatMap { guildId =>
+      Try {
+        JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+          val statement = conn.createStatement()
+          val result = statement.executeQuery("SELECT DISTINCT name FROM worlds")
+          val names = Iterator.continually(result.next()).takeWhile(identity).map(_ => result.getString("name")).toList
+          statement.close()
+          names
+        }
+      }.getOrElse(Nil)
+    }.distinct
+  }
 }

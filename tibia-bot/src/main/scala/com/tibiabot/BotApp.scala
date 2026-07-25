@@ -817,6 +817,21 @@ object BotApp extends App with StrictLogging {
         streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), discordsList)
         Thread.sleep(5500) // space each stream out 5.5 seconds
       }
+
+      // Shared world-cycle: as primary, also poll (and publish, via
+      // SharedWorldTibiaApi inside TibiaBot) any world a slave's guilds need
+      // that none of THIS process's own guilds do — discordsData above is
+      // built purely from our own JDA guild membership, so it can't see
+      // those. Empty discords list: nothing of ours to fan out to for these,
+      // the poll+publish is the whole point of the stream.
+      if (Config.BotRole.current == Config.BotRole.Primary) {
+        val extraWorlds = worldConfigRepository.allTrackedWorldNames().toSet -- discordsData.keySet
+        extraWorlds.foreach { worldName =>
+          streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), Nil)
+          Thread.sleep(5500)
+        }
+      }
+
       startUpComplete = true
     }
   }

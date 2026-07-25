@@ -146,6 +146,23 @@ object Config {
     val enabled: Boolean = accessToken.nonEmpty
   }
 
+  /** Shared world-cycle role — see discord.conf's bot-role comment.
+   *  `Disabled` (the default) behaves exactly as before this feature
+   *  existed: no extra Redis traffic, no cross-Postgres world scanning. */
+  object BotRole {
+    sealed trait Role
+    case object Disabled extends Role
+    case object Primary extends Role
+    case object Slave extends Role
+
+    val current: Role = discord.getString("bot-role").trim.toLowerCase match {
+      case "primary" => Primary
+      case "slave" => Slave
+      case _ => Disabled
+    }
+    val sharingEnabled: Boolean = current != Disabled
+  }
+
   /** Auto-leave a guild with no worlds tracked for this many days, unless a
    *  command's been run there within activityDays — see BotApp.pruneInactiveGuilds. */
   object InactiveGuild {

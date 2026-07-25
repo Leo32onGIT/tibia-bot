@@ -20,4 +20,11 @@ trait WorldConfigRepository {
   def updateWorldString(guildId: String, world: String, column: String, value: String): Unit
   /** Update an integer column for a world. */
   def updateWorldInt(guildId: String, world: String, column: String, value: Int): Unit
+
+  /** Every distinct world name tracked by ANY guild database on this Postgres
+   *  instance — a guild-agnostic scan, unlike listWorlds' per-guildId lookup.
+   *  Only meaningful for the shared-world-cycle primary role: it's how a
+   *  primary learns about worlds a slave's guilds need, since that can't come
+   *  from its own JDA guild membership. */
+  def allTrackedWorldNames(): List[String]
 }
