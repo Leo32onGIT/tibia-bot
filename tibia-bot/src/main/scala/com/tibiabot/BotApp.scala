@@ -781,6 +781,14 @@ object BotApp extends App with StrictLogging {
   }
 
   private def startBot(guild: Option[Guild], world: Option[String]): Unit = {
+    // A guild's stored world config can reference a world TibiaData has since
+    // merged/retired (e.g. a legacy `/setup` entry) — polling it would only
+    // ever fail to parse. Filtering against the live world list here means
+    // that failure happens once, as a clear skip log, instead of every poll
+    // cycle forever as a parse-warning.
+    val validWorlds = WorldManager.getWorldList().toSet
+    def skipStale(worldName: String): Unit =
+      logger.warn(s"Skipping stream for '$worldName' — not a currently valid Tibia world (stale/merged guild config?)")
 
     if (guild.isDefined && world.isDefined) {
       val g = guild.get
@@ -795,7 +803,11 @@ object BotApp extends App with StrictLogging {
           // left unchanged (the usedBy append was overwritten and never took effect);
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
-            streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get), paywallService).stream.run(), List(discords))
+            if (validWorlds.contains(world.get)) {
+              streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get), paywallService).stream.run(), List(discords))
+            } else {
+              skipStale(world.get)
+            }
           }
         }
       }
@@ -814,8 +826,12 @@ object BotApp extends App with StrictLogging {
         }
       }
       discordsData.foreach { case (worldName, discordsList) =>
-        streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), discordsList)
-        Thread.sleep(5500) // space each stream out 5.5 seconds
+        if (validWorlds.contains(worldName)) {
+          streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), discordsList)
+          Thread.sleep(5500) // space each stream out 5.5 seconds
+        } else {
+          skipStale(worldName)
+        }
       }
 
       // Shared world-cycle: as primary, also poll (and publish, via
@@ -827,8 +843,12 @@ object BotApp extends App with StrictLogging {
       if (Config.BotRole.current == Config.BotRole.Primary) {
         val extraWorlds = worldConfigRepository.allTrackedWorldNames().toSet -- discordsData.keySet
         extraWorlds.foreach { worldName =>
-          streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), Nil)
-          Thread.sleep(5500)
+          if (validWorlds.contains(worldName)) {
+            streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), Nil)
+            Thread.sleep(5500)
+          } else {
+            skipStale(worldName)
+          }
         }
       }
 
