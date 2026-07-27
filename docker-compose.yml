@@ -7,8 +7,11 @@
 #        • bundled Postgres:   docker compose --profile local-db up -d
 #        • pre-existing DB:    docker compose up -d          (set POSTGRES_HOST in .env)
 #
-# Redis (the cache) starts by default in both modes. Leave REDIS_HOST empty in
-# .env to run without caching (the bot then ignores the redis container).
+# Redis (the cache) starts by default (the `local-cache` profile is meant to
+# be active via COMPOSE_PROFILES in .env — see .env.example). A shared-world-
+# cycle slave doesn't run its own Redis at all (it points REDIS_HOST at the
+# primary's instead), so its .env leaves COMPOSE_PROFILES unset and the local
+# redis service is never created.
 
 services:
   bot:
@@ -19,6 +22,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+        # Satisfied normally when the `local-cache` profile is active; simply
+        # skipped (not an error) when it isn't, e.g. a shared-world-cycle
+        # slave — see the redis service below.
+        required: false
     # The bot connects to Postgres at boot; with the bundled DB (local-db profile)
     # it may restart a couple of times while Postgres initialises — that is
     # expected and harmless. It is NOT wired to depends_on postgres so that a
@@ -58,6 +65,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Only created when the `local-cache` profile is active (COMPOSE_PROFILES
+    # in .env — see .env.example). Absent entirely on a shared-world-cycle
+    # slave, which has no use for its own Redis.
+    profiles: ["local-cache"]
     networks:
       - violentbot
     # appendonly so the character-cache snapshot (and other cached keys) survive
