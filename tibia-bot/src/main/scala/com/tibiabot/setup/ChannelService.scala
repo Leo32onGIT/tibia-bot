@@ -328,7 +328,9 @@ final class ChannelService(
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
-          guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true).asJava).queue()
+          val excludeAll = Config.BotRole.current == Config.BotRole.Secondary &&
+            com.tibiabot.commands.CommandSchemas.secondaryExcludedCommandGuildIds.contains(guild.getIdLong)
+          guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true, excludeAll).asJava).queue()
         }
         startBot(Some(guild), Some(world))
 

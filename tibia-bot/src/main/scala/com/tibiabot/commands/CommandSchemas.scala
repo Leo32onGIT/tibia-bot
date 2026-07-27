@@ -274,12 +274,24 @@ object CommandSchemas {
    *  prune sweep, which must never auto-leave either of these. */
   val supportGuildIds: Set[Long] = Set(867319250708463628L, 1082484147492237515L)
 
+  /** Guild(s) a shared-world-cycle secondary must never register slash
+   *  commands in — the main support Discord's admin commands are the
+   *  primary's responsibility alone; a secondary sharing that guild would
+   *  otherwise register a duplicate, redundant command set there. */
+  val secondaryExcludedCommandGuildIds: Set[Long] = Set(867319250708463628L)
+
   /** The single place this decision is made — reused by the boot-time
    *  registration loop, onGuildJoin, and ChannelService's post-/setup
    *  upgrade, so a support guild with no world yet configured (were that to
-   *  ever happen) still correctly gets adminCommands, not just commands. */
-  def commandsFor(guildId: Long, hasWorldConfigured: Boolean): List[SlashCommandData] =
-    if (supportGuildIds.contains(guildId)) adminCommands
+   *  ever happen) still correctly gets adminCommands, not just commands.
+   *  `excludeAll` is decided by the caller (this object deliberately stays
+   *  decoupled from Config/BotRole) — when true, an empty list is returned
+   *  so the caller's bulk `updateCommands()` call clears any commands this
+   *  identity may have previously registered there, not just skips future
+   *  registration and leaves stale ones behind. */
+  def commandsFor(guildId: Long, hasWorldConfigured: Boolean, excludeAll: Boolean = false): List[SlashCommandData] =
+    if (excludeAll) Nil
+    else if (supportGuildIds.contains(guildId)) adminCommands
     else if (hasWorldConfigured) commands
     else initialCommands
 }

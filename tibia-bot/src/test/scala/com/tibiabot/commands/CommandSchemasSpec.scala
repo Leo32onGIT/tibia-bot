@@ -57,4 +57,13 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
   test("commandsFor: a non-support guild with a world configured gets the full set") {
     CommandSchemas.commandsFor(111L, hasWorldConfigured = true) shouldBe CommandSchemas.commands
   }
+
+  test("commandsFor: excludeAll returns an empty list regardless of the guild's own state") {
+    CommandSchemas.commandsFor(867319250708463628L, hasWorldConfigured = false, excludeAll = true) shouldBe Nil
+    CommandSchemas.commandsFor(111L, hasWorldConfigured = true, excludeAll = true) shouldBe Nil
+  }
+
+  test("secondaryExcludedCommandGuildIds contains the known support Discord a secondary must stay out of") {
+    CommandSchemas.secondaryExcludedCommandGuildIds should contain(867319250708463628L)
+  }
 }

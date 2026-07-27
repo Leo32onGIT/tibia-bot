@@ -390,7 +390,9 @@ object BotApp extends App with StrictLogging {
     // worldConfig, not just the world-list query inside it, or this throws
     // instead of returning empty.
     val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
-    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured).asJava).complete()
+    val excludeAll = Config.BotRole.current == Config.BotRole.Secondary &&
+      com.tibiabot.commands.CommandSchemas.secondaryExcludedCommandGuildIds.contains(g.getIdLong)
+    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll).asJava).complete()
   }
 
   // Start all world streams
