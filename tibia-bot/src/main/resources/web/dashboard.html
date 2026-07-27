@@ -208,11 +208,10 @@
   .tag.active { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
-  /* Which Discord bot(s) serve this world — only ever present once a
+  /* Which Discord bot serves this guild — only ever present once a
      shared-world-cycle primary's dashboard has slave data merged in. Sits
-     next to the world's PVP type in the detail title. */
-  .bot-avatars { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
-  .bot-avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; }
+     in each guild's own row in the discords list (.discord-item). */
+  .bot-avatar { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
 
   .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
   .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
@@ -449,19 +448,7 @@ function renderDetail(worlds) {
   const world = worlds.find(w => w.name === selectedWorld) || sortedWorlds(worlds)[0];
   if (!world) return;
 
-  // Distinct bots serving this world, derived from its guilds — a world can
-  // have guilds on more than one bot once a shared-world-cycle slave's data
-  // is merged in, so this can render more than one avatar.
-  const bots = [];
-  const seenBotIds = new Set();
-  (world.discords || []).forEach(d => {
-    if (d.bot && !seenBotIds.has(d.bot.userId)) {
-      seenBotIds.add(d.bot.userId);
-      bots.push(d.bot);
-    }
-  });
-  const botAvatars = bots.map(b => `<img class="bot-avatar" src="${b.avatarUrl}" alt="${b.name}" title="${b.name} (${b.userId})">`).join('');
-  document.getElementById('detail-title').innerHTML = (world.pvpType ? `${world.name} - ${world.pvpType}` : world.name) + `<span class="bot-avatars">${botAvatars}</span>`;
+  document.getElementById('detail-title').textContent = world.pvpType ? `${world.name} - ${world.pvpType}` : world.name;
   document.getElementById('detail-stale').textContent = world.lastPollAt ? '' : 'no data yet';
 
   document.getElementById('detail-stats').innerHTML = `
@@ -473,7 +460,12 @@ function renderDetail(worlds) {
   `;
 
   document.getElementById('detail-discords').innerHTML = world.discords.length
-    ? world.discords.map(d => `<div class="discord-item"><i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`).join('')
+    ? world.discords.map(d => {
+        // Only present once a shared-world-cycle primary's dashboard has
+        // slave data merged in — omitted entirely on a plain deployment.
+        const botAvatar = d.bot ? `<img class="bot-avatar" src="${d.bot.avatarUrl}" alt="${d.bot.name}" title="${d.bot.name} (${d.bot.userId})">` : '';
+        return `<div class="discord-item">${botAvatar}<i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`;
+      }).join('')
     : '<div class="muted">No discords tracking this world</div>';
 }
 
