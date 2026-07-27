@@ -317,7 +317,7 @@
     <span class="mobile-topbar-title">Violent Bot</span>
   </div>
   <div class="kpis-strip">
-    <div class="lanes-compact">
+    <div class="lanes-compact" id="lanes-compact">
       <div class="lanes-rows" id="lanes"></div>
     </div>
     <div class="kpi-group">
@@ -515,7 +515,16 @@ function formatRefreshInterval(seconds) {
   return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}min`;
 }
 
-function renderLanes(lanes) {
+function renderLanes(lanes, hasFleet) {
+  // Redundant once the Bots panel is showing (2+ bots) — this bot's own
+  // queue depths already appear there as one of its rows, so the KPI
+  // header's copy would just be the same numbers shown twice. Hidden with
+  // visibility (not display:none) so its grid column keeps the same
+  // footprint either way — the KPI/log-alerts groups next to it sit in a
+  // 1fr/auto/1fr grid, and removing this column's content entirely would
+  // let their positions shift depending on whether it's showing.
+  document.getElementById('lanes-compact').style.visibility = hasFleet ? 'hidden' : 'visible';
+
   const el = document.getElementById('lanes');
   el.innerHTML = '';
   Object.entries(lanes).forEach(([name, lane]) => {
@@ -562,12 +571,16 @@ function renderBots(bots) {
     const lanes = b.rateLimitLanes || {};
     const bgDepth = lanes.background ? lanes.background.queueDepth : 0;
     const olDepth = lanes['online-list'] ? lanes['online-list'].queueDepth : 0;
+    // Same heat ramp + scale (100/1000) as the KPI header's lane cards
+    // (renderLanes) so a queue depth reads the same severity everywhere.
+    const bgColor = heatColorForRatio(bgDepth / 100);
+    const olColor = heatColorForRatio(olDepth / 1000);
     return `<tr>
       <td class="bots-table-name"><img class="bot-avatar" src="${b.bot.avatarUrl}" alt="${b.bot.name}" title="${b.bot.name} (${b.bot.userId})"><span>${b.bot.name}</span>${roleLabel ? `<span class="muted">&middot; ${roleLabel}</span>` : ''}</td>
       <td>${b.worldCount}</td>
       <td>${b.population}</td>
-      <td>${bgDepth}</td>
-      <td>${olDepth}</td>
+      <td style="color:${bgColor};">${bgDepth}</td>
+      <td style="color:${olColor};">${olDepth}</td>
       <td class="muted">${timeAgo(b.publishedAt)}</td>
       <td class="gid">${b.bot.userId}</td>
     </tr>`;
@@ -919,7 +932,7 @@ function render() {
 
   renderSidebar(worlds);
   renderDetail(worlds);
-  renderLanes(lastData.rateLimitLanes);
+  renderLanes(lastData.rateLimitLanes, (lastData.bots || []).length >= 2);
   renderBots(lastData.bots || []);
   renderLogAlerts(lastData.logAlerts);
   renderPatreon(lastData.patreon || []);
