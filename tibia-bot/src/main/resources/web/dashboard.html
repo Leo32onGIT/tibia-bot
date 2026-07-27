@@ -147,10 +147,14 @@
   .detail-stat .num-label { font-size: 11px; color: var(--muted); }
 
   .bots-table-wrap { padding: 0 16px 16px; overflow-x: auto; }
-  .bots-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .bots-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 10px; border-bottom: 1px solid var(--panel-border); }
-  .bots-table td { padding: 8px 10px; border-bottom: 1px solid var(--panel-border); font-variant-numeric: tabular-nums; }
-  .bots-table tr:last-child td { border-bottom: none; }
+  .bots-table { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-size: 12px; }
+  .bots-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 10px 8px; border-bottom: 1px solid var(--panel-border); }
+  /* Same card background as .discord-item (world pane's discord info rows) so
+     the two lists read as one visual language. */
+  .bots-table td { padding: 8px 10px; background: rgba(255, 255, 255, 0.02); font-variant-numeric: tabular-nums; }
+  .bots-table td:first-child { border-radius: 6px 0 0 6px; }
+  .bots-table td:last-child { border-radius: 0 6px 6px 0; }
+  .bots-table th:last-child, .bots-table td:last-child { text-align: right; }
   .bots-table-name { display: flex; align-items: center; gap: 8px; font-variant-numeric: normal; }
 
   .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; max-height: 320px; overflow-y: auto; }

@@ -24,6 +24,7 @@ val AkkaHttpVersion = "10.5.0"
 
 libraryDependencies += "com.typesafe" % "config" % "1.4.2"
 libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.7.0"
+libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % "2.7.0"
 libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
