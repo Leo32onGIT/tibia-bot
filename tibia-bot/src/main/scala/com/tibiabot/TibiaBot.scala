@@ -1466,12 +1466,12 @@ class TibiaBot(
             val level = response.character.character.level.toInt
             Some(level)
           case Left(error) =>
-            logger.warn(s"Failed to get character $killerName from TibiaData API: $error")
+            logger.warn(s"Failed to get character '$killerName' from TibiaData API: $error")
             None
         }
       } catch {
         case ex: Exception =>
-          logger.warn(s"Exception when calling TibiaData API for $killerName: ${ex.getMessage}")
+          logger.warn(s"Exception when calling TibiaData API for '$killerName': ${ex.getMessage}")
           None
       }
     }

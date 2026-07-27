@@ -105,4 +105,31 @@ class LogCaptureSpec extends AnyFunSuite with Matchers {
     recent should have size 1
     recent.head.count shouldBe 2
   }
+
+  // Regression coverage for TibiaDataClient.requestWithRetry's retry-warning
+  // shape, whose per-request URI (including the character/guild/world name)
+  // is now quoted at the log call site specifically so it collapses here —
+  // previously unquoted, a burst of per-character 503s each got its own row.
+  test("TibiaDataClient retry warnings for different characters collapse as the same shape") {
+    val log = new LogCapture()
+    log.record("WARN", "com.tibiabot.tibiadata.TibiaDataClient",
+      "Got 503 Service Unavailable from 'https://api.tibiadata.com/v4/character/Tpan%20Alius' (attempt 2/3), retrying in 500ms")
+    log.record("WARN", "com.tibiabot.tibiadata.TibiaDataClient",
+      "Got 503 Service Unavailable from 'https://api.tibiadata.com/v4/character/Vuniro%20Invacion' (attempt 2/3), retrying in 500ms")
+
+    val recent = log.recentWarnings()
+    recent should have size 1
+    recent.head.count shouldBe 2
+  }
+
+  // Regression coverage for TibiaBot.getKillerLevel's exception-warning shape.
+  test("TibiaBot killer-fallback timeout warnings for different characters collapse as the same shape") {
+    val log = new LogCapture()
+    log.record("WARN", "com.tibiabot.TibiaBot", "Exception when calling TibiaData API for 'Baber Kedde': Future timed out after [10 seconds]")
+    log.record("WARN", "com.tibiabot.TibiaBot", "Exception when calling TibiaData API for 'Someone Else': Future timed out after [10 seconds]")
+
+    val recent = log.recentWarnings()
+    recent should have size 1
+    recent.head.count shouldBe 2
+  }
 }

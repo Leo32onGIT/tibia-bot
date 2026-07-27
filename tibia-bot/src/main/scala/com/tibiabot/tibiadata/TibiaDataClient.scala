@@ -47,7 +47,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
     Http().singleRequest(request).flatMap { response =>
       if (attempt < maxRetries && retryableStatusCodes.contains(response.status.intValue)) {
         val delay = retryBackoff(attempt)
-        logger.warn(s"Got ${response.status} from ${request.uri} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
+        logger.warn(s"Got ${response.status} from '${request.uri}' (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
         response.discardEntityBytes()
         after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
       } else {
@@ -56,7 +56,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
     }.recoverWith {
       case NonFatal(ex) if attempt < maxRetries =>
         val delay = retryBackoff(attempt)
-        logger.warn(s"Request to ${request.uri} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
+        logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
         after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
     }
 
