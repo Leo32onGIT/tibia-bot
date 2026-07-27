@@ -17,6 +17,7 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def retrieveUser(id: String): User = null
     def selfUserId: String = "self"
     def selfUserName: String = "ViolentBot"
+    def selfUserAvatarUrl: String = "https://example.com/avatar.png"
     def applicationOwnerId: String = "owner"
     def setWatchingActivity(text: String): Unit = ()
   }

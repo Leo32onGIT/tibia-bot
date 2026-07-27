@@ -101,16 +101,26 @@ final class StatusRoute(
 
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
+  /** This process's own Discord identity — attached to every discords/guild
+   *  entry this process reports (below), never to the world as a whole: a
+   *  world can be served by guilds on more than one bot, but a guild always
+   *  belongs to exactly one. avatarUrl/userId let the dashboard badge (and
+   *  hover-identify) which bot serves a given guild on a merged view. */
+  private def botIdentityJson: JsObject = JsObject(
+    "name" -> JsString(Config.BotRole.name),
+    "avatarUrl" -> JsString(discordGateway.selfUserAvatarUrl),
+    "userId" -> JsString(discordGateway.selfUserId)
+  )
+
   /** This process's own worlds — its JDA guild membership plus (as a
    *  shared-world-cycle primary) any extra worlds it polls on a slave's
-   *  behalf, per `BotApp.startBot`. Each entry is tagged with `bot` (see
-   *  Config.BotRole.name) so a merged dashboard (below) can show which
-   *  Discord bot actually serves it. Public: a slave calls this directly to
+   *  behalf, per `BotApp.startBot`. Public: a slave calls this directly to
    *  build the snapshot it publishes to Redis, reusing the exact same shape
    *  its own local dashboard would show if it ran one. */
   def buildWorldsJson(): JsArray = {
     val worldSnapshots = worldMetricsRegistry.snapshotAll()
     val streams = streamSupervisor.snapshot
+    val bot = botIdentityJson
 
     val worldsJson = streams.keySet.union(worldSnapshots.keySet).toList.sorted.map { world =>
       val snap = worldSnapshots.getOrElse(world, tracking.WorldSnapshot(0, None, None, 0, 0, 0, battleyeGreen = true, pvpType = ""))
@@ -121,7 +131,7 @@ final class StatusRoute(
         // owner isn't in JDA's member cache — same fallback used elsewhere
         // in this codebase (ChannelService.scala) for the same reason.
         val owner = Option(guild).flatMap(g => Option(g.getOwner)).map(_.getEffectiveName).getOrElse("Unknown")
-        JsObject("id" -> JsString(d.id), "name" -> JsString(name), "owner" -> JsString(owner))
+        JsObject("id" -> JsString(d.id), "name" -> JsString(name), "owner" -> JsString(owner), "bot" -> bot)
       }
       val recentEventsJson = recentEventsRegistry.forWorld(world).recent().map { ev =>
         JsObject(
@@ -132,7 +142,6 @@ final class StatusRoute(
       }
       JsObject(
         "name" -> JsString(world),
-        "bot" -> JsString(Config.BotRole.name),
         "population" -> JsNumber(snap.population),
         "lastPollAt" -> snap.lastPollAt.map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
         "nextPollAt" -> snap.nextPollAt.map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
@@ -180,7 +189,7 @@ final class StatusRoute(
     val ownWorlds = buildWorldsJson()
     remoteSlaveWorldsJson().map { remoteWorlds =>
       JsObject(
-        "worlds" -> JsArray(ownWorlds.elements ++ remoteWorlds),
+        "worlds" -> JsArray(StatusRoute.mergeWorlds(ownWorlds.elements ++ remoteWorlds)),
         "rateLimitLanes" -> JsObject(
           "background" -> laneJson(outboundSender),
           "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
@@ -344,4 +353,48 @@ object StatusRoute {
    *  a primary scans for via `keysMatching` to discover however many slaves
    *  are currently publishing. */
   val slaveStatusKeyPrefix = "tibia:slave-status:"
+
+  /** Merges local + remote world lists by `name` — a world tracked by guilds
+   *  on more than one bot must appear exactly once, not once per bot (a
+   *  naive concatenation would double-count it in the KPI strip and only
+   *  ever show one side's guilds in the detail view, since the frontend
+   *  looks up a world by name). Guild/discord lists from every contributing
+   *  entry are combined (each already tagged with its own bot); world-level
+   *  stats (population, deaths/levels/edits, pvp/battleye) are taken from
+   *  whichever entry polled most recently, since they describe the same
+   *  real Tibia world and duplicating/summing them would be wrong.
+   *  recentEvents are combined and re-capped at 50 (RecentEvents' own
+   *  per-process capacity) so a merge never shows more history than a
+   *  single bot's own dashboard would. A pure function of JsValues (no
+   *  instance state), so it's directly unit-testable. */
+  def mergeWorlds(entries: Vector[JsValue]): Vector[JsValue] = {
+    def asObj(v: JsValue): JsObject = v.asJsObject
+    def field(o: JsObject, key: String): Option[JsValue] = o.fields.get(key)
+    def instant(o: JsObject): Option[java.time.Instant] =
+      field(o, "lastPollAt").flatMap {
+        case JsString(s) => try Some(java.time.Instant.parse(s)) catch { case NonFatal(_) => None }
+        case _ => None
+      }
+
+    entries.map(asObj).groupBy(o => field(o, "name").collect { case JsString(n) => n }.getOrElse(""))
+      .toVector.sortBy(_._1).map { case (name, group) =>
+        if (group.size == 1) group.head
+        else {
+          // Most-recently-polled entry supplies every world-level stat field;
+          // guild lists and recent events are the one thing genuinely safe
+          // (and necessary) to combine across bots.
+          val newest = group.maxBy(o => instant(o).map(_.toEpochMilli).getOrElse(Long.MinValue))
+          val allDiscords = group.flatMap(o => field(o, "discords").collect { case JsArray(el) => el }.getOrElse(Vector.empty))
+          val allEvents = group.flatMap(o => field(o, "recentEvents").collect { case JsArray(el) => el }.getOrElse(Vector.empty))
+          val mergedEvents = allEvents.sortBy { ev =>
+            asObj(ev).fields.get("at").collect { case JsString(s) => try java.time.Instant.parse(s).toEpochMilli catch { case NonFatal(_) => 0L } }.getOrElse(0L)
+          }(Ordering[Long].reverse).take(50)
+          JsObject(newest.fields ++ Map(
+            "name" -> JsString(name),
+            "discords" -> JsArray(allDiscords),
+            "recentEvents" -> JsArray(mergedEvents)
+          ))
+        }
+      }
+  }
 }

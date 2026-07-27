@@ -14,6 +14,7 @@ class DiscordGatewaySpec extends AnyFunSuite with Matchers {
     def retrieveUser(id: String): User = null
     def selfUserId: String = "self-1"
     def selfUserName: String = "ViolentBot"
+    def selfUserAvatarUrl: String = "https://example.com/avatar.png"
     def applicationOwnerId: String = "owner-9"
     def setWatchingActivity(text: String): Unit = ()
   }

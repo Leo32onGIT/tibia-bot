@@ -208,9 +208,11 @@
   .tag.active { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
-  /* Which Discord bot serves this world/guild — only ever present once a
-     shared-world-cycle primary's dashboard has slave data merged in. */
-  .tag.bot-tag { background: rgba(255, 255, 255, 0.06); color: var(--muted); margin-left: 6px; }
+  /* Which Discord bot(s) serve this world — only ever present once a
+     shared-world-cycle primary's dashboard has slave data merged in. Sits
+     next to the world's PVP type in the detail title. */
+  .bot-avatars { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  .bot-avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; }
 
   .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
   .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
@@ -437,8 +439,7 @@ function renderSidebar(worlds) {
     const nameColor = heatColorForEdits(w.edits15m);
     const beIcon = w.battleyeGreen ? BE_ICON_GREEN : BE_ICON_YELLOW;
     const beLabel = w.battleyeGreen ? 'Green BattlEye' : 'Yellow BattlEye';
-    const botBadge = w.bot ? `<span class="tag bot-tag" title="Served by ${w.bot}">${w.bot}</span>` : '';
-    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span>${botBadge}<span class="pop">${w.population}</span>`;
+    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
     div.addEventListener('click', () => { selectedWorld = w.name; render(); closeSidebar(); });
     el.appendChild(div);
   });
@@ -448,8 +449,19 @@ function renderDetail(worlds) {
   const world = worlds.find(w => w.name === selectedWorld) || sortedWorlds(worlds)[0];
   if (!world) return;
 
-  const detailBotBadge = world.bot ? `<span class="tag bot-tag" title="Served by ${world.bot}">${world.bot}</span>` : '';
-  document.getElementById('detail-title').innerHTML = (world.pvpType ? `${world.name} - ${world.pvpType}` : world.name) + detailBotBadge;
+  // Distinct bots serving this world, derived from its guilds — a world can
+  // have guilds on more than one bot once a shared-world-cycle slave's data
+  // is merged in, so this can render more than one avatar.
+  const bots = [];
+  const seenBotIds = new Set();
+  (world.discords || []).forEach(d => {
+    if (d.bot && !seenBotIds.has(d.bot.userId)) {
+      seenBotIds.add(d.bot.userId);
+      bots.push(d.bot);
+    }
+  });
+  const botAvatars = bots.map(b => `<img class="bot-avatar" src="${b.avatarUrl}" alt="${b.name}" title="${b.name} (${b.userId})">`).join('');
+  document.getElementById('detail-title').innerHTML = (world.pvpType ? `${world.name} - ${world.pvpType}` : world.name) + `<span class="bot-avatars">${botAvatars}</span>`;
   document.getElementById('detail-stale').textContent = world.lastPollAt ? '' : 'no data yet';
 
   document.getElementById('detail-stats').innerHTML = `

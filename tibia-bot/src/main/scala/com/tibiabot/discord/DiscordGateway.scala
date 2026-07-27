@@ -19,6 +19,10 @@ trait DiscordGateway {
   def selfUserId: String
   /** The bot account's own username. */
   def selfUserName: String
+  /** The bot account's own avatar URL (falls back to Discord's default avatar
+   *  if none is set — never null/empty). Used to badge which bot serves a
+   *  world/guild on a merged shared-world-cycle dashboard. */
+  def selfUserAvatarUrl: String
   /** The Discord application owner's user id (the bot creator), or "" if unknown. */
   def applicationOwnerId: String
   /** Set the bot's "Watching <text>" presence. */
