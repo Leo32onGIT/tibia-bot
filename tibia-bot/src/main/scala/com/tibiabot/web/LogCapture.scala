@@ -36,9 +36,18 @@ final class LogCapture(capacity: Int = 50) {
    *  only by, say, a character name or a channel id compare as the same
    *  shape. Deliberately approximate — an occasional false-positive collapse
    *  of two genuinely distinct messages is an acceptable tradeoff for a
-   *  monitoring widget, not a correctness-sensitive comparison. */
+   *  monitoring widget, not a correctness-sensitive comparison.
+   *
+   *  The quote-matching regex treats a `'` as content rather than a closing
+   *  delimiter when it's immediately followed by a word character — e.g. a
+   *  Tibia character name like "Sir'Locke" embeds its own apostrophe, and a
+   *  naive `'[^']*'` would close the match on that inner apostrophe instead
+   *  of the real closing quote, leaving the rest of the message unblanked
+   *  and different on every occurrence. A genuine closing quote is followed
+   *  by whitespace, punctuation, or the end of the message, never a letter
+   *  or digit. */
   private def normalize(message: String): String =
-    message.replaceAll("'[^']*'", "'X'").replaceAll("\\d+", "N")
+    message.replaceAll("'(?:[^']|'(?=\\w))*'", "'X'").replaceAll("\\d+", "N")
 
   private def recordInto(queue: mutable.Queue[LogEvent], level: String, logger: String, message: String): Unit = {
     queue.lastOption match {

@@ -122,6 +122,32 @@ class LogCaptureSpec extends AnyFunSuite with Matchers {
     recent.head.count shouldBe 2
   }
 
+  // A character name embedding its own apostrophe (e.g. "Sir'Locke") must
+  // not prematurely close the quoted-value match on that inner apostrophe.
+  test("a quoted value containing its own apostrophe still collapses as the same shape") {
+    val log = new LogCapture()
+    log.record("WARN", "com.tibiabot.tibiadata.TibiaDataClient",
+      "Got 503 Service Unavailable from 'https://api.tibiadata.com/v4/character/Sir'Locke' (attempt 1/3), retrying in 250ms")
+    log.record("WARN", "com.tibiabot.tibiadata.TibiaDataClient",
+      "Got 503 Service Unavailable from 'https://api.tibiadata.com/v4/character/O'Brien' (attempt 1/3), retrying in 250ms")
+
+    val recent = log.recentWarnings()
+    recent should have size 1
+    recent.head.count shouldBe 2
+  }
+
+  // A genuine closing quote followed directly by punctuation (not a letter)
+  // must still be recognized as the delimiter, not swallowed as content.
+  test("a quoted value immediately followed by punctuation still closes correctly") {
+    val log = new LogCapture()
+    log.record("WARN", "com.example.Foo", "Failed for 'Alpha': boom")
+    log.record("WARN", "com.example.Foo", "Failed for 'Beta': boom")
+
+    val recent = log.recentWarnings()
+    recent should have size 1
+    recent.head.count shouldBe 2
+  }
+
   // Regression coverage for TibiaBot.getKillerLevel's exception-warning shape.
   test("TibiaBot killer-fallback timeout warnings for different characters collapse as the same shape") {
     val log = new LogCapture()
