@@ -63,7 +63,13 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
     CommandSchemas.commandsFor(111L, hasWorldConfigured = true, excludeAll = true) shouldBe Nil
   }
 
-  test("secondaryExcludedCommandGuildIds contains the known support Discord a secondary must stay out of") {
-    CommandSchemas.secondaryExcludedCommandGuildIds should contain(867319250708463628L)
+  test("excludedFromCommands: any identity other than the designated owner is excluded from a restricted guild") {
+    CommandSchemas.excludedFromCommands(867319250708463628L, "1193678088165404807") shouldBe false // Blue, the owner
+    CommandSchemas.excludedFromCommands(867319250708463628L, "1438767287447584893") shouldBe true // Red
+    CommandSchemas.excludedFromCommands(867319250708463628L, "1064479962515644507") shouldBe true // DEV
+  }
+
+  test("excludedFromCommands: an unrestricted guild never excludes anyone") {
+    CommandSchemas.excludedFromCommands(111L, "1064479962515644507") shouldBe false
   }
 }
