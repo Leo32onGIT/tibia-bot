@@ -254,12 +254,13 @@ object BotApp extends App with StrictLogging {
 
   private val slaveStatusPublishTtl = 30.seconds
 
-  /** Publishes this slave's own worlds/guilds snapshot (the exact same JSON
-   *  its own dashboard would show, were it running one) for a primary to
-   *  merge into its dashboard — see StatusRoute.remoteSlaveWorldsJson. */
+  /** Publishes this slave's full status snapshot (worlds/guilds, rate-limit
+   *  lanes, bot identity — the exact same data its own dashboard would show,
+   *  were it running one) for a primary to merge into its dashboard's
+   *  worlds view and fleet panel — see StatusRoute.remoteSlaveStatuses. */
   private def publishSlaveStatus(): Unit = {
     try {
-      val json = statusRoute.buildWorldsJson()
+      val json = statusRoute.buildBotStatusJson()
       persistence.RedisCacheProvider.cache.setEx(
         s"${web.StatusRoute.slaveStatusKeyPrefix}${Config.BotRole.name}",
         json.compactPrint,

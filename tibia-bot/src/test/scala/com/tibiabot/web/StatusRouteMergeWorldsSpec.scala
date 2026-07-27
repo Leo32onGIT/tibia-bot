@@ -104,4 +104,56 @@ class StatusRouteMergeWorldsSpec extends AnyFunSuite with Matchers {
   test("an empty input yields an empty result") {
     StatusRoute.mergeWorlds(Vector.empty) shouldBe Vector.empty
   }
+
+  private def lanes(bgDepth: Int, olDepth: Int): JsObject = JsObject(
+    "background" -> JsObject("queueDepth" -> JsNumber(bgDepth), "totalDropped" -> JsNumber(0), "totalSuperseded" -> JsNumber(0), "labels" -> JsObject.empty),
+    "online-list" -> JsObject("queueDepth" -> JsNumber(olDepth), "totalDropped" -> JsNumber(0), "totalSuperseded" -> JsNumber(0), "labels" -> JsObject.empty)
+  )
+
+  private def botStatus(name: String, userId: String, worlds: Vector[JsValue], publishedAt: String = "2026-01-01T00:00:00Z"): JsObject = JsObject(
+    "bot" -> bot(name, userId),
+    "publishedAt" -> JsString(publishedAt),
+    "worlds" -> JsArray(worlds),
+    "rateLimitLanes" -> lanes(0, 0)
+  )
+
+  test("buildBotsJson always includes the primary/self entry first, even with no slaves") {
+    val own = botStatus("Blue", "b1", Vector(world("Antica", Some("2026-01-01T00:00:00Z"))))
+    val bots = StatusRoute.buildBotsJson(own, Vector.empty)
+    bots.elements.size shouldBe 1
+    bots.elements.head.asJsObject.fields("bot").asJsObject.fields("name").asInstanceOf[JsString].value shouldBe "Blue"
+  }
+
+  test("buildBotsJson includes one entry per connected slave, after self") {
+    val own = botStatus("Blue", "b1", Vector.empty)
+    val red = botStatus("Red", "r1", Vector.empty)
+    val green = botStatus("Green", "g1", Vector.empty)
+    val bots = StatusRoute.buildBotsJson(own, Vector(red, green))
+    val names = bots.elements.map(_.asJsObject.fields("bot").asJsObject.fields("name").asInstanceOf[JsString].value)
+    names shouldBe List("Blue", "Red", "Green")
+  }
+
+  test("buildBotsJson derives worldCount and population from each bot's own worlds") {
+    val own = botStatus("Blue", "b1", Vector(
+      world("Antica", Some("2026-01-01T00:00:00Z"), population = 100),
+      world("Wintera", Some("2026-01-01T00:00:00Z"), population = 50)
+    ))
+    val bots = StatusRoute.buildBotsJson(own, Vector.empty)
+    val entry = bots.elements.head.asJsObject
+    entry.fields("worldCount").asInstanceOf[JsNumber].value.toInt shouldBe 2
+    entry.fields("population").asInstanceOf[JsNumber].value.toInt shouldBe 150
+  }
+
+  test("buildBotsJson carries each bot's own rate-limit lanes through unchanged") {
+    val own = JsObject(
+      "bot" -> bot("Blue", "b1"),
+      "publishedAt" -> JsString("2026-01-01T00:00:00Z"),
+      "worlds" -> JsArray(Vector.empty),
+      "rateLimitLanes" -> lanes(7, 3)
+    )
+    val bots = StatusRoute.buildBotsJson(own, Vector.empty)
+    val entryLanes = bots.elements.head.asJsObject.fields("rateLimitLanes").asJsObject
+    entryLanes.fields("background").asJsObject.fields("queueDepth").asInstanceOf[JsNumber].value.toInt shouldBe 7
+    entryLanes.fields("online-list").asJsObject.fields("queueDepth").asInstanceOf[JsNumber].value.toInt shouldBe 3
+  }
 }

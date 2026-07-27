@@ -146,6 +146,13 @@
   .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
   .detail-stat .num-label { font-size: 11px; color: var(--muted); }
 
+  .bots-table-wrap { padding: 0 16px 16px; overflow-x: auto; }
+  .bots-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .bots-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 10px; border-bottom: 1px solid var(--panel-border); }
+  .bots-table td { padding: 8px 10px; border-bottom: 1px solid var(--panel-border); font-variant-numeric: tabular-nums; }
+  .bots-table tr:last-child td { border-bottom: none; }
+  .bots-table-name { display: flex; align-items: center; gap: 8px; font-variant-numeric: normal; }
+
   .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; max-height: 320px; overflow-y: auto; }
   .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; flex-shrink: 0; }
   .discord-item i { color: var(--muted); font-size: 14px; }
@@ -319,6 +326,27 @@
     </div>
   </div>
 
+  <div class="panel" id="bots-panel" style="display:none;">
+    <div class="panel-title">
+      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i>Bots</span>
+    </div>
+    <div class="bots-table-wrap">
+      <table class="bots-table">
+        <thead>
+          <tr>
+            <th>Bot</th>
+            <th>Worlds</th>
+            <th>Population</th>
+            <th>Queue (general)</th>
+            <th>Queue (online list)</th>
+            <th>Last seen</th>
+          </tr>
+        </thead>
+        <tbody id="bots-list"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="panel" id="log-errors-panel" style="display:none;">
     <div class="panel-title">Errors</div>
     <div class="feed" id="log-errors-list"></div>
@@ -464,7 +492,7 @@ function renderDetail(worlds) {
         // Only present once a shared-world-cycle primary's dashboard has
         // slave data merged in — omitted entirely on a plain deployment.
         const botAvatar = d.bot ? `<img class="bot-avatar" src="${d.bot.avatarUrl}" alt="${d.bot.name}" title="${d.bot.name} (${d.bot.userId})">` : '';
-        return `<div class="discord-item">${botAvatar}<i class="ti ti-brand-discord" aria-hidden="true"></i><span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`;
+        return `<div class="discord-item">${botAvatar}<span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`;
       }).join('')
     : '<div class="muted">No discords tracking this world</div>';
 }
@@ -514,6 +542,29 @@ function renderLanes(lanes) {
     `;
     el.appendChild(card);
   });
+}
+
+// Only worth a whole panel once there's a fleet to compare — a plain
+// single-bot deployment already shows its own worlds/population/queues
+// elsewhere, so a one-row "Bots" table would just repeat them.
+function renderBots(bots) {
+  const panel = document.getElementById('bots-panel');
+  if (bots.length < 2) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  document.getElementById('bots-list').innerHTML = bots.map(b => {
+    const roleLabel = b.bot.role === 'primary' ? 'Primary' : b.bot.role === 'slave' ? 'Slave' : '';
+    const lanes = b.rateLimitLanes || {};
+    const bgDepth = lanes.background ? lanes.background.queueDepth : 0;
+    const olDepth = lanes['online-list'] ? lanes['online-list'].queueDepth : 0;
+    return `<tr>
+      <td class="bots-table-name"><img class="bot-avatar" src="${b.bot.avatarUrl}" alt="${b.bot.name}" title="${b.bot.name} (${b.bot.userId})"><span>${b.bot.name}</span>${roleLabel ? `<span class="muted">&middot; ${roleLabel}</span>` : ''}</td>
+      <td>${b.worldCount}</td>
+      <td>${b.population}</td>
+      <td>${bgDepth}</td>
+      <td>${olDepth}</td>
+      <td class="muted">${timeAgo(b.publishedAt)}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderFeedRow(ev, groupCount) {
@@ -862,6 +913,7 @@ function render() {
   renderSidebar(worlds);
   renderDetail(worlds);
   renderLanes(lastData.rateLimitLanes);
+  renderBots(lastData.bots || []);
   renderLogAlerts(lastData.logAlerts);
   renderPatreon(lastData.patreon || []);
   const selected = worlds.find(w => w.name === selectedWorld);
