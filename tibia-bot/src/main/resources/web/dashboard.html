@@ -208,6 +208,9 @@
   .tag.active { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
+  /* Which Discord bot serves this world/guild — only ever present once a
+     shared-world-cycle primary's dashboard has slave data merged in. */
+  .tag.bot-tag { background: rgba(255, 255, 255, 0.06); color: var(--muted); margin-left: 6px; }
 
   .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
   .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
@@ -434,7 +437,8 @@ function renderSidebar(worlds) {
     const nameColor = heatColorForEdits(w.edits15m);
     const beIcon = w.battleyeGreen ? BE_ICON_GREEN : BE_ICON_YELLOW;
     const beLabel = w.battleyeGreen ? 'Green BattlEye' : 'Yellow BattlEye';
-    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
+    const botBadge = w.bot ? `<span class="tag bot-tag" title="Served by ${w.bot}">${w.bot}</span>` : '';
+    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span>${botBadge}<span class="pop">${w.population}</span>`;
     div.addEventListener('click', () => { selectedWorld = w.name; render(); closeSidebar(); });
     el.appendChild(div);
   });
@@ -444,7 +448,8 @@ function renderDetail(worlds) {
   const world = worlds.find(w => w.name === selectedWorld) || sortedWorlds(worlds)[0];
   if (!world) return;
 
-  document.getElementById('detail-title').textContent = world.pvpType ? `${world.name} - ${world.pvpType}` : world.name;
+  const detailBotBadge = world.bot ? `<span class="tag bot-tag" title="Served by ${world.bot}">${world.bot}</span>` : '';
+  document.getElementById('detail-title').innerHTML = (world.pvpType ? `${world.name} - ${world.pvpType}` : world.name) + detailBotBadge;
   document.getElementById('detail-stale').textContent = world.lastPollAt ? '' : 'no data yet';
 
   document.getElementById('detail-stats').innerHTML = `

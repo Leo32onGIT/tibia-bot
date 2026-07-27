@@ -21,6 +21,7 @@ class OnlineDurationPersistenceSpec extends AnyFunSuite with Matchers {
     val store = TrieMap.empty[String, String]
     def get(key: String): Future[Option[String]] = Future.successful(store.get(key))
     def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = { store.put(key, value); Future.unit }
+    def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
     def close(): Unit = ()
   }
 

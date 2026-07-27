@@ -58,6 +58,7 @@ class CachingTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
     def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = {
       sets += 1; lastTtl += (key -> ttl); store.put(key, value); Future.unit
     }
+    def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
     def close(): Unit = ()
   }
 

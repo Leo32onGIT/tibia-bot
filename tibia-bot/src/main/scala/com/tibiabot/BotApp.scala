@@ -20,6 +20,7 @@ import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.utils.TimeFormat
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
+import spray.json._
 
 import java.awt.Color
 import java.time.{Instant, ZonedDateTime}
@@ -231,11 +232,43 @@ object BotApp extends App with StrictLogging {
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService, discordGateway)(ex)
-  akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
-    .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
-      akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
-    })
-  logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
+  // A shared-world-cycle slave doesn't run its own dashboard at all — its
+  // worlds/guilds are instead published (below) for the primary's dashboard
+  // to merge in, so no HTTP server, no Caddy, no second domain needed.
+  if (Config.BotRole.current != Config.BotRole.Slave) {
+    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
+      .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
+        akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
+      })
+    logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
+  } else {
+    // Matches the dashboard's own ~10s poll cadence (StatusRoute's comment on
+    // buildPatreonJson) — frequent enough that a primary's merged view feels
+    // live, cheap enough that it's a non-issue running forever in the
+    // background. TTL on the published key is longer than this interval
+    // (see slaveStatusPublishTtl) so a couple of missed cycles don't make
+    // this slave's panel flicker off the primary's dashboard.
+    actorSystem.scheduler.scheduleWithFixedDelay(5.seconds, 10.seconds)(() => publishSlaveStatus())(ex)
+    logger.info(s"Running as a shared-world-cycle slave ('${Config.BotRole.name}') — publishing status to the primary's dashboard instead of running its own")
+  }
+
+  private val slaveStatusPublishTtl = 30.seconds
+
+  /** Publishes this slave's own worlds/guilds snapshot (the exact same JSON
+   *  its own dashboard would show, were it running one) for a primary to
+   *  merge into its dashboard — see StatusRoute.remoteSlaveWorldsJson. */
+  private def publishSlaveStatus(): Unit = {
+    try {
+      val json = statusRoute.buildWorldsJson()
+      persistence.RedisCacheProvider.cache.setEx(
+        s"${web.StatusRoute.slaveStatusKeyPrefix}${Config.BotRole.name}",
+        json.compactPrint,
+        slaveStatusPublishTtl
+      ).recover { case e: Throwable => logger.warn(s"Failed to publish slave status: ${e.getMessage}") }(ex)
+    } catch {
+      case e: Throwable => logger.warn("Failed to build slave status snapshot", e)
+    }
+  }
 
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.

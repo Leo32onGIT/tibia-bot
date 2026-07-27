@@ -8,6 +8,7 @@ import io.lettuce.core.{RedisClient, RedisURI}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 import scala.jdk.FutureConverters._
 import scala.util.control.NonFatal
 
@@ -37,6 +38,11 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] =
     commands.psetex(key, ttl.toMillis, value).asScala.map(_ => ()).recover {
       case NonFatal(e) => logger.warn(s"redis PSETEX failed for '$key': ${e.getMessage}"); ()
+    }
+
+  def keysMatching(pattern: String): Future[List[String]] =
+    commands.keys(pattern).asScala.map(_.asScala.toList).recover {
+      case NonFatal(e) => logger.warn(s"redis KEYS failed for pattern '$pattern': ${e.getMessage}"); Nil
     }
 
   def close(): Unit = {

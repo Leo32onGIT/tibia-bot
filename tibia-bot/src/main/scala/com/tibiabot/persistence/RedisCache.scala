@@ -11,6 +11,13 @@ import scala.concurrent.duration.FiniteDuration
 trait RedisCache {
   def get(key: String): Future[Option[String]]
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit]
+  /** Discovers keys by prefix pattern (e.g. `tibia:slave-status:*`) — used by
+   *  a shared-world-cycle primary to find however many slaves are currently
+   *  publishing, without needing to know their names in advance. The
+   *  matched keyspace here is always small (a handful of slave-status
+   *  entries), so a plain KEYS is fine; not meant for scanning the whole
+   *  cache. */
+  def keysMatching(pattern: String): Future[List[String]]
   def close(): Unit
 }
 
@@ -19,5 +26,6 @@ trait RedisCache {
 object NoopRedisCache extends RedisCache {
   def get(key: String): Future[Option[String]] = Future.successful(None)
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = Future.unit
+  def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
   def close(): Unit = ()
 }

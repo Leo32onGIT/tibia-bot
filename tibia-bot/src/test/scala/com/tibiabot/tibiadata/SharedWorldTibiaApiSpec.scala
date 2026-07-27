@@ -38,6 +38,10 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     var sets = 0
     def get(key: String): Future[Option[String]] = { gets += 1; Future.successful(store.get(key)) }
     def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = { sets += 1; store.put(key, value); Future.unit }
+    def keysMatching(pattern: String): Future[List[String]] = {
+      val regex = ("^" + java.util.regex.Pattern.quote(pattern).replace("*", "\\E.*\\Q") + "$").r
+      Future.successful(store.keys.filter(k => regex.pattern.matcher(k).matches()).toList)
+    }
     def close(): Unit = ()
   }
 

@@ -49,6 +49,12 @@ services:
   # HTTP-01 challenge).
   caddy:
     image: caddy:2
+    # Only created when the `own-dashboard` profile is active (COMPOSE_PROFILES
+    # in .env — see .env.example). A shared-world-cycle slave doesn't run its
+    # own dashboard at all (BotApp skips binding the internal HTTP server too
+    # when BOT_ROLE=slave) — its worlds/guilds are published for the primary's
+    # dashboard to merge in instead, so no reverse proxy, no domain, needed.
+    profiles: ["own-dashboard"]
     env_file: .env
     ports:
       - "80:80"

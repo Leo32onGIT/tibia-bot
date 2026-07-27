@@ -8,6 +8,9 @@ import com.tibiabot.{app, discord, paywall, persistence, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.control.NonFatal
+
 /**
  * The monitoring dashboard: `/` (static HTML/JS shell) and `/status` (its JSON
  * data source), both restricted to the bot owner. Authentication (which
@@ -96,7 +99,16 @@ final class StatusRoute(
     ) ++ (if (adaptiveRefresh) Map("refreshIntervalSeconds" -> JsNumber(discord.AdaptiveRefreshInterval.intervalSeconds(sender.queueDepth))) else Map.empty)
   )
 
-  private def buildStatusJson(): JsObject = {
+  private implicit val ec: ExecutionContext = ExecutionContext.global
+
+  /** This process's own worlds — its JDA guild membership plus (as a
+   *  shared-world-cycle primary) any extra worlds it polls on a slave's
+   *  behalf, per `BotApp.startBot`. Each entry is tagged with `bot` (see
+   *  Config.BotRole.name) so a merged dashboard (below) can show which
+   *  Discord bot actually serves it. Public: a slave calls this directly to
+   *  build the snapshot it publishes to Redis, reusing the exact same shape
+   *  its own local dashboard would show if it ran one. */
+  def buildWorldsJson(): JsArray = {
     val worldSnapshots = worldMetricsRegistry.snapshotAll()
     val streams = streamSupervisor.snapshot
 
@@ -120,6 +132,7 @@ final class StatusRoute(
       }
       JsObject(
         "name" -> JsString(world),
+        "bot" -> JsString(Config.BotRole.name),
         "population" -> JsNumber(snap.population),
         "lastPollAt" -> snap.lastPollAt.map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
         "nextPollAt" -> snap.nextPollAt.map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
@@ -132,16 +145,50 @@ final class StatusRoute(
         "recentEvents" -> JsArray(recentEventsJson.toVector)
       )
     }
+    JsArray(worldsJson.toVector)
+  }
 
-    JsObject(
-      "worlds" -> JsArray(worldsJson.toVector),
-      "rateLimitLanes" -> JsObject(
-        "background" -> laneJson(outboundSender),
-        "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
-      ),
-      "logAlerts" -> buildLogAlertsJson(),
-      "patreon" -> buildPatreonJson()
-    )
+  /** Any shared-world-cycle slave's published worlds, merged in — see
+   *  `slaveStatusKeyPrefix`. Only a Primary looks; a plain/slave deployment
+   *  gets an empty list back with no Redis round-trip at all. Uses
+   *  `keysMatching` rather than a fixed slave list so this supports however
+   *  many slaves are actually publishing, with zero config on the primary
+   *  side when a new one joins. A slave that's gone quiet (past its
+   *  publish TTL) just stops appearing — no special-casing needed. */
+  private def remoteSlaveWorldsJson(): Future[Vector[JsValue]] =
+    if (Config.BotRole.current != Config.BotRole.Primary) Future.successful(Vector.empty)
+    else {
+      persistence.RedisCacheProvider.cache.keysMatching(s"${StatusRoute.slaveStatusKeyPrefix}*").flatMap { keys =>
+        Future.traverse(keys)(persistence.RedisCacheProvider.cache.get).map { values =>
+          values.flatten.flatMap { json =>
+            try json.parseJson.asInstanceOf[JsArray].elements
+            catch {
+              case NonFatal(e) =>
+                logger.warn(s"Failed to decode a slave status snapshot, skipping it: ${e.getMessage}")
+                Vector.empty
+            }
+          }.toVector
+        }
+      }.recover {
+        case NonFatal(e) =>
+          logger.warn(s"Failed to fetch slave status snapshots: ${e.getMessage}")
+          Vector.empty
+      }
+    }
+
+  private def buildStatusJson(): Future[JsObject] = {
+    val ownWorlds = buildWorldsJson()
+    remoteSlaveWorldsJson().map { remoteWorlds =>
+      JsObject(
+        "worlds" -> JsArray(ownWorlds.elements ++ remoteWorlds),
+        "rateLimitLanes" -> JsObject(
+          "background" -> laneJson(outboundSender),
+          "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
+        ),
+        "logAlerts" -> buildLogAlertsJson(),
+        "patreon" -> buildPatreonJson()
+      )
+    }
   }
 
   /** A synced Patreon member's status/pledge, spliced onto a supporter entry
@@ -266,7 +313,7 @@ final class StatusRoute(
       get {
         discordAuth.authenticatedUser { userId =>
           requireOwner(userId) {
-            complete(HttpEntity(ContentTypes.`application/json`, buildStatusJson().compactPrint))
+            complete(buildStatusJson().map(json => HttpEntity(ContentTypes.`application/json`, json.compactPrint)))
           }
         }
       }
@@ -289,4 +336,12 @@ final class StatusRoute(
         }
       }
     }
+}
+
+object StatusRoute {
+  /** Redis key prefix a shared-world-cycle slave publishes its worlds
+   *  snapshot under (full key: this prefix + Config.BotRole.name), and that
+   *  a primary scans for via `keysMatching` to discover however many slaves
+   *  are currently publishing. */
+  val slaveStatusKeyPrefix = "tibia:slave-status:"
 }
