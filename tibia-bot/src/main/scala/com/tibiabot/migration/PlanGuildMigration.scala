@@ -25,14 +25,20 @@ import scala.util.Try
  *  Usage: sbt "runMain com.tibiabot.migration.PlanGuildMigration
  *    --source-host <host> --source-password <password>
  *    --dest-host <host> --dest-password <password>
- *    [--user postgres] [--out <path.txt>]"
+ *    [--source-port 5432] [--dest-port 5432] [--user postgres] [--out <path.txt>]"
+ *
+ *  The port flags exist for the real Red->Blue run, where the two Postgres
+ *  instances live on separate VPS private networks that can't reach each
+ *  other directly — see two local SSH tunnels (e.g. -L 15432:localhost:5432
+ *  into each host) forwarded to distinct local ports, then --source-host
+ *  localhost --source-port 15432 --dest-host localhost --dest-port 15433.
  *
  *  With --out, writes the safe-to-migrate guild IDs one per line, for a
  *  dump/restore script to loop over. */
 object PlanGuildMigration {
 
   private val usage =
-    """Usage: --source-host <host> --source-password <password> --dest-host <host> --dest-password <password> [--user postgres] [--out <path.txt>]"""
+    """Usage: --source-host <host> --source-password <password> --dest-host <host> --dest-password <password> [--source-port 5432] [--dest-port 5432] [--user postgres] [--out <path.txt>]"""
 
   def main(args: Array[String]): Unit = {
     val flags = MigrationCli.parseArgs(args)
@@ -41,9 +47,11 @@ object PlanGuildMigration {
     val destHost = MigrationCli.require(flags, "dest-host", usage)
     val destPassword = MigrationCli.require(flags, "dest-password", usage)
     val user = flags.getOrElse("user", "postgres")
+    val sourcePort = flags.get("source-port").map(_.toInt).getOrElse(5432)
+    val destPort = flags.get("dest-port").map(_.toInt).getOrElse(5432)
 
-    val source = new JdbcConnectionProvider(sourceHost, sourcePassword, user)
-    val dest = new JdbcConnectionProvider(destHost, destPassword, user)
+    val source = new JdbcConnectionProvider(sourceHost, sourcePassword, user, sourcePort)
+    val dest = new JdbcConnectionProvider(destHost, destPassword, user, destPort)
 
     val sourceGuildIds = discoverGuildIds(source).toSet
     val destGuildIds = discoverGuildIds(dest).toSet

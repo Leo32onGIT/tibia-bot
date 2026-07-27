@@ -61,13 +61,22 @@ services:
     networks:
       - violentbot
     # appendonly so the character-cache snapshot (and other cached keys) survive
-    # a redis restart instead of forcing a cold re-fetch.
-    command: ["redis-server", "--appendonly", "yes"]
+    # a redis restart instead of forcing a cold re-fetch. requirepass matches
+    # REDIS_PASSWORD (already used by the bot's own client config) — matters
+    # once this is reachable beyond this host's own docker network, below.
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
+    # Published only to a specific private IP — unset (the default) binds to
+    # loopback only, i.e. no real exposure beyond this host. Set
+    # REDIS_PUBLISH_HOST to this host's own private IP on a shared-world-cycle
+    # primary, so slave bots elsewhere on the VPC can reach it; leave unset on
+    # a plain single-bot or slave deployment.
+    ports:
+      - "${REDIS_PUBLISH_HOST:-127.0.0.1}:6379:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
