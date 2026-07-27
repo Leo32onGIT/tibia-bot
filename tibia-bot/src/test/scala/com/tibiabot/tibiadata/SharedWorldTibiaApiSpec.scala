@@ -12,10 +12,11 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 /** Behaviour of the SharedWorldTibiaApi decorator: a Primary publishes a
- *  successful getWorld fetch to Redis (never a Left) and returns it
- *  unchanged; a Slave reads that published value on a hit without touching
- *  the underlying API, and falls back to it on a miss or a corrupt value;
- *  Disabled and every non-getWorld method are pure pass-throughs. */
+ *  successful getWorld/getCharacter fetch to Redis (never a Left) and returns
+ *  it unchanged; a Slave reads that published value on a hit without
+ *  touching the underlying API, and falls back to it on a miss or a corrupt
+ *  value; Disabled and every other method (including getCharacterV2, which
+ *  must stay a pure pass-through — see the class doc) are unaffected. */
 class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
 
   private implicit val ec: ExecutionContext = ExecutionContext.global
@@ -27,7 +28,9 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     try scala.io.Source.fromInputStream(is, "UTF-8").mkString finally is.close()
   }
   private val world: WorldResponse = fixture("world_antica.json").parseJson.convertTo[WorldResponse]
-  private val sharedKey = "tibia:world-shared:antica"
+  private val character: CharacterResponse = fixture("character.json").parseJson.convertTo[CharacterResponse]
+  private val sharedWorldKey = "tibia:world-shared:antica"
+  private val sharedCharacterKey = "tibia:character-shared:abu shusha"
 
   private class FakeCache(preset: Map[String, String] = Map.empty) extends RedisCache {
     val store = TrieMap.empty[String, String] ++ preset
@@ -38,8 +41,13 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     def close(): Unit = ()
   }
 
-  private class StubApi(worldResult: Either[String, WorldResponse] = Right(world)) extends TibiaApi {
+  private class StubApi(
+      worldResult: Either[String, WorldResponse] = Right(world),
+      characterResult: Either[String, CharacterResponse] = Right(character)
+  ) extends TibiaApi {
     var worldCalls = 0
+    var characterCalls = 0
+    var characterV2Calls = 0
     def getWorld(w: String): Future[Either[String, WorldResponse]] = { worldCalls += 1; Future.successful(worldResult) }
     def getWorlds() = Future.successful(Left("x"))
     def getBoostedBoss() = Future.successful(Left("x"))
@@ -47,52 +55,52 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     def getHighscores(w: String, page: Int) = Future.successful(Left("x"))
     def getGuild(guild: String) = Future.successful(Left("x"))
     def getGuildWithInput(input: (String, String)) = Future.successful((Left("x"), input._1, input._2))
-    def getCharacter(name: String) = Future.successful(Left("x"))
+    def getCharacter(name: String) = { characterCalls += 1; Future.successful(characterResult) }
     def getKillerFallback(name: String) = Future.successful(Left("x"))
-    def getCharacterV2(input: (String, Int)) = Future.successful(Left("x"))
+    def getCharacterV2(input: (String, Int)) = { characterV2Calls += 1; Future.successful(Left("x")) }
     def getCharacterWithInput(input: (String, String, String)) = Future.successful((Left("x"), input._1, input._2, input._3))
   }
 
-  test("primary: publishes a successful fetch to Redis and returns it unchanged") {
+  test("primary: publishes a successful world fetch to Redis and returns it unchanged") {
     val stub = new StubApi(); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
     await(api.getWorld("Antica")) shouldBe Right(world)
     stub.worldCalls shouldBe 1
     cache.sets shouldBe 1
-    cache.store(sharedKey).parseJson.convertTo[WorldResponse] shouldBe world
+    cache.store(sharedWorldKey).parseJson.convertTo[WorldResponse] shouldBe world
   }
 
-  test("primary: does not publish a Left result") {
+  test("primary: does not publish a world Left result") {
     val stub = new StubApi(worldResult = Left("api error")); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
     await(api.getWorld("Antica")) shouldBe Left("api error")
     cache.sets shouldBe 0
   }
 
-  test("slave: a cache hit is served without calling the underlying API") {
+  test("slave: a world cache hit is served without calling the underlying API") {
     val stub = new StubApi()
-    val cache = new FakeCache(preset = Map(sharedKey -> world.toJson.compactPrint))
+    val cache = new FakeCache(preset = Map(sharedWorldKey -> world.toJson.compactPrint))
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
     await(api.getWorld("Antica")) shouldBe Right(world)
     stub.worldCalls shouldBe 0
   }
 
-  test("slave: a cache miss falls back to the underlying API") {
+  test("slave: a world cache miss falls back to the underlying API") {
     val stub = new StubApi(); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
     await(api.getWorld("Antica")) shouldBe Right(world)
     stub.worldCalls shouldBe 1
   }
 
-  test("slave: a corrupt cached value falls back to the underlying API") {
+  test("slave: a corrupt world cached value falls back to the underlying API") {
     val stub = new StubApi()
-    val cache = new FakeCache(preset = Map(sharedKey -> "}{not json"))
+    val cache = new FakeCache(preset = Map(sharedWorldKey -> "}{not json"))
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
     await(api.getWorld("Antica")) shouldBe Right(world)
     stub.worldCalls shouldBe 1
   }
 
-  test("disabled: pure pass-through, cache never consulted") {
+  test("disabled: getWorld is a pure pass-through, cache never consulted") {
     val stub = new StubApi(); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Disabled)
     await(api.getWorld("Antica")) shouldBe Right(world)
@@ -101,11 +109,68 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     cache.sets shouldBe 0
   }
 
-  test("every non-getWorld method passes straight through to the underlying API") {
+  test("primary: publishes a successful character fetch to Redis and returns it unchanged") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
+    cache.sets shouldBe 1
+    cache.store(sharedCharacterKey).parseJson.convertTo[CharacterResponse] shouldBe character
+  }
+
+  test("primary: does not publish a character Left result, including a local 'Hit cache' signal") {
+    val stub = new StubApi(characterResult = Left("Hit cache")); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacter("Abu Shusha")) shouldBe Left("Hit cache")
+    cache.sets shouldBe 0
+  }
+
+  test("slave: a character cache hit is served without calling the underlying API") {
+    val stub = new StubApi()
+    val cache = new FakeCache(preset = Map(sharedCharacterKey -> character.toJson.compactPrint))
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 0
+  }
+
+  test("slave: a character cache miss falls back to the underlying API") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
+  }
+
+  test("slave: a corrupt character cached value falls back to the underlying API") {
+    val stub = new StubApi()
+    val cache = new FakeCache(preset = Map(sharedCharacterKey -> "}{not json"))
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Slave)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
+  }
+
+  test("disabled: getCharacter is a pure pass-through, cache never consulted") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Disabled)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
+    cache.gets shouldBe 0
+    cache.sets shouldBe 0
+  }
+
+  test("getCharacterV2 stays a pure pass-through even as primary — sharing would defeat its Noctera cache-bypass purpose") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacterV2(("Abu Shusha", 1000))) shouldBe Left("x")
+    stub.characterV2Calls shouldBe 1
+    cache.gets shouldBe 0
+    cache.sets shouldBe 0
+  }
+
+  test("every other method passes straight through to the underlying API regardless of role") {
     val stub = new StubApi(); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
     await(api.getBoostedBoss()) shouldBe Left("x")
-    await(api.getCharacter("Violent Beams")) shouldBe Left("x")
+    await(api.getKillerFallback("Violent Beams")) shouldBe Left("x")
     cache.gets shouldBe 0
     cache.sets shouldBe 0
   }

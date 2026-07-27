@@ -35,7 +35,13 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
       case j => Some(j.convertTo[Guild])
     }
 
-    override def write(obj: Option[Guild]): JsValue = ???
+    // Round-trips the same empty-object-for-None shape TibiaData itself uses —
+    // needed to re-serialize a CharacterResponse (e.g. for shared-world-cycle
+    // Redis publishing), not just parse one.
+    override def write(obj: Option[Guild]): JsValue = obj match {
+      case None => JsObject.empty
+      case Some(g) => guildFormat.write(g)
+    }
   }
   implicit val characterFormat: RootJsonFormat[response.Character] = jsonFormat16(response.Character)
   implicit val killersFormat: RootJsonFormat[Killers] = jsonFormat4(Killers)
@@ -48,7 +54,13 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
       case j => Some(j.convertTo[AccountInformation])
     }
 
-    override def write(obj: Option[AccountInformation]): JsValue = ???
+    // Round-trips the same empty-object-for-None shape TibiaData itself uses —
+    // needed to re-serialize a CharacterResponse (e.g. for shared-world-cycle
+    // Redis publishing), not just parse one.
+    override def write(obj: Option[AccountInformation]): JsValue = obj match {
+      case None => JsObject.empty
+      case Some(info) => accountInformationFormat.write(info)
+    }
   }
 
   implicit val charactersFormat: RootJsonFormat[CharacterSheet] = jsonFormat3(CharacterSheet)
