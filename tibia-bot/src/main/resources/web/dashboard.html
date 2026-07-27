@@ -183,7 +183,6 @@
   .lane-card-label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px; }
   .lane-card-depth { font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
   .lane-card-ms { color: var(--muted); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
-  .lane-card-refresh { color: var(--muted); font-size: 9px; margin-top: 1px; font-variant-numeric: tabular-nums; }
 
   .log-alerts-summary { display: flex; align-items: center; gap: 12px; justify-self: end; }
   .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
@@ -339,11 +338,11 @@
       <table class="bots-table">
         <thead>
           <tr>
-            <th>Bot</th>
+            <th></th>
             <th>Worlds</th>
-            <th>Population</th>
-            <th>Queue (general)</th>
-            <th>Queue (online list)</th>
+            <th>Tracked Players</th>
+            <th>General</th>
+            <th>Online Lists</th>
             <th>Last seen</th>
             <th>ID</th>
           </tr>
@@ -511,8 +510,11 @@ function laneDisplayName(key) {
   return key;
 }
 
-function formatRefreshInterval(seconds) {
-  return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}min`;
+// The single worst avg wait across a lane's labels — full per-label detail
+// (count, individual wait times) is only shown in the KPI header card's
+// hover tooltip, to keep both this and the Bots panel's row compact.
+function laneMaxWaitMs(lane) {
+  return Object.values(lane.labels).reduce((max, s) => Math.max(max, s.avgWaitMs), 0);
 }
 
 function renderLanes(lanes, hasFleet) {
@@ -534,17 +536,8 @@ function renderLanes(lanes, hasFleet) {
     const barMax = name === 'background' ? 100 : 1000;
     const ratio = Math.min(1, lane.queueDepth / barMax);
     const depthColor = heatColorForRatio(ratio);
-    // The single worst avg wait across this lane's labels — full per-label
-    // detail (count, individual wait times) is available on hover only, to
-    // keep this compact enough to sit in the KPI strip.
-    const maxWaitMs = Object.values(lane.labels).reduce((max, s) => Math.max(max, s.avgWaitMs), 0);
+    const maxWaitMs = laneMaxWaitMs(lane);
     const labelDetail = Object.entries(lane.labels).map(([label, s]) => `${label}: ${Math.round(s.avgWaitMs)}ms`).join(', ') || 'no traffic yet';
-
-    // Only online-list has an adaptive refresh cycle (general has no refresh
-    // timer to back off) — the field is only present on that lane's JSON.
-    const refreshLine = lane.refreshIntervalSeconds != null
-      ? `<div class="lane-card-refresh">refresh: ${formatRefreshInterval(lane.refreshIntervalSeconds)}</div>`
-      : '';
 
     const card = document.createElement('div');
     card.className = 'lane-card';
@@ -553,7 +546,6 @@ function renderLanes(lanes, hasFleet) {
       <div class="lane-card-label">${laneDisplayName(name)}</div>
       <div class="lane-card-depth" style="color:${depthColor};">${lane.queueDepth}</div>
       <div class="lane-card-ms">${Math.round(maxWaitMs)}ms</div>
-      ${refreshLine}
     `;
     el.appendChild(card);
   });
@@ -569,18 +561,20 @@ function renderBots(bots) {
   document.getElementById('bots-list').innerHTML = bots.map(b => {
     const roleLabel = b.bot.role === 'primary' ? 'Primary' : b.bot.role === 'secondary' ? 'Secondary' : '';
     const lanes = b.rateLimitLanes || {};
-    const bgDepth = lanes.background ? lanes.background.queueDepth : 0;
-    const olDepth = lanes['online-list'] ? lanes['online-list'].queueDepth : 0;
+    const bgLane = lanes.background || { queueDepth: 0, labels: {} };
+    const olLane = lanes['online-list'] || { queueDepth: 0, labels: {} };
     // Same heat ramp + scale (100/1000) as the KPI header's lane cards
     // (renderLanes) so a queue depth reads the same severity everywhere.
-    const bgColor = heatColorForRatio(bgDepth / 100);
-    const olColor = heatColorForRatio(olDepth / 1000);
+    const bgColor = heatColorForRatio(bgLane.queueDepth / 100);
+    const olColor = heatColorForRatio(olLane.queueDepth / 1000);
+    const bgWaitMs = Math.round(laneMaxWaitMs(bgLane));
+    const olWaitMs = Math.round(laneMaxWaitMs(olLane));
     return `<tr>
       <td class="bots-table-name"><img class="bot-avatar" src="${b.bot.avatarUrl}" alt="${b.bot.name}" title="${b.bot.name} (${b.bot.userId})"><span>${b.bot.name}</span>${roleLabel ? `<span class="muted">&middot; ${roleLabel}</span>` : ''}</td>
       <td>${b.worldCount}</td>
       <td>${b.population}</td>
-      <td style="color:${bgColor};">${bgDepth}</td>
-      <td style="color:${olColor};">${olDepth}</td>
+      <td style="color:${bgColor};">${bgLane.queueDepth} <span class="muted">&middot; ${bgWaitMs}ms</span></td>
+      <td style="color:${olColor};">${olLane.queueDepth} <span class="muted">&middot; ${olWaitMs}ms</span></td>
       <td class="muted">${timeAgo(b.publishedAt)}</td>
       <td class="gid">${b.bot.userId}</td>
     </tr>`;
