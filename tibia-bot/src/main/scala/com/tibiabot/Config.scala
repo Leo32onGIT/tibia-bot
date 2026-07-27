@@ -161,22 +161,6 @@ object Config {
       case _ => Disabled
     }
     val sharingEnabled: Boolean = current != Disabled
-
-    /** Display label for this bot instance (e.g. "Blue", "Red") — used to tag
-     *  dashboard entries so a merged primary+secondary view shows which
-     *  Discord bot actually serves each world/guild, and as this secondary's
-     *  key when publishing its status snapshot. Falls back to the role name
-     *  itself when unset, so a merged dashboard is never unlabelled even if
-     *  a deployer forgets to set BOT_NAME. */
-    val name: String = {
-      val configured = discord.getString("bot-name").trim
-      if (configured.nonEmpty) configured
-      else current match {
-        case Primary => "Primary"
-        case Secondary => "Secondary"
-        case Disabled => ""
-      }
-    }
   }
 
   /** Auto-leave a guild with no worlds tracked for this many days, unless a

@@ -159,7 +159,8 @@
   .discord-item .owner-icon { color: var(--warn); font-size: 13px; }
   .discord-item .sep { color: var(--muted); }
   .discord-item .owner { color: var(--muted); }
-  .discord-item .gid { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .gid { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .discord-item .gid { margin-left: auto; }
 
   /* Compact rate-limit indicator, folded into the same bordered strip as the
      KPI group (see .kpis-strip above) — rate-limit health is bot-wide, not
@@ -340,6 +341,7 @@
             <th>Queue (general)</th>
             <th>Queue (online list)</th>
             <th>Last seen</th>
+            <th>ID</th>
           </tr>
         </thead>
         <tbody id="bots-list"></tbody>
@@ -563,6 +565,7 @@ function renderBots(bots) {
       <td>${bgDepth}</td>
       <td>${olDepth}</td>
       <td class="muted">${timeAgo(b.publishedAt)}</td>
+      <td class="gid">${b.bot.userId}</td>
     </tr>`;
   }).join('');
 }

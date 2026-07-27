@@ -249,7 +249,7 @@ object BotApp extends App with StrictLogging {
     // (see secondaryStatusPublishTtl) so a couple of missed cycles don't
     // make this secondary's panel flicker off the primary's dashboard.
     actorSystem.scheduler.scheduleWithFixedDelay(5.seconds, 10.seconds)(() => publishSecondaryStatus())(ex)
-    logger.info(s"Running as a shared-world-cycle secondary ('${Config.BotRole.name}') — publishing status to the primary's dashboard instead of running its own")
+    logger.info(s"Running as a shared-world-cycle secondary ('${discordGateway.selfUserName}') — publishing status to the primary's dashboard instead of running its own")
   }
 
   private val secondaryStatusPublishTtl = 30.seconds
@@ -262,7 +262,7 @@ object BotApp extends App with StrictLogging {
     try {
       val json = statusRoute.buildBotStatusJson()
       persistence.RedisCacheProvider.cache.setEx(
-        s"${web.StatusRoute.secondaryStatusKeyPrefix}${Config.BotRole.name}",
+        s"${web.StatusRoute.secondaryStatusKeyPrefix}${discordGateway.selfUserId}",
         json.compactPrint,
         secondaryStatusPublishTtl
       ).recover { case e: Throwable => logger.warn(s"Failed to publish secondary status: ${e.getMessage}") }(ex)

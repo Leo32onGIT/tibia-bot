@@ -107,7 +107,7 @@ final class StatusRoute(
    *  belongs to exactly one. avatarUrl/userId let the dashboard badge (and
    *  hover-identify) which bot serves a given guild on a merged view. */
   private def botIdentityJson: JsObject = JsObject(
-    "name" -> JsString(Config.BotRole.name),
+    "name" -> JsString(discordGateway.selfUserName),
     "avatarUrl" -> JsString(discordGateway.selfUserAvatarUrl),
     "userId" -> JsString(discordGateway.selfUserId),
     "role" -> JsString(Config.BotRole.current match {
@@ -370,9 +370,10 @@ final class StatusRoute(
 
 object StatusRoute {
   /** Redis key prefix a shared-world-cycle secondary publishes its worlds
-   *  snapshot under (full key: this prefix + Config.BotRole.name), and that
-   *  a primary scans for via `keysMatching` to discover however many
-   *  secondaries are currently publishing. */
+   *  snapshot under (full key: this prefix + its own Discord user id, a
+   *  stable and always-unique suffix — see BotApp.publishSecondaryStatus),
+   *  and that a primary scans for via `keysMatching` to discover however
+   *  many secondaries are currently publishing. */
   val secondaryStatusKeyPrefix = "tibia:secondary-status:"
 
   /** Merges local + remote world lists by `name` — a world tracked by guilds
