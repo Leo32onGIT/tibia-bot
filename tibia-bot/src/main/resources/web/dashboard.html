@@ -216,8 +216,8 @@
   .tag.paused { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .tag.unconfirmed { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
   /* Which Discord bot serves this guild — only ever present once a
-     shared-world-cycle primary's dashboard has slave data merged in. Sits
-     in each guild's own row in the discords list (.discord-item). */
+     shared-world-cycle primary's dashboard has secondary data merged in.
+     Sits in each guild's own row in the discords list (.discord-item). */
   .bot-avatar { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
 
   .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
@@ -490,7 +490,7 @@ function renderDetail(worlds) {
   document.getElementById('detail-discords').innerHTML = world.discords.length
     ? world.discords.map(d => {
         // Only present once a shared-world-cycle primary's dashboard has
-        // slave data merged in — omitted entirely on a plain deployment.
+        // secondary data merged in — omitted entirely on a plain deployment.
         const botAvatar = d.bot ? `<img class="bot-avatar" src="${d.bot.avatarUrl}" alt="${d.bot.name}" title="${d.bot.name} (${d.bot.userId})">` : '';
         return `<div class="discord-item">${botAvatar}<span>${d.name}</span><span class="sep">&middot;</span><i class="ti ti-crown owner-icon" aria-hidden="true"></i><span class="owner">${d.owner}</span><span class="gid">${d.id}</span></div>`;
       }).join('')
@@ -552,7 +552,7 @@ function renderBots(bots) {
   if (bots.length < 2) { panel.style.display = 'none'; return; }
   panel.style.display = '';
   document.getElementById('bots-list').innerHTML = bots.map(b => {
-    const roleLabel = b.bot.role === 'primary' ? 'Primary' : b.bot.role === 'slave' ? 'Slave' : '';
+    const roleLabel = b.bot.role === 'primary' ? 'Primary' : b.bot.role === 'secondary' ? 'Secondary' : '';
     const lanes = b.rateLimitLanes || {};
     const bgDepth = lanes.background ? lanes.background.queueDepth : 0;
     const olDepth = lanes['online-list'] ? lanes['online-list'].queueDepth : 0;

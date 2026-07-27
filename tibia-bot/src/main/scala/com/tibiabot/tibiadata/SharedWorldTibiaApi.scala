@@ -12,10 +12,10 @@ import scala.util.control.NonFatal
 
 /** Shared world-cycle decorator — see Config.BotRole. A `Primary` fetches
  *  `getWorld`/`getCharacter` as normal and additionally fire-and-forget
- *  publishes each successful result to Redis; a `Slave` reads that published
- *  result first, falling back to fetching it directly on a miss (primary
- *  hasn't fetched this cycle yet, is down, or the value aged out). Every
- *  other method passes straight through to `underlying` unchanged —
+ *  publishes each successful result to Redis; a `Secondary` reads that
+ *  published result first, falling back to fetching it directly on a miss
+ *  (primary hasn't fetched this cycle yet, is down, or the value aged out).
+ *  Every other method passes straight through to `underlying` unchanged —
  *  `getCharacterV2` deliberately included: it exists solely to defeat
  *  TibiaData's own upstream caching for Noctera (name-case-randomised on
  *  every call), so sharing on top of it would reintroduce exactly the
@@ -60,7 +60,7 @@ final class SharedWorldTibiaApi(
         }
         result
       }
-    case Config.BotRole.Slave =>
+    case Config.BotRole.Secondary =>
       cache.get(sharedWorldKey(world)).recover { case NonFatal(_) => None }.flatMap {
         case Some(json) =>
           try Future.successful(Right(json.parseJson.convertTo[WorldResponse]))
@@ -88,7 +88,7 @@ final class SharedWorldTibiaApi(
         }
         result
       }
-    case Config.BotRole.Slave =>
+    case Config.BotRole.Secondary =>
       cache.get(sharedCharacterKey(name)).recover { case NonFatal(_) => None }.flatMap {
         case Some(json) =>
           try Future.successful(Right(json.parseJson.convertTo[CharacterResponse]))

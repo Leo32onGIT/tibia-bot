@@ -232,10 +232,10 @@ object BotApp extends App with StrictLogging {
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService, discordGateway)(ex)
-  // A shared-world-cycle slave doesn't run its own dashboard at all — its
-  // worlds/guilds are instead published (below) for the primary's dashboard
-  // to merge in, so no HTTP server, no Caddy, no second domain needed.
-  if (Config.BotRole.current != Config.BotRole.Slave) {
+  // A shared-world-cycle secondary doesn't run its own dashboard at all —
+  // its worlds/guilds are instead published (below) for the primary's
+  // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
+  if (Config.BotRole.current != Config.BotRole.Secondary) {
     akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
       .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
         akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
@@ -246,28 +246,28 @@ object BotApp extends App with StrictLogging {
     // buildPatreonJson) — frequent enough that a primary's merged view feels
     // live, cheap enough that it's a non-issue running forever in the
     // background. TTL on the published key is longer than this interval
-    // (see slaveStatusPublishTtl) so a couple of missed cycles don't make
-    // this slave's panel flicker off the primary's dashboard.
-    actorSystem.scheduler.scheduleWithFixedDelay(5.seconds, 10.seconds)(() => publishSlaveStatus())(ex)
-    logger.info(s"Running as a shared-world-cycle slave ('${Config.BotRole.name}') — publishing status to the primary's dashboard instead of running its own")
+    // (see secondaryStatusPublishTtl) so a couple of missed cycles don't
+    // make this secondary's panel flicker off the primary's dashboard.
+    actorSystem.scheduler.scheduleWithFixedDelay(5.seconds, 10.seconds)(() => publishSecondaryStatus())(ex)
+    logger.info(s"Running as a shared-world-cycle secondary ('${Config.BotRole.name}') — publishing status to the primary's dashboard instead of running its own")
   }
 
-  private val slaveStatusPublishTtl = 30.seconds
+  private val secondaryStatusPublishTtl = 30.seconds
 
-  /** Publishes this slave's full status snapshot (worlds/guilds, rate-limit
+  /** Publishes this secondary's full status snapshot (worlds/guilds, rate-limit
    *  lanes, bot identity — the exact same data its own dashboard would show,
    *  were it running one) for a primary to merge into its dashboard's
-   *  worlds view and fleet panel — see StatusRoute.remoteSlaveStatuses. */
-  private def publishSlaveStatus(): Unit = {
+   *  worlds view and fleet panel — see StatusRoute.remoteSecondaryStatuses. */
+  private def publishSecondaryStatus(): Unit = {
     try {
       val json = statusRoute.buildBotStatusJson()
       persistence.RedisCacheProvider.cache.setEx(
-        s"${web.StatusRoute.slaveStatusKeyPrefix}${Config.BotRole.name}",
+        s"${web.StatusRoute.secondaryStatusKeyPrefix}${Config.BotRole.name}",
         json.compactPrint,
-        slaveStatusPublishTtl
-      ).recover { case e: Throwable => logger.warn(s"Failed to publish slave status: ${e.getMessage}") }(ex)
+        secondaryStatusPublishTtl
+      ).recover { case e: Throwable => logger.warn(s"Failed to publish secondary status: ${e.getMessage}") }(ex)
     } catch {
-      case e: Throwable => logger.warn("Failed to build slave status snapshot", e)
+      case e: Throwable => logger.warn("Failed to build secondary status snapshot", e)
     }
   }
 
@@ -869,8 +869,8 @@ object BotApp extends App with StrictLogging {
       }
 
       // Shared world-cycle: as primary, also poll (and publish, via
-      // SharedWorldTibiaApi inside TibiaBot) any world a slave's guilds need
-      // that none of THIS process's own guilds do — discordsData above is
+      // SharedWorldTibiaApi inside TibiaBot) any world a secondary's guilds
+      // need that none of THIS process's own guilds do — discordsData above is
       // built purely from our own JDA guild membership, so it can't see
       // those. Empty discords list: nothing of ours to fan out to for these,
       // the poll+publish is the whole point of the stream.

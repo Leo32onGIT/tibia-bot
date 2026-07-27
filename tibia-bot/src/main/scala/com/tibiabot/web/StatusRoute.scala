@@ -112,16 +112,16 @@ final class StatusRoute(
     "userId" -> JsString(discordGateway.selfUserId),
     "role" -> JsString(Config.BotRole.current match {
       case Config.BotRole.Primary => "primary"
-      case Config.BotRole.Slave => "slave"
+      case Config.BotRole.Secondary => "secondary"
       case Config.BotRole.Disabled => "disabled"
     })
   )
 
   /** This process's own worlds — its JDA guild membership plus (as a
-   *  shared-world-cycle primary) any extra worlds it polls on a slave's
-   *  behalf, per `BotApp.startBot`. Public: a slave calls this directly to
-   *  build the snapshot it publishes to Redis, reusing the exact same shape
-   *  its own local dashboard would show if it ran one. */
+   *  shared-world-cycle primary) any extra worlds it polls on a secondary's
+   *  behalf, per `BotApp.startBot`. Public: a secondary calls this directly
+   *  to build the snapshot it publishes to Redis, reusing the exact same
+   *  shape its own local dashboard would show if it ran one. */
   def buildWorldsJson(): JsArray = {
     val worldSnapshots = worldMetricsRegistry.snapshotAll()
     val streams = streamSupervisor.snapshot
@@ -164,10 +164,10 @@ final class StatusRoute(
 
   /** This process's full status snapshot — bot identity, when this was built,
    *  its own worlds, and its own rate-limit lanes. Public: this is exactly
-   *  what a slave publishes to Redis (see `slaveStatusKeyPrefix`) so the
-   *  primary can show a "which bots are connected" fleet view alongside the
-   *  merged worlds, without a second Redis round-trip or a different shape
-   *  to decode. */
+   *  what a secondary publishes to Redis (see `secondaryStatusKeyPrefix`) so
+   *  the primary can show a "which bots are connected" fleet view alongside
+   *  the merged worlds, without a second Redis round-trip or a different
+   *  shape to decode. */
   def buildBotStatusJson(): JsObject = JsObject(
     "bot" -> botIdentityJson,
     "publishedAt" -> JsString(java.time.Instant.now().toString),
@@ -178,42 +178,42 @@ final class StatusRoute(
     )
   )
 
-  /** Any shared-world-cycle slave's published status, fetched raw — see
-   *  `slaveStatusKeyPrefix`. Only a Primary looks; a plain/slave deployment
-   *  gets an empty list back with no Redis round-trip at all. Uses
-   *  `keysMatching` rather than a fixed slave list so this supports however
-   *  many slaves are actually publishing, with zero config on the primary
-   *  side when a new one joins. A slave that's gone quiet (past its
-   *  publish TTL) just stops appearing — no special-casing needed. */
-  private def remoteSlaveStatuses(): Future[Vector[JsObject]] =
+  /** Any shared-world-cycle secondary's published status, fetched raw — see
+   *  `secondaryStatusKeyPrefix`. Only a Primary looks; a plain/secondary
+   *  deployment gets an empty list back with no Redis round-trip at all.
+   *  Uses `keysMatching` rather than a fixed secondary list so this supports
+   *  however many secondaries are actually publishing, with zero config on
+   *  the primary side when a new one joins. A secondary that's gone quiet
+   *  (past its publish TTL) just stops appearing — no special-casing needed. */
+  private def remoteSecondaryStatuses(): Future[Vector[JsObject]] =
     if (Config.BotRole.current != Config.BotRole.Primary) Future.successful(Vector.empty)
     else {
-      persistence.RedisCacheProvider.cache.keysMatching(s"${StatusRoute.slaveStatusKeyPrefix}*").flatMap { keys =>
+      persistence.RedisCacheProvider.cache.keysMatching(s"${StatusRoute.secondaryStatusKeyPrefix}*").flatMap { keys =>
         Future.traverse(keys)(persistence.RedisCacheProvider.cache.get).map { values =>
           values.flatten.flatMap { json =>
             try Some(json.parseJson.asJsObject)
             catch {
               case NonFatal(e) =>
-                logger.warn(s"Failed to decode a slave status snapshot, skipping it: ${e.getMessage}")
+                logger.warn(s"Failed to decode a secondary status snapshot, skipping it: ${e.getMessage}")
                 None
             }
           }.toVector
         }
       }.recover {
         case NonFatal(e) =>
-          logger.warn(s"Failed to fetch slave status snapshots: ${e.getMessage}")
+          logger.warn(s"Failed to fetch secondary status snapshots: ${e.getMessage}")
           Vector.empty
       }
     }
 
   private def buildStatusJson(): Future[JsObject] = {
     val ownStatus = buildBotStatusJson()
-    remoteSlaveStatuses().map { slaveStatuses =>
+    remoteSecondaryStatuses().map { secondaryStatuses =>
       val ownWorlds = ownStatus.fields("worlds").asInstanceOf[JsArray].elements
-      val remoteWorlds = slaveStatuses.flatMap(s => s.fields.get("worlds").collect { case JsArray(el) => el }.getOrElse(Vector.empty))
+      val remoteWorlds = secondaryStatuses.flatMap(s => s.fields.get("worlds").collect { case JsArray(el) => el }.getOrElse(Vector.empty))
       JsObject(
         "worlds" -> JsArray(StatusRoute.mergeWorlds(ownWorlds ++ remoteWorlds)),
-        "bots" -> StatusRoute.buildBotsJson(ownStatus, slaveStatuses),
+        "bots" -> StatusRoute.buildBotsJson(ownStatus, secondaryStatuses),
         "rateLimitLanes" -> ownStatus.fields("rateLimitLanes"),
         "logAlerts" -> buildLogAlertsJson(),
         "patreon" -> buildPatreonJson()
@@ -369,11 +369,11 @@ final class StatusRoute(
 }
 
 object StatusRoute {
-  /** Redis key prefix a shared-world-cycle slave publishes its worlds
+  /** Redis key prefix a shared-world-cycle secondary publishes its worlds
    *  snapshot under (full key: this prefix + Config.BotRole.name), and that
-   *  a primary scans for via `keysMatching` to discover however many slaves
-   *  are currently publishing. */
-  val slaveStatusKeyPrefix = "tibia:slave-status:"
+   *  a primary scans for via `keysMatching` to discover however many
+   *  secondaries are currently publishing. */
+  val secondaryStatusKeyPrefix = "tibia:secondary-status:"
 
   /** Merges local + remote world lists by `name` — a world tracked by guilds
    *  on more than one bot must appear exactly once, not once per bot (a
@@ -420,12 +420,12 @@ object StatusRoute {
   }
 
   /** One summary row per connected bot — this process itself plus every
-   *  slave currently publishing — for the dashboard's fleet panel. Each row
-   *  is a self-contained snapshot (name/avatar/role, worlds served,
+   *  secondary currently publishing — for the dashboard's fleet panel. Each
+   *  row is a self-contained snapshot (name/avatar/role, worlds served,
    *  population, its own rate-limit lanes, when it was last published) so
-   *  the frontend can render "any X slaves" without knowing bot names in
-   *  advance. A pure function of JsObjects, directly unit-testable. */
-  def buildBotsJson(own: JsObject, slaves: Vector[JsObject]): JsArray = {
+   *  the frontend can render "any X secondaries" without knowing bot names
+   *  in advance. A pure function of JsObjects, directly unit-testable. */
+  def buildBotsJson(own: JsObject, secondaries: Vector[JsObject]): JsArray = {
     def summarize(status: JsObject): JsObject = {
       val worlds = status.fields.get("worlds").collect { case JsArray(el) => el }.getOrElse(Vector.empty)
       val population = worlds.map { w =>
@@ -439,6 +439,6 @@ object StatusRoute {
         "rateLimitLanes" -> status.fields.getOrElse("rateLimitLanes", JsObject.empty)
       )
     }
-    JsArray((summarize(own) +: slaves.map(summarize)).toVector)
+    JsArray((summarize(own) +: secondaries.map(summarize)).toVector)
   }
 }

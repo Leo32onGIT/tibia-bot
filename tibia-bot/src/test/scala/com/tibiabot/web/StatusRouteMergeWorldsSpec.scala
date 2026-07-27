@@ -117,14 +117,14 @@ class StatusRouteMergeWorldsSpec extends AnyFunSuite with Matchers {
     "rateLimitLanes" -> lanes(0, 0)
   )
 
-  test("buildBotsJson always includes the primary/self entry first, even with no slaves") {
+  test("buildBotsJson always includes the primary/self entry first, even with no secondaries") {
     val own = botStatus("Blue", "b1", Vector(world("Antica", Some("2026-01-01T00:00:00Z"))))
     val bots = StatusRoute.buildBotsJson(own, Vector.empty)
     bots.elements.size shouldBe 1
     bots.elements.head.asJsObject.fields("bot").asJsObject.fields("name").asInstanceOf[JsString].value shouldBe "Blue"
   }
 
-  test("buildBotsJson includes one entry per connected slave, after self") {
+  test("buildBotsJson includes one entry per connected secondary, after self") {
     val own = botStatus("Blue", "b1", Vector.empty)
     val red = botStatus("Red", "r1", Vector.empty)
     val green = botStatus("Green", "g1", Vector.empty)

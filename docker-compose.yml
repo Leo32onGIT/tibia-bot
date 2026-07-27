@@ -9,9 +9,9 @@
 #
 # Redis (the cache) starts by default (the `local-cache` profile is meant to
 # be active via COMPOSE_PROFILES in .env — see .env.example). A shared-world-
-# cycle slave doesn't run its own Redis at all (it points REDIS_HOST at the
-# primary's instead), so its .env leaves COMPOSE_PROFILES unset and the local
-# redis service is never created.
+# cycle secondary doesn't run its own Redis at all (it points REDIS_HOST at
+# the primary's instead), so its .env leaves COMPOSE_PROFILES unset and the
+# local redis service is never created.
 
 services:
   bot:
@@ -24,7 +24,7 @@ services:
         condition: service_healthy
         # Satisfied normally when the `local-cache` profile is active; simply
         # skipped (not an error) when it isn't, e.g. a shared-world-cycle
-        # slave — see the redis service below.
+        # secondary — see the redis service below.
         required: false
     # The bot connects to Postgres at boot; with the bundled DB (local-db profile)
     # it may restart a couple of times while Postgres initialises — that is
@@ -50,10 +50,10 @@ services:
   caddy:
     image: caddy:2
     # Only created when the `own-dashboard` profile is active (COMPOSE_PROFILES
-    # in .env — see .env.example). A shared-world-cycle slave doesn't run its
-    # own dashboard at all (BotApp skips binding the internal HTTP server too
-    # when BOT_ROLE=slave) — its worlds/guilds are published for the primary's
-    # dashboard to merge in instead, so no reverse proxy, no domain, needed.
+    # in .env — see .env.example). A shared-world-cycle secondary doesn't run
+    # its own dashboard at all (BotApp skips binding the internal HTTP server
+    # too when BOT_ROLE=secondary) — its worlds/guilds are published for the
+    # primary's dashboard to merge in instead, so no reverse proxy, no domain, needed.
     profiles: ["own-dashboard"]
     env_file: .env
     ports:
@@ -73,7 +73,7 @@ services:
     image: redis:7-alpine
     # Only created when the `local-cache` profile is active (COMPOSE_PROFILES
     # in .env — see .env.example). Absent entirely on a shared-world-cycle
-    # slave, which has no use for its own Redis.
+    # secondary, which has no use for its own Redis.
     profiles: ["local-cache"]
     networks:
       - violentbot
@@ -85,8 +85,8 @@ services:
     # Published only to a specific private IP — unset (the default) binds to
     # loopback only, i.e. no real exposure beyond this host. Set
     # REDIS_PUBLISH_HOST to this host's own private IP on a shared-world-cycle
-    # primary, so slave bots elsewhere on the VPC can reach it; leave unset on
-    # a plain single-bot or slave deployment.
+    # primary, so secondary bots elsewhere on the VPC can reach it; leave
+    # unset on a plain single-bot or secondary deployment.
     ports:
       - "${REDIS_PUBLISH_HOST:-127.0.0.1}:6379:6379"
     volumes:
