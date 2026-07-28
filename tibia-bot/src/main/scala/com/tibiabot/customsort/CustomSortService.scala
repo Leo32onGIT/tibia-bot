@@ -3,7 +3,7 @@ package com.tibiabot.customsort
 import com.tibiabot.Config
 import com.tibiabot.domain.CustomSort
 import com.tibiabot.persistence.CustomSortRepository
-import com.tibiabot.presentation.{AdminLog, Embeds}
+import com.tibiabot.presentation.AdminLog
 import com.tibiabot.presentation.Embeds.BrandColor
 import com.tibiabot.state.StreamState
 import com.tibiabot.tibiadata.TibiaApi
@@ -66,7 +66,7 @@ final class CustomSortService(
           case Right(guildResponse) =>
             val guildName = guildResponse.guild.name
             guildName
-          case Left(errorMessage) =>
+          case Left(_) =>
             ""
         }.map { guildName =>
           if (guildName != "") {
@@ -98,7 +98,7 @@ final class CustomSortService(
           }
         }
       } else if (guildOrPlayer == "player") {
-        fetchPlayerSummary(nameLower).map { case (playerName, world, vocation, level) =>
+        fetchPlayerSummary(nameLower).map { case (playerName, _, vocation, level) =>
           if (playerName != "") {
             if (!streamState.customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.toLowerCase == nameLower)) {
 

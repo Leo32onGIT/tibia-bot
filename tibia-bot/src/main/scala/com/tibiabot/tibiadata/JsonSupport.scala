@@ -80,10 +80,6 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val creatureDataFormat: RootJsonFormat[CreatureData] = jsonFormat2(CreatureData)
   implicit val creatureResponseFormat: RootJsonFormat[CreatureResponse] = jsonFormat2(CreatureResponse)
 
-  implicit val highscorePageFormat: RootJsonFormat[HighscoresPage] = jsonFormat3(HighscoresPage)
-  implicit val highscoreListFormat: RootJsonFormat[HighscoresList] = jsonFormat6(HighscoresList)
-  implicit val highscoresFormat: RootJsonFormat[Highscores] = jsonFormat6(Highscores)
-  implicit val highscoresResponseFormat: RootJsonFormat[HighscoresResponse] = jsonFormat2(HighscoresResponse)
 }
 
 // Calling json.convertTo[String] directly inside strFormat.read would recurse into

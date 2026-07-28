@@ -135,7 +135,7 @@ class StreamStateConcurrencySpec extends AnyFunSuite with Matchers {
     val perThread = 250 // 16 * 250 = 4000 distinct character names
     race(threads) { t =>
       (0 until perThread).foreach { k =>
-        state.modifyCharacterCache(_ + (s"char-$t-$k" -> when))
+        state.recordCharacterSeen(s"char-$t-$k", when)
       }
     }
     state.characterCache.size shouldBe threads * perThread
@@ -156,7 +156,7 @@ class StreamStateConcurrencySpec extends AnyFunSuite with Matchers {
         state.modifyDiscordsData(_ + (s"d-$t-$i" -> List(discord("x"))))
         state.modifyWorldsData(_ + (s"w-$t-$i" -> List.empty[Worlds]))
         state.modifyActivityCommandBlocker(_ + (s"b-$t-$i" -> true))
-        state.modifyCharacterCache(_ + (s"c-$t-$i" -> when))
+        state.recordCharacterSeen(s"c-$t-$i", when)
       }
     }
     val expected = threads * perThread

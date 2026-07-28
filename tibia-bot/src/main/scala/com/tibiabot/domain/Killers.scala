@@ -36,6 +36,19 @@ object Killers {
     else None
   }
 
+  /** The character names a death's killer list will want a level for, given the
+   *  victim's name and each killer as (name, isPlayer).
+   *
+   *  Mirrors exactly what the death embed renders a "[level]" beside: player
+   *  killers only (creatures and environmental sources have no level), never
+   *  the victim themselves (deaths list "self" entries the embed skips), and a
+   *  summon resolved to its summoner — "fire elemental of X" asks about X, not
+   *  about the elemental. */
+  def levelLookupNames(victim: String, killers: Seq[(String, Boolean)]): Seq[String] =
+    killers.collect {
+      case (name, true) if name != victim => parseSummon(name).map(_._2).getOrElse(name)
+    }
+
   /** Join killer entries into one phrase: "a", "a and b", "a, b and c". Empty
    *  for no killers (the caller renders that as a suicide). */
   def joinNatural(parts: Seq[String]): String = parts match {

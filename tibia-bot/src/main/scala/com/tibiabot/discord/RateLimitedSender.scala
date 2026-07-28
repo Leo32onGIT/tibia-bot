@@ -35,16 +35,11 @@ final class RateLimitedSender(
   private val queue = new BoundedMessageQueue[Queued](capacity)
   private var stopTicker: Option[() => Unit] = None
   private var stats: Map[String, RateLimitedSender.LabelStats] = Map.empty
-  private var supersededCount = 0L
 
   /** Queue a send under `label`, superseding any still-pending item with the
    *  same `key` (see class doc), and ensure the drain loop is running. Thread-safe. */
   def enqueue(label: String, key: Option[String] = None)(dispatch: () => Unit): Unit = synchronized {
-    key.foreach { k =>
-      val removed = queue.removeWhere(_.key.contains(k))
-      supersededCount += removed
-    }
-    if (!queue.enqueue(Queued(label, key, System.currentTimeMillis(), dispatch)))
+    if (!queue.enqueue(Queued(label, key, System.currentTimeMillis(), dispatch), key))
       logger.warn(s"Outbound message queue full (capacity $capacity); dropped ${queue.dropped} messages so far")
     if (stopTicker.isEmpty) stopTicker = Some(startTicker(() => drainOne()))
   }
@@ -73,7 +68,7 @@ final class RateLimitedSender(
   def totalDropped: Long = synchronized { queue.dropped }
 
   /** Cumulative messages superseded (replaced by a newer enqueue under the same key) since creation. */
-  def totalSuperseded: Long = synchronized { supersededCount }
+  def totalSuperseded: Long = synchronized { queue.superseded }
 
   /** Per-label send count + average queue wait time since the last call to this
    *  method (or since startup, the first time), then resets the window. Intended

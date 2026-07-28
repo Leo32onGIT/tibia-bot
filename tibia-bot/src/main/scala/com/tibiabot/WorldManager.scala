@@ -19,8 +19,8 @@ object WorldManager extends StrictLogging {
     new tibiadata.CachingTibiaApi(new TibiaDataClient(new state.StreamState), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
   // The world list changes only at major game updates, so cache it (default 1h)
-  // instead of making a blocking API call on every getWorldList() (e.g. once per
-  // /leaderboards). Falls back to the last good value, then the static list.
+  // instead of making a blocking API call on every getWorldList(). Falls back to
+  // the last good value, then the static list.
   // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
   private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 

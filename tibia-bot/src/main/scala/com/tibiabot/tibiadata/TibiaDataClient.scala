@@ -8,7 +8,7 @@ import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.pattern.after
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -28,6 +28,12 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
 
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
   private val guildUrl = "https://api.tibiadata.com/v4/guild/"
+
+  // Built once: fetchCharacterCached runs on every character response (tens of
+  // thousands a minute across all worlds), and DateTimeFormatter is immutable
+  // and thread-safe, so there is no reason to rebuild it per response.
+  private val dateHeaderFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
 
   private val retryableStatusCodes: Set[Int] = Set(429, 500, 502, 503, 504)
   private val maxRetries = 2
@@ -119,12 +125,6 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
       resp => s"Failed to get boosted creature with status: '${resp.status}'",
       s"Failed to parse boosted creature")
 
-  def getHighscores(world: String, page: Int): Future[Either[String, HighscoresResponse]] =
-    fetch[HighscoresResponse](
-      s"${Config.tibiadataApi}/v4/highscores/${world}/experience/all/${page.toString}",
-      resp => s"Failed to get highscores with status: '${resp.status}'",
-      s"Failed to parse highscores")
-
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = {
     val encodedName = URLEncoder.encode(guild, "UTF-8").replaceAll("\\+", "%20")
     fetch[GuildResponse](
@@ -160,22 +160,17 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
    *  otherwise record the timestamp and unmarshal. The request URL differs
    *  between callers (plain vs the level>=1000 bypass), so it is built by the
    *  caller and passed in as `responseFuture`. */
-  private def fetchCharacterCached(name: String, responseFuture: Future[HttpResponse]): Future[Either[String, CharacterResponse]] = {
-    val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
+  private def fetchCharacterCached(name: String, encodedName: String, responseFuture: Future[HttpResponse]): Future[Either[String, CharacterResponse]] =
     responseFuture.flatMap { response =>
       response.header[DateHeader] match {
         case Some(dateHeader) =>
-          val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
-          val responseDate = ZonedDateTime.parse(dateHeader.date.toString, formatter)
-          streamState.characterCache.get(name) match {
-            case Some(existingDate) if responseDate.isAfter(existingDate) =>
-              streamState.modifyCharacterCache(_ + (name -> responseDate))
-              unmarshalCharacter(response, encodedName)
-            case Some(_) =>
+          val responseDate = ZonedDateTime.parse(dateHeader.date.toString, dateHeaderFormatter)
+          streamState.characterSeenAt(name) match {
+            case Some(existingDate) if !responseDate.isAfter(existingDate) =>
               response.discardEntityBytes()
               Future.successful(Left("Hit cache"))
-            case None =>
-              streamState.modifyCharacterCache(_ + (name -> responseDate))
+            case _ =>
+              streamState.recordCharacterSeen(name, responseDate)
               unmarshalCharacter(response, encodedName)
           }
         case None =>
@@ -183,11 +178,10 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
           Future.successful(Left("No Date header in response"))
       }
     }
-  }
 
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    fetchCharacterCached(name, requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")))
+    fetchCharacterCached(name, encodedName, requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
@@ -221,7 +215,7 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
           }
           randomizedName
         } else encodedName
-    fetchCharacterCached(name, requestWithRetry(HttpRequest(uri = s"$apiUrl$bypassName")))
+    fetchCharacterCached(name, encodedName, requestWithRetry(HttpRequest(uri = s"$apiUrl$bypassName")))
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {

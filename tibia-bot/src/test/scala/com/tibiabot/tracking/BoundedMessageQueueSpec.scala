@@ -40,4 +40,45 @@ class BoundedMessageQueueSpec extends AnyFunSuite with Matchers {
     q.dropped shouldBe 1
     List.fill(3)(q.dequeueOption()).flatten shouldBe List(2, 3, 4)
   }
+
+  test("re-enqueueing a key replaces the pending item and moves it to the tail") {
+    val q = new BoundedMessageQueue[Int]()
+    q.enqueue(1, Some("a"))
+    q.enqueue(2, Some("b"))
+    q.enqueue(3, Some("a")) // supersedes 1, and goes behind 2
+    q.size shouldBe 2
+    q.superseded shouldBe 1
+    List.fill(2)(q.dequeueOption()).flatten shouldBe List(2, 3)
+  }
+
+  test("distinct keys are independent and keep FIFO order") {
+    val q = new BoundedMessageQueue[Int]()
+    q.enqueue(1, Some("a"))
+    q.enqueue(2, Some("b"))
+    q.size shouldBe 2
+    q.superseded shouldBe 0
+    List.fill(2)(q.dequeueOption()).flatten shouldBe List(1, 2)
+  }
+
+  test("keyed and unkeyed items interleave in one FIFO order") {
+    val q = new BoundedMessageQueue[Int]()
+    q.enqueue(1, Some("a"))
+    q.enqueue(2)             // unkeyed
+    q.enqueue(3, Some("b"))
+    q.enqueue(4)             // unkeyed, never superseded by another unkeyed
+    q.size shouldBe 4
+    q.superseded shouldBe 0
+    List.fill(4)(q.dequeueOption()).flatten shouldBe List(1, 2, 3, 4)
+  }
+
+  test("superseding at capacity replaces rather than drops") {
+    val q = new BoundedMessageQueue[Int](capacity = 2)
+    q.enqueue(1, Some("a"))
+    q.enqueue(2, Some("b"))
+    q.enqueue(3, Some("a")) shouldBe true // frees a slot before re-inserting
+    q.size shouldBe 2
+    q.dropped shouldBe 0
+    q.superseded shouldBe 1
+    List.fill(2)(q.dequeueOption()).flatten shouldBe List(2, 3)
+  }
 }

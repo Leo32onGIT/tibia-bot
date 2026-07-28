@@ -3,11 +3,9 @@ package com.tibiabot.worldsettings
 import com.tibiabot.Config
 import com.tibiabot.domain.Worlds
 import com.tibiabot.persistence.{DiscordConfigRepository, WorldConfigRepository}
-import com.tibiabot.presentation.{AdminLog, Embeds}
+import com.tibiabot.presentation.AdminLog
 import com.tibiabot.presentation.Embeds.BrandColor
 import com.tibiabot.state.StreamState
-import com.tibiabot.tibiadata.TibiaApi
-import com.tibiabot.tibiadata.response.HighscoresResponse
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -17,15 +15,13 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
-import scala.concurrent.{ExecutionContextExecutor, Future}
 
 /**
  * Per-world setting slash commands: auto-hunt detection, deaths/levels
- * visibility, exiva-on-death, minimum level, fullbless level, online-list
- * layout, and leaderboards. Extracted from BotApp (detectHunted/
- * deathsLevelsHideShow/exivaList/minLevel/fullblessLevel + the generic
- * updateWorldSetting[T] helper from a prior de-duplication pass, plus
- * leaderboards).
+ * visibility, exiva-on-death, minimum level, fullbless level and online-list
+ * layout. Extracted from BotApp (detectHunted/deathsLevelsHideShow/exivaList/
+ * minLevel/fullblessLevel + the generic updateWorldSetting[T] helper from a
+ * prior de-duplication pass).
  *
  * onlineListConfig does its own channel/category mutation through the
  * injected ChannelService rather than the updateWorldSetting[T] helper.
@@ -34,10 +30,9 @@ final class WorldSettingsService(
   worldConfigRepository: WorldConfigRepository,
   discordConfigRepository: DiscordConfigRepository,
   streamState: StreamState,
-  tibiaDataClient: TibiaApi,
   channelService: com.tibiabot.setup.ChannelService,
   botUser: String
-)(implicit ex: ExecutionContextExecutor) extends StrictLogging {
+) extends StrictLogging {
 
   private def discordRetrieveConfig(guild: Guild): Map[String, String] =
     discordConfigRepository.getConfig(guild.getId)
@@ -268,7 +263,7 @@ final class WorldSettingsService(
               val allyPkRole = worldConfigData("allypk_role")
               val masslogRole = worldConfigData("masslog_role")
 
-              message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level))
+              message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level.toString))
                 .setComponents(ActionRow.of(channelService.fullblessRoleButtons.asJava))
                 .queue()
             }
@@ -282,35 +277,6 @@ final class WorldSettingsService(
     } else {
       embedBuild.setDescription(s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.")
       embedBuild.build()
-    }
-  }
-
-  def leaderboards(event: SlashCommandInteractionEvent, world: String, callback: MessageEmbed => Unit): Unit = {
-    val worldFormal = com.tibiabot.domain.WorldName.formal(world)
-    val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(BrandColor)
-
-    if (Config.worldList.exists(_.equalsIgnoreCase(world))) {
-      val highScores: Future[Either[String, HighscoresResponse]] = tibiaDataClient.getHighscores(worldFormal, 1)
-
-      highScores.onComplete {
-        case scala.util.Success(Right(highscoreResponse)) =>
-          val currentPage = highscoreResponse.highscores.highscore_page.current_page
-          val totalPages = highscoreResponse.highscores.highscore_page.total_pages
-          embedBuild.setDescription(s"Current page: $currentPage\nTotal pages: $totalPages.")
-          callback(embedBuild.build())
-
-        case scala.util.Success(Left(errorMessage)) =>
-          embedBuild.setDescription(s"${Config.noEmoji} Failed to fetch highscores: $errorMessage")
-          callback(embedBuild.build())
-
-        case scala.util.Failure(exception) =>
-          embedBuild.setDescription(s"${Config.noEmoji} An error occurred: ${exception.toString}")
-          callback(embedBuild.build())
-      }
-    } else {
-      embedBuild.setDescription(s"${Config.noEmoji} **$worldFormal** is not a valid world.")
-      callback(embedBuild.build())
     }
   }
 

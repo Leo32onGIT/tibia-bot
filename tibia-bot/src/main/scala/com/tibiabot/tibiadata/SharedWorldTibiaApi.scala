@@ -106,7 +106,6 @@ final class SharedWorldTibiaApi(
   def getWorlds(): Future[Either[String, WorldsResponse]] = underlying.getWorlds()
   def getBoostedBoss(): Future[Either[String, BoostedResponse]] = underlying.getBoostedBoss()
   def getBoostedCreature(): Future[Either[String, CreatureResponse]] = underlying.getBoostedCreature()
-  def getHighscores(world: String, page: Int): Future[Either[String, HighscoresResponse]] = underlying.getHighscores(world, page)
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = underlying.getGuild(guild)
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)] = underlying.getGuildWithInput(input)
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = underlying.getKillerFallback(name)

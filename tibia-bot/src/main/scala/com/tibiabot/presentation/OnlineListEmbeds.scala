@@ -20,6 +20,21 @@ object OnlineListEmbeds {
     s"`$durationStr`"
   }
 
+  private val durationPattern = "`(?:\\d+hr )?\\d+min`".r
+
+  /** The same line with every [[durationString]] masked out.
+   *
+   *  Used to decide whether an already-posted online-list message still says
+   *  the same thing. Every line carries a live "how long online" duration that
+   *  ticks up roughly every minute, so a raw compare almost never matches even
+   *  when the roster itself is unchanged, and the message gets needlessly
+   *  rewritten on every check. Masking the duration means an unchanged roster
+   *  is correctly detected as unchanged; the tradeoff is that the *displayed*
+   *  duration only refreshes when something else about the list changes too (a
+   *  login/logout, level-up, guild change). Lives next to `durationString` so
+   *  the two can't drift apart. */
+  def withoutDurations(text: String): String = durationPattern.replaceAllIn(text, "`_`")
+
   /** The paywall's paused-online-list channel suffix (see BotApp.
    *  postPausedOnlineListNotice) — a single shared constant so the "strip
    *  the bot-appended suffix" regex below can never drift out of sync with

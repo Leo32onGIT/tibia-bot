@@ -8,7 +8,6 @@ import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 
-import scala.concurrent.ExecutionContextExecutor
 import scala.util.{Failure, Success, Try}
 
 /** Owner-only Patreon seat admin actions for the dashboard: release one seat,
@@ -26,7 +25,7 @@ final class PatreonAdminRoute(
   discordAuth: DiscordAuth,
   ownerId: String,
   paywallService: paywall.PaywallService
-)(implicit ex: ExecutionContextExecutor) extends StrictLogging {
+) extends StrictLogging {
 
   private def requireOwner(userId: String): Directive0 =
     if (userId == ownerId) pass else complete(StatusCodes.Forbidden -> "Forbidden")

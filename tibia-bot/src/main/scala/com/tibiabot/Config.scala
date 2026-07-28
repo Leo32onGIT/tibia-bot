@@ -9,9 +9,6 @@ import scala.jdk.DurationConverters._
 object Config {
   // prod or dev environment
   val prod = true
-  val verifiedDiscords = List(
-    "1082484147492237515" // alpha/testing server
-  )
 
   private val discord = ConfigFactory.load().getConfig("discord-config")
   private val mappings = ConfigFactory.load().getConfig("mapping-config")
@@ -35,11 +32,11 @@ object Config {
   object Cache {
     private def dur(key: String): FiniteDuration = discord.getDuration(s"cache.$key").toScala
     val boostedTtl: FiniteDuration = dur("boosted-ttl")
-    val highscoresTtl: FiniteDuration = dur("highscores-ttl")
     val worldListTtl: FiniteDuration = dur("world-list-ttl")
     val characterSnapshotTtl: FiniteDuration = dur("character-snapshot-ttl")
     val characterSnapshotInterval: FiniteDuration = dur("character-snapshot-interval")
     val onlineDurationTtl: FiniteDuration = dur("online-duration-ttl")
+    val killerLevelTtl: FiniteDuration = dur("killer-level-ttl")
   }
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
@@ -55,7 +52,6 @@ object Config {
 
   // discord config
   val webHookAvatar: String = discord.getString("avatar-url")
-  val aolThumbnail: String = discord.getString("fullbless-avatar-url")
   val nameChangeThumbnail: String = discord.getString("namechange-thumbnail")
   val guildLeaveThumbnail: String = discord.getString("guild-leave-thumbnail")
   val guildSwapGrey: String = discord.getString("guild-swap-thumbnail-grey")
@@ -75,7 +71,6 @@ object Config {
  val enemyGuild: String = discord.getString("enemyguild-emoji")
  val ally: String = discord.getString("ally-emoji")
  val enemy: String = discord.getString("enemy-emoji")
- val neutral: String = discord.getString("neutral-emoji")
  val mkEmoji: String = discord.getString("mk-emoji")
  val cubeEmoji: String = discord.getString("cube-emoji")
  val svarGreenEmoji: String = discord.getString("svar-green-emoji")
@@ -90,12 +85,8 @@ object Config {
  val exivaEmoji: String = discord.getString("exiva-emoji")
  val indentEmoji: String = discord.getString("indent-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")
- val desireEmoji: String = discord.getString("desire-emoji")
- val covetEmoji: String = discord.getString("covet-emoji")
  val primalEmoji: String = discord.getString("primal-emoji")
  val hazardEmoji: String = discord.getString("hazard-emoji")
- val boostedBossEmoji: String = discord.getString("boosted-boss-emoji")
- val boostedCreatureEmoji: String = discord.getString("boosted-creature-emoji")
  val yesEmoji: String = discord.getString("yes-emoji")
  val noEmoji: String = discord.getString("no-emoji")
  val letterEmoji: String = discord.getString("letter-emoji")

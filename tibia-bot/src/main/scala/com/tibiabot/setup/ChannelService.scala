@@ -177,9 +177,11 @@ final class ChannelService(
     Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(Config.masslogEmoji))
   )
 
-  /** The "the bot will poke" role-notification embed for a world. Built by both
-   *  /setup (initial post) and /fullbless (edits the existing message). */
-  def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, level: Int): MessageEmbed =
+  /** The "the bot will poke" role-notification embed for a world. Built by
+   *  /setup (initial post), /fullbless (edits the existing message) and
+   *  /repair (reposts it). `level` is a String because /repair reads it
+   *  straight out of the stored world config; it is only ever interpolated. */
+  def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, level: String): MessageEmbed =
     new EmbedBuilder()
       .setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
       .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
@@ -307,7 +309,7 @@ final class ChannelService(
         if (notificationsChannel != null) {
           if (notificationsChannel.canTalk()) {
 
-            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, 250))
+            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "250"))
               .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
             }
@@ -425,7 +427,7 @@ final class ChannelService(
       var adminCategory = guild.getCategoryById(discordConfig("admin_category"))
       var adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
       var boostedChannel = guild.getTextChannelById(discordConfig("boosted_channel"))
-      var boostedMessage = discordConfig("boosted_messageid")
+      val boostedMessage = discordConfig("boosted_messageid")
 
       // get channel literals
       var category = guild.getCategoryById(categoryInfo.getOrElse("0"))
@@ -494,20 +496,8 @@ final class ChannelService(
             val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
 
             // Fullbless Role
-            val fullblessEmbed = new EmbedBuilder()
-            val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
-            fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-            fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-            fullblessEmbed.setColor(BrandColor)
-            fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-            fullblessEmbed.setDescription(fullblessEmbedText)
-            boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
-              .setComponents(ActionRow.of(
-                Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
-                Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-                Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
-                Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-              ))
+            boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, fullblessLevel))
+              .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
 
             // Update role id if it changed
@@ -571,7 +561,7 @@ final class ChannelService(
             try {
               boostedMessageAction.complete()
             } catch {
-              case e: Throwable =>
+              case _: Throwable =>
                 postBoostedNotifications(boostedChannel, guild, worldFormal)
             }
           }
@@ -761,20 +751,8 @@ final class ChannelService(
           val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
 
           // Fullbless Role
-          val fullblessEmbed = new EmbedBuilder()
-          val fullblessEmbedText = s"The bot will poke:\n${Config.inqEmoji}<@&${fullblessRole.getId}> If an enemy fullblesses and is over level `${fullblessLevel}`\n${Config.bossEmoji}<@&${nemesisRole.getId}> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&${allyPkRole.getId}> If an ally gets pked\n${Config.masslogEmoji}<@&${masslogRole.getId}> If enemies masslog on **$worldFormal**"
-          fullblessEmbed.setTitle(s":crossed_swords: $worldFormal :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$worldFormal")
-          fullblessEmbed.setThumbnail(s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
-          fullblessEmbed.setColor(BrandColor)
-          fullblessEmbed.setFooter("Add or remove yourself from the role using the buttons below:")
-          fullblessEmbed.setDescription(fullblessEmbedText)
-          boostedChannel.sendMessageEmbeds(fullblessEmbed.build())
-            .setComponents(ActionRow.of(
-              Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(s"${Config.inqEmoji}")),
-              Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(s"${Config.bossEmoji}")),
-              Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(s"${Config.hazardEmoji}")),
-              Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(s"${Config.masslogEmoji}"))
-            ))
+          boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, fullblessLevel))
+            .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
             .queue()
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)

@@ -323,7 +323,7 @@ object ButtonHandler extends StrictLogging {
                 _ => {
                   event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](${BotApp.charUrl(charName)})**.").setEphemeral(true).queue()
                 },
-                error => {
+                _ => {
                   // DM failed to send: fall back to prompting in-channel
                   val fallbackEmbed = new EmbedBuilder()
                     .setColor(16711680) // red
@@ -422,7 +422,7 @@ object ButtonHandler extends StrictLogging {
         if (screenshots.nonEmpty && currentIndex < screenshots.length) {
           val screenshotToDelete = screenshots(currentIndex)
 
-          if (BotApp.deleteDeathScreenshot(guild.getId, guild.getName, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
+          if (BotApp.deleteDeathScreenshot(guild.getId, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
             val updatedScreenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
             val embeds = originalMessage.getEmbeds
 

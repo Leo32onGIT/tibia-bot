@@ -17,10 +17,14 @@ class SlashRoutingSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("the only routable command not registered with Discord is the WIP leaderboards") {
-    // leaderboards is intentionally defined-but-unregistered (see CommandSchemasSpec);
-    // any OTHER extra handler would be a dead route to flag.
-    SlashRouting.handlers.keySet.diff(registered) shouldBe Set("leaderboards")
+  test("every routable command is registered with Discord — no dead routes") {
+    // Previously this allowed one exception, the unregistered work-in-progress
+    // "leaderboards" handler. That was removed, so the invariant is now exact:
+    // a handler Discord never dispatches to is dead code.
+    val unreachable = SlashRouting.handlers.keySet.diff(registered)
+    withClue(s"handlers with no registered command: $unreachable") {
+      unreachable shouldBe empty
+    }
   }
 
   test("no duplicate handler names") {

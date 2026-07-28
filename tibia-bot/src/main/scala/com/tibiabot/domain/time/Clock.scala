@@ -1,28 +1,18 @@
 package com.tibiabot.domain.time
 
-import java.time.{Instant, ZoneId, ZonedDateTime}
+import java.time.ZoneId
 
-/** Time-source port (Dependency Inversion).
+/** Time constants shared by the cycle math in this package.
  *
- *  Time-dependent logic depends on this trait rather than calling
- *  `Instant.now()` / `ZonedDateTime.now()` directly, so it can be tested
- *  deterministically with a fixed clock. Wiring the existing wall-clock call
- *  sites onto this port happens incrementally (e.g. with the scheduler step);
- *  the pure cycle math in this package is already parameterized by explicit
- *  instants and needs no clock.
- */
-trait Clock {
-  def instant: Instant
-  def now: ZonedDateTime
-}
-
+ *  This used to also declare a `Clock` port (trait + `SystemClock`) intended
+ *  for incrementally moving wall-clock calls behind an injectable seam. Nothing
+ *  ever implemented or consumed it in production — only `Berlin` below was
+ *  ever referenced — so it has been dropped rather than left as an unused
+ *  abstraction. The pure cycle math here (see [[DromeCycle]],
+ *  [[DreamScarCycle]]) is already parameterized by explicit instants and needs
+ *  no clock; if a future caller does need an injectable one, `java.time.Clock`
+ *  covers it without a bespoke type. */
 object Clock {
   /** The game's reference time zone, used throughout the bot. */
   val Berlin: ZoneId = ZoneId.of("Europe/Berlin")
-}
-
-/** Real clock backed by system time, in the game's Europe/Berlin zone. */
-final class SystemClock extends Clock {
-  def instant: Instant = Instant.now()
-  def now: ZonedDateTime = ZonedDateTime.now(Clock.Berlin)
 }

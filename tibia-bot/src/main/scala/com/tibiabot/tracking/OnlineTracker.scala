@@ -7,6 +7,11 @@ import scala.collection.mutable
  *  their guild/flag, and how long they've been online. Keyed by player name
  *  in an insertion-ordered map for O(1) lookups/updates; behaviour is pinned
  *  by OnlineTrackerSpec.
+ *
+ *  Thread-safe. The world stream writes it (from the poll response), while the
+ *  online-list refresh reads [[snapshot]] on its own schedule from a different
+ *  thread — an unsynchronised mutable map can return a corrupt view, or throw,
+ *  when read during a structural update.
  */
 final case class OnlinePlayer(
   name: String,
@@ -23,15 +28,19 @@ final class OnlineTracker {
   // irrelevant downstream since onlineList re-sorts, but it keeps behaviour
   // predictable and tests deterministic).
   private val state = mutable.LinkedHashMap.empty[String, OnlinePlayer]
+  private val lock = new Object()
 
-  def size: Int = state.size
-  def snapshot: List[OnlinePlayer] = state.values.toList
+  def size: Int = lock.synchronized { state.size }
+
+  /** A detached copy — the caller may hold and iterate it while the stream
+   *  keeps updating. */
+  def snapshot: List[OnlinePlayer] = lock.synchronized { state.values.toList }
 
   /** Replace presence from a fresh online list, carrying over guildName /
    *  duration / flag for players already present. Players absent from `online`
    *  are dropped (they logged off). Incoming `level` is already parsed to Int,
    *  exactly as `player.level.toInt` in the flow. */
-  def updateFromOnline(online: Seq[(String, Int, String)], now: ZonedDateTime): Unit = {
+  def updateFromOnline(online: Seq[(String, Int, String)], now: ZonedDateTime): Unit = lock.synchronized {
     // build the next state reading from the *current* one, then swap in.
     val rebuilt = mutable.LinkedHashMap.empty[String, OnlinePlayer]
     online.foreach { case (name, level, vocation) =>
@@ -49,7 +58,7 @@ final class OnlineTracker {
   }
 
   /** Exact, case-sensitive lookup by name. */
-  def find(name: String): Option[OnlinePlayer] = state.get(name)
+  def find(name: String): Option[OnlinePlayer] = lock.synchronized { state.get(name) }
 
   /** Seed state from a pre-restart snapshot without clobbering any player a
    *  live poll already updated (existing wins — guards the load-vs-first-poll
@@ -57,18 +66,21 @@ final class OnlineTracker {
    *  `time` is stamped to `restoreTime`, not its original value, so the next
    *  real `updateFromOnline` delta reflects only time actually elapsed since
    *  restart, not the whole downtime gap. */
-  def restore(entries: Iterable[OnlinePlayer], restoreTime: ZonedDateTime): Unit =
+  def restore(entries: Iterable[OnlinePlayer], restoreTime: ZonedDateTime): Unit = lock.synchronized {
     entries.foreach { p =>
       if (!state.contains(p.name)) state.put(p.name, p.copy(time = restoreTime))
     }
+  }
 
   /** Update a player's guild only if it actually changed. */
-  def setGuild(name: String, guildName: String): Unit =
+  def setGuild(name: String, guildName: String): Unit = lock.synchronized {
     state.get(name).foreach { p =>
       if (p.guildName != guildName) state.update(name, p.copy(guildName = guildName))
     }
+  }
 
   /** Set a player's flag, e.g. the level-up marker. */
-  def setFlag(name: String, flag: String): Unit =
+  def setFlag(name: String, flag: String): Unit = lock.synchronized {
     state.get(name).foreach { p => state.update(name, p.copy(flag = flag)) }
+  }
 }

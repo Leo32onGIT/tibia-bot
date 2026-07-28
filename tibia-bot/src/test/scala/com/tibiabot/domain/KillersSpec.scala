@@ -45,6 +45,26 @@ class KillersSpec extends AnyFunSuite with Matchers {
     Killers.sourceArticle("orc berserker") shouldBe "an "
   }
 
+  test("levelLookupNames takes player killers only — creatures have no level") {
+    Killers.levelLookupNames("Victim", Seq(("Bubble", true), ("a dragon", false))) shouldBe Seq("Bubble")
+  }
+
+  test("levelLookupNames skips the victim's own 'self' entry") {
+    Killers.levelLookupNames("Victim", Seq(("Victim", true), ("Bubble", true))) shouldBe Seq("Bubble")
+  }
+
+  test("levelLookupNames resolves a summon to its summoner") {
+    Killers.levelLookupNames("Victim", Seq(("fire elemental of Bubble", true))) shouldBe Seq("Bubble")
+  }
+
+  test("levelLookupNames keeps a player whose name merely contains ' of '") {
+    Killers.levelLookupNames("Victim", Seq(("Knight of Flame", true))) shouldBe Seq("Knight of Flame")
+  }
+
+  test("levelLookupNames is empty for a purely environmental death") {
+    Killers.levelLookupNames("Victim", Seq(("energy", false), ("drowning", false))) shouldBe empty
+  }
+
   test("joinNatural: no killers, one, two, and many") {
     Killers.joinNatural(Nil) shouldBe ""
     Killers.joinNatural(Seq("a dragon")) shouldBe "a dragon"

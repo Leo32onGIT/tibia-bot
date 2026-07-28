@@ -82,16 +82,4 @@ class TibiaDataDecodersSpec extends AnyFunSuite with Matchers with JsonSupport {
     all(members.map(_.vocation)) should not be empty
     all(members.map(_.level)) should be > 0.0
   }
-
-  test("highscores: experience page decodes with a ranked list and paging") {
-    val r = fixture("highscores_antica.json").parseJson.convertTo[HighscoresResponse]
-    r.highscores.world shouldBe "Antica"
-    r.highscores.category shouldBe "experience"
-    val list = r.highscores.highscore_list.getOrElse(Nil)
-    list should not be empty
-    list.head.rank shouldBe 1.0
-    all(list.map(_.name)) should not be empty
-    all(list.map(_.value)) should be > 0.0
-    r.highscores.highscore_page.total_pages should be > 0.0
-  }
 }

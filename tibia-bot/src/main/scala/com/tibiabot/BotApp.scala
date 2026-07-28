@@ -1,37 +1,26 @@
 package com.tibiabot
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.tibiadata.TibiaDataClient
-import com.tibiabot.tibiadata.response.{CharacterResponse, GuildResponse, BoostedResponse, CreatureResponse, Members, HighscoresResponse}
+import com.tibiabot.tibiadata.response.{BoostedResponse, CreatureResponse}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
-import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons._
 import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
-import net.dv8tion.jda.api.entities.Role
-import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.utils.TimeFormat
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
-import spray.json._
 
-import java.awt.Color
 import java.time.{Instant, ZonedDateTime}
-import scala.collection.immutable.ListMap
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success}
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import scala.util.Random
 import scala.concurrent.Await
 import com.tibiabot.presentation.Embeds.BrandColor
@@ -125,7 +114,7 @@ object BotApp extends App with StrictLogging {
 
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
-      Config.Cache.boostedTtl, Config.Cache.highscoresTtl)(scala.concurrent.ExecutionContext.global)
+      Config.Cache.boostedTtl)(scala.concurrent.ExecutionContext.global)
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
@@ -235,7 +224,7 @@ object BotApp extends App with StrictLogging {
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
-  private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)(ex)
+  private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
@@ -287,6 +276,7 @@ object BotApp extends App with StrictLogging {
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
   def characterCache: Map[String, ZonedDateTime] = streamState.characterCache
+  def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit = streamState.warmCharacterCache(loaded)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
@@ -305,8 +295,6 @@ object BotApp extends App with StrictLogging {
     streamState.modifyWorldsData(f)
   def modifyActivityCommandBlocker(f: Map[String, Boolean] => Map[String, Boolean]): Unit =
     streamState.modifyActivityCommandBlocker(f)
-  def modifyCharacterCache(f: Map[String, ZonedDateTime] => Map[String, ZonedDateTime]): Unit =
-    streamState.modifyCharacterCache(f)
 
   // Warm the Date-header character cache from the last Redis snapshot so a
   // restart doesn't re-baseline every character against the rate-limited API,
@@ -317,7 +305,7 @@ object BotApp extends App with StrictLogging {
     new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
   charCachePersistence.load().foreach { loaded =>
     if (loaded.nonEmpty) {
-      modifyCharacterCache(existing => loaded ++ existing) // existing (fresher) entries win
+      warmCharacterCache(loaded) // existing (fresher) entries win
       logger.info(s"Warmed character cache from Redis snapshot: ${loaded.size} entries")
     }
   }
@@ -352,7 +340,7 @@ object BotApp extends App with StrictLogging {
   // Per-world setting commands (auto-hunt detection, deaths/levels visibility,
   // exiva-on-death, minimum level, fullbless level, leaderboards)
   val worldSettingsService = new worldsettings.WorldSettingsService(
-    worldConfigRepository, discordConfigRepository, streamState, tibiaDataClient, channelService, botUser
+    worldConfigRepository, discordConfigRepository, streamState, channelService, botUser
   )
 
   // Dream Courts boss rotation extracted to domain.time.DreamScarCycle.
@@ -370,7 +358,7 @@ object BotApp extends App with StrictLogging {
       val boostedBoss = boostedResponse.boostable_bosses.boostable_boss_list
       val boostedBossList = boostedBoss.map(_.name.toLowerCase).toList
       boostedBossList
-    case Left(errorMessage) =>
+    case Left(_) =>
       List.empty[String]
   }
 
@@ -538,7 +526,7 @@ object BotApp extends App with StrictLogging {
                 boostedBoss
               )
 
-            case Left(errorMessage) =>
+            case Left(_) =>
               throw new Exception(s"Failed to load boosted boss.")
           }
 
@@ -555,7 +543,7 @@ object BotApp extends App with StrictLogging {
                 boostedCreature
               )
 
-            case Left(errorMessage) =>
+            case Left(_) =>
               throw new Exception(s"Failed to load boosted boss.")
           }
 
@@ -780,12 +768,9 @@ object BotApp extends App with StrictLogging {
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()
-
-    modifyCharacterCache(_.filter {
-      case (_, timestamp) =>
-        val ageMinutes = timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES)
-        ageMinutes <= maxAgeMinutes
-    })
+    streamState.pruneCharacterCache { timestamp =>
+      timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES) <= maxAgeMinutes
+    }
   }
 
   /** Load a guild's hunted/allied/worlds/activity/customSort config into
@@ -809,10 +794,10 @@ object BotApp extends App with StrictLogging {
     val worldsInfo = worldConfig(g)
     modifyWorldsData(_ + (guildId -> worldsInfo))
 
-    val activityInfo = activityConfig(g, "tracked_activity")
+    val activityInfo = activityConfig(g)
     modifyActivityData(_ + (guildId -> activityInfo))
 
-    val customSortInfo = customSortConfig(g, "online_list_categories")
+    val customSortInfo = customSortConfig(g)
     modifyCustomSortData(_ + (guildId -> customSortInfo))
 
     modifyActivityCommandBlocker(_ + (guildId -> false))
@@ -856,7 +841,7 @@ object BotApp extends App with StrictLogging {
           // only an absent world starts a new stream.
           if (!streamSupervisor.contains(world.get)) {
             if (validWorlds.contains(world.get)) {
-              streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get), paywallService).stream.run(), List(discords))
+              streamSupervisor.put(world.get, new TibiaBot(world.get, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(world.get), recentEventsRegistry.forWorld(world.get), paywallService).run(), List(discords))
             } else {
               skipStale(world.get)
             }
@@ -879,7 +864,7 @@ object BotApp extends App with StrictLogging {
       }
       discordsData.foreach { case (worldName, discordsList) =>
         if (validWorlds.contains(worldName)) {
-          streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), discordsList)
+          streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).run(), discordsList)
           Thread.sleep(5500) // space each stream out 5.5 seconds
         } else {
           skipStale(worldName)
@@ -896,7 +881,7 @@ object BotApp extends App with StrictLogging {
         val extraWorlds = worldConfigRepository.allTrackedWorldNames().toSet -- discordsData.keySet
         extraWorlds.foreach { worldName =>
           if (validWorlds.contains(worldName)) {
-            streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).stream.run(), Nil)
+            streamSupervisor.put(worldName, new TibiaBot(worldName, outboundSender, onlineListSender, worldMetricsRegistry.forWorld(worldName), recentEventsRegistry.forWorld(worldName), paywallService).run(), Nil)
             Thread.sleep(5500)
           } else {
             skipStale(worldName)
@@ -976,7 +961,7 @@ object BotApp extends App with StrictLogging {
   private def guildConfig(guild: Guild, query: String): List[Guilds] =
     huntedAlliedRepository.getGuilds(guild.getId, query)
 
-  private def activityConfig(guild: Guild, query: String): List[PlayerCache] =
+  private def activityConfig(guild: Guild): List[PlayerCache] =
     activityRepository.getActivity(guild.getId)
 
   def discordRetrieveConfig(guild: Guild): Map[String, String] =
@@ -1043,7 +1028,7 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def customSortConfig(guild: Guild, query: String): List[CustomSort] =
+  private def customSortConfig(guild: Guild): List[CustomSort] =
     customSortRepository.getAll(guild.getId)
 
   private def creatureImageUrl(creature: String): String =
@@ -1059,7 +1044,7 @@ object BotApp extends App with StrictLogging {
   def getDeathScreenshots(guildId: String, world: String, characterName: String, deathTime: Long): List[DeathScreenshot] =
     deathScreenshotRepository.get(guildId, world, characterName, deathTime)
 
-  def deleteDeathScreenshot(guildId: String, world: String, characterName: String, deathTime: Long, screenshotUrl: String, userId: String): Boolean = {
+  def deleteDeathScreenshot(guildId: String, characterName: String, deathTime: Long, screenshotUrl: String, userId: String): Boolean = {
     val guild = discordGateway.guildById(guildId)
     val member = guild.retrieveMemberById(userId).complete()
     val admin = member != null && (member.hasPermission(Permission.MANAGE_SERVER) || member.hasPermission(Permission.MESSAGE_MANAGE))

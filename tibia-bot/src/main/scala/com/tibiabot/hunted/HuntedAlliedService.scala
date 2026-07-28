@@ -247,7 +247,7 @@ final class HuntedAlliedService(
               else {
                 guildApiBuffer += s"**$name** *(This guild doesn't exist)* $reasonEmoji"
               }
-            case (Left(errorMessage), name, reason) =>
+            case (Left(_), name, _) =>
               guildApiBuffer += s"**$name** *(This guild doesn't exist)*"
           }
           val guildsAsList: List[String] = List(guildHeader) ++ guildApiBuffer
@@ -351,7 +351,7 @@ final class HuntedAlliedService(
               } else {
                 vocationBuffers("none") += ((0, "Character does not exist", s"${Config.noEmoji} **N/A** — **$name**"))
               }
-            case (Left(errorMessage), name, _, _) =>
+            case (Left(_), name, _, _) =>
               vocationBuffers("none") += ((0, "Character does not exist", s"${Config.noEmoji} **N/A** — **$name**"))
           }
           val allPlayers = com.tibiabot.presentation.WorldList.byWorld(
@@ -474,7 +474,7 @@ final class HuntedAlliedService(
             val guildName = guildResponse.guild.name
             val guildMembers = guildResponse.guild.members.getOrElse(List.empty[Members])
             (guildName, guildMembers)
-          case Left(errorMessage) =>
+          case Left(_) =>
             ("", List.empty)
         }.map { case (guildName, guildMembers) =>
           if (guildName != "") {
@@ -565,7 +565,7 @@ final class HuntedAlliedService(
             val guildName = guildResponse.guild.name
             val guildMembers = guildResponse.guild.members.getOrElse(List.empty[Members])
             (guildName, guildMembers)
-          case Left(errorMessage) =>
+          case Left(_) =>
             ("", List.empty)
         }.map { case (guildName, guildMembers) =>
           if (guildName != "") {
@@ -654,7 +654,7 @@ final class HuntedAlliedService(
           case Right(guildResponse) =>
             val guildName = guildResponse.guild.name
             guildName
-          case Left(errorMessage) =>
+          case Left(_) =>
             ""
         }.map { guildName =>
           if (guildName != "") {
@@ -765,7 +765,7 @@ final class HuntedAlliedService(
           case Right(guildResponse) =>
             val guildName = guildResponse.guild.name
             guildName
-          case Left(errorMessage) =>
+          case Left(_) =>
             ""
         }.map { guildName =>
           if (guildName != "") {

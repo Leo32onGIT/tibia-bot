@@ -6,10 +6,7 @@ import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, Sl
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 
 /** Slash-command schema (shape) definitions, extracted verbatim from BotApp.
- *  Pure JDA command-builder data — no behaviour, no external coupling.
- *
- *  Note: `leaderboardsCommand` is defined but intentionally NOT in `commands`
- *  or `adminCommands` (it is unregistered today); preserved as-is. */
+ *  Pure JDA command-builder data — no behaviour, no external coupling. */
 object CommandSchemas {
 
   val setupCommand: SlashCommandData = Commands.slash("setup", "Setup a world to be tracked")
@@ -152,11 +149,6 @@ object CommandSchemas {
       new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for fullbless pokes").setRequired(true)
         .setMinValue(1)
         .setMaxValue(4000)
-    )
-
-  val leaderboardsCommand: SlashCommandData = Commands.slash("leaderboards", "Modify the level at which enemy fullblesses poke")
-    .addOptions(
-      new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
     )
 
   val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")

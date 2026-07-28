@@ -56,7 +56,6 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     def getWorlds() = Future.successful(Left("x"))
     def getBoostedBoss() = Future.successful(Left("x"))
     def getBoostedCreature() = Future.successful(Left("x"))
-    def getHighscores(w: String, page: Int) = Future.successful(Left("x"))
     def getGuild(guild: String) = Future.successful(Left("x"))
     def getGuildWithInput(input: (String, String)) = Future.successful((Left("x"), input._1, input._2))
     def getCharacter(name: String) = { characterCalls += 1; Future.successful(characterResult) }

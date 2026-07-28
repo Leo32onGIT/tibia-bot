@@ -6,10 +6,10 @@ scalaVersion := "2.13.18"
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
 // Pins the packaged image's entrypoint/launcher script to the bot itself.
-// Without this, sbt-native-packager generates one launcher script per
-// discovered `main` method (BotApp, plus any migration/* CLI tools with
-// their own main) instead of the single `violent-bot-dedicated` script
-// docker-compose.yml's image expects to run by default.
+// sbt-native-packager generates one launcher script per discovered `main`
+// method; naming it explicitly guarantees the single `violent-bot-dedicated`
+// script docker-compose.yml's image expects to run by default, and keeps that
+// true if another entry point is ever added.
 Compile / mainClass := Some("com.tibiabot.BotApp")
 dockerExposedPorts += 443
 // Status dashboard: internal-only, reached via Caddy on the docker-compose

@@ -4,7 +4,7 @@ import com.tibiabot.domain.PatreonMember
 import com.tibiabot.persistence.{ConnectionProvider, PatreonMemberRepository}
 
 import java.sql.{Connection, ResultSet, Timestamp}
-import java.time.{ZoneOffset, ZonedDateTime}
+import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of PatreonMemberRepository, routed through

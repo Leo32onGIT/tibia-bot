@@ -29,12 +29,6 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
       ("guild", "player", "list", "clear", "info", "autodetect", "levels", "deaths")
   }
 
-  test("leaderboards is defined but intentionally not registered") {
-    CommandSchemas.leaderboardsCommand.getName shouldBe "leaderboards"
-    CommandSchemas.commands.map(_.getName) should not contain "leaderboards"
-    CommandSchemas.adminCommands.map(_.getName) should not contain "leaderboards"
-  }
-
   test("initialCommands is the minimal set visible before any world is configured") {
     CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
       List("setup", "help", "galthen", "boosted", "patreon")
