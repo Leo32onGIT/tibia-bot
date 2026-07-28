@@ -14,7 +14,10 @@ import scala.util.{Failure, Success, Try}
 /** Owner-only Patreon seat admin actions for the dashboard: add, release one,
  *  or release every seat a user holds — arbitrary overrides of the normal
  *  `/setup`-driven seat flow, bypassing [[paywall.PaywallService.canAssignSeat]]'s
- *  limit entirely (this is the one place that's meant to happen). Reuses
+ *  limit entirely (this is the one place that's meant to happen). Also a
+ *  per-user seat-count adjustment (see `extra-seats` below), a separate
+ *  admin lever from seat assignment — it raises or lowers a user's overall
+ *  limit rather than force-claiming one specific (guild, world) pair. Reuses
  *  [[DiscordAuth.authenticatedUser]] the same way [[StatusRoute]] does; mounted
  *  alongside it under the same `/dashboard` prefix in BotApp. */
 final class PatreonAdminRoute(
@@ -82,6 +85,22 @@ final class PatreonAdminRoute(
           requireOwner(callerId) {
             paywallService.releaseAllSeats(targetUserId)
             complete(ok)
+          }
+        }
+      }
+    } ~
+    path("patreon" / "users" / Segment / "extra-seats") { targetUserId =>
+      put {
+        discordAuth.authenticatedUser { callerId =>
+          requireOwner(callerId) {
+            entity(as[String]) { body =>
+              Try(body.parseJson.asJsObject.fields("extraSeats").convertTo[Int]) match {
+                case Success(extraSeats) =>
+                  paywallService.setExtraSeats(targetUserId, extraSeats)
+                  complete(ok)
+                case Failure(_) => badRequest("Expected an integer extraSeats")
+              }
+            }
           }
         }
       }

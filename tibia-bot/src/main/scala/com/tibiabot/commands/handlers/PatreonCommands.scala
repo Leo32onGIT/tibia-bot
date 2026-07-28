@@ -9,13 +9,14 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 
 import scala.jdk.CollectionConverters._
 
-/** `/patreon` — a supporter's self-service view of their own seats: a fixed
- *  `seatsPerUser`-length list of slots, each either a claimed (guild, world)
- *  pair or `*empty*`, plus a button per claimed seat to release it (freeing
- *  it up to reassign elsewhere, or leaving the world running ungated as a
- *  legacy setup — see PaywallService.hasSeat). Always ephemeral, via
- *  BotListener's global deferReply(true), so this is safe to run in any
- *  shared server regardless of who else is there. */
+/** `/patreon` — a supporter's self-service view of their own seats: a
+ *  `PaywallService.effectiveSeatLimit`-length list of slots (the global
+ *  default plus any dashboard-granted per-user adjustment), each either a
+ *  claimed (guild, world) pair or `*empty*`, plus a button per claimed seat
+ *  to release it (freeing it up to reassign elsewhere, or leaving the world
+ *  running ungated as a legacy setup — see PaywallService.hasSeat). Always
+ *  ephemeral, via BotListener's global deferReply(true), so this is safe to
+ *  run in any shared server regardless of who else is there. */
 object PatreonCommands {
 
   def handle(event: SlashCommandInteractionEvent): Unit = {
@@ -33,7 +34,7 @@ object PatreonCommands {
       event.getHook.sendMessageEmbeds(embed).queue()
     } else {
       val seats = BotApp.paywallService.seatsForUser(userId)
-      val slotLines = (0 until Config.Patreon.seatsPerUser).map { i =>
+      val slotLines = (0 until BotApp.paywallService.effectiveSeatLimit(userId)).map { i =>
         seats.lift(i) match {
           case Some(seat) =>
             val guild = BotApp.discordGateway.guildById(seat.guildId)

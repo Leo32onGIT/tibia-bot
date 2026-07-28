@@ -1,7 +1,7 @@
 package com.tibiabot.paywall
 
 import com.tibiabot.discord.DiscordGateway
-import com.tibiabot.persistence.PatreonSeatRepository
+import com.tibiabot.persistence.{PatreonSeatOverrideRepository, PatreonSeatRepository}
 import net.dv8tion.jda.api.entities.Guild
 
 import java.time.ZonedDateTime
@@ -9,15 +9,17 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters._
 
 /** Ties ongoing bot activity to a Patreon subscription via a seat system:
- *  each supporter gets `seatLimit` seats, and running `/setup` for a (guild,
- *  world) pair assigns one — see [[com.tibiabot.setup.ChannelService]]. A
- *  (guild, world) pair with no assigned seat (everything that existed before
- *  this feature, or a world nobody's set up under this model yet) is always
- *  treated as active — the grandfather case, so pre-existing tracking is
- *  unaffected. */
+ *  each supporter gets `seatLimit` seats (adjustable per-user via
+ *  [[effectiveSeatLimit]] — a dashboard-granted override on top of the flat
+ *  default), and running `/setup` for a (guild, world) pair assigns one —
+ *  see [[com.tibiabot.setup.ChannelService]]. A (guild, world) pair with no
+ *  assigned seat (everything that existed before this feature, or a world
+ *  nobody's set up under this model yet) is always treated as active — the
+ *  grandfather case, so pre-existing tracking is unaffected. */
 final class PaywallService(
   discordGateway: DiscordGateway,
   patreonSeatRepository: PatreonSeatRepository,
+  patreonSeatOverrideRepository: PatreonSeatOverrideRepository,
   supportGuildId: String,
   patreonRoleId: String,
   seatLimit: Int,
@@ -61,17 +63,23 @@ final class PaywallService(
     }
   }
 
+  /** This user's seat limit: the flat global default plus their own
+   *  dashboard-granted adjustment (see [[setExtraSeats]]), which may be
+   *  negative — floored so a limit can never go below 0. */
+  def effectiveSeatLimit(userId: String): Int =
+    math.max(0, seatLimit + patreonSeatOverrideRepository.extraSeatsFor(userId))
+
   /** Pure — can this user claim a seat for (guildId, world)? If someone
    *  already owns that pair, only that same person may (re-)claim it
    *  (idempotent re-`/setup`, always allowed even at the limit) — a
    *  different user is blocked outright, regardless of their own seat
-   *  count. If nobody owns it yet, allowed only if they're under their seat
-   *  limit. Split from [[canAssignSeat]] so this logic is testable without a
-   *  database. */
-  private[paywall] def canAssignSeatPure(existingOwner: Option[String], currentSeatCount: Int, userId: String): Boolean =
+   *  count. If nobody owns it yet, allowed only if they're under their
+   *  (effective) seat limit. Split from [[canAssignSeat]] so this logic is
+   *  testable without a database. */
+  private[paywall] def canAssignSeatPure(existingOwner: Option[String], currentSeatCount: Int, userId: String, effectiveLimit: Int): Boolean =
     existingOwner match {
       case Some(owner) => owner == userId
-      case None => currentSeatCount < seatLimit
+      case None => currentSeatCount < effectiveLimit
     }
 
   /** The `/setup` seat-availability check — reads live seat state. The bot
@@ -81,7 +89,8 @@ final class PaywallService(
     userId == ownerId || canAssignSeatPure(
       patreonSeatRepository.seatFor(guildId, world).map(_.userId),
       patreonSeatRepository.seatsForUser(userId).size,
-      userId
+      userId,
+      effectiveSeatLimit(userId)
     )
 
   /** Assigns (or idempotently reassigns) a seat. Call only after
@@ -113,18 +122,29 @@ final class PaywallService(
    *  [[refreshAll]] sweeps, just exposed for reading. */
   def allSeats(): List[com.tibiabot.domain.PatreonSeat] = patreonSeatRepository.allSeats()
 
+  /** Sets (or replaces) a user's seat-count adjustment — the dashboard's
+   *  "grant extra seats" admin action. Arbitrary, admin's discretion; may be
+   *  negative — see [[effectiveSeatLimit]] for the floor. */
+  def setExtraSeats(userId: String, extraSeats: Int): Unit =
+    patreonSeatOverrideRepository.setExtraSeats(userId, extraSeats, ZonedDateTime.now())
+
+  /** Every user with a non-default seat adjustment, for the dashboard's
+   *  supporters panel — same source [[effectiveSeatLimit]] reads, just
+   *  exposed in bulk to avoid a per-supporter lookup. */
+  def allExtraSeats(): Map[String, Int] = patreonSeatOverrideRepository.allExtraSeats()
+
   /** Only reachable when (guildId, world) is currently paused. The new
    *  claimant needs no relation to the lapsed owner — just room under their
-   *  own seat limit. Reclaiming a seat you already (still) own is always
-   *  allowed, even at the limit — same "no net change" reasoning as
-   *  [[canAssignSeatPure]]'s idempotent-reclaim case. Deliberately not a
+   *  own (effective) seat limit. Reclaiming a seat you already (still) own
+   *  is always allowed, even at the limit — same "no net change" reasoning
+   *  as [[canAssignSeatPure]]'s idempotent-reclaim case. Deliberately not a
    *  relaxed [[canAssignSeatPure]]: that method's "someone else owns it ->
    *  blocked" rule is what stops a plain `/setup` from stealing an *active*
    *  seat, but reassignment only ever runs against a *paused* one — the
    *  lapsed owner having it isn't a block condition here, it's the whole
    *  point. */
-  private[paywall] def canReassignSeatPure(newUserAlreadyOwnsIt: Boolean, newUserSeatCount: Int): Boolean =
-    newUserAlreadyOwnsIt || newUserSeatCount < seatLimit
+  private[paywall] def canReassignSeatPure(newUserAlreadyOwnsIt: Boolean, newUserSeatCount: Int, effectiveLimit: Int): Boolean =
+    newUserAlreadyOwnsIt || newUserSeatCount < effectiveLimit
 
   /** The `/setup`-on-a-paused-world reassignment-availability check. The
    *  paused gate still applies to the bot owner (reassignment is only ever
@@ -133,7 +153,8 @@ final class PaywallService(
   def canReassignSeat(newUserId: String, guildId: String, world: String): Boolean =
     !isActive(guildId, world) && (newUserId == ownerId || canReassignSeatPure(
       patreonSeatRepository.seatFor(guildId, world).exists(_.userId == newUserId),
-      patreonSeatRepository.seatsForUser(newUserId).size
+      patreonSeatRepository.seatsForUser(newUserId).size,
+      effectiveSeatLimit(newUserId)
     ))
 
   /** Reassigns and reactivates immediately, rather than waiting for the next

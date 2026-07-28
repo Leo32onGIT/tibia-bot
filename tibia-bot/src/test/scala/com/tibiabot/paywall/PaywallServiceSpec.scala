@@ -2,7 +2,7 @@ package com.tibiabot.paywall
 
 import com.tibiabot.discord.DiscordGateway
 import com.tibiabot.domain.PatreonSeat
-import com.tibiabot.persistence.PatreonSeatRepository
+import com.tibiabot.persistence.{PatreonSeatOverrideRepository, PatreonSeatRepository}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -22,8 +22,9 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def setWatchingActivity(text: String): Unit = ()
   }
 
-  private class FakeSeatRepository extends PatreonSeatRepository {
-    def seatsForUser(userId: String): List[PatreonSeat] = Nil
+  private class FakeSeatRepository(existingSeats: Int = 0) extends PatreonSeatRepository {
+    private val fakeSeat = PatreonSeat("user-1", "User One", "guild-x", "World", ZonedDateTime.now())
+    def seatsForUser(userId: String): List[PatreonSeat] = List.fill(existingSeats)(fakeSeat)
     def seatFor(guildId: String, world: String): Option[PatreonSeat] = None
     def assignSeat(userId: String, userName: String, guildId: String, world: String, created: ZonedDateTime): Unit = ()
     def releaseSeat(guildId: String, world: String): Unit = ()
@@ -31,8 +32,15 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def allSeats(): List[PatreonSeat] = Nil
   }
 
-  private def service(seatLimit: Int = 3, ownerId: String = "owner-id") =
-    new PaywallService(new FakeGateway, new FakeSeatRepository, "support-guild", "patreon-role", seatLimit, ownerId)
+  private class FakeSeatOverrideRepository(initial: Map[String, Int] = Map.empty) extends PatreonSeatOverrideRepository {
+    private var overrides = initial
+    def extraSeatsFor(userId: String): Int = overrides.getOrElse(userId, 0)
+    def setExtraSeats(userId: String, extraSeats: Int, updated: ZonedDateTime): Unit = overrides += userId -> extraSeats
+    def allExtraSeats(): Map[String, Int] = overrides
+  }
+
+  private def service(seatLimit: Int = 3, ownerId: String = "owner-id", overrides: Map[String, Int] = Map.empty, existingSeats: Int = 0) =
+    new PaywallService(new FakeGateway, new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), "support-guild", "patreon-role", seatLimit, ownerId)
 
   test("isActive defaults true for a (guild, world) pair that's never been checked") {
     service().isActive("unknown-guild", "Antica") shouldBe true
@@ -57,31 +65,63 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
   }
 
   test("canAssignSeatPure: under the limit with no existing owner is allowed") {
-    service(seatLimit = 3).canAssignSeatPure(None, 2, "user-1") shouldBe true
+    service(seatLimit = 3).canAssignSeatPure(None, 2, "user-1", 3) shouldBe true
   }
 
   test("canAssignSeatPure: at the limit with no existing owner is blocked") {
-    service(seatLimit = 3).canAssignSeatPure(None, 3, "user-1") shouldBe false
+    service(seatLimit = 3).canAssignSeatPure(None, 3, "user-1", 3) shouldBe false
   }
 
   test("canAssignSeatPure: re-claiming your own existing seat is always allowed, even at the limit") {
-    service(seatLimit = 3).canAssignSeatPure(Some("user-1"), 3, "user-1") shouldBe true
+    service(seatLimit = 3).canAssignSeatPure(Some("user-1"), 3, "user-1", 3) shouldBe true
   }
 
   test("canAssignSeatPure: another user's existing seat blocks you even under the limit") {
-    service(seatLimit = 3).canAssignSeatPure(Some("someone-else"), 0, "user-1") shouldBe false
+    service(seatLimit = 3).canAssignSeatPure(Some("someone-else"), 0, "user-1", 3) shouldBe false
   }
 
   test("canReassignSeatPure: already owning it is allowed even at the limit") {
-    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = true, newUserSeatCount = 3) shouldBe true
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = true, newUserSeatCount = 3, effectiveLimit = 3) shouldBe true
   }
 
   test("canReassignSeatPure: under the limit with no prior relation to the seat is allowed") {
-    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 2) shouldBe true
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 2, effectiveLimit = 3) shouldBe true
   }
 
   test("canReassignSeatPure: at the limit and not the owner is blocked") {
-    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 3) shouldBe false
+    service(seatLimit = 3).canReassignSeatPure(newUserAlreadyOwnsIt = false, newUserSeatCount = 3, effectiveLimit = 3) shouldBe false
+  }
+
+  test("effectiveSeatLimit: with no override, equals the flat global default") {
+    service(seatLimit = 5).effectiveSeatLimit("user-1") shouldBe 5
+  }
+
+  test("effectiveSeatLimit: a positive override adds on top of the global default") {
+    service(seatLimit = 5, overrides = Map("user-1" -> 2)).effectiveSeatLimit("user-1") shouldBe 7
+  }
+
+  test("effectiveSeatLimit: a negative override subtracts from the global default") {
+    service(seatLimit = 5, overrides = Map("user-1" -> -2)).effectiveSeatLimit("user-1") shouldBe 3
+  }
+
+  test("effectiveSeatLimit: a negative override larger than the default floors at 0, never negative") {
+    service(seatLimit = 5, overrides = Map("user-1" -> -10)).effectiveSeatLimit("user-1") shouldBe 0
+  }
+
+  test("effectiveSeatLimit: an override only applies to the user it was granted to") {
+    val svc = service(seatLimit = 5, overrides = Map("user-1" -> 3))
+    svc.effectiveSeatLimit("user-1") shouldBe 8
+    svc.effectiveSeatLimit("user-2") shouldBe 5
+  }
+
+  test("canAssignSeat: at the global default with no override, a new seat is blocked") {
+    val svc = service(seatLimit = 1, existingSeats = 1)
+    svc.canAssignSeat("user-1", "guild-1", "Antica") shouldBe false
+  }
+
+  test("canAssignSeat: a user with a granted extra seat can go past the global default") {
+    val svc = service(seatLimit = 1, existingSeats = 1, overrides = Map("user-1" -> 1))
+    svc.canAssignSeat("user-1", "guild-1", "Antica") shouldBe true
   }
 
   test("a (guild, world) pair whose owner fails the check becomes inactive and is reported as lapsed") {

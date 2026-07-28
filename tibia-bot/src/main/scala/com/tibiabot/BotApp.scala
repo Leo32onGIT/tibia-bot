@@ -150,6 +150,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcDiscordConfigRepository(connectionProvider)
   private val patreonSeatRepository: persistence.PatreonSeatRepository =
     new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
+  private val patreonSeatOverrideRepository: persistence.PatreonSeatOverrideRepository =
+    new persistence.jdbc.JdbcPatreonSeatOverrideRepository(connectionProvider)
   val guildActivityRepository: persistence.GuildActivityRepository =
     new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
   private val renameCooldownRepository: persistence.RenameCooldownRepository =
@@ -177,11 +179,13 @@ object BotApp extends App with StrictLogging {
   // Per-user boosted boss/creature notification subscriptions
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
 
-  // Ties bot activity to a Patreon subscription via a 3-seat system (see
+  // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
   // their seats to that (guild, world) pair; that pair's activity keeps
   // posting only while its seat's owner still holds the support-guild role.
-  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
+  // Seat count is Config.Patreon.seatsPerUser plus any per-user adjustment
+  // granted through the dashboard (see PaywallService.effectiveSeatLimit).
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
 
   // Direct Patreon API access, purely additive to the dashboard's supporters
   // panel — see Config.PatreonApi and syncPatreonMembers below. Never touches

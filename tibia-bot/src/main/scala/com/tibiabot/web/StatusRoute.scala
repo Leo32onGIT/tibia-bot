@@ -262,6 +262,12 @@ final class StatusRoute(
     val patreonMembers = patreonMemberRepository.snapshot().filter(_.patronStatus.isDefined)
     val patreonByDiscordId = patreonMembers.flatMap(m => m.discordUserId.map(_ -> m)).toMap
     val unlinkedMembers = patreonMembers.filter(_.discordUserId.isEmpty)
+    // Single bulk read rather than one lookup per supporter below — see
+    // PaywallService.effectiveSeatLimit for the same floor-at-0 arithmetic
+    // applied per-request; kept in sync here rather than called directly so
+    // this stays one query instead of N.
+    val extraSeatsByUser = paywallService.allExtraSeats()
+    def seatLimitFor(userId: String): Int = math.max(0, Config.Patreon.seatsPerUser + extraSeatsByUser.getOrElse(userId, 0))
 
     val seatSupporters = bySupporter.toList.map { case (userId, seats) =>
       val seatsJson = seats.map { seat =>
@@ -284,7 +290,8 @@ final class StatusRoute(
       val base = Map(
         "userId" -> (JsString(userId): JsValue),
         "userName" -> (JsString(displayName): JsValue),
-        "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
+        "seatLimit" -> (JsNumber(seatLimitFor(userId)): JsValue),
+        "extraSeats" -> (JsNumber(extraSeatsByUser.getOrElse(userId, 0)): JsValue),
         "seats" -> (JsArray(seatsJson.toVector): JsValue)
       )
       val enriched = patreonMember.map(patreonMemberFields).getOrElse(Map.empty)
@@ -295,12 +302,15 @@ final class StatusRoute(
       val entry = Map(
         "userId" -> (JsString(userId): JsValue),
         "userName" -> (JsString(member.fullName): JsValue),
-        "seatLimit" -> (JsNumber(Config.Patreon.seatsPerUser): JsValue),
+        "seatLimit" -> (JsNumber(seatLimitFor(userId)): JsValue),
+        "extraSeats" -> (JsNumber(extraSeatsByUser.getOrElse(userId, 0)): JsValue),
         "seats" -> (JsArray(Vector.empty): JsValue)
       ) ++ patreonMemberFields(member)
       member.fullName -> JsObject(entry)
     }
 
+    // No linked Discord id, so no id to key a seat-count adjustment on —
+    // always the flat base default.
     val unlinked = unlinkedMembers.map { member =>
       val entry = Map(
         "userId" -> (JsNull: JsValue),

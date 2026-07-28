@@ -284,7 +284,7 @@ final class ChannelService(
       val worldConfigData = worldRetrieveConfig(guild, world)
       if (worldConfigData.isEmpty) {
         if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
-          s"${Config.noEmoji} You've used all **${Config.Patreon.seatsPerUser}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
+          s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
         } else {
         // captured before worldCreateConfig runs below, since afterward this
         // would never be empty — gates the one-time command-set expansion
