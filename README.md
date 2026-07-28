@@ -209,7 +209,7 @@ You will need to change this to point to your emojis.
 The repository ships a `docker-compose.yml` that runs the bot together with a
 Redis cache.
 
-8. **Build the bot image** (tags `violent-bot-dedicated:latest`):    
+5. **Build the bot image** (tags `violent-bot-dedicated:latest`):    
 
    ```bash
    sbt docker:publishLocal
@@ -224,7 +224,7 @@ Redis cache.
    ```
    </details>
 
-9. **Start the stack**:    
+6. **Start the stack**:    
 
      ```bash
      docker compose up -d
