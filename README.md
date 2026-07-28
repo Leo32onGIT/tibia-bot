@@ -24,6 +24,7 @@ Current features include:
 - Activity Feed
 - Server Save Notifications
 - Command Log
+- Monitoring dashboard (per-world health, throughput and recent events)
 
 ## Architecture
 
@@ -45,30 +46,44 @@ Supporting packages:
 | `persistence/` | Repository ports + `ConnectionProvider`/`SchemaInitializer`; JDBC/Postgres impls in `persistence/jdbc/`. All JDBC access goes through `JdbcSupport.withConnection`, which releases the connection even when a statement throws, so errors can't leak connections under concurrent load. |
 | `presentation/` | Pure embed/message builders (deaths, online list, boosted, galthen). |
 | `scheduler/` | Server-save schedule decisions (window, Rashid location, Drome countdown). |
-| `tracking/` | Death/level/online dedup state and masslog detection. |
-| `tibiadata/` | TibiaData v4 API client; response models in `tibiadata/response/`. |
+| `state/` | `StreamState` — the per-guild hunted/allied/world config shared by every stream. |
+| `tracking/` | Per-world stream state: death/level/online dedup, masslog detection, the online-list message cache, killer-level cache, and the dashboard's metrics/recent-event buffers. |
+| `tibiadata/` | TibiaData v4 API client, its caching decorator, and `RetryPolicy`; response models in `tibiadata/response/`. |
+| `paywall/` | Patreon seat system — ties a (guild, world) pair's activity to a supporter's subscription. |
+| `web/` | The monitoring dashboard: Discord-OAuth-gated `/status`, log capture, Patreon admin routes. |
 | `wiki/` | Fandom wiki client and HTML parser. |
 | `domain/` | Core case classes; game-time cycles in `domain/time/`. |
-| `galthen/`, `boosted/`, `admin/` | Feature services extracted from `BotApp`. |
+| `setup/`, `worldsettings/`, `hunted/`, `customsort/`, `galthen/`, `boosted/`, `admin/`, `patreonapi/` | Feature services extracted from `BotApp`. |
 
 **Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),
 all sharing a single `ActorSystem`/dispatcher and HTTP pool. Each world ticks every
 60s through a back-pressured `mapAsync(1)` pipeline with a `mapAsyncUnordered(32)`
 fan-out for per-character lookups, and per-stage `Supervision.Resume` so a single bad
-response never kills the stream. Per-world dedup state is isolated to each stream; the
-state shared across worlds (`state/StreamState`) is read lock-free on `@volatile` fields
-and mutated only through synchronized `modify*` helpers, so concurrent per-guild updates
-never clobber each other.
+response never kills the stream.
+
+Alongside each stream, a **separate scheduled sweep refreshes that world's online
+lists**. Rebuilding a list means sorting and rendering every online player for every
+Discord tracking the world, so doing it inside the poll pipeline put it on the critical
+path for that tick's deaths. It now runs on its own cadence and reads a thread-safe
+snapshot of the tracker, which means a slow or failing poll neither delays the online
+list nor is delayed by it.
+
+Per-world dedup state is isolated to each stream. State shared across worlds
+(`state/StreamState`) is read lock-free on `@volatile` fields and mutated through
+synchronized `modify*` helpers, so concurrent per-guild updates never clobber each
+other — except the character freshness cache, which is written once per character
+response (tens of thousands a minute) and so is a `ConcurrentHashMap` with per-entry
+striping rather than a copy-on-write map behind the shared lock.
 
 ```mermaid
 flowchart TB
-    subgraph sup ["app/StreamSupervisor — one Akka stream per world"]
+    subgraph sup ["app/StreamSupervisor — one poll stream + one online-list sweep per world"]
         WA[world A]
         WB[world B]
         WN[world N]
     end
 
-    subgraph pipe ["the pipeline each world runs independently — tick 60s, back-pressured"]
+    subgraph pipe ["poll pipeline, per world — tick 60s, back-pressured"]
         direction LR
         T["Source.tick 60s"] --> GWp["getWorld<br/>mapAsync(1)"]
         GWp --> GC["getCharacterData<br/>mapAsyncUnordered(32)"]
@@ -76,13 +91,30 @@ flowchart TB
         SDp --> PDp["postToDiscord<br/>mapAsync(1)"]
     end
 
+    subgraph sweep ["online-list sweep, per world — own schedule, off the poll path"]
+        direction LR
+        SW["scheduled sweep"] --> OL["render lists<br/>per guild"]
+        OL --> OLS["OnlineListState<br/>diff vs what's posted"]
+    end
+
     WA --> T
     WB --> T
     WN --> T
+    WA --> SW
+    WB --> SW
+    WN --> SW
 
-    GC -->|HTTP per online character| API{{TibiaData v4 API}}
+    GC -->|HTTP per online character| API{{"TibiaData v4 API<br/>(Cloudflare + Kong)"}}
     SDp <-->|"@volatile read · synchronized modify*"| ST[("state/StreamState")]
-    PDp --> SN["RateLimitedSender<br/>per-world queue"] --> JDA["JDA global rate limiter"] --> D([Discord])
+    SDp -->|"writes presence"| OT[("OnlineTracker<br/>thread-safe")]
+    OT -->|"reads a snapshot"| OL
+
+    PDp ==>|"deaths — top priority, no pacing"| JDA
+    PDp -->|"activity · admin · level-ups · renames"| BG["outboundSender<br/>bot-wide background lane"]
+    OLS -->|"only what actually changed"| OLQ["onlineListSender<br/>bot-wide online-list lane"]
+    BG --> JDA["JDA rate limiter"]
+    OLQ --> JDA
+    JDA --> D([Discord])
 
     WA -.->|run concurrently on| AS[/"shared ActorSystem dispatcher + akka-http pool"/]
     WB -.-> AS
@@ -90,12 +122,29 @@ flowchart TB
 ```
 
 The world streams run concurrently on the shared dispatcher and HTTP pool; the only
-points they contend on are `StreamState` (serialised writes) and the JDA rate limiter
-(outbound sends). Startup staggers stream launches by ~5.5s so they don't all poll at once.
+points they contend on are `StreamState` (serialised writes) and the outbound lanes.
+Startup staggers stream launches by ~5.5s so they don't all poll at once.
+
+**Outbound traffic is split by priority, not by world.** Both `RateLimitedSender`
+lanes are bot-wide singletons, so the aggregate send rate is bounded across every
+world rather than per stream. Deaths — the thing the bot exists to post quickly —
+bypass both lanes and go straight to JDA's own rate limiter. Everything else is
+paced: low-priority notifications share the background lane, and online-list edits
+get their own much slower lane, because Discord groups message-edit calls into a
+"shared" bucket that is tighter than the general REST budget. Each queued item is
+keyed by its target, so a backlog is bounded by the number of distinct
+channels/messages rather than by how often they are refreshed — a superseded update
+is replaced, not queued behind its own successor.
 
 ## Local TibiaData Api (Optional)
-This is only used for Boosted boss/creature endpoints currently.    
+This is only used for the Boosted boss/creature endpoints (and the high-level
+character bypass) — everything else, including the per-character death polling,
+goes to the public `api.tibiadata.com`.    
 Using a local instance of TibiaData gives you quicker notifications.
+
+> ⚠️ A local instance scrapes tibia.com directly and tolerates **far** less traffic
+> than the public API before Cloudflare blocks it for an hour. Keep it on the
+> low-volume endpoints above; do not point the character polling at it.
 
 1. Edit the `.env` file
 ```env
