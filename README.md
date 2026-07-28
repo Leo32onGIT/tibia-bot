@@ -137,10 +137,9 @@ channels/messages rather than by how often they are refreshed — a superseded u
 is replaced, not queued behind its own successor.
 
 ## Local TibiaData Api (Optional)
-This is only used for the Boosted boss/creature endpoints (and the high-level
-character bypass) — everything else, including the per-character death polling,
+This is only used for the Boosted boss/creature endpoints — everything else, including the per-character death polling,
 goes to the public `api.tibiadata.com`.    
-Using a local instance of TibiaData gives you quicker notifications.
+Using a local instance of TibiaData gives you quicker server save notifications.
 
 > ⚠️ A local instance scrapes tibia.com directly and tolerates **far** less traffic
 > than the public API before Cloudflare blocks it for an hour. Keep it on the
