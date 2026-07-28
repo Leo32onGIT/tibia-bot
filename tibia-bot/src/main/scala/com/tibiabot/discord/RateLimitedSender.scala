@@ -22,33 +22,54 @@ import com.typesafe.scalalogging.StrictLogging
  * Leave `key` unset for one-off events (a notification, an alert) where every
  * enqueued item is meaningful and none should be silently replaced.
  *
+ * An optional `group` names the resource a send competes for (e.g. the channel
+ * it targets). With `perGroupMinGapMs` set, the drain skips past any item whose
+ * group was dispatched less than that long ago and takes the next eligible one
+ * instead, so a single group's items are spread out rather than draining
+ * back-to-back. This matters because the pace above is bot-wide while Discord's
+ * tighter limits on this traffic are per-channel: a channel whose online list
+ * packs into several messages enqueues them all at once, and in strict FIFO
+ * they leave in one tight burst that trips that per-channel limit even though
+ * the bot-wide rate is fine. Skipping is not a delay — the slot goes to another
+ * group's work, so total throughput is unchanged. Leave at 0 to drain in plain
+ * FIFO order.
+ *
  * The default capacity (`Int.MaxValue`) reproduces the previous unbounded behaviour
  * exactly; a finite capacity drops messages instead of leaking memory under a burst.
  */
 final class RateLimitedSender(
   startTicker: (() => Unit) => (() => Unit),
-  capacity: Int = Int.MaxValue
+  capacity: Int = Int.MaxValue,
+  perGroupMinGapMs: Long = 0,
+  now: () => Long = () => System.currentTimeMillis()
 ) extends StrictLogging {
 
-  private case class Queued(label: String, key: Option[String], enqueuedAtMs: Long, dispatch: () => Unit)
+  private case class Queued(label: String, key: Option[String], group: Option[String], enqueuedAtMs: Long, dispatch: () => Unit)
 
   private val queue = new BoundedMessageQueue[Queued](capacity)
   private var stopTicker: Option[() => Unit] = None
   private var stats: Map[String, RateLimitedSender.LabelStats] = Map.empty
+  // Only groups dispatched within the last `perGroupMinGapMs` are of interest,
+  // and expired entries are pruned on every drain, so this stays about as large
+  // as the number of groups reachable inside one gap window.
+  private var lastDispatchAtMs: Map[String, Long] = Map.empty
 
   /** Queue a send under `label`, superseding any still-pending item with the
-   *  same `key` (see class doc), and ensure the drain loop is running. Thread-safe. */
-  def enqueue(label: String, key: Option[String] = None)(dispatch: () => Unit): Unit = synchronized {
-    if (!queue.enqueue(Queued(label, key, System.currentTimeMillis(), dispatch), key))
+   *  same `key` and spaced out from other items sharing its `group` (see class
+   *  doc), and ensure the drain loop is running. Thread-safe. */
+  def enqueue(label: String, key: Option[String] = None, group: Option[String] = None)(dispatch: () => Unit): Unit = synchronized {
+    if (!queue.enqueue(Queued(label, key, group, now(), dispatch), key))
       logger.warn(s"Outbound message queue full (capacity $capacity); dropped ${queue.dropped} messages so far")
     if (stopTicker.isEmpty) stopTicker = Some(startTicker(() => drainOne()))
   }
 
-  /** Send the next queued message, if any. Failures are logged, never propagated. */
+  /** Send the next eligible queued message, if any. Failures are logged, never
+   *  propagated. A tick on which every reachable item is still inside its
+   *  group's gap sends nothing and simply retries on the next one. */
   private[discord] def drainOne(): Unit = {
-    val next = synchronized { queue.dequeueOption() }
+    val next = synchronized { dequeueEligible() }
     next.foreach { queued =>
-      val waitMs = System.currentTimeMillis() - queued.enqueuedAtMs
+      val waitMs = now() - queued.enqueuedAtMs
       synchronized {
         val prior = stats.getOrElse(queued.label, RateLimitedSender.LabelStats.empty)
         stats = stats.updated(queued.label, prior.record(waitMs))
@@ -60,6 +81,20 @@ final class RateLimitedSender(
       }
     }
   }
+
+  /** Take the next item that isn't still inside its group's gap, and record the
+   *  dispatch time of whatever group it belongs to. Caller must hold the lock. */
+  private def dequeueEligible(): Option[Queued] =
+    if (perGroupMinGapMs <= 0) queue.dequeueOption()
+    else {
+      val nowMs = now()
+      lastDispatchAtMs = lastDispatchAtMs.filter { case (_, atMs) => nowMs - atMs < perGroupMinGapMs }
+      val picked = queue.dequeueFirstOption(RateLimitedSender.MaxGroupScan) { queued =>
+        queued.group.forall(g => !lastDispatchAtMs.contains(g))
+      }
+      picked.foreach(_.group.foreach(g => lastDispatchAtMs = lastDispatchAtMs.updated(g, nowMs)))
+      picked
+    }
 
   /** Current backlog depth (items waiting to be sent). */
   def queueDepth: Int = synchronized { queue.size }
@@ -87,6 +122,14 @@ final class RateLimitedSender(
 }
 
 object RateLimitedSender {
+
+  /** How far past the head a group-spaced drain will look for an eligible item.
+   *  A blocked run at the head is at most the items queued for the handful of
+   *  groups touched within one gap window, so this is generous; it exists only
+   *  so a pathological backlog can't turn one tick into a full-queue walk while
+   *  holding the lock. */
+  private val MaxGroupScan = 256
+
   final case class LabelStats(count: Long, totalWaitMs: Long) {
     def record(waitMs: Long): LabelStats = LabelStats(count + 1, totalWaitMs + waitMs)
     def avgWaitMs: Double = if (count == 0) 0.0 else totalWaitMs.toDouble / count

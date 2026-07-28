@@ -1402,16 +1402,22 @@ class TibiaBot(
    *  Discord match.
    *
    *  Sends go through their own dedicated lane (onlineListSender), separate
-   *  from the general background lane — Discord groups message-edit PATCH
-   *  calls into a "shared" bucket across many channels for this bot, tighter
-   *  than the general REST budget (confirmed via live 429s), so this traffic
-   *  needs a slower, isolated pace. Each send is keyed by (channel id, message
-   *  index): demand here can exceed what that slower pace can drain, so
-   *  without keying, a backed-up queue fills with many stale updates to the
-   *  same handful of channels, each superseded by the next before it ever
-   *  sends (observed depth in the thousands, 25+ minute average wait). Keying
-   *  caps the backlog at one pending update per channel/message and guarantees
-   *  whatever finally sends is current. */
+   *  from the general background lane — Discord rate-limits message-edit PATCH
+   *  calls far harder than the general REST budget (confirmed via live 429s),
+   *  so this traffic needs a slower, isolated pace. Each send is keyed by
+   *  (channel id, message index): demand here can exceed what that slower pace
+   *  can drain, so without keying, a backed-up queue fills with many stale
+   *  updates to the same handful of channels, each superseded by the next
+   *  before it ever sends (observed depth in the thousands, 25+ minute average
+   *  wait). Keying caps the backlog at one pending update per channel/message
+   *  and guarantees whatever finally sends is current.
+   *
+   *  Each send is also grouped by channel id, because Discord's limit here is
+   *  per-channel while the lane's pace is bot-wide. A list that packs into
+   *  several embeds enqueues them all at once and in FIFO they would drain
+   *  back-to-back, putting 5+ edits into one channel inside a second; the group
+   *  makes the lane spend those slots on other channels and come back to this
+   *  one after its gap. */
   private def dispatchOnlineListUpdate(channel: TextChannel, fields: List[String], guildId: String, guildName: String): Unit = {
     val channelId = channel.getId
     val lastIndex = fields.size - 1
@@ -1436,14 +1442,14 @@ class TibiaBot(
     onlineListState.plan(channelId, fields).foreach {
       case tracking.EditOnlineListMessage(index, messageId, field) =>
         worldMetrics.incrementEdits()
-        onlineListSender.enqueue("edit", Some(s"$channelId:$index")) { () =>
+        onlineListSender.enqueue("edit", Some(s"$channelId:$index"), Some(channelId)) { () =>
           try channel.editMessageEmbedsById(messageId, buildEmbed(field, index == lastIndex))
             .queue(null, onlineListErrorHandler(channelId))
           catch { case ex: Throwable => failed(ex) }
         }
       case tracking.SendOnlineListMessage(index, field) =>
         worldMetrics.incrementEdits()
-        onlineListSender.enqueue("send", Some(s"$channelId:$index")) { () =>
+        onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
           try channel.sendMessageEmbeds(buildEmbed(field, index == lastIndex)).setSuppressedNotifications(true)
             .queue(
               message => onlineListState.recordMessageId(channelId, index, message.getId),

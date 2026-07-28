@@ -66,6 +66,31 @@ final class BoundedMessageQueue[T](capacity: Int = Int.MaxValue, dropNewest: Boo
   /** Remove and return the head, or None if empty (FIFO). */
   def dequeueOption(): Option[T] = if (q.isEmpty) None else Some(removeOldest())
 
+  /** Remove and return the first item from the head that satisfies `pred`,
+   *  leaving any skipped items in place and in order. Scans at most `maxScan`
+   *  entries and returns None if none of them qualifies, so a long run of
+   *  ineligible items at the head costs a bounded amount of work rather than
+   *  walking the whole backlog — the caller is expected to retry on its next
+   *  tick, by which time eligibility will have changed.
+   *
+   *  Used to space out items targeting the same resource (see
+   *  [[com.tibiabot.discord.RateLimitedSender]]'s per-group gap); with no
+   *  predicate in play the plain FIFO [[dequeueOption]] is what runs. */
+  def dequeueFirstOption(maxScan: Int)(pred: T => Boolean): Option[T] = {
+    val it = q.entrySet().iterator()
+    var scanned = 0
+    var found: Option[T] = None
+    while (found.isEmpty && scanned < maxScan && it.hasNext) {
+      val value = it.next().getValue
+      if (pred(value)) {
+        it.remove()
+        found = Some(value)
+      }
+      scanned += 1
+    }
+    found
+  }
+
   private def removeOldest(): T = {
     val it = q.entrySet().iterator()
     val head = it.next()

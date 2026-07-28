@@ -130,11 +130,19 @@ lanes are bot-wide singletons, so the aggregate send rate is bounded across ever
 world rather than per stream. Deaths — the thing the bot exists to post quickly —
 bypass both lanes and go straight to JDA's own rate limiter. Everything else is
 paced: low-priority notifications share the background lane, and online-list edits
-get their own much slower lane, because Discord groups message-edit calls into a
-"shared" bucket that is tighter than the general REST budget. Each queued item is
-keyed by its target, so a backlog is bounded by the number of distinct
-channels/messages rather than by how often they are refreshed — a superseded update
-is replaced, not queued behind its own successor.
+get their own much slower lane, because Discord rate-limits message-edit calls far
+harder than the general REST budget. Each queued item is keyed by its target, so a
+backlog is bounded by the number of distinct channels/messages rather than by how
+often they are refreshed — a superseded update is replaced, not queued behind its
+own successor.
+
+Those edit limits are per-channel while the lane's pace is bot-wide, so online-list
+items also carry their channel as a *group*: the drain skips past an item whose
+channel it touched within the last `online-list-per-channel-min-gap-ms` and spends
+the slot on a different channel instead. Without it, a list that packs into several
+embeds enqueues them together and drains back-to-back, putting enough edits into one
+channel to trip that channel's limit even while the bot-wide rate is well within
+budget. Skipping costs no throughput — only ordering.
 
 ## Local TibiaData Api (Optional)
 This is only used for the Boosted boss/creature endpoints — everything else, including the per-character death polling,

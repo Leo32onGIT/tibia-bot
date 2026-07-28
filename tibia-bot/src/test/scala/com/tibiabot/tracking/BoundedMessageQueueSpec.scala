@@ -71,6 +71,27 @@ class BoundedMessageQueueSpec extends AnyFunSuite with Matchers {
     List.fill(4)(q.dequeueOption()).flatten shouldBe List(1, 2, 3, 4)
   }
 
+  test("dequeueFirstOption skips ineligible items at the head, leaving them in order") {
+    val q = new BoundedMessageQueue[Int]()
+    (1 to 5).foreach(q.enqueue)
+    q.dequeueFirstOption(10)(_ % 2 == 0) shouldBe Some(2)
+    q.size shouldBe 4
+    List.fill(4)(q.dequeueOption()).flatten shouldBe List(1, 3, 4, 5)
+  }
+
+  test("dequeueFirstOption gives up past maxScan rather than walking the whole queue") {
+    val q = new BoundedMessageQueue[Int]()
+    (1 to 10).foreach(q.enqueue)
+    q.dequeueFirstOption(3)(_ == 9) shouldBe None // 9 is reachable, but not within 3
+    q.size shouldBe 10                            // nothing consumed by the failed scan
+    q.dequeueFirstOption(10)(_ == 9) shouldBe Some(9)
+  }
+
+  test("dequeueFirstOption on an empty queue is None") {
+    val q = new BoundedMessageQueue[Int]()
+    q.dequeueFirstOption(10)(_ => true) shouldBe None
+  }
+
   test("superseding at capacity replaces rather than drops") {
     val q = new BoundedMessageQueue[Int](capacity = 2)
     q.enqueue(1, Some("a"))

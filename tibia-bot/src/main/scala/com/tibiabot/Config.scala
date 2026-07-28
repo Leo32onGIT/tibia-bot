@@ -102,6 +102,7 @@ object Config {
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
   val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")
+  val onlineListPerChannelMinGapMs: Long = discord.getLong("online-list-per-channel-min-gap-ms")
 
   /** Monitoring dashboard: Discord OAuth2 + session signing + reverse-proxy domain. */
   object Web {

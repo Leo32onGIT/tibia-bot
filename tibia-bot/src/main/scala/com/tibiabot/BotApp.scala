@@ -58,14 +58,14 @@ object BotApp extends App with StrictLogging {
    *  since the last log) shows whether the lane is keeping up or backing up;
    *  the per-label breakdown shows which traffic is consuming the lane's
    *  budget and how long it's waiting. */
-  private def makeMonitoredSender(name: String, delayMs: Int): discord.RateLimitedSender = {
+  private def makeMonitoredSender(name: String, delayMs: Int, perGroupMinGapMs: Long = 0): discord.RateLimitedSender = {
     val sender = new discord.RateLimitedSender(drain => {
       val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
         0.seconds,
         delayMs.milliseconds
       )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
       () => cancellable.cancel()
-    })
+    }, perGroupMinGapMs = perGroupMinGapMs)
     var lastLoggedQueueDepth = 0
     actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
       val depth = sender.queueDepth
@@ -94,11 +94,16 @@ object BotApp extends App with StrictLogging {
   val outboundSender = makeMonitoredSender("background", Config.globalMessageDelayMs)
 
   // Separate, much slower lane just for online-list message edits/sends —
-  // Discord groups these into a "shared" bucket across many channels for this
-  // bot, tighter than the general REST budget (confirmed via live 429s with
-  // Retry-After 5-6s), so it needs its own pace instead of sharing the lane
-  // above with everything else.
-  val onlineListSender = makeMonitoredSender("online-list", Config.onlineListMessageDelayMs)
+  // Discord rate-limits this traffic far harder than the general REST budget
+  // (confirmed via live 429s with Retry-After 4-6s), so it needs its own pace
+  // instead of sharing the lane above with everything else. Those limits are
+  // per-channel, so the lane is additionally told to space out sends targeting
+  // the same channel (see the group argument in dispatchOnlineListUpdate); the
+  // bot-wide pace alone can't prevent one channel's several embeds draining
+  // back-to-back.
+  val onlineListSender = makeMonitoredSender(
+    "online-list", Config.onlineListMessageDelayMs, Config.onlineListPerChannelMinGapMs
+  )
 
   // Per-world population/poll-timing/throughput counters and per-world recent-
   // activity feeds, both read by the monitoring dashboard's /status endpoint.

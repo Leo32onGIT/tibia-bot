@@ -137,6 +137,66 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     sent.toList shouldBe List("a", "b")
   }
 
+  /** A clock the test advances by hand, so the per-group gap can be exercised
+   *  without sleeping. */
+  private class ManualClock {
+    var ms: Long = 0L
+    val now: () => Long = () => ms
+    def advance(by: Long): Unit = ms += by
+  }
+
+  test("items sharing a group are spread out, and the skipped slot goes to another group") {
+    val ticker = new ManualTicker
+    val clock = new ManualClock
+    val sender = new RateLimitedSender(ticker.start, perGroupMinGapMs = 1000, now = clock.now)
+    val sent = ListBuffer.empty[String]
+
+    // Channel A packs into three messages and enqueues them all at once; B has one.
+    sender.enqueue("edit", Some("a:0"), Some("a"))(() => sent += "a0")
+    sender.enqueue("edit", Some("a:1"), Some("a"))(() => sent += "a1")
+    sender.enqueue("edit", Some("a:2"), Some("a"))(() => sent += "a2")
+    sender.enqueue("edit", Some("b:0"), Some("b"))(() => sent += "b0")
+
+    // In FIFO this would be a0,a1,a2 back-to-back — the burst that 429s.
+    ticker.tick(); clock.advance(200)
+    ticker.tick(); clock.advance(200)
+    sent.toList shouldBe List("a0", "b0")
+
+    // A is still inside its gap and nothing else is eligible: the tick is a no-op,
+    // and the item stays queued rather than being dropped.
+    ticker.tick()
+    sent.toList shouldBe List("a0", "b0")
+    sender.queueDepth shouldBe 2
+
+    clock.advance(700) // 1100ms since a0
+    ticker.tick()
+    sent.toList shouldBe List("a0", "b0", "a1")
+  }
+
+  test("ungrouped items are never held back by the gap") {
+    val ticker = new ManualTicker
+    val clock = new ManualClock
+    val sender = new RateLimitedSender(ticker.start, perGroupMinGapMs = 1000, now = clock.now)
+    val sent = ListBuffer.empty[String]
+
+    List("a", "b", "c").foreach(s => sender.enqueue("test")(() => sent += s))
+    ticker.tick(); ticker.tick(); ticker.tick()
+
+    sent.toList shouldBe List("a", "b", "c")
+  }
+
+  test("a zero gap drains in plain FIFO order regardless of grouping") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    val sent = ListBuffer.empty[String]
+
+    sender.enqueue("edit", Some("a:0"), Some("a"))(() => sent += "a0")
+    sender.enqueue("edit", Some("a:1"), Some("a"))(() => sent += "a1")
+    ticker.tick(); ticker.tick()
+
+    sent.toList shouldBe List("a0", "a1")
+  }
+
   test("no key means every enqueue is kept, even for identical labels") {
     val ticker = new ManualTicker
     val sender = new RateLimitedSender(ticker.start)
