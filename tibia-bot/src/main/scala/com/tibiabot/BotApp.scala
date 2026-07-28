@@ -235,7 +235,7 @@ object BotApp extends App with StrictLogging {
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
-  private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService, discordGateway)(ex)
+  private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)(ex)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
