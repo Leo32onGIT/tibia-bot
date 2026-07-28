@@ -48,6 +48,24 @@ final class KillerLevelCache(ttl: FiniteDuration, maxEntries: Int = 4096) {
     if (entries.size > maxEntries) evictOldest(entries.size - maxEntries)
   }
 
+  /** Record a failure for `name` only if nothing fresh is already known, and
+   *  report whether it did.
+   *
+   *  For giving up on a lookup that never came back: the request may land
+   *  between deciding it is unresolved and writing it off, and a real level
+   *  that arrived must not be overwritten by the write-off. Checking and
+   *  writing under one lock closes that window, and makes the count of names
+   *  actually written off exact rather than an estimate. */
+  def recordMissIfAbsent(name: String, now: ZonedDateTime): Boolean = lock.synchronized {
+    val key = name.toLowerCase
+    if (entries.get(key).exists(fresh(_, now))) false
+    else {
+      entries.update(key, Entry(None, now))
+      if (entries.size > maxEntries) evictOldest(entries.size - maxEntries)
+      true
+    }
+  }
+
   /** Drop expired entries. Called once per death batch, not per lookup. */
   def prune(now: ZonedDateTime): Unit = lock.synchronized {
     entries.filterInPlace { case (_, entry) => fresh(entry, now) }

@@ -1540,34 +1540,44 @@ class TibiaBot(
       val batch = wanted.take(killerLevelBatchCap)
       if (wanted.size > batch.size)
         logger.info(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
-      // Recovered per element, never per batch: one failed lookup must not fail
-      // the others, and must not fail this stage.
+      // Each lookup caches its own outcome as it lands, rather than the batch
+      // recording them together at the end — so a batch that times out still
+      // keeps whatever did resolve in time. Recovered per element, never per
+      // batch: one failed lookup must not fail the others or this stage.
       val resolved = Source(batch)
         .mapAsyncUnordered(killerLevelConcurrency) { name =>
           tibiaDataClient.getKillerFallback(name)
             .map {
-              case Right(response) => name -> Some(response.character.character.level.toInt)
+              case Right(response) => killerLevelCache.record(name, Some(response.character.character.level.toInt), now)
               case Left(error) =>
                 logger.warn(s"Failed to get character '$name' from TibiaData API: $error")
-                name -> None
+                killerLevelCache.record(name, None, now)
             }
             .recover { case ex: Throwable =>
               logger.warn(s"Exception when calling TibiaData API for '$name': ${ex.getMessage}")
-              name -> None
+              killerLevelCache.record(name, None, now)
             }
         }
-        .runWith(Sink.seq)
+        .runWith(Sink.ignore)
       try {
         // One bounded wait for the whole batch, in place of the per-killer,
         // per-discord serial waits this replaces.
-        Await.result(resolved, killerLevelBatchTimeout).foreach { case (name, level) =>
-          killerLevelCache.record(name, level, now)
-        }
+        Await.result(resolved, killerLevelBatchTimeout)
       } catch {
         case ex: Throwable =>
-          // Whatever resolved in time is lost for this batch; those killers
-          // render without a level and are retried on the next death batch.
-          logger.warn(s"Killer-level lookups for world '$world' did not finish within ${killerLevelBatchTimeout.toSeconds}s: ${ex.getMessage}")
+          // Cache a miss for whatever still hasn't answered. When the API is
+          // merely slow or hung (rather than refusing quickly) the requests
+          // never complete, so without this nothing is recorded and the very
+          // next death batch pays the full timeout again for the same names —
+          // a sustained outage costs 10s per batch forever. Recording the miss
+          // makes a hang behave like a fast failure: one timeout per killer per
+          // killer-level-ttl. The trade is that a killer whose lookup was in
+          // flight when the API recovered shows no level until that TTL
+          // expires; a late-completing request still overwrites this with the
+          // real level if it arrives. Write-off is if-absent so it can never
+          // clobber a level that landed just as the wait gave up.
+          val writtenOff = batch.count(killerLevelCache.recordMissIfAbsent(_, now))
+          logger.warn(s"Killer-level lookups for world '$world' did not finish within ${killerLevelBatchTimeout.toSeconds}s ($writtenOff of ${batch.size} unresolved, cached as no-level until the TTL expires): ${ex.getMessage}")
       }
     }
   }

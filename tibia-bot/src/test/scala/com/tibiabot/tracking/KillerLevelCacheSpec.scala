@@ -62,6 +62,42 @@ class KillerLevelCacheSpec extends AnyFunSuite with Matchers {
     cache.levelFor("Bubble", t0.plusMinutes(17)) shouldBe Some(901)
   }
 
+  test("writing off an unresolved lookup stops it being retried until the TTL expires") {
+    val cache = new KillerLevelCache(10.minutes)
+    cache.recordMissIfAbsent("Bubble", t0) shouldBe true
+    cache.needsLookup("Bubble", t0) shouldBe false
+    cache.levelFor("Bubble", t0) shouldBe None
+    cache.needsLookup("Bubble", t0.plusMinutes(11)) shouldBe true // retried once stale
+  }
+
+  test("writing off never clobbers a level that landed first") {
+    val cache = new KillerLevelCache(10.minutes)
+    cache.record("Bubble", Some(900), t0) // the slow lookup came back after all
+    cache.recordMissIfAbsent("Bubble", t0) shouldBe false
+    cache.levelFor("Bubble", t0) shouldBe Some(900)
+  }
+
+  test("writing off never clobbers an already-recorded failure either") {
+    val cache = new KillerLevelCache(10.minutes)
+    cache.record("Ghost", None, t0)
+    cache.recordMissIfAbsent("Ghost", t0) shouldBe false
+  }
+
+  test("a stale entry is written off rather than left to expire mid-outage") {
+    val cache = new KillerLevelCache(10.minutes)
+    cache.record("Bubble", Some(900), t0)
+    val later = t0.plusMinutes(11)
+    cache.recordMissIfAbsent("Bubble", later) shouldBe true
+    cache.levelFor("Bubble", later) shouldBe None
+  }
+
+  test("a late-arriving level still overwrites a write-off") {
+    val cache = new KillerLevelCache(10.minutes)
+    cache.recordMissIfAbsent("Bubble", t0) shouldBe true
+    cache.record("Bubble", Some(900), t0) // the in-flight request finally landed
+    cache.levelFor("Bubble", t0) shouldBe Some(900)
+  }
+
   test("prune drops expired entries and keeps live ones") {
     val cache = new KillerLevelCache(10.minutes)
     cache.record("Old", Some(100), t0)
