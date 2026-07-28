@@ -401,7 +401,7 @@
     </div>
     <div class="patreon-list" id="patreon-list"></div>
     <form class="patreon-add-form" id="patreon-extra-form">
-      <input type="text" id="patreon-extra-userid" placeholder="Discord user ID" required>
+      <input type="text" id="patreon-extra-username" placeholder="Discord username" required>
       <input type="number" id="patreon-extra-count" placeholder="Extra seats (can be negative)" required>
       <button type="submit">Set extra seats</button>
     </form>
@@ -876,13 +876,13 @@ document.getElementById('patreon-search').addEventListener('input', (e) => {
 
 document.getElementById('patreon-extra-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const userId = document.getElementById('patreon-extra-userid').value.trim();
+  const username = document.getElementById('patreon-extra-username').value.trim();
   const extraSeatsRaw = document.getElementById('patreon-extra-count').value.trim();
-  if (!userId || extraSeatsRaw === '') return;
+  if (!username || extraSeatsRaw === '') return;
   const extraSeats = Number(extraSeatsRaw);
   if (!Number.isInteger(extraSeats)) { alert('Extra seats must be a whole number'); return; }
   try {
-    await patreonAction('PUT', `/dashboard/patreon/users/${userId}/extra-seats`, { extraSeats });
+    await patreonAction('PUT', '/dashboard/patreon/extra-seats', { username, extraSeats });
     e.target.reset();
     e.target.classList.remove('open');
     poll();

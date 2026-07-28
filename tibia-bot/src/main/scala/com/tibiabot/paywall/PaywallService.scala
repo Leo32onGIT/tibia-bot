@@ -15,7 +15,11 @@ import scala.jdk.CollectionConverters._
  *  see [[com.tibiabot.setup.ChannelService]]. A (guild, world) pair with no
  *  assigned seat (everything that existed before this feature, or a world
  *  nobody's set up under this model yet) is always treated as active — the
- *  grandfather case, so pre-existing tracking is unaffected. */
+ *  grandfather case, so pre-existing tracking is unaffected. A positive
+ *  seat-count adjustment also bypasses the underlying subscription check
+ *  entirely (see [[callerIsSubscribed]]) — the dashboard's "grant extra
+ *  seats" admin action doubles as a full paywall override for that one
+ *  person, not just a seat-count bump. */
 final class PaywallService(
   discordGateway: DiscordGateway,
   patreonSeatRepository: PatreonSeatRepository,
@@ -42,15 +46,19 @@ final class PaywallService(
    *  gate calls this directly; `refreshAll` calls it once per distinct seat
    *  owner. The bot owner always passes, regardless of role — so they can
    *  always `/setup`, and any seat assigned to them never lapses via the
-   *  periodic recheck either, since that reuses this same check. Otherwise:
-   *  not a member of the support guild (or a lookup failure) reads as
-   *  "not subscribed", never as an error to propagate. A REST lookup rather
-   *  than JDA's member cache deliberately — caching every member of the
-   *  support guild would need the privileged GUILD_MEMBERS intent (Discord's
-   *  bot-verification process past 100 guilds) for what's an infrequent,
-   *  low-volume check. */
+   *  periodic recheck either, since that reuses this same check. A user with
+   *  a *positive* dashboard-granted seat adjustment also always passes,
+   *  regardless of role or membership — an admin using "grant extra seats"
+   *  is treated as an explicit override of the whole paywall for that
+   *  person, not just their seat count (a zero or negative adjustment does
+   *  not grant this bypass). Otherwise: not a member of the support guild
+   *  (or a lookup failure) reads as "not subscribed", never as an error to
+   *  propagate. A REST lookup rather than JDA's member cache deliberately —
+   *  caching every member of the support guild would need the privileged
+   *  GUILD_MEMBERS intent (Discord's bot-verification process past 100
+   *  guilds) for what's an infrequent, low-volume check. */
   def callerIsSubscribed(userId: String): Boolean = {
-    if (userId == ownerId) true
+    if (userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
     else {
       val supportGuild = discordGateway.guildById(supportGuildId)
       if (supportGuild == null) false
@@ -60,6 +68,27 @@ final class PaywallService(
       } catch {
         case _: Throwable => false
       }
+    }
+  }
+
+  /** Resolves a Discord username to that member's user id, searched within
+   *  the support guild — the dashboard's "grant extra seats" admin action
+   *  takes a username rather than asking the admin to go find a raw id.
+   *  Case-insensitive exact match; None if nobody matches, there are
+   *  multiple guild nicknames sharing a prefix with no exact match, or the
+   *  support guild isn't reachable. Uses retrieveMembersByPrefix — a scoped,
+   *  query-based gateway search, not the full member cache — so this needs
+   *  no privileged GUILD_MEMBERS intent, same reasoning as
+   *  [[callerIsSubscribed]]'s own REST-lookup choice. */
+  def findUserIdByUsername(username: String): Option[String] = {
+    val supportGuild = discordGateway.guildById(supportGuildId)
+    if (supportGuild == null) None
+    else try {
+      supportGuild.retrieveMembersByPrefix(username, 25).get().asScala
+        .find(_.getUser.getName.equalsIgnoreCase(username))
+        .map(_.getUser.getId)
+    } catch {
+      case _: Throwable => None
     }
   }
 
@@ -132,6 +161,29 @@ final class PaywallService(
    *  supporters panel — same source [[effectiveSeatLimit]] reads, just
    *  exposed in bulk to avoid a per-supporter lookup. */
   def allExtraSeats(): Map[String, Int] = patreonSeatOverrideRepository.allExtraSeats()
+
+  /** Called after a Patreon member sync — Patreon becomes the source of
+   *  truth for anyone it now has a confirmed Discord link to, so a
+   *  dashboard-granted seat adjustment an admin gave that person as a
+   *  temporary bridge (before Patreon "picked them up" — see
+   *  [[callerIsSubscribed]]'s positive-override bypass) is reclaimed back to
+   *  the flat default. Only clears a *positive* adjustment — the actual
+   *  bypass/bonus this is undoing — a zero or negative one is left alone,
+   *  same "positive only" rule `callerIsSubscribed` itself uses. Returns the
+   *  ids actually cleared, for the caller to log.
+   *
+   *  This method itself is a dumb, unconditional "clear these ids' positive
+   *  overrides" — it's the caller's job to pass only ids *newly* linked this
+   *  sync (see BotApp.syncPatreonMembers), not every currently-linked id.
+   *  Passing an already-linked id here every cycle would silently wipe out
+   *  a legitimate bonus later granted to an existing supporter — this is
+   *  meant to fire once, at the hand-off moment, not repeatedly. */
+  def reclaimOverridesFromPatreon(linkedDiscordUserIds: Iterable[String]): Set[String] = {
+    val current = patreonSeatOverrideRepository.allExtraSeats()
+    val toClear = linkedDiscordUserIds.filter(id => current.getOrElse(id, 0) > 0).toSet
+    toClear.foreach(id => patreonSeatOverrideRepository.setExtraSeats(id, 0, ZonedDateTime.now()))
+    toClear
+  }
 
   /** Only reachable when (guildId, world) is currently paused. The new
    *  claimant needs no relation to the lapsed owner — just room under their

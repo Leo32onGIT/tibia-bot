@@ -754,15 +754,28 @@ object BotApp extends App with StrictLogging {
   /** Best-effort periodic snapshot of the Patreon campaign's member list
    *  (see patreonapi.PatreonApiClient), purely for the dashboard's
    *  supporters panel — never affects paywallService's own Discord-role
-   *  gate. Fire-and-forget: a failed fetch just leaves the last snapshot in
-   *  place until the next tick, same degrade-gracefully shape as everything
-   *  else here. */
+   *  gate directly. It does reclaim a dashboard-granted seat override for
+   *  someone Patreon has *just now* confirmed a Discord link for (see
+   *  PaywallService.reclaimOverridesFromPatreon): a one-time hand-off from
+   *  the admin's manual bridge to Patreon as the ongoing source of truth,
+   *  the moment that account first appears linked — never on a later sync,
+   *  so a legitimate bonus later granted to an already-linked supporter
+   *  isn't silently wiped out every cycle. Determined by diffing against the
+   *  previous snapshot (captured here before it's overwritten), not by
+   *  anything in the fetched member data itself. Fire-and-forget: a failed
+   *  fetch just leaves the last snapshot in place until the next tick, same
+   *  degrade-gracefully shape as everything else here. */
   private def syncPatreonMembers(): Unit =
     patreonApiClient.fetchAllMembers().foreach { members =>
       val enriched = members.map(resolveDiscordUsername)
       logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account)")
+      val previouslyLinkedIds = patreonMemberRepository.snapshot().flatMap(_.discordUserId).toSet
       try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
       catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
+
+      val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
+      val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
+      if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
     }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {

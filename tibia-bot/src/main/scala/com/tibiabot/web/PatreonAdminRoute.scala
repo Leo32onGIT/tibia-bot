@@ -13,8 +13,13 @@ import scala.util.{Failure, Success, Try}
 
 /** Owner-only Patreon seat admin actions for the dashboard: release one seat,
  *  release every seat a user holds, or set a per-user seat-count adjustment
- *  (`extra-seats` below) — arbitrary overrides of the normal `/setup`-driven
- *  seat flow. Reuses [[DiscordAuth.authenticatedUser]] the same way
+ *  (`extra-seats` below, resolved from a Discord username rather than a raw
+ *  id — see [[paywall.PaywallService.findUserIdByUsername]]). A *positive*
+ *  adjustment also fully bypasses the Patreon subscription check for that
+ *  person (see [[paywall.PaywallService.callerIsSubscribed]]), so this
+ *  doubles as "give this specific person bot access without a real
+ *  subscription" — arbitrary overrides of the normal `/setup`-driven seat
+ *  flow. Reuses [[DiscordAuth.authenticatedUser]] the same way
  *  [[StatusRoute]] does; mounted alongside it under the same `/dashboard`
  *  prefix in BotApp. */
 final class PatreonAdminRoute(
@@ -58,16 +63,26 @@ final class PatreonAdminRoute(
         }
       }
     } ~
-    path("patreon" / "users" / Segment / "extra-seats") { targetUserId =>
+    path("patreon" / "extra-seats") {
       put {
         discordAuth.authenticatedUser { callerId =>
           requireOwner(callerId) {
             entity(as[String]) { body =>
-              Try(body.parseJson.asJsObject.fields("extraSeats").convertTo[Int]) match {
-                case Success(extraSeats) =>
-                  paywallService.setExtraSeats(targetUserId, extraSeats)
-                  complete(ok)
-                case Failure(_) => badRequest("Expected an integer extraSeats")
+              Try(body.parseJson.asJsObject.fields) match {
+                case Success(fields) if fields.contains("username") && fields.contains("extraSeats") =>
+                  val username = fields("username").convertTo[String]
+                  Try(fields("extraSeats").convertTo[Int]) match {
+                    case Success(extraSeats) =>
+                      paywallService.findUserIdByUsername(username) match {
+                        case Some(targetUserId) =>
+                          paywallService.setExtraSeats(targetUserId, extraSeats)
+                          complete(ok)
+                        case None =>
+                          badRequest(s"No member found with username '$username' in the support server")
+                      }
+                    case Failure(_) => badRequest("Expected an integer extraSeats")
+                  }
+                case _ => badRequest("Expected username and extraSeats")
               }
             }
           }

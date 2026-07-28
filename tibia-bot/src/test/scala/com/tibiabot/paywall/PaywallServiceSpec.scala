@@ -64,6 +64,26 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     svc.callerIsSubscribed("someone-else") shouldBe false
   }
 
+  test("callerIsSubscribed: a positive seat adjustment bypasses the role check entirely") {
+    val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 1))
+    // FakeGateway.guildById returning null would normally fail this for a
+    // non-owner (see the previous test) - the positive override bypasses
+    // that path before it's even reached.
+    svc.callerIsSubscribed("user-1") shouldBe true
+  }
+
+  test("callerIsSubscribed: a zero or negative seat adjustment does not bypass the role check") {
+    val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 0, "user-2" -> -1))
+    svc.callerIsSubscribed("user-1") shouldBe false
+    svc.callerIsSubscribed("user-2") shouldBe false
+  }
+
+  test("findUserIdByUsername: an unreachable support guild resolves to None") {
+    // FakeGateway.guildById always returns null, same as the
+    // support-guild-unreachable path callerIsSubscribed already covers.
+    service().findUserIdByUsername("someone") shouldBe None
+  }
+
   test("canAssignSeatPure: under the limit with no existing owner is allowed") {
     service(seatLimit = 3).canAssignSeatPure(None, 2, "user-1", 3) shouldBe true
   }
@@ -122,6 +142,28 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
   test("canAssignSeat: a user with a granted extra seat can go past the global default") {
     val svc = service(seatLimit = 1, existingSeats = 1, overrides = Map("user-1" -> 1))
     svc.canAssignSeat("user-1", "guild-1", "Antica") shouldBe true
+  }
+
+  test("reclaimOverridesFromPatreon: a positive override is cleared for a now-linked account, and reported") {
+    val svc = service(overrides = Map("user-1" -> 3))
+    svc.reclaimOverridesFromPatreon(List("user-1")) shouldBe Set("user-1")
+    svc.effectiveSeatLimit("user-1") shouldBe service().effectiveSeatLimit("user-1") // back to the flat default
+  }
+
+  test("reclaimOverridesFromPatreon: a zero or negative override is left alone, not reported") {
+    val svc = service(overrides = Map("user-1" -> 0, "user-2" -> -2))
+    svc.reclaimOverridesFromPatreon(List("user-1", "user-2")) shouldBe empty
+  }
+
+  test("reclaimOverridesFromPatreon: an id with no override at all is left alone, not reported") {
+    val svc = service()
+    svc.reclaimOverridesFromPatreon(List("someone-else")) shouldBe empty
+  }
+
+  test("reclaimOverridesFromPatreon: only clears overrides for ids actually passed in") {
+    val svc = service(overrides = Map("user-1" -> 3, "user-2" -> 2))
+    svc.reclaimOverridesFromPatreon(List("user-1")) shouldBe Set("user-1")
+    svc.allExtraSeats() shouldBe Map("user-1" -> 0, "user-2" -> 2)
   }
 
   test("a (guild, world) pair whose owner fails the check becomes inactive and is reported as lapsed") {
