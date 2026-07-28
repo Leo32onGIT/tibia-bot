@@ -43,17 +43,21 @@
     <appender-ref ref="DASHBOARD" />
   </logger>
 
-  <!-- JDA logs a WARN every time it hits a 429 and auto-retries internally —
-       not a failure our code ever sees (the request still succeeds once the
-       Retry-After elapses), just noise from the online-list lane's "shared"
-       bucket occasionally getting hit despite its own slower pace + dedup.
-       Suppressed now that the online-list lane has its own pace, dedup, and
-       adaptive refresh backoff (AdaptiveRefreshInterval) to keep it from
-       saturating in the first place — genuine ERROR-level events from this
-       logger, if any, still surface on both console and the dashboard. -->
-  <logger name="net.dv8tion.jda.api.requests.RestRateLimiter" level="ERROR" additivity="false">
+  <!-- JDA logs a WARN every time it hits a 429 and auto-retries internally.
+       That is not a failure our code ever sees (the request still succeeds
+       once the Retry-After elapses), and in bursts it drowns the dashboard's
+       alerts panel — but it is the only direct signal of how hard we are
+       pushing Discord's shared bucket, so it is worth keeping somewhere.
+       Console only (no DASHBOARD ref): visible in `docker logs` when
+       diagnosing rate-limit pressure, without crowding out actionable
+       warnings on the dashboard. additivity="false" stops the root logger
+       re-adding the dashboard appender.
+
+       Note this also keeps ERROR-level events from this logger off the
+       dashboard, since a logger cannot route levels to different appenders
+       — they are still on the console. -->
+  <logger name="net.dv8tion.jda.api.requests.RestRateLimiter" level="WARN" additivity="false">
     <appender-ref ref="CONSOLE" />
-    <appender-ref ref="DASHBOARD" />
   </logger>
 
   <root level="INFO">
