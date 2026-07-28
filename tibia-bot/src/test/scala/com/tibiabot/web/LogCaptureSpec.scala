@@ -49,15 +49,54 @@ class LogCaptureSpec extends AnyFunSuite with Matchers {
     recent.head.count shouldBe 3
   }
 
-  test("a different message in between does not collapse into the earlier run") {
+  test("a repeat still collapses even with a different message in between") {
     val log = new LogCapture()
     log.record("WARN", "com.example.Spammy", "429 again")
     log.record("WARN", "com.example.Other", "unrelated")
     log.record("WARN", "com.example.Spammy", "429 again")
 
     val recent = log.recentWarnings()
-    recent should have size 3
-    recent.forall(_.count == 1) shouldBe true
+    recent should have size 2
+    recent.map(_.logger) shouldBe List("com.example.Spammy", "com.example.Other") // the repeat is newest
+    recent.head.count shouldBe 2
+  }
+
+  test("two noisy sources interleaving stay at one row each, not one row per event") {
+    val log = new LogCapture()
+    (1 to 40).foreach { i =>
+      log.record("WARN", "com.tibiabot.tibiadata.TibiaDataClient", s"Failed to get character: 'Player$i' with status: '503 Service Unavailable'")
+      log.record("WARN", "net.dv8tion.jda.api.requests.RestRateLimiter", s"Encountered 429 on route PATCH/channels/$i/messages, retry after 512 ms")
+    }
+    val recent = log.recentWarnings()
+    recent should have size 2
+    recent.map(_.count).toSet shouldBe Set(40)
+  }
+
+  test("different loggers with the same message shape stay separate rows") {
+    val log = new LogCapture()
+    log.record("WARN", "com.example.A", "timed out after 5s")
+    log.record("WARN", "com.example.B", "timed out after 9s")
+
+    log.recentWarnings() should have size 2
+  }
+
+  test("a collapsed entry keeps the newest message text, not the first") {
+    val log = new LogCapture()
+    log.record("WARN", "com.example.Spammy", "failed for 'Alice'")
+    log.record("WARN", "com.example.Other", "unrelated")
+    log.record("WARN", "com.example.Spammy", "failed for 'Bob'")
+
+    log.recentWarnings().head.message shouldBe "failed for 'Bob'"
+  }
+
+  test("collapsing does not let one shape consume the capacity") {
+    val log = new LogCapture(capacity = 5)
+    (1 to 100).foreach(i => log.record("WARN", "com.example.Spammy", s"429 on bucket $i"))
+    log.record("WARN", "com.example.Rare", "something genuinely different")
+
+    val recent = log.recentWarnings()
+    recent should have size 2
+    recent.map(_.logger) should contain("com.example.Rare") // not evicted by the burst
   }
 
   test("reading does not remove anything") {

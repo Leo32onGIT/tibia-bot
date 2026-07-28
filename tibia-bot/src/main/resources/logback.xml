@@ -45,19 +45,17 @@
 
   <!-- JDA logs a WARN every time it hits a 429 and auto-retries internally.
        That is not a failure our code ever sees (the request still succeeds
-       once the Retry-After elapses), and in bursts it drowns the dashboard's
-       alerts panel — but it is the only direct signal of how hard we are
-       pushing Discord's shared bucket, so it is worth keeping somewhere.
-       Console only (no DASHBOARD ref): visible in `docker logs` when
-       diagnosing rate-limit pressure, without crowding out actionable
-       warnings on the dashboard. additivity="false" stops the root logger
-       re-adding the dashboard appender.
+       once the Retry-After elapses), but it is the only direct signal of how
+       hard we are pushing Discord's shared bucket, so it belongs on the
+       dashboard rather than being suppressed as it was previously.
 
-       Note this also keeps ERROR-level events from this logger off the
-       dashboard, since a logger cannot route levels to different appenders
-       — they are still on the console. -->
+       It is safe to surface at WARN because LogCapture keeps one entry per
+       distinct message shape per logger and counts repeats, so even a heavy
+       burst occupies a single row of the alerts panel instead of flooding
+       it — the reason it was silenced before. -->
   <logger name="net.dv8tion.jda.api.requests.RestRateLimiter" level="WARN" additivity="false">
     <appender-ref ref="CONSOLE" />
+    <appender-ref ref="DASHBOARD" />
   </logger>
 
   <root level="INFO">

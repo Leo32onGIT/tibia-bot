@@ -17,16 +17,24 @@ final case class LogEvent(at: Instant, level: String, logger: String, message: S
  *  burst of frequent warnings would otherwise evict rare errors before
  *  anyone saw them. Same shape as [[com.tibiabot.tracking.RecentEvents]]
  *  within each buffer: recording never removes anything except to stay under
- *  `capacity`, reading never removes anything at all — except that a repeat
- *  of the same logger whose message has the same *shape* as that buffer's
- *  latest entry (see [[normalize]]) bumps that entry's count and replaces
- *  its message/timestamp instead of adding a new one, so a bursty repeating
- *  warning can't flood the buffer and push out genuinely different alerts —
- *  even when the message embeds a different value each time (a character
- *  name, a channel id, a retry-after ms count), which is the common case for
- *  real repeating warnings, not the exception. Only collapses *runs* of the
- *  same shape, not every past occurrence — a different message in between
- *  starts a new entry. */
+ *  `capacity`, and reading never removes anything at all.
+ *
+ *  Each buffer holds one entry per distinct *shape* (see [[normalize]]) per
+ *  logger. A repeat bumps that entry's count and refreshes its message and
+ *  timestamp, wherever it already sits, and moves it to the most-recent end —
+ *  so a bursty repeating warning can't flood the buffer and push out
+ *  genuinely different alerts, even when the message embeds a different value
+ *  each time (a character name, a channel id, a retry-after ms count), which
+ *  is the common case for real repeating warnings rather than the exception.
+ *
+ *  Matching across the whole buffer, rather than only against its newest
+ *  entry, is what makes this hold when two noisy sources overlap: the
+ *  TibiaData poll and JDA's Discord rate limiter can both burst at once, and
+ *  while they interleave, run-only matching would collapse neither and fill
+ *  every slot with alternating near-duplicates. The tradeoff is that
+ *  ordering no longer distinguishes "A, then B, then A again" from "B, then
+ *  A" — only each shape's latest occurrence and total count are kept, which
+ *  is what an at-a-glance alerts panel wants. */
 final class LogCapture(capacity: Int = 50) {
   private val errorEvents = mutable.Queue.empty[LogEvent]
   private val warnEvents = mutable.Queue.empty[LogEvent]
@@ -50,12 +58,15 @@ final class LogCapture(capacity: Int = 50) {
     message.replaceAll("'(?:[^']|'(?=\\w))*'", "'X'").replaceAll("\\d+", "N")
 
   private def recordInto(queue: mutable.Queue[LogEvent], level: String, logger: String, message: String): Unit = {
-    queue.lastOption match {
-      case Some(last) if last.logger == logger && normalize(last.message) == normalize(message) =>
-        queue(queue.size - 1) = last.copy(at = Instant.now(), message = message, count = last.count + 1)
-      case _ =>
-        queue.enqueue(LogEvent(Instant.now(), level, logger, message, count = 1))
-        while (queue.size > capacity) queue.dequeue()
+    val shape = normalize(message)
+    val existing = queue.indexWhere(e => e.logger == logger && normalize(e.message) == shape)
+    if (existing >= 0) {
+      val merged = queue(existing).copy(at = Instant.now(), message = message, count = queue(existing).count + 1)
+      queue.remove(existing)
+      queue.enqueue(merged) // it just happened, so it is now the most recent
+    } else {
+      queue.enqueue(LogEvent(Instant.now(), level, logger, message, count = 1))
+      while (queue.size > capacity) queue.dequeue()
     }
   }
 
