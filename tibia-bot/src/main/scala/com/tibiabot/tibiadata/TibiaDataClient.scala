@@ -18,7 +18,7 @@ import com.tibiabot.state.StreamState
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 import spray.json.DeserializationException
-import akka.http.scaladsl.model.headers.{Date => DateHeader}
+import akka.http.scaladsl.model.headers.{Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 import java.time.{ZonedDateTime, ZoneId}
 import java.time.format.DateTimeFormatter
 
@@ -35,35 +35,54 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
   private val dateHeaderFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
 
-  private val retryableStatusCodes: Set[Int] = Set(429, 500, 502, 503, 504)
+  private val retryPolicy = new RetryPolicy()
   private val maxRetries = 2
-  private def retryBackoff(attempt: Int): FiniteDuration = (250 * (attempt + 1)).milliseconds
 
-  /** Issue a GET with a short bounded retry on transient failures: a handful of
-   *  retryable HTTP statuses (rate-limited / upstream briefly unavailable, e.g.
-   *  a 503 from api.tibiadata.com) or a connection-level failure (timeout,
-   *  reset). Anything else — including a well-formed 200 or a definitive 404 —
-   *  is returned as-is on the first attempt, since retrying a real answer would
-   *  just get the same answer again. Bounded to 2 retries with a short backoff
-   *  (250ms, 500ms) so the character poll path (up to 32-way concurrent, every
-   *  ~60s per world) stays predictable rather than piling up retries under a
-   *  sustained outage — a failure past that still degrades to the existing
+  /** The server's requested backoff, if it asked for one. `Retry-After` is
+   *  legal as either delta-seconds or an HTTP-date; Cloudflare and Kong both
+   *  send the former, but the date form is accepted rather than ignored.
+   *  A date already in the past reads as "retry now". */
+  private def retryAfterOf(response: HttpResponse): Option[FiniteDuration] =
+    response.header[`Retry-After`].map { header =>
+      header.delaySecondsOrDateTime match {
+        case RetryAfterDuration(seconds) => seconds.seconds
+        case RetryAfterDateTime(dateTime) => math.max(0L, dateTime.clicks - System.currentTimeMillis()).millis
+      }
+    }
+
+  /** Issue a GET, retrying only when [[RetryPolicy]] says it is worth it: a
+   *  transient upstream failure (500/502/503/504) or a connection-level failure
+   *  (timeout, reset). Anything else — a well-formed 200, a definitive 404, or
+   *  a 429 telling us to send less — is returned as-is, since retrying an
+   *  answer just gets the same answer, and retrying a rate limit makes it
+   *  worse. A response the policy declines to retry degrades to the existing
    *  logged-Left behaviour untouched. */
   private def requestWithRetry(request: HttpRequest, attempt: Int = 0): Future[HttpResponse] =
     Http().singleRequest(request).flatMap { response =>
-      if (attempt < maxRetries && retryableStatusCodes.contains(response.status.intValue)) {
-        val delay = retryBackoff(attempt)
-        logger.warn(s"Got ${response.status} from '${request.uri}' (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
-        response.discardEntityBytes()
-        after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
-      } else {
-        Future.successful(response)
+      val status = response.status.intValue
+      val retryAfter = retryAfterOf(response)
+      retryPolicy.onResponse(status, retryAfter, attempt) match {
+        case RetryDecision.RetryIn(delay) =>
+          logger.warn(s"Got ${response.status} from '${request.uri}' (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
+          response.discardEntityBytes()
+          after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+        case RetryDecision.GiveUp =>
+          // Worth its own line: being rate-limited is the one upstream response
+          // that says something about our own behaviour rather than theirs.
+          if (retryPolicy.isRateLimited(status))
+            logger.warn(s"Rate limited (429) by '${request.uri}'${retryAfter.fold("")(d => s", asked to wait ${d.toSeconds}s")} — not retrying; the next poll cycle is the retry")
+          else
+            retryAfter.foreach(d => logger.warn(s"Got ${response.status} from '${request.uri}' asking for a ${d.toSeconds}s backoff — longer than a request is held open for, so not retrying"))
+          Future.successful(response)
       }
     }.recoverWith {
-      case NonFatal(ex) if attempt < maxRetries =>
-        val delay = retryBackoff(attempt)
-        logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
-        after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+      case NonFatal(ex) =>
+        retryPolicy.onConnectionFailure(attempt) match {
+          case RetryDecision.RetryIn(delay) =>
+            logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
+            after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+          case RetryDecision.GiveUp => Future.failed(ex)
+        }
     }
 
   /** Shared recovery for an Unmarshal failure across every endpoint. On a
