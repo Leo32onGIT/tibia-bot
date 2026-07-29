@@ -105,6 +105,12 @@ class TibiaBot(
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var onlineListTableUpdateTimer: ZonedDateTime = ZonedDateTime.now().minusMinutes(10) // Start immediately
+  // The refresh cadence currently in force, carried across sweeps so
+  // AdaptiveRefreshInterval can apply hysteresis to it. 0 means "no previous
+  // value", which makes the first sweep take the tier the depth asks for.
+  // Read and written only from the online-list sweep's own thread, like the
+  // purge timers above.
+  private var onlineListRefreshSeconds: Int = 0
 
   // The implicit ExecutionContext CachingTibiaApi takes is the stream's own `ex`
   // (an ExecutionContextExecutor, so it wins implicit resolution) — an inner
@@ -720,8 +726,12 @@ class TibiaBot(
         lazy val roster = onlineTracker.snapshot
         // Back off when the shared online-list lane is congested instead of
         // always refreshing at the healthy cadence — see AdaptiveRefreshInterval
-        // for the queueDepth -> interval mapping.
-        val refreshIntervalSeconds = discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth)
+        // for the queueDepth -> interval mapping. Feeding the current cadence
+        // back in is what gives that mapping its hysteresis, so a depth parked
+        // on a tier boundary doesn't flap between two cadences.
+        onlineListRefreshSeconds =
+          discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth, onlineListRefreshSeconds)
+        val refreshIntervalSeconds = onlineListRefreshSeconds
         discordsData(world).foreach { discords =>
           val guildId = discords.id
           val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
