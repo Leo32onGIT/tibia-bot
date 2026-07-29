@@ -14,7 +14,7 @@ class RenameCooldownRepositoryIntegrationSpec extends AnyFunSuite with Matchers 
 
   test("recordRename and loadForWorld round-trip, scoped per world, overwriting on repeated calls") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcRenameCooldownRepository(provider)
     clearCooldowns(provider)
 
@@ -38,22 +38,5 @@ class RenameCooldownRepositoryIntegrationSpec extends AnyFunSuite with Matchers 
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'rename_cooldowns'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM rename_cooldowns")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }

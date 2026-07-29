@@ -13,7 +13,7 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
 
   test("patreon_seats: assign, retrieve by user/guild-world, and release") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
@@ -36,7 +36,7 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
 
   test("allSeats returns every seat regardless of owner") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
@@ -48,7 +48,7 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
 
   test("releaseAllSeatsForUser frees every seat owned by that user, leaving other users untouched") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
@@ -66,7 +66,7 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
 
   test("releaseAllSeatsForUser is a no-op for a user who owns no seats") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatRepository(provider)
     clearSeats(provider)
 
@@ -82,22 +82,5 @@ class PatreonSeatRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'patreon_seats'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM patreon_seats")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }

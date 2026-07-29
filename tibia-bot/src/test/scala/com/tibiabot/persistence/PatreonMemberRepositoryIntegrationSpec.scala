@@ -14,7 +14,7 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("replaceSnapshot round-trips members, including nullable patron_status/discord_user_id/discord_username") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
@@ -29,7 +29,7 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("a later replaceSnapshot prunes members no longer present, without a window where the table is empty") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
@@ -48,7 +48,7 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("replaceSnapshot with an empty list clears the whole table") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
@@ -65,22 +65,5 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'patreon_members'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM patreon_members")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }

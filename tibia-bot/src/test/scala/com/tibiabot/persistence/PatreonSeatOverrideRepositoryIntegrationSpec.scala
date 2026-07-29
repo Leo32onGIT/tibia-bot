@@ -13,7 +13,7 @@ class PatreonSeatOverrideRepositoryIntegrationSpec extends AnyFunSuite with Matc
 
   test("a user with no override reads back 0") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatOverrideRepository(provider)
     clearOverrides(provider)
 
@@ -22,7 +22,7 @@ class PatreonSeatOverrideRepositoryIntegrationSpec extends AnyFunSuite with Matc
 
   test("setExtraSeats round-trips a positive and a negative adjustment") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatOverrideRepository(provider)
     clearOverrides(provider)
 
@@ -35,7 +35,7 @@ class PatreonSeatOverrideRepositoryIntegrationSpec extends AnyFunSuite with Matc
 
   test("setExtraSeats for the same user again replaces the prior value, not a second row") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatOverrideRepository(provider)
     clearOverrides(provider)
 
@@ -48,7 +48,7 @@ class PatreonSeatOverrideRepositoryIntegrationSpec extends AnyFunSuite with Matc
 
   test("allExtraSeats returns every user with a non-default adjustment") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonSeatOverrideRepository(provider)
     clearOverrides(provider)
 
@@ -65,22 +65,5 @@ class PatreonSeatOverrideRepositoryIntegrationSpec extends AnyFunSuite with Matc
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'patreon_seat_overrides'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM patreon_seat_overrides")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }
