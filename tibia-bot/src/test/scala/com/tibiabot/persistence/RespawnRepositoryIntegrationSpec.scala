@@ -269,6 +269,30 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.unwarnedActiveClaims(g, now) shouldBe empty
   }
 
+  test("setClaimDuration moves an active claim's deadline, and leaves a queued one without any") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val active = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(120), 120,
+      RespawnClaim.KindAdHoc)
+    repo.markWarned(g, active.id)
+
+    repo.setClaimDuration(g, active.id, 180, Some(now.plusMinutes(180)))
+    val grown = repo.activeClaim(g, spawn.id)
+    grown.map(_.durationMinutes) shouldBe Some(180)
+    grown.flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(180).toInstant)
+    // Re-armed, so a claim whose deadline moved still gets its reminder.
+    grown.map(_.warned) shouldBe Some(false)
+
+    val queued = repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc).get
+    queued.endsAt shouldBe None
+    repo.setClaimDuration(g, queued.id, 90, None)
+    val requeued = repo.queueFor(g, spawn.id).find(_.id == queued.id)
+    requeued.map(_.durationMinutes) shouldBe Some(90)
+    // Still no deadline: inventing one would make the expiry sweep treat a claim
+    // that hasn't started as though it had.
+    requeued.flatMap(_.endsAt) shouldBe None
+  }
+
   test("member preferences round-trip, and distinguish 'off' from 'never chose'") {
     val (repo, g) = freshRepo()
     repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs.none("u1")

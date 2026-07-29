@@ -48,6 +48,7 @@ object RespawnThreads extends StrictLogging {
       // making the member pick the right word for their own state was needless.
       ActionRow.of(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
+        Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
@@ -241,8 +242,15 @@ object RespawnThreads extends StrictLogging {
   def applyTag(forum: ForumChannel, thread: ThreadChannel, tagName: String): Unit = {
     val tag: Option[ForumTag] = forum.getAvailableTags.asScala.find(_.getName.equalsIgnoreCase(tagName))
     tag.foreach { found =>
-      Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).complete()).failed.foreach { error =>
-        logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
+      // Skip when the thread already carries exactly this tag. Applying it again
+      // is a REST call that changes nothing, and the card is refreshed far more
+      // often than a spawn actually flips between taken and free. The current
+      // tags come from JDA's cache, so the check itself costs nothing.
+      val alreadyApplied = thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId)
+      if (!alreadyApplied) {
+        Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).complete()).failed.foreach { error =>
+          logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
+        }
       }
     }
   }
@@ -357,9 +365,22 @@ object RespawnButtonId {
   val boardClaim: String = s"${Prefix}board:claim"
   val boardConfig: String = s"${Prefix}board:config"
 
+  /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
+  def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
+
   /** Modal ids, kept next to the buttons that open them. */
-  val modalClaim: String = s"${Prefix}modal:claim"
-  val modalConfig: String = s"${Prefix}modal:config"
+  val ModalPrefix: String = s"${Prefix}modal:"
+  val modalClaim: String = s"${ModalPrefix}claim"
+  val modalConfig: String = s"${ModalPrefix}config"
+  /** Carries the spawn, since a modal submission arrives with no memory of which
+   *  card opened it. */
+  def modalDuration(respawnId: Long): String = s"${ModalPrefix}duration:$respawnId"
+
+  /** The spawn id out of a duration modal's id, or None if it isn't one. */
+  def parseDurationModal(modalId: String): Option[Long] = {
+    val marker = s"${ModalPrefix}duration:"
+    if (!modalId.startsWith(marker)) None else Try(modalId.stripPrefix(marker).toLong).toOption
+  }
 
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"

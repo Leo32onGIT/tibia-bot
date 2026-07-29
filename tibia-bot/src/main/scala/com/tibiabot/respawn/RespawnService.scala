@@ -367,6 +367,64 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
     }
 
+  /** Change how long the caller's claim on one spawn runs.
+   *
+   *  Behind the Config button on a spawn's card, so someone who has misjudged a
+   *  hunt can adjust without releasing and re-claiming. Works for a queued or
+   *  offered claim too — a duration only matters once it starts, and it is the
+   *  same thing the member is choosing.
+   *
+   *  Stamina is settled on the difference, not the new total: growing a claim
+   *  reserves the extra (and is refused if it doesn't fit), shrinking one hands
+   *  the remainder back. The new total can't go below what has already elapsed —
+   *  those minutes are spent whatever the member now says — so shortening past
+   *  that point simply ends the hunt as soon as the next sweep runs.
+   */
+  def setClaimDuration(guild: Guild, userId: String, respawnId: Long, newTotalMinutes: Int,
+                       now: ZonedDateTime = ZonedDateTime.now()): Either[String, (Respawn, Int)] =
+    settings(guild.getId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val guildId = guild.getId
+        if (newTotalMinutes < 5 || newTotalMinutes > config.maxDurationMinutes)
+          Left(s"A claim has to be between 5 minutes and " +
+            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+        else repository.openClaimsForUser(guildId, userId).find(_.respawnId == respawnId) match {
+          case None => Left("You aren't holding or waiting for that respawn.")
+          case Some(claim) =>
+            val respawn = repository.findById(guildId, respawnId)
+            if (!claim.isActive) {
+              // Queued and offered claims have reserved nothing yet, so this is
+              // just a stored number until they start.
+              repository.setClaimDuration(guildId, claim.id, newTotalMinutes, None)
+              respawn.foreach(refreshThread(guild, _, config))
+              respawn.map(r => Right((r, newTotalMinutes))).getOrElse(Left("That respawn is gone."))
+            } else {
+              val start = claim.startsAt.getOrElse(claim.claimedAt)
+              val elapsed = math.max(0L, java.time.Duration.between(start, now).toMinutes).toInt
+              val total = math.max(newTotalMinutes, elapsed)
+              val delta = total - claim.durationMinutes
+              val boundary = resetBoundary(now)
+
+              val affordable =
+                if (delta <= 0) true
+                else repository.reserveStamina(guildId, userId, delta, config.staminaMinutes, boundary)
+
+              if (!affordable) {
+                val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
+                Left(s"That would need **${RespawnEmbeds.humanDuration(delta)}** more stamina but you only have " +
+                  s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** left. " +
+                  s"Your tank refills at server save <t:${ServerSaveSchedule.nextServerSave(now).toInstant.getEpochSecond}:R>.")
+              } else {
+                if (delta < 0) repository.refundStamina(guildId, userId, -delta, boundary)
+                repository.setClaimDuration(guildId, claim.id, total, Some(start.plusMinutes(total.toLong)))
+                respawn.foreach(refreshThread(guild, _, config))
+                respawn.map(r => Right((r, total))).getOrElse(Left("That respawn is gone."))
+              }
+            }
+        }
+    }
+
   /** Force a spawn free regardless of who holds it (`/respawn admin clear`).
    *  Refunds the holder like a voluntary release would — an admin clearing a
    *  spawn isn't a penalty. */
@@ -512,7 +570,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // spawn stays assigned to its previous holder while the next person
           // decides — and so both windows lapse on the same sweep.
           outgoing.foreach(claim => repository.setLimbo(guildId, claim.id, expiresAt))
-          refreshThread(guild, respawn, config)
+          // No card refresh: the holder is unchanged and the offered member is
+          // still rendered at the head of the queue, so the card would come out
+          // byte-identical. Skipping it keeps a handover to zero Discord edits.
           val delivered = RespawnThreads.dm(guild, offer.userId,
             RespawnEmbeds.dmEmbed("Your turn on a respawn",
               RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt), imageFor(respawn)),
@@ -617,7 +677,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     RespawnThreads.findForum(guild, config).flatMap { forum =>
       val guildId = guild.getId
       val active = repository.activeClaim(guildId, respawn.id)
-      val queue = repository.queueFor(guildId, respawn.id)
+      // The person holding an unanswered offer is still shown at the head of the
+      // queue, exactly where they were while queued. That's both truthful — they
+      // are next — and what makes an offer going out change nothing on the card,
+      // so it needs no edit at all.
+      val queue = repository.offeredClaim(guildId, respawn.id).toList ++ repository.queueFor(guildId, respawn.id)
       val card = RespawnEmbeds.claimCard(respawn, active, queue, config, imageFor(respawn))
       val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
 

@@ -141,6 +141,14 @@ trait RespawnRepository {
 
   def extendClaim(guildId: String, claimId: Long, newEndsAt: ZonedDateTime, newDurationMinutes: Int): Unit
 
+  /** Set a claim's length outright, rather than adding to it.
+   *
+   *  `newEndsAt` is None for a claim that hasn't started — a queued or offered
+   *  row has no deadline yet, and inventing one would make it look active to the
+   *  expiry sweep. */
+  def setClaimDuration(guildId: String, claimId: Long, durationMinutes: Int,
+                       newEndsAt: Option[ZonedDateTime]): Unit
+
   // --- stamina ------------------------------------------------------------
 
   /** A user's stamina for the server-save day starting at `resetAt`, resetting

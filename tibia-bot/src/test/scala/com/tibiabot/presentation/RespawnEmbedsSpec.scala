@@ -74,15 +74,24 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     taken.keys should not contain "Options"
   }
 
-  test("a claim being handed over still shows its holder, and says why") {
-    val handingOver = claim("99", character = "Galarzaa").copy(limboUntil = Some(now.plusMinutes(10)))
-    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(handingOver), Nil, settings, image(cultOrcs))
-    embed.getColorRaw shouldBe RespawnEmbeds.ClaimedColor
-    embed.getDescription should include("Galarzaa")
-    embed.getDescription should include("next person in line")
-    // The deadline has already passed, so showing it would read as "an hour ago"
-    // next to a claim the card says is still live.
-    fields(embed).keys should not contain "Hunt end"
+  test("a claim shows when the hunt started as well as when it ends") {
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, settings, image(cultOrcs))
+    // Short time for the start — a relative "3 hours ago" says less than the
+    // clock time it began at.
+    fields(embed)("Hunt start") should endWith(":t>")
+    fields(embed)("Hunt end") should endWith(":R>")
+  }
+
+  test("a card renders identically whether or not a handover is pending") {
+    // This is what lets a handover cost zero Discord edits: if limbo changed the
+    // card at all, the offer going out and being answered would each need one.
+    val holding = claim("99", character = "Galarzaa")
+    val handingOver = holding.copy(limboUntil = Some(now.plusMinutes(10)))
+    val before = RespawnEmbeds.claimCard(cultOrcs, Some(holding), Nil, settings, image(cultOrcs))
+    val during = RespawnEmbeds.claimCard(cultOrcs, Some(handingOver), Nil, settings, image(cultOrcs))
+    during.getDescription shouldBe before.getDescription
+    during.getColorRaw shouldBe before.getColorRaw
+    fields(during) shouldBe fields(before)
   }
 
   test("the handover offer says what happens if it's ignored") {

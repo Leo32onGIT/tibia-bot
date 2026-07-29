@@ -658,6 +658,27 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
+  def setClaimDuration(guildId: String, claimId: Long, durationMinutes: Int,
+                       newEndsAt: Option[ZonedDateTime]): Unit = withGuild(guildId) { conn =>
+    // warned resets for the same reason extendClaim resets it: a claim whose
+    // deadline moved should get a fresh reminder near the new one.
+    val statement = conn.prepareStatement(
+      """UPDATE respawn_claims
+        |SET duration_minutes = ?, ends_at = COALESCE(?, ends_at), warned = FALSE
+        |WHERE id = ?;""".stripMargin)
+    try {
+      statement.setInt(1, durationMinutes)
+      newEndsAt match {
+        case Some(when) => statement.setTimestamp(2, Timestamp.from(when.toInstant))
+        // COALESCE leaves the column alone, which for a queued claim means it
+        // stays NULL rather than being handed a deadline it shouldn't have.
+        case None       => statement.setNull(2, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+      }
+      statement.setLong(3, claimId)
+      statement.executeUpdate()
+    } finally statement.close()
+  }
+
   // --- stamina ------------------------------------------------------------
 
   def stamina(guildId: String, userId: String, budgetMinutes: Int, resetAt: ZonedDateTime): Stamina =

@@ -1,6 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
+import com.tibiabot.domain.Respawn
 import com.tibiabot.respawn.RespawnButtonId
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
@@ -29,8 +30,7 @@ object RespawnModals extends StrictLogging {
   private val DurationField = "duration"
   private val WarnField = "warn"
 
-  def handles(modalId: String): Boolean =
-    modalId == RespawnButtonId.modalClaim || modalId == RespawnButtonId.modalConfig
+  def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
 
   // --- opening ------------------------------------------------------------
 
@@ -81,6 +81,29 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
+  /** Adjust the length of the caller's own claim on one spawn, pre-filled with
+   *  what it is now. Same field as the board's Config, but scoped to this spawn
+   *  rather than to their default. */
+  def durationModal(guildId: String, userId: String, respawn: Respawn): Modal = {
+    val current = BotApp.respawnService.openClaimsForUser(guildId, userId)
+      .find(_._2.respawnId == respawn.id)
+      .map(_._2.durationMinutes.toString)
+      .getOrElse("")
+    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+
+    Modal.create(RespawnButtonId.modalDuration(respawn.id), "Hunt duration")
+      .addComponents(
+        Label.of(s"How long for, in total? (minutes)",
+          s"${respawn.displayName} — 5 to $maxDuration. Counts from when the hunt started.",
+          TextInput.create(DurationField, TextInputStyle.SHORT)
+            .setValue(current)
+            .setRequired(true)
+            .setMaxLength(4)
+            .build())
+      )
+      .build()
+  }
+
   // --- submissions --------------------------------------------------------
 
   def handle(event: ModalInteractionEvent): Unit = {
@@ -89,14 +112,35 @@ object RespawnModals extends StrictLogging {
       reply(event, s"${Config.noEmoji} That only works inside a server.")
       return
     }
-    event.getModalId match {
-      case RespawnButtonId.modalClaim  => submitClaim(event)
-      case RespawnButtonId.modalConfig => submitConfig(event)
-      case other =>
-        logger.warn(s"Unknown respawn modal '$other'")
-        reply(event, s"${Config.noEmoji} I didn't understand that form.")
+    val modalId = event.getModalId
+    RespawnButtonId.parseDurationModal(modalId) match {
+      case Some(respawnId) => submitDuration(event, respawnId)
+      case None => modalId match {
+        case RespawnButtonId.modalClaim  => submitClaim(event)
+        case RespawnButtonId.modalConfig => submitConfig(event)
+        case other =>
+          logger.warn(s"Unknown respawn modal '$other'")
+          reply(event, s"${Config.noEmoji} I didn't understand that form.")
+      }
     }
   }
+
+  private def submitDuration(event: ModalInteractionEvent, respawnId: Long): Unit =
+    Try(value(event, DurationField).toInt).toOption match {
+      case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
+      case Some(minutes) =>
+        BotApp.respawnService.setClaimDuration(event.getGuild, event.getUser.getId, respawnId, minutes) match {
+          case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+          case Right((respawn, applied)) =>
+            val note =
+              if (applied != minutes)
+                s"\nYou'd already hunted longer than that, so it's set to " +
+                  s"${RespawnEmbeds.humanDuration(applied)} and ends now."
+              else ""
+            reply(event, s"${Config.yesEmoji} **${respawn.displayName}** is now set to " +
+              s"${RespawnEmbeds.humanDuration(applied)}.$note")
+        }
+    }
 
   private def submitClaim(event: ModalInteractionEvent): Unit = {
     val guild = event.getGuild

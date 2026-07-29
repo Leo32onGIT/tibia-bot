@@ -94,6 +94,10 @@ object RespawnButtons extends StrictLogging {
                 val outcome = service.claim(guild, user.getId, user.getName, "", respawn.code, None)
                 replyClaim(event, outcome)
 
+              case "config" =>
+                // Opens a modal, so this branch must not have deferred or replied.
+                event.replyModal(RespawnModals.durationModal(guild.getId, user.getId, respawn)).queue()
+
               case "leave" | "release" =>
                 val outcome = service.release(guild, user.getId, Some(respawn.code))
                 reply(event, renderRelease(outcome))

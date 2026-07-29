@@ -20,6 +20,10 @@ object RespawnEmbeds {
    *  cards need no per-minute refresh. */
   private def relative(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:R>"
 
+  /** Wall-clock time in each reader's own timezone. Used for a hunt's start,
+   *  where a relative "3 hours ago" tells you less than when it actually began. */
+  private def clockTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:t>"
+
   /** "2h", "45m", "1h 30m" — durations read better than a raw minute count in
    *  an embed field. */
   def humanDuration(minutes: Int): String = {
@@ -63,11 +67,13 @@ object RespawnEmbeds {
     claim match {
       case Some(active) =>
         embed.setColor(ClaimedColor)
-        val handing = if (active.limboUntil.isDefined) handoverNote else ""
-        embed.setDescription(s"This respawn is currently being used by ${claimantLabel(active)}.$handing")
-        // While a handover is pending the deadline has already gone, so showing
-        // it would read as "an hour ago" next to a claim the card calls current.
-        if (active.limboUntil.isEmpty) active.endsAt.foreach(end => embed.addField("Hunt end", relative(end), false))
+        embed.setDescription(s"This respawn is currently being used by ${claimantLabel(active)}.")
+        // Deliberately identical whether or not a handover is pending. Anything
+        // conditional on limbo would cost a card edit when the offer goes out and
+        // another when it resolves, and the spawn is still that person's either
+        // way — so there is nothing to say.
+        active.startsAt.foreach(start => embed.addField("Hunt start", clockTime(start), true))
+        active.endsAt.foreach(end => embed.addField("Hunt end", relative(end), true))
       case None =>
         embed.setColor(FreeColor)
         embed.setDescription(s"This respawn is **free**.\nClaim it with `/respawn claim ${respawn.code}`.")
@@ -117,11 +123,6 @@ object RespawnEmbeds {
       .setFooter(s"Claims can run up to ${humanDuration(settings.maxDurationMinutes)} on this server.")
       .build()
   }
-
-  /** Why a claim whose time is up is still showing as taken. */
-  private val handoverNote: String =
-    "\n\nTheir time is up and the next person in line has been asked to take over — " +
-      "it stays theirs until that's answered."
 
   /** The handover offer, sent by DM with Claim/Cancel buttons.
    *
