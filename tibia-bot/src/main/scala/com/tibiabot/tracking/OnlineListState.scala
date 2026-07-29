@@ -59,7 +59,7 @@ final class OnlineListState(normalise: String => String = OnlineListEmbeds.witho
    *  what those actions will produce, and return the actions.
    *
    *  A message is only re-edited when its normalised description actually
-   *  changed: the caller runs this every ~90-120s per guild whether or not the
+   *  changed: the caller runs this every ~2 minutes per guild whether or not the
    *  online list moved at all, so without the guard it would rewrite every
    *  message on every check.
    *

@@ -692,7 +692,7 @@ class TibiaBot(
     // sorting, grouping and rendering every online player for every discord
     // tracking this world, and doing that inside a mapAsync(1) stage put it on
     // the critical path for that tick's deaths and for the next poll behind
-    // them, despite only actually firing every ~90-120s per guild.
+    // them, despite only actually firing every ~2 minutes per guild at best.
 
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
@@ -719,8 +719,8 @@ class TibiaBot(
         // roster, and most sweeps find nothing to do.
         lazy val roster = onlineTracker.snapshot
         // Back off when the shared online-list lane is congested instead of
-        // always refreshing every 90s — see AdaptiveRefreshInterval for the
-        // queueDepth -> interval mapping.
+        // always refreshing at the healthy cadence — see AdaptiveRefreshInterval
+        // for the queueDepth -> interval mapping.
         val refreshIntervalSeconds = discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth)
         discordsData(world).foreach { discords =>
           val guildId = discords.id

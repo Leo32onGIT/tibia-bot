@@ -6,8 +6,8 @@ import org.scalatest.matchers.should.Matchers
 class AdaptiveRefreshIntervalSpec extends AnyFunSuite with Matchers {
 
   test("an idle lane refreshes at the fast default") {
-    AdaptiveRefreshInterval.intervalSeconds(0) shouldBe 90
-    AdaptiveRefreshInterval.intervalSeconds(100) shouldBe 90
+    AdaptiveRefreshInterval.intervalSeconds(0) shouldBe 120
+    AdaptiveRefreshInterval.intervalSeconds(100) shouldBe 120
   }
 
   test("crossing the first tier boundary slows the interval") {
