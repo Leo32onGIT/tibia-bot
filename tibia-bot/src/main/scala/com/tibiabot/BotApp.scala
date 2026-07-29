@@ -442,7 +442,13 @@ object BotApp extends App with StrictLogging {
         if (!startUpComplete) return
         ticks += 1
         val refreshBoards = ticks % ticksPerDay == 0
-        discordGateway.guilds.foreach { guild =>
+        // Only guilds with a configured world are worth sweeping. The bot sits
+        // in plenty of guilds that never ran /setup and so have no
+        // `_<guildId>` database at all — asking those for their settings opens
+        // a connection that can only fail, every cycle, forever. A guild can't
+        // have a respawn forum without /setup having created its database
+        // first, so this filter loses nothing.
+        discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
           try {
             respawnService.sweep(guild)
             if (refreshBoards) {

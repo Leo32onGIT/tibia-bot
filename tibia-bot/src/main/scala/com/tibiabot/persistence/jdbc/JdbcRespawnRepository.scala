@@ -140,7 +140,23 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   // --- settings -----------------------------------------------------------
 
-  def settings(guildId: String): Option[RespawnSettings] = withGuild(guildId) { conn =>
+  /** A guild with no database at all has certainly not configured respawns, so
+   *  that reads as None rather than propagating.
+   *
+   *  This is the one entry point reached for guilds the bot has never been set
+   *  up in — the periodic sweep asks every guild for its settings — and those
+   *  guilds have no `_<guildId>` database, so connecting throws. Without this
+   *  the sweep would log a stack trace for each of them on every cycle.
+   *  Postgres reports a missing database as SQLState 3D000
+   *  (`invalid_catalog_name`); any other failure is still a real error and is
+   *  left to propagate. */
+  def settings(guildId: String): Option[RespawnSettings] =
+    try settingsQuery(guildId)
+    catch {
+      case error: java.sql.SQLException if error.getSQLState == "3D000" => None
+    }
+
+  private def settingsQuery(guildId: String): Option[RespawnSettings] = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement("SELECT * FROM respawn_settings WHERE id = 1;")
     try {
       val result = statement.executeQuery()

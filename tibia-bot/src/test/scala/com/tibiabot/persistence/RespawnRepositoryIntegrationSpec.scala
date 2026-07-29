@@ -301,6 +301,15 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.stamina(g, "u1", 240, boundary).usedMinutes shouldBe 120
   }
 
+  test("a guild with no database at all reads as unconfigured rather than throwing") {
+    val provider = pgOrCancel()
+    val repo = new JdbcRespawnRepository(provider)
+    // The periodic sweep asks every guild the bot is in for its settings, and
+    // guilds that never ran /setup have no `_<guildId>` database — that has to
+    // read as "not configured", not blow up once per guild per cycle.
+    repo.settings("888000888000888999") shouldBe None
+  }
+
   test("dropGuildData is safe to run twice and on an empty guild") {
     val (repo, g) = freshRepo()
     repo.dropGuildData(g)
