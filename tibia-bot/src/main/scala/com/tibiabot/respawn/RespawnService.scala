@@ -1,7 +1,7 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.Config
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.RespawnRepository
 import com.tibiabot.presentation.RespawnEmbeds
 import com.tibiabot.scheduler.ServerSaveSchedule
@@ -202,7 +202,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         resolve(guild.getId, query) match {
           case None => ClaimOutcome.UnknownSpawn(query)
           case Some(respawn) =>
-            val minutes = requestedMinutes.getOrElse(config.defaultDurationMinutes)
+            // Explicit request wins, then the member's own default, then the
+            // guild's — so the forum buttons (which never pass a duration) honour
+            // whatever the member set through Config.
+            val minutes = requestedMinutes.getOrElse(
+              repository.userPrefs(guild.getId, userId).defaultDurationOr(config.defaultDurationMinutes))
             if (minutes <= 0 || minutes > config.maxDurationMinutes)
               ClaimOutcome.BadDuration(minutes, config.maxDurationMinutes)
             else {
@@ -406,7 +410,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         Try {
           repository.cancelClaim(guildId, offer.id)
           repository.findById(guildId, offer.respawnId).foreach { respawn =>
-            RespawnThreads.dm(guild, offer.userId, RespawnEmbeds.handoverLapsed(respawn))
+            RespawnThreads.dm(guild, offer.userId,
+              RespawnEmbeds.dmEmbed("Handover expired", RespawnEmbeds.handoverLapsed(respawn), imageFor(respawn)))
             logger.info(s"Handover offer ${offer.id} on '${respawn.code}' in guild '$guildId' lapsed unanswered")
           }
         }.failed.foreach { error =>
@@ -434,22 +439,28 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
 
-      if (config.warnMinutes > 0) {
-        repository.claimsNeedingWarning(guildId, now, config.warnMinutes).foreach { claim =>
-          Try {
+      // Reminder lead time is per member, so every running claim is considered
+      // and each one's own owner decides whether it is due yet.
+      repository.unwarnedActiveClaims(guildId, now).foreach { claim =>
+        Try {
+          val lead = repository.userPrefs(guildId, claim.userId).warnMinutesOr(config.warnMinutes)
+          val due = lead > 0 && claim.endsAt.exists(!_.isAfter(now.plusMinutes(lead.toLong)))
+          if (due) {
             repository.markWarned(guildId, claim.id)
             repository.findById(guildId, claim.respawnId).foreach { respawn =>
               val remaining = claim.endsAt
                 .map(end => math.max(1, java.time.Duration.between(now, end).toMinutes).toInt)
-                .getOrElse(config.warnMinutes)
+                .getOrElse(lead)
               // DM only, with no thread fallback: a nudge about your own claim
               // isn't worth pinging a shared thread for, and missing it costs
               // nothing — the claim ends the same way either way.
-              RespawnThreads.dm(guild, claim.userId, RespawnEmbeds.expiryWarning(respawn, claim, remaining))
+              RespawnThreads.dm(guild, claim.userId,
+                RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim, remaining),
+                  imageFor(respawn)))
             }
-          }.failed.foreach { error =>
-            logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
           }
+        }.failed.foreach { error =>
+          logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
         }
       }
     }
@@ -503,7 +514,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           outgoing.foreach(claim => repository.setLimbo(guildId, claim.id, expiresAt))
           val thread = refreshThread(guild, respawn, config)
           RespawnThreads.dmOrAnnounce(guild, offer.userId,
-            RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt),
+            RespawnEmbeds.dmEmbed("Your turn on a respawn",
+              RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt), imageFor(respawn)),
             Some(RespawnThreads.offerButtons(guildId, offer.id)), thread)
           Some(offer)
 
@@ -638,6 +650,38 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  them before it stops tracking them. */
   def openThreadIds(guildId: String): List[String] =
     repository.listRespawns(guildId).map(_.threadId).filter(id => id.nonEmpty && id != "0")
+
+  // --- member preferences -------------------------------------------------
+
+  def userPrefs(guildId: String, userId: String): RespawnUserPrefs =
+    repository.userPrefs(guildId, userId)
+
+  /** Save a member's own defaults, clamped to what the guild actually allows.
+   *
+   *  Validation lives here rather than in the modal handler so the bounds are
+   *  the same wherever the preference is set from. A duration longer than the
+   *  guild's maximum would be refused at claim time anyway, and a reminder lead
+   *  beyond [[RespawnUserPrefs.MaxWarnMinutes]] would fire the instant a claim
+   *  started. */
+  def saveUserPrefs(guildId: String, userId: String, defaultDuration: Option[Int],
+                    warnMinutes: Option[Int]): Either[String, RespawnUserPrefs] =
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val badDuration = defaultDuration.exists(m => m < 5 || m > config.maxDurationMinutes)
+        val badWarn = warnMinutes.exists(m => m < 0 || m > RespawnUserPrefs.MaxWarnMinutes)
+        if (badDuration)
+          Left(s"A claim has to be between 5 minutes and " +
+            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+        else if (badWarn)
+          Left(s"A reminder can be at most " +
+            s"${RespawnEmbeds.humanDuration(RespawnUserPrefs.MaxWarnMinutes)} before your claim ends.")
+        else {
+          val prefs = RespawnUserPrefs(userId, defaultDuration, warnMinutes)
+          repository.saveUserPrefs(guildId, prefs)
+          Right(prefs)
+        }
+    }
 
   /** The claim card's main image for a spawn. The one place the presentation
    *  layer's config-free image builder is fed the bot's actual creature-name

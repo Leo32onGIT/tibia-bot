@@ -43,15 +43,26 @@ object RespawnThreads extends StrictLogging {
    *  [[RespawnButtonId]]. */
   def claimButtons(respawnId: Long, claimed: Boolean): ActionRow =
     if (claimed)
+      // One Leave button, not a separate Release: which of the two it means is
+      // decided by whether the presser holds the spawn or is waiting for it, and
+      // making the member pick the right word for their own state was needless.
       ActionRow.of(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
-        Button.secondary(RespawnButtonId.leave(respawnId), "Leave queue"),
-        Button.danger(RespawnButtonId.release(respawnId), "Release")
+        Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
       ActionRow.of(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹"))
       )
+
+  /** The buttons on the pinned board post, which is what makes the whole system
+   *  usable without touching a slash command: a spawn with no post yet can't
+   *  have a Claim button of its own, so the board carries one. */
+  def boardButtons: ActionRow =
+    ActionRow.of(
+      Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(Emoji.fromUnicode("🏹")),
+      Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
+    )
 
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
@@ -121,6 +132,7 @@ object RespawnThreads extends StrictLogging {
   def postBoard(forum: ForumChannel, settings: RespawnSettings): String = {
     val message = new MessageCreateBuilder()
       .setEmbeds(RespawnEmbeds.boardPost(settings))
+      .setComponents(boardButtons)
       .build()
     val post = forum.createForumPost("📖 How respawn claims work", message).complete()
     val thread = post.getThreadChannel
@@ -258,11 +270,11 @@ object RespawnThreads extends StrictLogging {
    *  have DMs closed, or share no mutual guild — so callers pass a fallback for
    *  anything that actually has to reach them.
    */
-  def dm(guild: Guild, userId: String, content: String, buttons: Option[ActionRow] = None): Boolean =
+  def dm(guild: Guild, userId: String, embed: MessageEmbed, buttons: Option[ActionRow] = None): Boolean =
     Try {
       val user = guild.getJDA.retrieveUserById(userId).complete()
       val channel = user.openPrivateChannel().complete()
-      val action = channel.sendMessage(content)
+      val action = channel.sendMessageEmbeds(embed)
       buttons.fold(action.complete())(row => action.setComponents(row).complete())
       true
     }.recover {
@@ -276,12 +288,15 @@ object RespawnThreads extends StrictLogging {
    *  can't be delivered. Used for anything the person genuinely needs to see —
    *  a handover offer they have minutes to answer, in particular, would
    *  otherwise lapse without them ever knowing it existed. */
-  def dmOrAnnounce(guild: Guild, userId: String, content: String, buttons: Option[ActionRow],
+  def dmOrAnnounce(guild: Guild, userId: String, embed: MessageEmbed, buttons: Option[ActionRow],
                    thread: Option[ThreadChannel]): Unit =
-    if (!dm(guild, userId, content, buttons)) {
+    if (!dm(guild, userId, embed, buttons)) {
       thread.foreach { channel =>
         Try {
-          val action = channel.sendMessage(s"<@$userId> $content")
+          // The mention goes in the message content rather than the embed, since
+          // a mention inside an embed doesn't notify anyone — and notifying them
+          // is the entire reason for this fallback.
+          val action = channel.sendMessage(s"<@$userId>").setEmbeds(embed)
           buttons.fold(action.complete())(row => action.setComponents(row).complete())
         }.failed.foreach { error =>
           logger.warn(s"Could not reach user '$userId' by DM or in thread '${channel.getId}'", error)
@@ -364,6 +379,15 @@ object RespawnButtonId {
    *  in per-guild databases, so without the guild in the id there would be no
    *  way to know which database the claim belongs to. Well within Discord's
    *  100-character component-id limit. */
+  /** The board post's buttons carry no id of their own — there is only ever one
+   *  board per guild, and the guild comes from the interaction. */
+  val boardClaim: String = s"${Prefix}board:claim"
+  val boardConfig: String = s"${Prefix}board:config"
+
+  /** Modal ids, kept next to the buttons that open them. */
+  val modalClaim: String = s"${Prefix}modal:claim"
+  val modalConfig: String = s"${Prefix}modal:config"
+
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
 
@@ -377,6 +401,8 @@ object RespawnButtonId {
   sealed trait Action
   /** An in-thread button on a spawn's claim card; the guild comes from the event. */
   final case class SpawnButton(action: String, respawnId: Long) extends Action
+  /** A button on the pinned board post — "claim" or "config". */
+  final case class BoardButton(what: String) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
 
@@ -384,6 +410,7 @@ object RespawnButtonId {
    *  ignored rather than throwing. */
   def parse(componentId: String): Option[Action] =
     componentId.stripPrefix(Prefix).split(':') match {
+      case Array("board", what) => Some(BoardButton(what))
       case Array("accept", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>

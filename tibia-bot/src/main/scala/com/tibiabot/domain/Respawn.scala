@@ -117,6 +117,35 @@ final case class RespawnSettings(
   handoverMinutes: Int
 )
 
+/** One member's own preferences, overriding the guild defaults for their own
+ *  claims. Set through the Config button on the spawns board.
+ *
+ *  Both are `None` until the member changes them, which is what lets a guild
+ *  retune its defaults and have everyone who never expressed a preference
+ *  follow along.
+ */
+final case class RespawnUserPrefs(
+  userId: String,
+  /** How long their claims run when they don't say otherwise. */
+  defaultDurationMinutes: Option[Int],
+  /** How far ahead of a claim ending they want their reminder DM. `Some(0)`
+   *  means they've deliberately turned reminders off, which is why this is an
+   *  Option of a possibly-zero value rather than just zero-means-unset. */
+  warnMinutes: Option[Int]
+) {
+  def defaultDurationOr(guildDefault: Int): Int = defaultDurationMinutes.getOrElse(guildDefault)
+  def warnMinutesOr(guildDefault: Int): Int = warnMinutes.getOrElse(guildDefault)
+}
+
+object RespawnUserPrefs {
+  def none(userId: String): RespawnUserPrefs = RespawnUserPrefs(userId, None, None)
+
+  /** Longest reminder lead time a member may ask for. A claim can only run for
+   *  `maxDurationMinutes` anyway, so anything beyond this would fire the moment
+   *  the claim started. */
+  val MaxWarnMinutes: Int = 12 * 60
+}
+
 /** A user's remaining claim budget for the current server-save day.
  *
  *  Stamina is reserved up front for a claim's full duration rather than

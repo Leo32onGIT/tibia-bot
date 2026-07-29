@@ -88,7 +88,21 @@ class BotListener extends ListenerAdapter with StrictLogging {
     BotApp.channelService.discordLeave(event)
   }
 
-  override def onModalInteraction(event: ModalInteractionEvent): Unit = interactions.ModalHandler.handle(event)
+  override def onModalInteraction(event: ModalInteractionEvent): Unit =
+    // Respawn modals route separately because ModalHandler opens with
+    // deferEdit(), which rewrites the message the modal came from — here that is
+    // the pinned board post. They also hit the database and JDA, so like the
+    // respawn buttons they run on the command pool rather than the event thread.
+    if (interactions.RespawnModals.handles(event.getModalId)) {
+      commandExecutor.execute(() => {
+        try interactions.RespawnModals.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on respawn modal '${event.getModalId}'", ex)
+        }
+      })
+    } else {
+      interactions.ModalHandler.handle(event)
+    }
 
   /** Feeds the `spawn` option on `/respawn`. Answered straight off the event
    *  thread: it only ranks the guild's already-loaded catalogue in memory, and

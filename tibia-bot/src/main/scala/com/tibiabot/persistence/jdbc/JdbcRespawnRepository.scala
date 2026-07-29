@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.{ConnectionProvider, RespawnRepository}
 
 import java.sql.{Connection, ResultSet, Timestamp}
@@ -99,6 +99,16 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "CREATE INDEX IF NOT EXISTS respawn_claims_by_deadline ON respawn_claims (status, ends_at);")
       statement.executeUpdate(
         "CREATE INDEX IF NOT EXISTS respawn_claims_by_user ON respawn_claims (user_id, status);")
+
+      // NULL means "follow the guild default", which is why these are nullable
+      // rather than zero-defaulted: 0 is a meaningful value for warn_minutes
+      // (reminders off) and would be indistinguishable from unset.
+      statement.executeUpdate(
+        """CREATE TABLE IF NOT EXISTS respawn_user_prefs (
+          |user_id VARCHAR(255) PRIMARY KEY,
+          |default_duration INT,
+          |warn_minutes INT
+          |);""".stripMargin)
 
       statement.executeUpdate(
         """CREATE TABLE IF NOT EXISTS respawn_stamina (
@@ -406,15 +416,17 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     } finally statement.close()
   }
 
-  def claimsNeedingWarning(guildId: String, now: ZonedDateTime, withinMinutes: Int): List[RespawnClaim] =
+  def unwarnedActiveClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim] =
     withGuild(guildId) { conn =>
+      // No lead-time window here — it varies per member, so the caller decides
+      // which of these are actually due. Claims already handing over are
+      // excluded: their time is up, so a reminder would be pointless.
       val statement = conn.prepareStatement(
         """SELECT * FROM respawn_claims
-          |WHERE status = 'active' AND warned = FALSE AND ends_at > ? AND ends_at <= ?
+          |WHERE status = 'active' AND warned = FALSE AND ends_at > ? AND limbo_until IS NULL
           |ORDER BY ends_at;""".stripMargin)
       try {
         statement.setTimestamp(1, Timestamp.from(now.toInstant))
-        statement.setTimestamp(2, Timestamp.from(now.plusMinutes(withinMinutes.toLong).toInstant))
         collectClaims(statement.executeQuery())
       } finally statement.close()
     }
@@ -694,6 +706,48 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit =
     withGuild(guildId) { conn => writeStamina(conn, userId, math.max(0, usedMinutes), resetAt) }
 
+  // --- member preferences -------------------------------------------------
+
+  def userPrefs(guildId: String, userId: String): RespawnUserPrefs = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT default_duration, warn_minutes FROM respawn_user_prefs WHERE user_id = ?;")
+    try {
+      statement.setString(1, userId)
+      val result = statement.executeQuery()
+      if (!result.next()) RespawnUserPrefs.none(userId)
+      else {
+        // getInt returns 0 for SQL NULL, so wasNull is the only way to tell
+        // "reminders off" from "never chose".
+        val duration = result.getInt("default_duration")
+        val durationSet = !result.wasNull()
+        val warn = result.getInt("warn_minutes")
+        val warnSet = !result.wasNull()
+        RespawnUserPrefs(userId,
+          if (durationSet) Some(duration) else None,
+          if (warnSet) Some(warn) else None)
+      }
+    } finally statement.close()
+  }
+
+  def saveUserPrefs(guildId: String, prefs: RespawnUserPrefs): Unit = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """INSERT INTO respawn_user_prefs (user_id, default_duration, warn_minutes)
+        |VALUES (?, ?, ?)
+        |ON CONFLICT (user_id) DO UPDATE SET
+        |default_duration = EXCLUDED.default_duration,
+        |warn_minutes = EXCLUDED.warn_minutes;""".stripMargin)
+    try {
+      statement.setString(1, prefs.userId)
+      def setOptionalInt(index: Int, value: Option[Int]): Unit = value match {
+        case Some(number) => statement.setInt(index, number)
+        case None         => statement.setNull(index, java.sql.Types.INTEGER)
+      }
+      setOptionalInt(2, prefs.defaultDurationMinutes)
+      setOptionalInt(3, prefs.warnMinutes)
+      statement.executeUpdate()
+    } finally statement.close()
+  }
+
   // --- teardown -----------------------------------------------------------
 
   def dropGuildData(guildId: String): Unit = withGuildTransaction(guildId) { conn =>
@@ -706,6 +760,10 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate("DELETE FROM respawn_claims;")
       statement.executeUpdate("DELETE FROM respawns;")
       statement.executeUpdate("DELETE FROM respawn_settings;")
+      // respawn_user_prefs is left alone alongside respawn_stamina: both belong
+      // to the member rather than to this particular setup, and someone who
+      // chose a 3h default claim shouldn't silently lose it because an admin
+      // removed and re-added a world.
       // Stamina is left alone: it is per user and per server-save day, resets
       // itself on the next read, and is the one thing that would be wrong to
       // hand back if the same people set the bot up again the same day.

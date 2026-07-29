@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
 
 import java.time.ZonedDateTime
 
@@ -76,8 +76,13 @@ trait RespawnRepository {
    *  as the spawn's holder while the next person decides. */
   def expiredClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Active claims ending within `withinMinutes` that haven't been warned yet. */
-  def claimsNeedingWarning(guildId: String, now: ZonedDateTime, withinMinutes: Int): List[RespawnClaim]
+  /** Active claims still running that haven't had their reminder yet.
+   *
+   *  Returns the whole set rather than filtering by a lead time in SQL, because
+   *  the lead time is now per member (see [[RespawnUserPrefs]]) — there is no
+   *  single window to query by. The set is bounded by how many spawns are held
+   *  at once, so filtering the rest in Scala is cheap. */
+  def unwarnedActiveClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
   /** Start a claim immediately. Returns the stored row. */
   def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
@@ -154,6 +159,12 @@ trait RespawnRepository {
 
   /** Admin override — set a user's consumed minutes directly. */
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit
+
+  // --- member preferences -------------------------------------------------
+
+  def userPrefs(guildId: String, userId: String): RespawnUserPrefs
+
+  def saveUserPrefs(guildId: String, prefs: RespawnUserPrefs): Unit
 
   // --- teardown -----------------------------------------------------------
 

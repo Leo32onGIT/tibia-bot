@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs}
 import com.tibiabot.persistence.jdbc.JdbcRespawnRepository
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -247,11 +247,57 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.insertActiveClaim(g, later.id, "u3", "3", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc)
 
     repo.expiredClaims(g, now).map(_.userId) shouldBe List("u1")
-    repo.claimsNeedingWarning(g, now, 10).map(_.userId) shouldBe List("u2")
+
+    // Every running unwarned claim comes back, whatever its deadline: the lead
+    // time is per member now, so there is no single window to filter on in SQL
+    // and the service decides which of these are actually due.
+    repo.unwarnedActiveClaims(g, now).map(_.userId) shouldBe List("u2", "u3")
 
     // Warned once, never again — otherwise every 30-second sweep would re-ping.
     repo.markWarned(g, soonClaim.id)
-    repo.claimsNeedingWarning(g, now, 10) shouldBe empty
+    repo.unwarnedActiveClaims(g, now).map(_.userId) shouldBe List("u3")
+  }
+
+  test("a claim handing over is not offered a reminder — its time is already up") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc)
+    repo.unwarnedActiveClaims(g, now).map(_.id) shouldBe List(claim.id)
+
+    repo.setLimbo(g, claim.id, now.plusMinutes(10))
+    repo.unwarnedActiveClaims(g, now) shouldBe empty
+  }
+
+  test("member preferences round-trip, and distinguish 'off' from 'never chose'") {
+    val (repo, g) = freshRepo()
+    repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs.none("u1")
+
+    repo.saveUserPrefs(g, RespawnUserPrefs("u1", Some(180), Some(15)))
+    repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs("u1", Some(180), Some(15))
+
+    // 0 is a real choice (reminders off) and must not read back as unset, which
+    // is why the columns are nullable rather than zero-defaulted.
+    repo.saveUserPrefs(g, RespawnUserPrefs("u1", Some(180), Some(0)))
+    repo.userPrefs(g, "u1").warnMinutes shouldBe Some(0)
+    repo.userPrefs(g, "u1").warnMinutesOr(10) shouldBe 0
+
+    // Clearing back to unset means following the guild default again.
+    repo.saveUserPrefs(g, RespawnUserPrefs("u1", None, None))
+    repo.userPrefs(g, "u1").warnMinutes shouldBe None
+    repo.userPrefs(g, "u1").warnMinutesOr(10) shouldBe 10
+    repo.userPrefs(g, "u1").defaultDurationOr(120) shouldBe 120
+
+    // A second save replaces the row rather than adding one.
+    repo.saveUserPrefs(g, RespawnUserPrefs("u1", Some(60), None))
+    repo.userPrefs(g, "u1").defaultDurationMinutes shouldBe Some(60)
+  }
+
+  test("member preferences survive teardown — they belong to the member, not the setup") {
+    val (repo, g) = freshRepo()
+    repo.saveUserPrefs(g, RespawnUserPrefs("u1", Some(180), Some(15)))
+    repo.dropGuildData(g)
+    repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs("u1", Some(180), Some(15))
   }
 
   test("extending moves the deadline and re-arms the warning") {

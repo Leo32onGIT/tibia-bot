@@ -1,6 +1,6 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
@@ -85,6 +85,37 @@ object RespawnEmbeds {
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
     embed.build()
+  }
+
+  /** Wraps DM copy in the same brand-coloured embed the rest of the bot's
+   *  messages use, so a handover offer doesn't arrive as bare text while
+   *  everything else is an embed. The spawn's creature goes in as a thumbnail
+   *  rather than a full image: a DM is a notification, not a card to look at. */
+  def dmEmbed(title: String, body: String, thumbnailUrl: String = ""): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(title).setDescription(body)
+    if (thumbnailUrl.nonEmpty) embed.setThumbnail(thumbnailUrl)
+    embed.build()
+  }
+
+  /** Confirmation of a member's own settings, shown after the Config modal. */
+  def userPrefsEmbed(prefs: RespawnUserPrefs, settings: RespawnSettings): MessageEmbed = {
+    def shown(value: Option[Int], guildValue: Int, off: String): String = value match {
+      case Some(0)       => off
+      case Some(minutes) => humanDuration(minutes)
+      // Naming the guild's value makes it clear the setting is following the
+      // server rather than being unset in some broken way.
+      case None          => s"${humanDuration(guildValue)} (server default)"
+    }
+    new EmbedBuilder()
+      .setColor(Embeds.BrandColor)
+      .setTitle("Your respawn settings")
+      .setDescription("These apply to your own claims on this server.")
+      .addField("Default claim length",
+        shown(prefs.defaultDurationMinutes, settings.defaultDurationMinutes, "—"), true)
+      .addField("Remind me before the end",
+        shown(prefs.warnMinutes, settings.warnMinutes, "off"), true)
+      .setFooter(s"Claims can run up to ${humanDuration(settings.maxDurationMinutes)} on this server.")
+      .build()
   }
 
   /** Why a claim whose time is up is still showing as taken. */
@@ -200,6 +231,9 @@ object RespawnEmbeds {
           "take it out from under you.\n\n" +
           "**Stamina**\n" + staminaLine + "\n" +
           "Holding two respawns at once is fine — they just both draw from the same tank.\n\n" +
+          "**Buttons on this post**\n" +
+          "**Claim** takes any respawn by code or name — use it for one that has no post yet.\n" +
+          "**Config** sets your own default claim length and how long before the end you want reminding.\n\n" +
           "**Finding things**\n" +
           "`/respawn list` shows everything currently claimed, `/respawn status <spawn>` shows one, " +
           "and `/respawn stamina` shows what you have left.")
