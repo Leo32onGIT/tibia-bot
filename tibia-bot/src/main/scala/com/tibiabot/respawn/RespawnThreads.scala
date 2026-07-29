@@ -228,14 +228,6 @@ object RespawnThreads extends StrictLogging {
       logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
     }
 
-  /** Post a notification into a spawn's thread. Editing the card above pings
-   *  nobody, so anything a person needs to be told (you're up, you're nearly
-   *  out of time) has to be its own message. */
-  def announce(thread: ThreadChannel, content: String): Unit =
-    Try(thread.sendMessage(content).complete()).failed.foreach { error =>
-      logger.warn(s"Could not post a respawn notice in thread '${thread.getId}'", error)
-    }
-
   /** Put the spawn's post to sleep once nobody holds it. Not locked — a locked
    *  thread needs MANAGE_THREADS to reopen and would also stop people leaving
    *  notes on a spawn between hunts. */

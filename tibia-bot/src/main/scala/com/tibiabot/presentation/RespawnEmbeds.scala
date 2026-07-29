@@ -154,9 +154,6 @@ object RespawnEmbeds {
     s"Your claim on **${respawn.displayName}** ends in ${humanDuration(minutes)}.\n" +
       "Use `/respawn extend` if you want longer, or `/respawn release` to hand it over now."
 
-  def freedNotice(respawn: Respawn): String =
-    s"**${respawn.displayName}** is now free — claim it with `/respawn claim ${respawn.code}`."
-
   /** `/respawn list` — everything currently held, most-urgent first. */
   def activeClaimsList(claims: List[(Respawn, RespawnClaim, Int)]): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Claimed respawns")

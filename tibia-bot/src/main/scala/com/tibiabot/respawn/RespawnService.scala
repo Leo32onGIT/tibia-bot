@@ -525,8 +525,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // Use the thread refreshThread just resolved rather than re-deriving it
           // from `respawn`: that is a snapshot taken before the refresh, so on a
           // spawn's first claim its threadId is still empty here.
+          // The card itself already flips to free with a Claim button on it, so
+          // there is nothing to say — a "now free" post would just be noise in a
+          // thread meant to stay readable.
           refreshThread(guild, respawn, config).foreach { thread =>
-            RespawnThreads.announce(thread, RespawnEmbeds.freedNotice(respawn))
             // Archived, not locked: people can still leave notes on a spawn
             // between hunts, and reviving it doesn't need a moderator.
             RespawnThreads.archive(thread)
