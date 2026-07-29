@@ -256,11 +256,12 @@ object RespawnThreads extends StrictLogging {
 
   /** DM a user, optionally with buttons. Returns whether it was delivered.
    *
-   *  Reminders and handover offers go to the person's DMs rather than the
-   *  spawn's thread: a thread ping is easy to miss and turns a shared card into
-   *  a stream of notices aimed at one person. Nothing here is fatal — a user can
-   *  have DMs closed, or share no mutual guild — so callers pass a fallback for
-   *  anything that actually has to reach them.
+   *  Reminders and handover offers go to the person's DMs and nowhere else: a
+   *  spawn's thread is kept clean of notices aimed at one member. Nothing here is
+   *  fatal — a member can have DMs closed, or share no mutual guild — and an
+   *  undeliverable handover offer simply lapses on schedule and passes to the
+   *  next person, so a closed inbox costs its owner their turn but never wedges
+   *  the spawn.
    */
   def dm(guild: Guild, userId: String, embed: MessageEmbed, buttons: Option[ActionRow] = None): Boolean =
     Try {
@@ -275,26 +276,6 @@ object RespawnThreads extends StrictLogging {
           s"(DMs closed, or no mutual guild): ${error.getMessage}")
         false
     }.getOrElse(false)
-
-  /** DM `userId`, falling back to a mention in the spawn's thread if the DM
-   *  can't be delivered. Used for anything the person genuinely needs to see —
-   *  a handover offer they have minutes to answer, in particular, would
-   *  otherwise lapse without them ever knowing it existed. */
-  def dmOrAnnounce(guild: Guild, userId: String, embed: MessageEmbed, buttons: Option[ActionRow],
-                   thread: Option[ThreadChannel]): Unit =
-    if (!dm(guild, userId, embed, buttons)) {
-      thread.foreach { channel =>
-        Try {
-          // The mention goes in the message content rather than the embed, since
-          // a mention inside an embed doesn't notify anyone — and notifying them
-          // is the entire reason for this fallback.
-          val action = channel.sendMessage(s"<@$userId>").setEmbeds(embed)
-          buttons.fold(action.complete())(row => action.setComponents(row).complete())
-        }.failed.foreach { error =>
-          logger.warn(s"Could not reach user '$userId' by DM or in thread '${channel.getId}'", error)
-        }
-      }
-    }
 
   // --- retirement ---------------------------------------------------------
 

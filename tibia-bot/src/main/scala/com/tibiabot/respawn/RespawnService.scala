@@ -512,11 +512,19 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // spawn stays assigned to its previous holder while the next person
           // decides — and so both windows lapse on the same sweep.
           outgoing.foreach(claim => repository.setLimbo(guildId, claim.id, expiresAt))
-          val thread = refreshThread(guild, respawn, config)
-          RespawnThreads.dmOrAnnounce(guild, offer.userId,
+          refreshThread(guild, respawn, config)
+          val delivered = RespawnThreads.dm(guild, offer.userId,
             RespawnEmbeds.dmEmbed("Your turn on a respawn",
               RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt), imageFor(respawn)),
-            Some(RespawnThreads.offerButtons(guildId, offer.id)), thread)
+            Some(RespawnThreads.offerButtons(guildId, offer.id)))
+          if (!delivered) {
+            // Nothing is posted in the thread as a fallback — spawn threads stay
+            // clean. The offer just lapses on schedule and moves to the next
+            // person, so an unreachable member loses their turn but the spawn
+            // keeps moving. Logged because it is invisible to everyone otherwise.
+            logger.warn(s"Handover offer ${offer.id} on '${respawn.code}' in guild '$guildId' could not be " +
+              s"delivered to user ${offer.userId}; it will lapse and pass to the next person")
+          }
           Some(offer)
 
         case None =>
