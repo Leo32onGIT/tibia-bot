@@ -27,6 +27,7 @@ object SlashRouting {
     "galthen"      -> (GalthenCommands.handle _),
     "online"       -> (OnlineListCommands.handle _),
     "boosted"      -> (BoostedCommands.handle _),
-    "patreon"      -> (PatreonCommands.handle _)
+    "patreon"      -> (PatreonCommands.handle _),
+    "respawn"      -> (RespawnCommands.handle _)
   )
 }

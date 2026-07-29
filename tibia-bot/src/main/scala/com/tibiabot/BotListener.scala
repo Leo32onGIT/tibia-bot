@@ -5,6 +5,7 @@ import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
@@ -79,7 +80,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
     val excludeAll = CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
-    guild.updateCommands().addCommands(CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = false, excludeAll).asJava).queue()
+    guild.updateCommands().addCommands(CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = false, excludeAll, Config.Respawn.enabled).asJava).queue()
     BotApp.channelService.discordJoin(event)
   }
 
@@ -89,7 +90,41 @@ class BotListener extends ListenerAdapter with StrictLogging {
 
   override def onModalInteraction(event: ModalInteractionEvent): Unit = interactions.ModalHandler.handle(event)
 
-  override def onButtonInteraction(event: ButtonInteractionEvent): Unit = interactions.ButtonHandler.handle(event, pendingScreenshots, BotApp.streamState)
+  /** Feeds the `spawn` option on `/respawn`. Answered straight off the event
+   *  thread: it only ranks the guild's already-loaded catalogue in memory, and
+   *  Discord's autocomplete budget is far tighter than the 3-second interaction
+   *  window, so handing it to the command pool would add latency to the one
+   *  interaction that can least afford it. */
+  override def onCommandAutoCompleteInteraction(event: CommandAutoCompleteInteractionEvent): Unit = {
+    if (event.getName == "respawn" && event.getFocusedOption.getName == "spawn" && event.getGuild != null) {
+      try event.replyChoices(
+        commands.handlers.RespawnCommands.autocompleteChoicesAsJava(event.getGuild.getId, event.getFocusedOption.getValue)
+      ).queue(_ => (), _ => ())
+      catch {
+        case ex: Throwable =>
+          logger.warn("Failed to build respawn autocomplete choices", ex)
+          event.replyChoices(
+            java.util.Collections.emptyList[net.dv8tion.jda.api.interactions.commands.Command.Choice]()
+          ).queue(_ => (), _ => ())
+      }
+    }
+  }
+
+  override def onButtonInteraction(event: ButtonInteractionEvent): Unit =
+    // Respawn buttons create/edit forum threads through blocking JDA calls, so
+    // they go to the same pool as slash commands. Running them inline would
+    // stall JDA's event thread — the exact starvation the pool above exists to
+    // prevent — while a thread is created or un-archived.
+    if (interactions.RespawnButtons.handles(event.getComponentId)) {
+      commandExecutor.execute(() => {
+        try interactions.RespawnButtons.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on respawn button '${event.getComponentId}'", ex)
+        }
+      })
+    } else {
+      interactions.ButtonHandler.handle(event, pendingScreenshots, BotApp.streamState)
+    }
 
   override def onMessageReceived(event: MessageReceivedEvent): Unit = interactions.ScreenshotMessageHandler.onMessage(event, pendingScreenshots)
 }

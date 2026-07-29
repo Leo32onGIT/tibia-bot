@@ -1,0 +1,319 @@
+package com.tibiabot.persistence
+
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings}
+import com.tibiabot.persistence.jdbc.JdbcRespawnRepository
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+
+import java.time.{ZoneOffset, ZonedDateTime}
+
+/** Round-trips the respawn claim tables against a real Postgres (cancels without
+ *  PGHOST).
+ *
+ *  This is where the feature's SQL is actually executed: the DDL, the
+ *  `RETURNING *` inserts, the `make_interval` deadline arithmetic and the
+ *  lazily-resetting stamina rows are all things a Scala-level unit test can't
+ *  reach.
+ */
+class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with PostgresSupport {
+
+  private val guildId = "888000888000888111" // numeric-only fake guild id
+  private val now = ZonedDateTime.parse("2026-07-30T12:00:00Z")
+  private val boundary = ZonedDateTime.parse("2026-07-30T08:00:00Z") // a server save
+
+  private def freshRepo(): (JdbcRespawnRepository, String) = {
+    val provider = pgOrCancel()
+    ensureGuildDatabase(provider, guildId)
+    val repo = new JdbcRespawnRepository(provider)
+    // Creates the tables on first use, then clears anything a previous run left.
+    repo.listRespawns(guildId).foreach(r => repo.removeRespawn(guildId, r.id))
+    (repo, guildId)
+  }
+
+  test("settings round-trip, including the channel-only update") {
+    val (repo, g) = freshRepo()
+    val settings = RespawnSettings("0", "0", 120, 240, 20, 240, 10)
+    repo.saveSettings(g, settings)
+    repo.settings(g) shouldBe Some(settings)
+
+    // saveSettings is an upsert on a fixed id — a second call must not create a
+    // second row or the read would become non-deterministic.
+    repo.saveSettings(g, settings.copy(queueLimit = 5))
+    repo.settings(g).map(_.queueLimit) shouldBe Some(5)
+
+    repo.updateChannels(g, "111", "222")
+    repo.settings(g).map(s => (s.forumChannel, s.boardThread)) shouldBe Some(("111", "222"))
+    repo.settings(g).map(_.queueLimit) shouldBe Some(5) // untouched
+  }
+
+  test("catalogue: add, find by code and id, edit one field, remove") {
+    val (repo, g) = freshRepo()
+    val added = repo.addRespawn(g, "415", "Cult Orcs", "Orc Cult Fanatic", "Edron", "", "", Respawn.SourceSeed, "seed")
+    added.code shouldBe "415"
+    added.displayName shouldBe "415 — Cult Orcs"
+
+    repo.findByCode(g, "415").map(_.name) shouldBe Some("Cult Orcs")
+    repo.findByCode(g, "415").map(_.id) shouldBe Some(added.id)
+    repo.findById(g, added.id).map(_.code) shouldBe Some("415")
+    repo.findByCode(g, "nope") shouldBe None
+
+    // A partial edit must leave the fields it wasn't given alone.
+    repo.updateRespawn(g, added.id, name = None, creature = Some("Orc Cult Priest"), world = None, mapperLink = None)
+    val edited = repo.findById(g, added.id)
+    edited.map(_.creature) shouldBe Some("Orc Cult Priest")
+    edited.map(_.name) shouldBe Some("Cult Orcs")
+
+    repo.removeRespawn(g, added.id)
+    repo.findByCode(g, "415") shouldBe None
+  }
+
+  test("codes are matched case-insensitively") {
+    val (repo, g) = freshRepo()
+    repo.addRespawn(g, "1415a", "Fury dungeon", "Fury", "Rathleton", "", "", Respawn.SourceSeed, "seed")
+    repo.findByCode(g, "1415A").map(_.name) shouldBe Some("Fury dungeon")
+  }
+
+  test("re-adding an existing code returns the stored row without overwriting it") {
+    val (repo, g) = freshRepo()
+    val first = repo.addRespawn(g, "806", "Hydra Mountain", "Hydra", "Port Hope", "", "", Respawn.SourceSeed, "seed")
+    // This is what makes `/respawn admin seed` safe to re-run over a guild's
+    // own edits.
+    val second = repo.addRespawn(g, "806", "SOMETHING ELSE", "Wrong", "Nowhere", "", "", Respawn.SourceCustom, "x")
+    second.id shouldBe first.id
+    second.name shouldBe "Hydra Mountain"
+    second.creature shouldBe "Hydra"
+  }
+
+  test("seed import inserts only codes the guild doesn't already have") {
+    val (repo, g) = freshRepo()
+    repo.addRespawn(g, "415", "My Own Name", "", "Edron", "", "", Respawn.SourceCustom, "admin")
+
+    val batch = List(("415", "Edron", "Cult Orcs", "Orc Cult Fanatic"), ("806", "Port Hope", "Hydra Mountain", "Hydra"))
+    repo.importSeed(g, batch) shouldBe 1
+    repo.findByCode(g, "415").map(_.name) shouldBe Some("My Own Name") // preserved
+    repo.findByCode(g, "806").map(_.name) shouldBe Some("Hydra Mountain")
+
+    repo.importSeed(g, batch) shouldBe 0 // idempotent
+  }
+
+  test("an active claim gets a deadline and is found as the spawn's holder") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+
+    repo.activeClaim(g, spawn.id) shouldBe None
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Char", now, now.plusMinutes(120), 120,
+      RespawnClaim.KindAdHoc)
+    claim.status shouldBe RespawnClaim.StatusActive
+    claim.endsAt.map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
+
+    repo.activeClaim(g, spawn.id).map(_.userId) shouldBe Some("u1")
+    repo.allActiveClaims(g).map(_.userId) should contain("u1")
+    repo.openClaimsForUser(g, "u1").map(_.respawnId) shouldBe List(spawn.id)
+  }
+
+  test("queueing assigns increasing positions and refuses duplicates and a full queue") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    repo.insertActiveClaim(g, spawn.id, "holder", "H", "", now, now.plusMinutes(60), 60, RespawnClaim.KindAdHoc)
+
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 120, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(1)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(2)
+
+    // Already queued.
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 120, 5, RespawnClaim.KindAdHoc) shouldBe None
+    // Already holding it.
+    repo.enqueueClaim(g, spawn.id, "holder", "H", "", 60, 5, RespawnClaim.KindAdHoc) shouldBe None
+    // Queue full at the limit of 2.
+    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", 60, 2, RespawnClaim.KindAdHoc) shouldBe None
+
+    repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u1", "u2")
+  }
+
+  test("promoting a queued claim derives its deadline from its own duration") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 90, 20, RespawnClaim.KindAdHoc).get
+
+    val promoted = repo.promoteClaim(g, queued.id, now)
+    promoted.map(_.status) shouldBe Some(RespawnClaim.StatusActive)
+    promoted.map(_.queuePosition) shouldBe Some(0)
+    // 90 minutes, from the row's duration — not the 120-minute default.
+    promoted.flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(90).toInstant)
+
+    // Promoting the same row twice must not resurrect a finished claim — this
+    // is the guard that makes the sweep safe against a concurrent release.
+    repo.promoteClaim(g, queued.id, now) shouldBe None
+  }
+
+  test("cancelQueued clears exactly the named users, leaving the rest in order") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", 60, 20, RespawnClaim.KindAdHoc)
+
+    repo.cancelQueued(g, spawn.id, Set("u1", "u3"))
+    repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u2")
+    repo.cancelQueued(g, spawn.id, Set.empty) // no-op, must not throw
+  }
+
+  test("expired and soon-to-expire claims are found by their deadlines") {
+    val (repo, g) = freshRepo()
+    val past = repo.addRespawn(g, "1", "Past", "", "R", "", "", Respawn.SourceSeed, "seed")
+    val soon = repo.addRespawn(g, "2", "Soon", "", "R", "", "", Respawn.SourceSeed, "seed")
+    val later = repo.addRespawn(g, "3", "Later", "", "R", "", "", Respawn.SourceSeed, "seed")
+
+    repo.insertActiveClaim(g, past.id, "u1", "1", "", now.minusHours(3), now.minusMinutes(5), 175, RespawnClaim.KindAdHoc)
+    val soonClaim = repo.insertActiveClaim(g, soon.id, "u2", "2", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, later.id, "u3", "3", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc)
+
+    repo.expiredClaims(g, now).map(_.userId) shouldBe List("u1")
+    repo.claimsNeedingWarning(g, now, 10).map(_.userId) shouldBe List("u2")
+
+    // Warned once, never again — otherwise every 30-second sweep would re-ping.
+    repo.markWarned(g, soonClaim.id)
+    repo.claimsNeedingWarning(g, now, 10) shouldBe empty
+  }
+
+  test("extending moves the deadline and re-arms the warning") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc)
+    repo.markWarned(g, claim.id)
+
+    repo.extendClaim(g, claim.id, now.plusMinutes(65), 65)
+    val extended = repo.activeClaim(g, spawn.id)
+    extended.flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(65).toInstant)
+    extended.map(_.durationMinutes) shouldBe Some(65)
+    extended.map(_.warned) shouldBe Some(false)
+  }
+
+  test("finished and cancelled claims stop counting as held") {
+    val (repo, g) = freshRepo()
+    val a = repo.addRespawn(g, "1", "A", "", "R", "", "", Respawn.SourceSeed, "seed")
+    val b = repo.addRespawn(g, "2", "B", "", "R", "", "", Respawn.SourceSeed, "seed")
+    val finished = repo.insertActiveClaim(g, a.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+
+    repo.openClaimsForUser(g, "u1") should have size 2
+    repo.finishClaim(g, finished.id)
+    repo.cancelClaim(g, cancelled.id)
+    repo.openClaimsForUser(g, "u1") shouldBe empty
+    repo.activeClaim(g, a.id) shouldBe None
+  }
+
+  test("stamina reserves, refuses an overdraw, and refunds without going negative") {
+    val (repo, g) = freshRepo()
+    repo.setStaminaUsed(g, "u1", 0, boundary)
+
+    repo.stamina(g, "u1", 240, boundary).remainingMinutes shouldBe 240
+    repo.reserveStamina(g, "u1", 120, 240, boundary) shouldBe true
+    repo.reserveStamina(g, "u1", 120, 240, boundary) shouldBe true // exactly empties the 4h tank
+    repo.stamina(g, "u1", 240, boundary).remainingMinutes shouldBe 0
+
+    // Nothing is written when it doesn't fit, so a refused claim can't quietly
+    // consume part of the tank.
+    repo.reserveStamina(g, "u1", 1, 240, boundary) shouldBe false
+    repo.stamina(g, "u1", 240, boundary).usedMinutes shouldBe 240
+
+    repo.refundStamina(g, "u1", 60, boundary)
+    repo.stamina(g, "u1", 240, boundary).remainingMinutes shouldBe 60
+    repo.refundStamina(g, "u1", 9999, boundary)
+    repo.stamina(g, "u1", 240, boundary).usedMinutes shouldBe 0
+  }
+
+  test("a zero budget means unlimited, not that every claim is refused") {
+    val (repo, g) = freshRepo()
+    repo.setStaminaUsed(g, "u2", 0, boundary)
+    repo.reserveStamina(g, "u2", 10000, 0, boundary) shouldBe true
+  }
+
+  test("a stamina row from an earlier server-save day reads as a full tank") {
+    val (repo, g) = freshRepo()
+    // Yesterday's tank, fully spent.
+    repo.setStaminaUsed(g, "u3", 240, boundary.minusDays(1))
+    repo.stamina(g, "u3", 240, boundary.minusDays(1)).usedMinutes shouldBe 240
+
+    // Reading against today's boundary resets it lazily — no daily job needed,
+    // and a bot that was down over 10:00 still comes back correct.
+    repo.stamina(g, "u3", 240, boundary).usedMinutes shouldBe 0
+    repo.reserveStamina(g, "u3", 240, 240, boundary) shouldBe true
+    repo.stamina(g, "u3", 240, boundary).usedMinutes shouldBe 240
+  }
+
+  test("removing a respawn takes its claims with it") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
+
+    repo.removeRespawn(g, spawn.id)
+    repo.openClaimsForUser(g, "u1") shouldBe empty
+    repo.openClaimsForUser(g, "u2") shouldBe empty
+  }
+
+  test("thread ids round-trip and can be cleared") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    spawn.threadId shouldBe ""
+    repo.setThreadId(g, spawn.id, "99887766")
+    repo.findById(g, spawn.id).map(_.threadId) shouldBe Some("99887766")
+    repo.setThreadId(g, spawn.id, "")
+    repo.findById(g, spawn.id).map(_.threadId) shouldBe Some("")
+  }
+
+  test("timestamps survive the round-trip as absolute instants") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    // Deliberately not UTC: the column is TIMESTAMPTZ, so what comes back must
+    // be the same instant regardless of the zone it went in as.
+    val inTokyo = now.withZoneSameInstant(ZoneOffset.ofHours(9))
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", inTokyo, inTokyo.plusMinutes(120), 120, RespawnClaim.KindAdHoc)
+    repo.activeClaim(g, spawn.id).flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
+  }
+
+  test("dropGuildData removes claims, catalogue and settings together") {
+    val (repo, g) = freshRepo()
+    repo.saveSettings(g, RespawnSettings("111", "222", 120, 240, 20, 240, 10))
+    val spawn = repo.addRespawn(g, "415", "My Own Name", "Orc Cult Fanatic", "Edron", "", "", Respawn.SourceCustom, "admin")
+    repo.setThreadId(g, spawn.id, "5551234")
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
+
+    repo.dropGuildData(g)
+
+    repo.listRespawns(g) shouldBe empty
+    repo.findByCode(g, "415") shouldBe None
+    repo.openClaimsForUser(g, "u1") shouldBe empty
+    repo.openClaimsForUser(g, "u2") shouldBe empty
+    repo.allActiveClaims(g) shouldBe empty
+    // No settings row means a later /setup is treated as a first-time setup and
+    // builds a fresh forum, rather than adopting the retired archive channel.
+    repo.settings(g) shouldBe None
+  }
+
+  test("dropGuildData leaves stamina alone — it is per user and per day, not per guild setup") {
+    val (repo, g) = freshRepo()
+    repo.setStaminaUsed(g, "u1", 120, boundary)
+    repo.dropGuildData(g)
+    // Removing and re-adding a world the same day must not hand everyone a
+    // fresh tank; stamina resets on its own at the next server save.
+    repo.stamina(g, "u1", 240, boundary).usedMinutes shouldBe 120
+  }
+
+  test("dropGuildData is safe to run twice and on an empty guild") {
+    val (repo, g) = freshRepo()
+    repo.dropGuildData(g)
+    repo.dropGuildData(g)
+    repo.listRespawns(g) shouldBe empty
+    repo.settings(g) shouldBe None
+  }
+
+  private def ensureGuildDatabase(provider: JdbcConnectionProvider, guildId: String): Unit = {
+    val conn = provider.admin()
+    try {
+      val rs = conn.createStatement().executeQuery(s"SELECT datname FROM pg_database WHERE datname = '_$guildId'")
+      if (!rs.next()) conn.createStatement().executeUpdate(s"CREATE DATABASE _$guildId")
+    } finally conn.close()
+  }
+}

@@ -1,0 +1,134 @@
+package com.tibiabot.persistence
+
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+
+import java.time.ZonedDateTime
+
+/** Persistence port for the respawn claim system's per-guild tables
+ *  (`respawns`, `respawn_claims`, `respawn_settings`, `respawn_stamina`).
+ *
+ *  Everything is keyed by guildId because each guild has its own database and
+ *  its own curated catalogue.
+ */
+trait RespawnRepository {
+
+  // --- settings -----------------------------------------------------------
+
+  /** The guild's respawn settings, or None if `/respawn` was never set up here. */
+  def settings(guildId: String): Option[RespawnSettings]
+
+  /** Create or replace the guild's settings row. */
+  def saveSettings(guildId: String, settings: RespawnSettings): Unit
+
+  /** Point the guild at a (re)created forum channel and board post. */
+  def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit
+
+  // --- catalogue ----------------------------------------------------------
+
+  def listRespawns(guildId: String): List[Respawn]
+
+  def findByCode(guildId: String, code: String): Option[Respawn]
+
+  def findById(guildId: String, respawnId: Long): Option[Respawn]
+
+  /** Insert a spawn, or return the existing one if its code is already taken.
+   *  Returns the row that ended up in the table either way. */
+  def addRespawn(guildId: String, code: String, name: String, creature: String, region: String,
+                 world: String, mapperLink: String, source: String, addedBy: String): Respawn
+
+  def updateRespawn(guildId: String, respawnId: Long, name: Option[String], creature: Option[String],
+                    world: Option[String], mapperLink: Option[String]): Unit
+
+  /** Remove a catalogue entry and every claim attached to it. */
+  def removeRespawn(guildId: String, respawnId: Long): Unit
+
+  /** Remember which forum post represents this spawn ("" to forget it). */
+  def setThreadId(guildId: String, respawnId: Long, threadId: String): Unit
+
+  /** Bulk-insert seed rows, skipping codes the guild already has. Returns how
+   *  many were actually inserted. */
+  def importSeed(guildId: String, spawns: List[(String, String, String, String)]): Int
+
+  // --- claims -------------------------------------------------------------
+
+  def activeClaim(guildId: String, respawnId: Long): Option[RespawnClaim]
+
+  def queueFor(guildId: String, respawnId: Long): List[RespawnClaim]
+
+  /** Every spawn currently held, for `/respawn list`. */
+  def allActiveClaims(guildId: String): List[RespawnClaim]
+
+  /** Active or queued claims belonging to one user, for `/respawn release` and
+   *  the per-user stamina display. */
+  def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
+
+  /** Claims whose `endsAt` has passed — the expiry sweep's work list. */
+  def expiredClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Active claims ending within `withinMinutes` that haven't been warned yet. */
+  def claimsNeedingWarning(guildId: String, now: ZonedDateTime, withinMinutes: Int): List[RespawnClaim]
+
+  /** Start a claim immediately. Returns the stored row. */
+  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+                        characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
+                        durationMinutes: Int, kind: String): RespawnClaim
+
+  /** Append to a spawn's queue, taking the next free position. Returns the
+   *  stored row, or None if the queue is already at `queueLimit` or the user is
+   *  already in it. */
+  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+                   characterName: String, durationMinutes: Int, queueLimit: Int,
+                   kind: String): Option[RespawnClaim]
+
+  /** Make one specific queued claim active, running from `startsAt`.
+   *
+   *  Targets a claim id rather than "whatever is at the head" so the caller can
+   *  reserve that person's stamina first and then promote exactly them. Returns
+   *  None if the row is no longer queued — which is the same check that makes
+   *  this safe against the claimant leaving the queue in between. */
+  def promoteClaim(guildId: String, claimId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** Cancel the queued claims of `userIds` on one spawn. Used to clear people
+   *  who can no longer afford their claim out of the way rather than leaving
+   *  them stuck at the head blocking everyone behind them. */
+  def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String]): Unit
+
+  def finishClaim(guildId: String, claimId: Long): Unit
+
+  def cancelClaim(guildId: String, claimId: Long): Unit
+
+  def markWarned(guildId: String, claimId: Long): Unit
+
+  def extendClaim(guildId: String, claimId: Long, newEndsAt: ZonedDateTime, newDurationMinutes: Int): Unit
+
+  // --- stamina ------------------------------------------------------------
+
+  /** A user's stamina for the server-save day starting at `resetAt`, resetting
+   *  the tank if the stored row belongs to an older day. */
+  def stamina(guildId: String, userId: String, budgetMinutes: Int, resetAt: ZonedDateTime): Stamina
+
+  /** Reserve `minutes` against a user's tank. Returns false (and writes
+   *  nothing) if it no longer fits — the caller must treat that as the claim
+   *  being refused, since a concurrent claim may have taken the room since the
+   *  check. */
+  def reserveStamina(guildId: String, userId: String, minutes: Int, budgetMinutes: Int,
+                     resetAt: ZonedDateTime): Boolean
+
+  /** Give back unused minutes when a claim ends early. Never drops below zero. */
+  def refundStamina(guildId: String, userId: String, minutes: Int, resetAt: ZonedDateTime): Unit
+
+  /** Admin override — set a user's consumed minutes directly. */
+  def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit
+
+  // --- teardown -----------------------------------------------------------
+
+  /** Forget everything the respawn system knows about this guild: claims,
+   *  catalogue and settings.
+   *
+   *  Used when the guild's last world is `/remove`d. The forum channel itself
+   *  is kept as read-only history (see ChannelService.retireSpawnsForum), but
+   *  none of it is tracked any more — a later `/setup` starts from the bundled
+   *  seed again rather than inheriting a catalogue whose threads all point into
+   *  a retired channel. */
+  def dropGuildData(guildId: String): Unit
+}

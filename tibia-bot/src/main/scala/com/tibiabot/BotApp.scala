@@ -138,6 +138,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcHuntedAlliedRepository(connectionProvider)
   private val customSortRepository: persistence.CustomSortRepository =
     new persistence.jdbc.JdbcCustomSortRepository(connectionProvider)
+  private val respawnRepository: persistence.RespawnRepository =
+    new persistence.jdbc.JdbcRespawnRepository(connectionProvider)
   private val worldConfigRepository: persistence.WorldConfigRepository =
     new persistence.jdbc.JdbcWorldConfigRepository(connectionProvider, Config.mergedWorlds)
   private val discordConfigRepository: persistence.DiscordConfigRepository =
@@ -169,6 +171,12 @@ object BotApp extends App with StrictLogging {
 
   // Galthen's Satchel cooldown tracking
   val galthenService = new galthen.GalthenService(galthenRepository, connectionProvider, discordGateway)
+
+  // Respawn claim system — see respawn.RespawnService. Constructed regardless of
+  // Config.Respawn.enabled (it does no I/O until called, and the repository
+  // creates its tables lazily on first use); the flag gates command
+  // registration, channel creation and the sweep below instead.
+  val respawnService = new respawn.RespawnService(respawnRepository)
 
   // Per-user boosted boss/creature notification subscriptions
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
@@ -328,6 +336,7 @@ object BotApp extends App with StrictLogging {
     streamState,
     boostedService,
     paywallService,
+    respawnService,
     botUser,
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
@@ -388,7 +397,7 @@ object BotApp extends App with StrictLogging {
     // instead of returning empty.
     val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
     val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(g.getIdLong, g.getJDA.getSelfUser.getId)
-    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll).asJava).complete()
+    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll, Config.Respawn.enabled).asJava).complete()
   }
 
   // Start all world streams
@@ -402,6 +411,55 @@ object BotApp extends App with StrictLogging {
     advanceDromeTime(startTime)
   }
   startBot(None, None) // guild: Option[Guild], world: Option[String]
+
+  // Respawn claim system: close expired claims, promote whoever is queued
+  // behind them, and warn claimants whose time is nearly up.
+  //
+  // On its own single-threaded scheduler rather than the shared actorSystem
+  // one, because the body blocks — it creates, edits and archives forum threads
+  // through JDA — and the Akka scheduler's dispatcher also runs every world's
+  // poll stream. scheduleWithFixedDelay on a single thread additionally means a
+  // slow sweep can never overlap itself.
+  //
+  // Nothing here is scheduled per claim, so this is restart-safe by
+  // construction: a claim that lapsed while the bot was down is resolved by the
+  // first sweep after it comes back, not lost with an in-memory timer.
+  if (Config.Respawn.enabled) {
+    val respawnSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+      (r: Runnable) => {
+        val thread = new Thread(r, "respawn-sweep")
+        thread.setDaemon(true)
+        thread
+      })
+    val sweepMillis = Config.Respawn.sweepInterval.toMillis
+    respawnSweeper.scheduleWithFixedDelay(new Runnable {
+      // Counts sweeps so the board-post refresh (a REST call per guild) runs
+      // roughly daily instead of every 30 seconds.
+      private var ticks = 0L
+      private val ticksPerDay = math.max(1L, (24 * 60 * 60 * 1000L) / math.max(1L, sweepMillis))
+
+      def run(): Unit = {
+        if (!startUpComplete) return
+        ticks += 1
+        val refreshBoards = ticks % ticksPerDay == 0
+        discordGateway.guilds.foreach { guild =>
+          try {
+            respawnService.sweep(guild)
+            if (refreshBoards) {
+              respawnService.settings(guild.getId)
+                .foreach(respawn.RespawnThreads.refreshBoard(guild, _))
+            }
+          } catch {
+            // One guild's bad state (deleted channel, revoked permission) must
+            // not stop every other guild's claims from being resolved.
+            case ex: Throwable =>
+              logger.warn(s"Respawn sweep failed for guild '${guild.getId}'", ex)
+          }
+        }
+      }
+    }, sweepMillis, sweepMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+    logger.info(s"Respawn claim system enabled — sweeping every ${Config.Respawn.sweepInterval}")
+  }
 
   // run the scheduler to clean cache and update dashboard every hour.
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this

@@ -1,13 +1,40 @@
 package com.tibiabot.scheduler
 
-import java.time.{DayOfWeek, Duration, Instant, LocalTime}
+import com.tibiabot.domain.time.Clock
+
+import java.time.{DayOfWeek, Duration, Instant, LocalTime, ZonedDateTime}
 
 /** Pure scheduling decisions used by the periodic (server-save) job. */
 object ServerSaveSchedule {
 
+  /** Server save itself: 10:00 in the game's reference zone. The window below
+   *  and the respawn system's daily stamina reset both hang off this one time. */
+  val serverSaveTime: LocalTime = LocalTime.of(10, 0)
+
   /** The post-server-save notification window: after 10:00 and before 10:45 (Berlin time). */
   def isServerSaveWindow(time: LocalTime): Boolean =
-    time.isAfter(LocalTime.of(10, 0)) && time.isBefore(LocalTime.of(10, 45))
+    time.isAfter(serverSaveTime) && time.isBefore(LocalTime.of(10, 45))
+
+  /** The most recent server save at or before `now` — i.e. the start of the
+   *  current "server save day". Used as the epoch a user's claim stamina is
+   *  measured against: a stamina row stamped with an older boundary than this
+   *  is stale and resets to a full tank on next read.
+   *
+   *  Resolved in [[Clock.Berlin]], so the boundary follows the game's clock
+   *  through daylight-saving changes rather than drifting an hour twice a year.
+   *  Between midnight and 10:00 the current day's save hasn't happened yet, so
+   *  the boundary is still yesterday's. */
+  def lastServerSave(now: ZonedDateTime): ZonedDateTime = {
+    val berlin = now.withZoneSameInstant(Clock.Berlin)
+    val todaysSave = berlin.toLocalDate.atTime(serverSaveTime).atZone(Clock.Berlin)
+    if (berlin.isBefore(todaysSave)) todaysSave.minusDays(1) else todaysSave
+  }
+
+  /** The next server save strictly after `now` — when a spent stamina tank
+   *  refills. Rendered as a Discord relative timestamp in the "out of stamina"
+   *  replies. */
+  def nextServerSave(now: ZonedDateTime): ZonedDateTime =
+    lastServerSave(now).plusDays(1)
 
   /** The city where Rashid can be found on a given (Berlin minus 10h) weekday. */
   def rashidLocation(day: DayOfWeek): String = day match {

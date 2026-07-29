@@ -155,6 +155,42 @@ object Config {
     val sharingEnabled: Boolean = current != Disabled
   }
 
+  /** The respawn claim system (`/respawn` + the `📅・sᴘᴀᴡɴs` forum).
+   *
+   *  `enabled` defaults to **false** and is the feature's rollout gate. Prod and
+   *  DEV run the same image, so without it the first deploy of this branch would
+   *  start creating forum channels in every guild that has run `/setup`. While
+   *  it is off, `/respawn` isn't registered with Discord and `/setup`/`/repair`
+   *  skip the forum entirely; flip `RESPAWN_ENABLED=true` only where the feature
+   *  is actually being tested.
+   *
+   *  The duration/queue/stamina values here are *defaults for a guild's first
+   *  setup*. They're copied into that guild's `respawn_settings` row at creation
+   *  and read from there afterwards, so retuning the bot's defaults later never
+   *  silently changes the rules under a guild that is already using it.
+   */
+  object Respawn {
+    private val respawn = discord.getConfig("respawn")
+    val enabled: Boolean = respawn.getBoolean("enabled")
+    /** How long a claim runs when the user doesn't say. */
+    val defaultDurationMinutes: Int = respawn.getInt("default-duration-minutes")
+    /** Ceiling on a single claim, including extensions. */
+    val maxDurationMinutes: Int = respawn.getInt("max-duration-minutes")
+    /** How many people may wait behind the active claim. */
+    val queueLimit: Int = respawn.getInt("queue-limit")
+    /** Each user's daily claim budget, refilled at server save. 0 disables
+     *  stamina entirely (unlimited claiming). */
+    val staminaMinutes: Int = respawn.getInt("stamina-minutes")
+    /** Ping the claimer this many minutes before their claim ends. */
+    val warnMinutes: Int = respawn.getInt("warn-minutes")
+    /** How often the expiry/promotion sweep runs. Also the worst-case lateness
+     *  of a claim ending. */
+    val sweepInterval: FiniteDuration = respawn.getDuration("sweep-interval").toScala
+    /** Shown as the claim embed's image when a spawn has no `creature` set —
+     *  most of the seed catalogue starts out that way. */
+    val fallbackImage: String = respawn.getString("fallback-image")
+  }
+
   /** Auto-leave a guild with no worlds tracked for this many days, unless a
    *  command's been run there within activityDays — see BotApp.pruneInactiveGuilds. */
   object InactiveGuild {

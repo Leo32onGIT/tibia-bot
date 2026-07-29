@@ -25,6 +25,7 @@ Current features include:
 - Server Save Notifications
 - Command Log
 - Monitoring dashboard (per-world health, throughput and recent events)
+- Respawn claims (a `📅・sᴘᴀᴡɴs` forum where each respawn is a thread showing who's on it and who's queued)
 
 ## Architecture
 
@@ -53,6 +54,7 @@ Supporting packages:
 | `web/` | The monitoring dashboard: Discord-OAuth-gated `/status`, log capture, Patreon admin routes. |
 | `wiki/` | Fandom wiki client and HTML parser. |
 | `domain/` | Core case classes; game-time cycles in `domain/time/`. |
+| `respawn/` | Respawn claim system: catalogue + seed loader, the claim/queue/stamina rules, and the forum-thread lifecycle. Gated behind `RESPAWN_ENABLED`. |
 | `setup/`, `worldsettings/`, `hunted/`, `customsort/`, `galthen/`, `boosted/`, `admin/`, `patreonapi/` | Feature services extracted from `BotApp`. |
 
 **Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),

@@ -49,6 +49,7 @@ final class ChannelService(
   streamState: StreamState,
   boostedService: BoostedService,
   paywallService: PaywallService,
+  respawnService: com.tibiabot.respawn.RespawnService,
   botUser: String,
   startBot: (Option[Guild], Option[String]) => Unit,
   serverSaveExtraEmbeds: String => List[MessageEmbed],
@@ -189,6 +190,128 @@ final class ChannelService(
       .setFooter("Add or remove yourself from the role using the buttons below:")
       .setDescription(s"The bot will poke:\n${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n${Config.masslogEmoji}<@&$masslogRoleId> If enemies masslog on **$world**")
       .build()
+
+  /** Create the respawn system's `📅・sᴘᴀᴡɴs` forum and its pinned board post in
+   *  the guild's admin category, seeding the catalogue on the way.
+   *
+   *  Idempotent by design: if the forum still exists this reports that and
+   *  changes nothing, so it doubles as the repair path. Returns the text to
+   *  show the caller.
+   *
+   *  Kept here rather than in RespawnService because it needs the guild's admin
+   *  category, which is `discord_info` state this class already owns — and
+   *  because `/setup` and `/repair` call it for exactly the same reason they
+   *  create the notifications channel.
+   */
+  def createSpawnsForum(guild: Guild): String = {
+    if (!Config.Respawn.enabled) {
+      return s"${Config.noEmoji} The respawn claim system isn't enabled on this bot."
+    }
+    val discordConfig = discordRetrieveConfig(guild)
+    if (discordConfig.isEmpty) {
+      return s"${Config.noEmoji} Run `/setup <world>` first — the respawn forum lives in the bot's category, " +
+        "which doesn't exist yet."
+    }
+
+    // Settings are created on first setup and reused afterwards, so a repair
+    // never resets a guild's tuned durations/limits back to the bot defaults.
+    val settings = respawnService.settings(guild.getId).getOrElse {
+      val defaults = respawnService.defaultSettings
+      respawnService.saveSettings(guild.getId, defaults)
+      defaults
+    }
+
+    try {
+      com.tibiabot.respawn.RespawnThreads.findForum(guild, settings) match {
+        case Some(existing) =>
+          // The channel survived; the board post may not have.
+          val boardMissing = com.tibiabot.respawn.RespawnThreads
+            .resolveThread(guild, existing, settings.boardThread).isEmpty
+          if (boardMissing) {
+            val boardId = com.tibiabot.respawn.RespawnThreads.postBoard(existing, settings)
+            respawnService.updateChannels(guild.getId, existing.getId, boardId)
+            s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its info post was missing, " +
+              "so I've recreated it."
+          } else {
+            s"${Config.noEmoji} <#${existing.getId}> already exists; nothing to do."
+          }
+
+        case None =>
+          var adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
+          if (adminCategory == null) {
+            val newAdminCategory = guild.createCategory("Violent Bot").complete()
+            newAdminCategory.upsertPermissionOverride(guild.getBotRole)
+              .grant(Permission.VIEW_CHANNEL)
+              .grant(Permission.MESSAGE_SEND)
+              .complete()
+            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
+            discordUpdateConfig(guild, newAdminCategory.getId, "", "", "", "")
+            adminCategory = newAdminCategory
+          }
+
+          val (forumId, boardId) =
+            com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings)
+          respawnService.updateChannels(guild.getId, forumId, boardId)
+
+          // Seeding here rather than on first claim means the autocomplete has
+          // something to offer the moment the channel appears.
+          val seeded = respawnService.importSeed(guild.getId)
+
+          val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
+          com.tibiabot.presentation.AdminLog.post(adminChannel,
+            s"The respawn claim system was set up — see <#$forumId>.",
+            "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+
+          s":gear: Created <#$forumId> with **$seeded** respawns in the catalogue.\n" +
+            "Claim one with `/respawn claim`, and manage the list with `/respawn admin`."
+      }
+    } catch {
+      case e: net.dv8tion.jda.api.exceptions.PermissionException =>
+        logger.warn(s"Respawn forum setup on guild '${guild.getId}' aborted on a missing permission: ${e.getMessage}")
+        s"${Config.noEmoji} I couldn't create the respawn forum because I'm missing a required permission. " +
+          "Grant me **Manage Channels**, **Manage Permissions** and **Manage Threads**, then try again."
+      case e: Exception =>
+        logger.warn(s"Respawn forum setup on guild '${guild.getId}' failed before completing", e)
+        s"${Config.noEmoji} Something went wrong creating the respawn forum. Wait a moment, then run " +
+          "`/respawn admin setup` again."
+    }
+  }
+
+  /** Retire the respawn forum when `/remove` takes the guild's last world.
+   *
+   *  Unlike the command-log and notifications channels, the forum is **kept** —
+   *  it holds the server's hunt history, and deleting that silently isn't worth
+   *  the tidiness. Instead it is archived, renamed, lifted out of the bot's
+   *  category and made read-only, while the bot drops all of its own respawn
+   *  data (claims, catalogue, settings).
+   *
+   *  Two consequences worth knowing:
+   *   - Because the catalogue goes, a later `/setup` builds a *new* forum from
+   *     the bundled seed; the retired one stays behind as history under its own
+   *     name, so the two never collide.
+   *   - This is deliberately *not* gated on `Config.Respawn.enabled`. The flag
+   *     can be switched off after a guild already has a forum, and teardown
+   *     still has to leave that channel in a sane state.
+   */
+  def retireSpawnsForum(guild: Guild): Unit = {
+    try {
+      respawnService.settings(guild.getId).foreach { settings =>
+        com.tibiabot.respawn.RespawnThreads.findForum(guild, settings).foreach { forum =>
+          com.tibiabot.respawn.RespawnThreads.retireForum(guild, forum,
+            "Violent Bot is no longer tracking a world on this server, so respawn claims have been turned off.\n\n" +
+              "This channel has been kept as a read-only archive of previous claims. " +
+              "Delete it whenever you like — the bot won't touch it again.\n\n" +
+              "Running `/setup` for a world later will create a fresh spawns channel.")
+        }
+        respawnService.teardown(guild.getId)
+      }
+    } catch {
+      case ex: Throwable =>
+        // Never fail a /remove over this — the world's own channels are the
+        // point, and a half-retired forum is fixable by hand.
+        logger.warn(s"Could not retire the respawn forum on guild '${guild.getId}'", ex)
+    }
+  }
 
   def createChannels(event: SlashCommandInteractionEvent): SetupResult = {
     val world: String = com.tibiabot.domain.WorldName.formal(event.getInteraction.getOptions.asScala.find(_.getName == "world").map(_.getAsString).getOrElse("").trim())
@@ -331,9 +454,22 @@ final class ChannelService(
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
           val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
-          guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true, excludeAll).asJava).queue()
+          guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true, excludeAll, Config.Respawn.enabled).asJava).queue()
         }
         startBot(Some(guild), Some(world))
+
+        // Respawn forum, when the feature is switched on for this deployment.
+        // Self-guarding and idempotent, so it's safe to call on every /setup:
+        // a guild's second world doesn't get a second forum.
+        if (Config.Respawn.enabled) {
+          try createSpawnsForum(guild)
+          catch {
+            case ex: Throwable =>
+              // Never fail a /setup over this — the world's channels are the
+              // point, and `/respawn admin setup` can create the forum later.
+              logger.warn(s"Could not create the respawn forum during /setup on guild '${guild.getId}'", ex)
+          }
+        }
 
         // matches the audit pattern used by /repair and /remove
         val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
@@ -849,6 +985,16 @@ final class ChannelService(
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
+      // Recreate the respawn forum/board if either has been deleted. Outside
+      // the block above because that one only runs when a *world* channel is
+      // missing, and the forum is guild-level — it can be deleted on its own.
+      if (Config.Respawn.enabled) {
+        try createSpawnsForum(guild)
+        catch {
+          case ex: Throwable =>
+            logger.warn(s"Could not repair the respawn forum on guild '${guild.getId}'", ex)
+        }
+      }
     } else {
       embedBuild.setDescription(s"${Config.noEmoji} You cannot run a `/repair` on **$worldFormal** because that world has not been `/setup` yet.")
     }
@@ -960,6 +1106,9 @@ final class ChannelService(
           if (boostedChannel != null) boostedChannel.delete().complete()
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           if (adminChannel != null) adminChannel.delete().complete()
+          // Before the category: the forum is kept, so it has to be moved out
+          // deliberately rather than orphaned by the category's deletion.
+          retireSpawnsForum(guild)
           val adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
           if (adminCategory != null) adminCategory.delete().complete()
         } else {
