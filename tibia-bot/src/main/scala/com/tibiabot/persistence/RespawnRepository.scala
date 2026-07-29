@@ -49,6 +49,18 @@ trait RespawnRepository {
    *  many were actually inserted. */
   def importSeed(guildId: String, spawns: List[(String, String, String, String)]): Int
 
+  /** Bring seed-derived rows' `creature` back in line with the bundled list,
+   *  returning how many actually changed.
+   *
+   *  Curating which monster represents each spawn is an ongoing job, and
+   *  `importSeed` deliberately never touches a code the guild already has — so
+   *  without this, an improved seed would only ever reach a brand-new guild.
+   *
+   *  Skips rows a guild added itself, and rows whose creature an admin has set by
+   *  hand (see `updateRespawn`, which pins them): someone who fixed a monster in
+   *  Discord should not have it reverted by the next deploy. */
+  def syncSeedCreatures(guildId: String, creaturesByCode: List[(String, String)]): Int
+
   // --- claims -------------------------------------------------------------
 
   def activeClaim(guildId: String, respawnId: Long): Option[RespawnClaim]

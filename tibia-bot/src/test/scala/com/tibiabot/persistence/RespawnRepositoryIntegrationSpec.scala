@@ -96,6 +96,49 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.importSeed(g, batch) shouldBe 0 // idempotent
   }
 
+  test("syncSeedCreatures updates seed rows, and only what actually changed") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", ""), ("806", "Port Hope", "Hydra Mountain", "Hydra")))
+
+    // A better list arrives: 415 gains a creature, 806 already matches.
+    repo.syncSeedCreatures(g, List(("415", "Orc Cult Fanatic"), ("806", "Hydra"))) shouldBe 1
+    repo.findByCode(g, "415").map(_.creature) shouldBe Some("Orc Cult Fanatic")
+
+    // Idempotent, which is what makes this safe to run on every boot.
+    repo.syncSeedCreatures(g, List(("415", "Orc Cult Fanatic"), ("806", "Hydra"))) shouldBe 0
+  }
+
+  test("syncSeedCreatures leaves a hand-picked creature and a guild's own spawn alone") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "Orc Cult Fanatic")))
+    val own = repo.addRespawn(g, "999", "Our Spot", "Demon", "Home", "", "", Respawn.SourceCustom, "admin")
+
+    // An admin picks a different monster in Discord: that pins the row.
+    val seeded = repo.findByCode(g, "415").get
+    repo.updateRespawn(g, seeded.id, name = None, creature = Some("Orc Cult Priest"),
+      world = None, mapperLink = None)
+
+    repo.syncSeedCreatures(g, List(("415", "Orc Cult Fanatic"), ("999", "Something Else"))) shouldBe 0
+    // Their choice survives the next deploy...
+    repo.findByCode(g, "415").map(_.creature) shouldBe Some("Orc Cult Priest")
+    // ...and a spawn the guild added itself is never seed-managed at all.
+    repo.findById(g, own.id).map(_.creature) shouldBe Some("Demon")
+  }
+
+  test("editing a name doesn't pin the creature") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+    val seeded = repo.findByCode(g, "415").get
+
+    // Renaming is not a statement about which monster belongs on the card, so it
+    // must not opt the row out of future image improvements.
+    repo.updateRespawn(g, seeded.id, name = Some("Cult Orcs (east)"), creature = None,
+      world = None, mapperLink = None)
+    repo.syncSeedCreatures(g, List(("415", "Orc Cult Fanatic"))) shouldBe 1
+    repo.findByCode(g, "415").map(_.creature) shouldBe Some("Orc Cult Fanatic")
+    repo.findByCode(g, "415").map(_.name) shouldBe Some("Cult Orcs (east)")
+  }
+
   test("an active claim gets a deadline and is found as the spawn's holder") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")

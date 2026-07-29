@@ -57,7 +57,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |mapper_link VARCHAR(512) NOT NULL DEFAULT '',
           |thread_id VARCHAR(255) NOT NULL DEFAULT '',
           |source VARCHAR(16) NOT NULL DEFAULT 'custom',
-          |added_by VARCHAR(255) NOT NULL DEFAULT ''
+          |added_by VARCHAR(255) NOT NULL DEFAULT '',
+          |creature_pinned BOOLEAN NOT NULL DEFAULT FALSE
           |);""".stripMargin)
 
       statement.executeUpdate(
@@ -89,6 +90,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS limbo_until TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS creature_pinned BOOLEAN NOT NULL DEFAULT FALSE;")
 
       // The sweep scans by (status, ends_at) every 30 seconds and every claim
       // read is "this spawn's active row / this spawn's queue" — both hot
@@ -307,7 +310,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         |name = COALESCE(?, name),
         |creature = COALESCE(?, creature),
         |world = COALESCE(?, world),
-        |mapper_link = COALESCE(?, mapper_link)
+        |mapper_link = COALESCE(?, mapper_link),
+        |creature_pinned = creature_pinned OR ? IS NOT NULL
         |WHERE id = ?;""".stripMargin)
     try {
       def setOptional(index: Int, value: Option[String]): Unit =
@@ -319,7 +323,10 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       setOptional(2, creature)
       setOptional(3, world)
       setOptional(4, mapperLink)
-      statement.setLong(5, respawnId)
+      // Pins the row when this call set a creature, so the boot-time seed sync
+      // leaves a hand-picked monster alone from then on.
+      setOptional(5, creature)
+      statement.setLong(6, respawnId)
       statement.executeUpdate()
     } finally statement.close()
   }
@@ -356,6 +363,28 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         }
         // Each element is 1 when the row was inserted and 0 when the code was
         // already present, so the sum is exactly "how many are new".
+        statement.executeBatch().sum
+      } finally statement.close()
+    }
+
+  def syncSeedCreatures(guildId: String, creaturesByCode: List[(String, String)]): Int =
+    withGuildTransaction(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """UPDATE respawns SET creature = ?
+          |WHERE LOWER(code) = LOWER(?)
+          |  AND source = 'seed'
+          |  AND creature_pinned = FALSE
+          |  AND creature <> ?;""".stripMargin)
+      try {
+        creaturesByCode.foreach { case (code, creature) =>
+          statement.setString(1, creature)
+          statement.setString(2, code)
+          // `creature <> ?` keeps this a no-op once the guild is in step, so the
+          // returned count is "what actually changed" rather than "rows I looked
+          // at" — which is what makes it safe to log on every boot.
+          statement.setString(3, creature)
+          statement.addBatch()
+        }
         statement.executeBatch().sum
       } finally statement.close()
     }

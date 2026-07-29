@@ -431,6 +431,24 @@ object BotApp extends App with StrictLogging {
         thread.setDaemon(true)
         thread
       })
+    // Bring each configured guild's spawn images in line with the bundled list.
+    // Deciding which monster represents a spawn is an ongoing curation job, and
+    // the seed import deliberately never revisits a code a guild already has —
+    // so without this an improved list would only reach brand-new guilds.
+    // Cheap (one batched UPDATE per guild) and a no-op once in step, so it runs
+    // on every boot rather than needing to be remembered as a command.
+    discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
+      try {
+        if (respawnService.settings(guild.getId).isDefined) {
+          val changed = respawnService.syncSeedCreatures(guild.getId)
+          if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
+        }
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not sync respawn creature images for guild '${guild.getId}'", ex)
+      }
+    }
+
     val sweepMillis = Config.Respawn.sweepInterval.toMillis
     respawnSweeper.scheduleWithFixedDelay(new Runnable {
       // Counts sweeps so the board-post refresh (a REST call per guild) runs

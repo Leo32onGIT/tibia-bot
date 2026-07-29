@@ -146,6 +146,20 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   def removeRespawn(guildId: String, respawnId: Long): Unit = repository.removeRespawn(guildId, respawnId)
 
+  /** Push improvements to the bundled list's creature choices out to a guild that
+   *  already imported it, and report how many changed.
+   *
+   *  Run at boot rather than behind a command: which monster represents a spawn is
+   *  curated over time, and `importSeed` never revisits a code the guild already
+   *  has, so otherwise an improved list would only ever reach new guilds. Rows the
+   *  guild added itself, and rows whose creature an admin picked by hand, are left
+   *  alone.
+   *
+   *  Only `creature` is synced. Names and regions are left as the guild has them,
+   *  since those are things a server may reasonably reword for itself. */
+  def syncSeedCreatures(guildId: String): Int =
+    repository.syncSeedCreatures(guildId, RespawnCatalogue.seed.map(s => (s.code, s.creature)))
+
   /** Import the bundled seed catalogue, skipping codes the guild already has.
    *  Safe to run repeatedly — it never overwrites a guild's own edits. Returns
    *  how many entries were added. */
