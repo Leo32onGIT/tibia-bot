@@ -36,11 +36,34 @@ class StaminaSpec extends AnyFunSuite with Matchers {
     tank(300, budget = 240).canAfford(1) shouldBe false
   }
 
-  test("respawn button ids round-trip") {
-    RespawnButtonId.parse(RespawnButtonId.next(415L)) shouldBe Some(("next", 415L))
-    RespawnButtonId.parse(RespawnButtonId.claim(1L)) shouldBe Some(("claim", 1L))
-    RespawnButtonId.parse(RespawnButtonId.leave(99L)) shouldBe Some(("leave", 99L))
-    RespawnButtonId.parse(RespawnButtonId.release(7L)) shouldBe Some(("release", 7L))
+  test("in-thread respawn button ids round-trip to a spawn action") {
+    RespawnButtonId.parse(RespawnButtonId.next(415L)) shouldBe Some(RespawnButtonId.SpawnButton("next", 415L))
+    RespawnButtonId.parse(RespawnButtonId.claim(1L)) shouldBe Some(RespawnButtonId.SpawnButton("claim", 1L))
+    RespawnButtonId.parse(RespawnButtonId.leave(99L)) shouldBe Some(RespawnButtonId.SpawnButton("leave", 99L))
+    RespawnButtonId.parse(RespawnButtonId.release(7L)) shouldBe Some(RespawnButtonId.SpawnButton("release", 7L))
+  }
+
+  test("offer button ids carry the guild, because a DM interaction has no guild of its own") {
+    RespawnButtonId.parse(RespawnButtonId.accept("1082484147492237515", 42L)) shouldBe
+      Some(RespawnButtonId.OfferButton(accept = true, "1082484147492237515", 42L))
+    RespawnButtonId.parse(RespawnButtonId.decline("1082484147492237515", 42L)) shouldBe
+      Some(RespawnButtonId.OfferButton(accept = false, "1082484147492237515", 42L))
+  }
+
+  test("offer button ids stay inside Discord's 100-character component-id limit") {
+    // Real snowflakes are 18-19 digits and claim ids grow without bound; an id
+    // over the limit is rejected by Discord when the message is sent, so the
+    // whole handover DM would fail rather than just the button.
+    RespawnButtonId.accept("1082484147492237515", Long.MaxValue).length should be < 100
+    RespawnButtonId.decline("1082484147492237515", Long.MaxValue).length should be < 100
+  }
+
+  test("the two id shapes never parse as each other") {
+    // The trailing number is a respawn id for one and a claim id for the other,
+    // so confusing them would act on the wrong row entirely.
+    RespawnButtonId.parse(RespawnButtonId.claim(5L)) shouldBe Some(RespawnButtonId.SpawnButton("claim", 5L))
+    RespawnButtonId.parse(RespawnButtonId.accept("9", 5L)) shouldBe
+      Some(RespawnButtonId.OfferButton(accept = true, "9", 5L))
   }
 
   test("the respawn prefix claims its own ids and nothing else") {
@@ -59,9 +82,30 @@ class StaminaSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.parse("respawn:") shouldBe None
   }
 
+  test("a claim knows whether it is being handed over") {
+    val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
+      Some(now), 120, warned = false, kind = RespawnClaim.KindAdHoc,
+      limboUntil = None, offerExpiresAt = None)
+    base.inLimbo(now) shouldBe false
+    base.copy(limboUntil = Some(now.plusMinutes(10))).inLimbo(now) shouldBe true
+    // The window having passed is exactly when the claim stops being the holder.
+    base.copy(limboUntil = Some(now.minusMinutes(1))).inLimbo(now) shouldBe false
+    base.copy(limboUntil = Some(now)).inLimbo(now) shouldBe false
+  }
+
+  test("an offered claim is neither active nor merely queued") {
+    val offered = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusOffered, 1, now, None, None,
+      120, warned = false, kind = RespawnClaim.KindAdHoc, limboUntil = None,
+      offerExpiresAt = Some(now.plusMinutes(10)))
+    offered.isOffered shouldBe true
+    offered.isActive shouldBe false
+    offered.isQueued shouldBe false
+  }
+
   test("a claim knows which state it is in") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
-      Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc)
+      Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc,
+      limboUntil = None, offerExpiresAt = None)
     base.isActive shouldBe true
     base.isQueued shouldBe false
     base.copy(status = RespawnClaim.StatusQueued).isQueued shouldBe true

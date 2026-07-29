@@ -63,18 +63,15 @@ object RespawnEmbeds {
     claim match {
       case Some(active) =>
         embed.setColor(ClaimedColor)
-        embed.setDescription(s"This respawn is currently being used by ${claimantLabel(active)}.")
-        active.endsAt.foreach(end => embed.addField("Hunt end", relative(end), false))
+        val handing = if (active.limboUntil.isDefined) handoverNote else ""
+        embed.setDescription(s"This respawn is currently being used by ${claimantLabel(active)}.$handing")
+        // While a handover is pending the deadline has already gone, so showing
+        // it would read as "an hour ago" next to a claim the card calls current.
+        if (active.limboUntil.isEmpty) active.endsAt.foreach(end => embed.addField("Hunt end", relative(end), false))
       case None =>
         embed.setColor(FreeColor)
         embed.setDescription(s"This respawn is **free**.\nClaim it with `/respawn claim ${respawn.code}`.")
     }
-
-    val options = List(
-      s"**Hunt Duration:** ${humanDuration(settings.defaultDurationMinutes)}",
-      s"**Respawn Queue Limit:** ${settings.queueLimit}"
-    )
-    embed.addField("Options", options.mkString("\n"), false)
 
     if (queue.nonEmpty) {
       // Only the first few, so a full 20-deep queue can't blow the 1024-char
@@ -90,18 +87,41 @@ object RespawnEmbeds {
     embed.build()
   }
 
-  /** Posted into the thread when a queued claim takes over, so the new holder
-   *  gets an actual notification — editing the card above pings nobody. */
-  def promotionNotice(respawn: Respawn, claim: RespawnClaim): String = {
+  /** Why a claim whose time is up is still showing as taken. */
+  private val handoverNote: String =
+    "\n\nTheir time is up and the next person in line has been asked to take over — " +
+      "it stays theirs until that's answered."
+
+  /** The handover offer, sent by DM with Claim/Cancel buttons.
+   *
+   *  Deliberately explicit that doing nothing loses the spot. The whole point of
+   *  the confirmation step is that a spawn isn't handed to someone who has
+   *  walked away, so people should know that silence costs them their place
+   *  rather than discovering it afterwards. */
+  def handoverOffer(respawn: Respawn, claim: RespawnClaim, guildName: String,
+                    expiresAt: ZonedDateTime): String =
+    s"**${respawn.displayName}** is ready for you in **$guildName**.\n" +
+      s"Press **Claim** to take it for ${humanDuration(claim.durationMinutes)}.\n" +
+      s"This offer expires ${relative(expiresAt)} — if you don't answer you lose your place in the queue."
+
+  /** Sent by DM once someone accepts their handover offer. */
+  def handoverAccepted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(relative).getOrElse("soon")
-    s"<@${claim.userId}> **${respawn.displayName}** is yours now — it's free and your claim ends $ends."
+    s"**${respawn.displayName}** is yours — your claim ends $ends."
   }
 
-  /** The "your time is nearly up" nudge. */
-  def expiryWarning(respawn: Respawn, claim: RespawnClaim, minutes: Int): String = {
-    val queueNote = "Someone is waiting behind you."
-    s"<@${claim.userId}> your claim on **${respawn.displayName}** ends in ${humanDuration(minutes)}. $queueNote"
-  }
+  /** Sent by DM when an offer lapsed unanswered, so losing the spot isn't a
+   *  silent surprise. */
+  def handoverLapsed(respawn: Respawn): String =
+    s"You didn't answer in time, so **${respawn.displayName}** has moved on to the next person " +
+      "and you've been taken out of its queue."
+
+  /** The "your time is nearly up" nudge, sent by DM rather than posted in the
+   *  spawn's thread — it is aimed at one person, and a thread ping turns a
+   *  shared card into a stream of notices nobody else needs. */
+  def expiryWarning(respawn: Respawn, claim: RespawnClaim, minutes: Int): String =
+    s"Your claim on **${respawn.displayName}** ends in ${humanDuration(minutes)}.\n" +
+      "Use `/respawn extend` if you want longer, or `/respawn release` to hand it over now."
 
   def freedNotice(respawn: Respawn): String =
     s"**${respawn.displayName}** is now free — claim it with `/respawn claim ${respawn.code}`."
@@ -173,8 +193,11 @@ object RespawnEmbeds {
           s"${humanDuration(settings.maxDurationMinutes)} in total.\n\n" +
           "**Queueing**\n" +
           "If a respawn is taken, hit **Next** on its post to line up behind the current hunter. " +
-          s"Up to ${settings.queueLimit} people can wait. When the claim ahead of you ends you take " +
-          "over automatically and get pinged in the post.\n\n" +
+          s"Up to ${settings.queueLimit} people can wait. When the claim ahead of you ends I'll **DM you** " +
+          s"with a **Claim** button — press it within ${humanDuration(settings.handoverMinutes)} and the " +
+          "respawn is yours. Ignore it or press **Cancel** and you drop out of the queue and it goes to the " +
+          "next person.\nUntil you answer, the respawn stays with its previous hunter, so nobody else can " +
+          "take it out from under you.\n\n" +
           "**Stamina**\n" + staminaLine + "\n" +
           "Holding two respawns at once is fine — they just both draw from the same tank.\n\n" +
           "**Finding things**\n" +

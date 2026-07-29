@@ -34,10 +34,9 @@ object RespawnThreads extends StrictLogging {
    *  cosmetic filter, and `/repair` restores the originals. */
   val TagFree: String = "Free"
   val TagClaimed: String = "Claimed"
-  val TagQueued: String = "Queued"
 
   private val tagSeeds: List[(String, String)] =
-    List(TagFree -> "🟢", TagClaimed -> "🔴", TagQueued -> "🟡")
+    List(TagFree -> "🟢", TagClaimed -> "🔴")
 
   /** Buttons under a spawn's claim card. The respawn id is encoded into the id
    *  so a click needs no lookup of which post it came from — see
@@ -53,6 +52,15 @@ object RespawnThreads extends StrictLogging {
       ActionRow.of(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹"))
       )
+
+  /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
+   *  destructive option because it drops them out of the queue entirely —
+   *  exactly like leaving it. */
+  def offerButtons(guildId: String, claimId: Long): ActionRow =
+    ActionRow.of(
+      Button.success(RespawnButtonId.accept(guildId, claimId), "Claim").withEmoji(Emoji.fromUnicode("🏹")),
+      Button.danger(RespawnButtonId.decline(guildId, claimId), "Cancel")
+    )
 
   // --- forum channel ------------------------------------------------------
 
@@ -235,9 +243,51 @@ object RespawnThreads extends StrictLogging {
     }
   }
 
-  /** The status tag a spawn should be showing right now. */
-  def tagFor(claimed: Boolean, queued: Boolean): String =
-    if (!claimed) TagFree else if (queued) TagQueued else TagClaimed
+  /** The status tag a spawn should be showing right now. Deliberately binary —
+   *  a spawn is either taken or available, and whether anyone happens to be
+   *  waiting behind it isn't a state of the spawn. */
+  def tagFor(claimed: Boolean): String = if (claimed) TagClaimed else TagFree
+
+  // --- direct messages ----------------------------------------------------
+
+  /** DM a user, optionally with buttons. Returns whether it was delivered.
+   *
+   *  Reminders and handover offers go to the person's DMs rather than the
+   *  spawn's thread: a thread ping is easy to miss and turns a shared card into
+   *  a stream of notices aimed at one person. Nothing here is fatal — a user can
+   *  have DMs closed, or share no mutual guild — so callers pass a fallback for
+   *  anything that actually has to reach them.
+   */
+  def dm(guild: Guild, userId: String, content: String, buttons: Option[ActionRow] = None): Boolean =
+    Try {
+      val user = guild.getJDA.retrieveUserById(userId).complete()
+      val channel = user.openPrivateChannel().complete()
+      val action = channel.sendMessage(content)
+      buttons.fold(action.complete())(row => action.setComponents(row).complete())
+      true
+    }.recover {
+      case error =>
+        logger.info(s"Could not DM user '$userId' in guild '${guild.getId}' " +
+          s"(DMs closed, or no mutual guild): ${error.getMessage}")
+        false
+    }.getOrElse(false)
+
+  /** DM `userId`, falling back to a mention in the spawn's thread if the DM
+   *  can't be delivered. Used for anything the person genuinely needs to see —
+   *  a handover offer they have minutes to answer, in particular, would
+   *  otherwise lapse without them ever knowing it existed. */
+  def dmOrAnnounce(guild: Guild, userId: String, content: String, buttons: Option[ActionRow],
+                   thread: Option[ThreadChannel]): Unit =
+    if (!dm(guild, userId, content, buttons)) {
+      thread.foreach { channel =>
+        Try {
+          val action = channel.sendMessage(s"<@$userId> $content")
+          buttons.fold(action.complete())(row => action.setComponents(row).complete())
+        }.failed.foreach { error =>
+          logger.warn(s"Could not reach user '$userId' by DM or in thread '${channel.getId}'", error)
+        }
+      }
+    }
 
   // --- retirement ---------------------------------------------------------
 
@@ -308,13 +358,38 @@ object RespawnButtonId {
   def leave(respawnId: Long): String = s"${Prefix}leave:$respawnId"
   def release(respawnId: Long): String = s"${Prefix}release:$respawnId"
 
+  /** Handover-offer buttons carry the guild id as well as the claim id.
+   *
+   *  They are pressed in a DM, where `event.getGuild` is null — and claims live
+   *  in per-guild databases, so without the guild in the id there would be no
+   *  way to know which database the claim belongs to. Well within Discord's
+   *  100-character component-id limit. */
+  def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
+  def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
+
   def handles(componentId: String): Boolean = componentId.startsWith(Prefix)
 
-  /** ("next", 415L) from "respawn:next:415". None for anything malformed, so a
-   *  stale button from an older deploy is ignored rather than throwing. */
-  def parse(componentId: String): Option[(String, Long)] =
+  /** What a respawn button press means. Parsing to an ADT rather than a tuple
+   *  keeps the two id shapes from being confused: the trailing number is a
+   *  *respawn* id for the in-thread buttons and a *claim* id for the offer
+   *  buttons, which is exactly the sort of thing a bare `(String, Long)` invites
+   *  a caller to get wrong. */
+  sealed trait Action
+  /** An in-thread button on a spawn's claim card; the guild comes from the event. */
+  final case class SpawnButton(action: String, respawnId: Long) extends Action
+  /** A Claim/Cancel button on a handover offer DM. */
+  final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
+
+  /** None for anything malformed, so a button left over from an older deploy is
+   *  ignored rather than throwing. */
+  def parse(componentId: String): Option[Action] =
     componentId.stripPrefix(Prefix).split(':') match {
-      case Array(action, id) => Try(id.toLong).toOption.map(action -> _)
-      case _                 => None
+      case Array("accept", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
+      case Array("decline", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(OfferButton(accept = false, guildId, _))
+      case Array(action, id) =>
+        Try(id.toLong).toOption.map(SpawnButton(action, _))
+      case _ => None
     }
 }

@@ -181,8 +181,11 @@ object Config {
     /** Each user's daily claim budget, refilled at server save. 0 disables
      *  stamina entirely (unlimited claiming). */
     val staminaMinutes: Int = respawn.getInt("stamina-minutes")
-    /** Ping the claimer this many minutes before their claim ends. */
+    /** DM the claimer this many minutes before their claim ends. */
     val warnMinutes: Int = respawn.getInt("warn-minutes")
+    /** How long the next person in line has to accept a handover offer before
+     *  it's assumed they're away and the spawn moves on. */
+    val handoverMinutes: Int = respawn.getInt("handover-minutes")
     /** How often the expiry/promotion sweep runs. Also the worst-case lateness
      *  of a claim ending. */
     val sweepInterval: FiniteDuration = respawn.getDuration("sweep-interval").toScala

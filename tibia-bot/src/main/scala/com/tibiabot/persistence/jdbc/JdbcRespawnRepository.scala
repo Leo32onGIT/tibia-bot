@@ -42,7 +42,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |max_duration INT NOT NULL DEFAULT 240,
           |queue_limit INT NOT NULL DEFAULT 20,
           |stamina_minutes INT NOT NULL DEFAULT 240,
-          |warn_minutes INT NOT NULL DEFAULT 10
+          |warn_minutes INT NOT NULL DEFAULT 10,
+          |handover_minutes INT NOT NULL DEFAULT 10
           |);""".stripMargin)
 
       statement.executeUpdate(
@@ -73,8 +74,21 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |ends_at TIMESTAMPTZ,
           |duration_minutes INT NOT NULL,
           |warned BOOLEAN NOT NULL DEFAULT FALSE,
-          |kind VARCHAR(16) NOT NULL DEFAULT 'adhoc'
+          |kind VARCHAR(16) NOT NULL DEFAULT 'adhoc',
+          |limbo_until TIMESTAMPTZ,
+          |offer_expires_at TIMESTAMPTZ
           |);""".stripMargin)
+
+      // Columns added after the tables first shipped. `IF NOT EXISTS` makes each
+      // a no-op once applied, so this doubles as the migration for guilds that
+      // already have the tables — `CREATE TABLE IF NOT EXISTS` above would
+      // silently skip them and leave the new columns missing.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS handover_minutes INT NOT NULL DEFAULT 10;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS limbo_until TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
 
       // The sweep scans by (status, ends_at) every 30 seconds and every claim
       // read is "this spawn's active row / this spawn's queue" — both hot
@@ -129,7 +143,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       endsAt = optionalZoned(result, "ends_at"),
       durationMinutes = result.getInt("duration_minutes"),
       warned = result.getBoolean("warned"),
-      kind = Option(result.getString("kind")).getOrElse(RespawnClaim.KindAdHoc)
+      kind = Option(result.getString("kind")).getOrElse(RespawnClaim.KindAdHoc),
+      limboUntil = optionalZoned(result, "limbo_until"),
+      offerExpiresAt = optionalZoned(result, "offer_expires_at")
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -167,7 +183,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         maxDurationMinutes = result.getInt("max_duration"),
         queueLimit = result.getInt("queue_limit"),
         staminaMinutes = result.getInt("stamina_minutes"),
-        warnMinutes = result.getInt("warn_minutes")
+        warnMinutes = result.getInt("warn_minutes"),
+        handoverMinutes = result.getInt("handover_minutes")
       )) else None
     } finally statement.close()
   }
@@ -175,8 +192,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def saveSettings(guildId: String, settings: RespawnSettings): Unit = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_settings
-        |(id, forum_channel, board_thread, default_duration, max_duration, queue_limit, stamina_minutes, warn_minutes)
-        |VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        |(id, forum_channel, board_thread, default_duration, max_duration, queue_limit, stamina_minutes,
+        | warn_minutes, handover_minutes)
+        |VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         |ON CONFLICT (id) DO UPDATE SET
         |forum_channel = EXCLUDED.forum_channel,
         |board_thread = EXCLUDED.board_thread,
@@ -184,7 +202,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         |max_duration = EXCLUDED.max_duration,
         |queue_limit = EXCLUDED.queue_limit,
         |stamina_minutes = EXCLUDED.stamina_minutes,
-        |warn_minutes = EXCLUDED.warn_minutes;""".stripMargin)
+        |warn_minutes = EXCLUDED.warn_minutes,
+        |handover_minutes = EXCLUDED.handover_minutes;""".stripMargin)
     try {
       statement.setString(1, settings.forumChannel)
       statement.setString(2, settings.boardThread)
@@ -193,6 +212,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setInt(5, settings.queueLimit)
       statement.setInt(6, settings.staminaMinutes)
       statement.setInt(7, settings.warnMinutes)
+      statement.setInt(8, settings.handoverMinutes)
       statement.executeUpdate()
     } finally statement.close()
   }
@@ -365,7 +385,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim] = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """SELECT * FROM respawn_claims
-        |WHERE user_id = ? AND status IN ('active', 'queued')
+        |WHERE user_id = ? AND status IN ('active', 'queued', 'offered')
         |ORDER BY status, ends_at NULLS LAST, queue_position;""".stripMargin)
     try {
       statement.setString(1, userId)
@@ -375,9 +395,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def expiredClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
-      "SELECT * FROM respawn_claims WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at;")
+      """SELECT * FROM respawn_claims
+        |WHERE status = 'active'
+        |  AND (limbo_until <= ? OR (limbo_until IS NULL AND ends_at <= ?))
+        |ORDER BY ends_at;""".stripMargin)
     try {
       statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      statement.setTimestamp(2, Timestamp.from(now.toInstant))
       collectClaims(statement.executeQuery())
     } finally statement.close()
   }
@@ -481,10 +505,10 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def promoteClaim(guildId: String, claimId: Long, startsAt: ZonedDateTime): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
-      // `status = 'queued'` in the WHERE clause is the concurrency guard: if the
-      // claimant left the queue between the caller reserving their stamina and
-      // this update, nothing is written and the caller refunds instead of
-      // activating a claim that no longer exists.
+      // `status = 'offered'` in the WHERE clause is the concurrency guard: if the
+      // offer lapsed or was declined between the caller reserving their stamina
+      // and this update, nothing is written and the caller refunds instead of
+      // activating a claim nobody accepted.
       //
       // ends_at is derived in SQL from the row's own duration so the deadline
       // can't be computed from a stale in-memory copy of it.
@@ -496,8 +520,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET status = 'active', queue_position = 0, starts_at = ?, warned = FALSE,
-          |    ends_at = CAST(? AS TIMESTAMPTZ) + make_interval(mins => duration_minutes)
-          |WHERE id = ? AND status = 'queued'
+          |    ends_at = CAST(? AS TIMESTAMPTZ) + make_interval(mins => duration_minutes),
+          |    offer_expires_at = NULL, limbo_until = NULL
+          |WHERE id = ? AND status = 'offered'
           |RETURNING *;""".stripMargin)
       try {
         statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
@@ -507,6 +532,58 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
     }
+
+  def findClaimById(guildId: String, claimId: Long): Option[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("SELECT * FROM respawn_claims WHERE id = ?;")
+    try {
+      statement.setLong(1, claimId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def offerClaim(guildId: String, claimId: Long, offerExpiresAt: ZonedDateTime): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET status = 'offered', offer_expires_at = ?
+          |WHERE id = ? AND status = 'queued'
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(offerExpiresAt.toInstant))
+        statement.setLong(2, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def offeredClaim(guildId: String, respawnId: Long): Option[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_claims WHERE respawn_id = ? AND status = 'offered' ORDER BY id LIMIT 1;")
+    try {
+      statement.setLong(1, respawnId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def expiredOffers(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_claims WHERE status = 'offered' AND offer_expires_at <= ? ORDER BY offer_expires_at;")
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def setLimbo(guildId: String, claimId: Long, limboUntil: ZonedDateTime): Unit = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("UPDATE respawn_claims SET limbo_until = ? WHERE id = ?;")
+    try {
+      statement.setTimestamp(1, Timestamp.from(limboUntil.toInstant))
+      statement.setLong(2, claimId)
+      statement.executeUpdate()
+    } finally statement.close()
+  }
 
   def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String]): Unit =
     if (userIds.nonEmpty) withGuildTransaction(guildId) { conn =>

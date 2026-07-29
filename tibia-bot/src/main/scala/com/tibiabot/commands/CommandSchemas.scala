@@ -336,8 +336,11 @@ object CommandSchemas {
               new OptionData(OptionType.INTEGER, "stamina", "Daily claim budget per user in minutes (0 = unlimited)")
                 .setMinValue(0)
                 .setMaxValue(1440),
-              new OptionData(OptionType.INTEGER, "warn", "Warn the claimer this many minutes before the end (0 = off)")
+              new OptionData(OptionType.INTEGER, "warn", "DM the claimer this many minutes before the end (0 = off)")
                 .setMinValue(0)
+                .setMaxValue(120),
+              new OptionData(OptionType.INTEGER, "handover", "Minutes to accept a handover before it passes on")
+                .setMinValue(1)
                 .setMaxValue(120)
             )
         )

@@ -197,7 +197,8 @@ object RespawnCommands {
               maxDurationMinutes = options.get("max-duration").flatMap(toInt).getOrElse(current.maxDurationMinutes),
               queueLimit = options.get("queue-limit").flatMap(toInt).getOrElse(current.queueLimit),
               staminaMinutes = options.get("stamina").flatMap(toInt).getOrElse(current.staminaMinutes),
-              warnMinutes = options.get("warn").flatMap(toInt).getOrElse(current.warnMinutes)
+              warnMinutes = options.get("warn").flatMap(toInt).getOrElse(current.warnMinutes),
+              handoverMinutes = options.get("handover").flatMap(toInt).getOrElse(current.handoverMinutes)
             )
             if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
               reply(event, s"${Config.noEmoji} The default claim length can't be longer than the maximum " +
@@ -231,7 +232,8 @@ object RespawnCommands {
 
     case ClaimOutcome.Queued(respawn, _, position) =>
       Embeds.response(s"${Config.yesEmoji} You're **#$position** in the queue for " +
-        s"**${respawn.displayName}**.\nYou'll be pinged in its post when it's your turn.")
+        s"**${respawn.displayName}**.\nI'll DM you when it's your turn — you'll have a few minutes " +
+        "to confirm before it passes to the next person.")
 
     case ClaimOutcome.AlreadyHolding(respawn, claim) =>
       if (claim.isActive)
@@ -262,9 +264,10 @@ object RespawnCommands {
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
-    case ReleaseOutcome.Released(respawn, refunded, promoted) =>
-      val handover = promoted
-        .map(claim => s"\n<@${claim.userId}> was next in line and has it now.")
+    case ReleaseOutcome.Released(respawn, refunded, offered) =>
+      val handover = offered
+        .map(claim => s"\n<@${claim.userId}> is next in line and has been asked if they want it. " +
+          "It stays yours until they answer, so nobody else can take it in the meantime.")
         .getOrElse("\nIt's free again.")
       val refund =
         if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back."
@@ -273,6 +276,10 @@ object RespawnCommands {
 
     case ReleaseOutcome.LeftQueue(respawn) =>
       s"${Config.yesEmoji} You've left the queue for **${respawn.displayName}**."
+
+    case ReleaseOutcome.AlreadyHandingOver(spawnName) =>
+      s"${Config.noEmoji} **$spawnName** is already being handed over — " +
+        "I'm waiting on the next person in line to answer."
 
     case ReleaseOutcome.NothingHeld =>
       s"${Config.noEmoji} You aren't holding or queued for any respawn."
@@ -291,7 +298,8 @@ object RespawnCommands {
       s"**Maximum claim:** ${RespawnEmbeds.humanDuration(settings.maxDurationMinutes)}\n" +
       s"**Queue limit:** ${settings.queueLimit}\n" +
       s"**Stamina:** $stamina\n" +
-      s"**Warning:** $warn"
+      s"**Warning:** $warn\n" +
+      s"**Handover window:** ${RespawnEmbeds.humanDuration(settings.handoverMinutes)}"
   }
 
   /** A jump link to the spawn's forum post, once it has one — spawns that have

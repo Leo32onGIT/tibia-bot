@@ -32,7 +32,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
   test("settings round-trip, including the channel-only update") {
     val (repo, g) = freshRepo()
-    val settings = RespawnSettings("0", "0", 120, 240, 20, 240, 10)
+    val settings = RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10)
     repo.saveSettings(g, settings)
     repo.settings(g) shouldBe Some(settings)
 
@@ -129,20 +129,99 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u1", "u2")
   }
 
-  test("promoting a queued claim derives its deadline from its own duration") {
+  test("a queued claim must be offered before it can be promoted") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 90, 20, RespawnClaim.KindAdHoc).get
 
+    // Straight from the queue is refused: a spawn is never handed to somebody
+    // who hasn't confirmed they still want it.
+    repo.promoteClaim(g, queued.id, now) shouldBe None
+
+    val offered = repo.offerClaim(g, queued.id, now.plusMinutes(10))
+    offered.map(_.status) shouldBe Some(RespawnClaim.StatusOffered)
+    offered.flatMap(_.offerExpiresAt).map(_.toInstant) shouldBe Some(now.plusMinutes(10).toInstant)
+    // An offered claim is no longer in the visible queue, but still counts as
+    // something its owner holds.
+    repo.queueFor(g, spawn.id) shouldBe empty
+    repo.offeredClaim(g, spawn.id).map(_.userId) shouldBe Some("u1")
+    repo.openClaimsForUser(g, "u1").map(_.id) shouldBe List(queued.id)
+
     val promoted = repo.promoteClaim(g, queued.id, now)
     promoted.map(_.status) shouldBe Some(RespawnClaim.StatusActive)
     promoted.map(_.queuePosition) shouldBe Some(0)
-    // 90 minutes, from the row's duration — not the 120-minute default.
+    // 90 minutes, from the row's own duration — not the 120-minute default.
     promoted.flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(90).toInstant)
+    promoted.flatMap(_.offerExpiresAt) shouldBe None
 
-    // Promoting the same row twice must not resurrect a finished claim — this
-    // is the guard that makes the sweep safe against a concurrent release.
+    // Accepting twice must not resurrect the claim or double-charge stamina.
     repo.promoteClaim(g, queued.id, now) shouldBe None
+  }
+
+  test("only a queued claim can be offered, and only once") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc).get
+
+    repo.offerClaim(g, queued.id, now.plusMinutes(10)) should not be empty
+    // A second offer on the same row would let two sweeps both DM the same
+    // person and both hold the spawn open for them.
+    repo.offerClaim(g, queued.id, now.plusMinutes(10)) shouldBe None
+  }
+
+  test("an offer past its deadline is picked up for cancellation, and only then") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc).get
+    repo.offerClaim(g, queued.id, now.plusMinutes(10))
+
+    repo.expiredOffers(g, now) shouldBe empty
+    repo.expiredOffers(g, now.plusMinutes(9)) shouldBe empty
+    repo.expiredOffers(g, now.plusMinutes(10)).map(_.userId) shouldBe List("u1")
+
+    repo.cancelClaim(g, queued.id)
+    repo.expiredOffers(g, now.plusMinutes(30)) shouldBe empty
+    repo.offeredClaim(g, spawn.id) shouldBe None
+  }
+
+  test("a claim in limbo is not treated as expired until its handover window elapses") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(2), now, 120,
+      RespawnClaim.KindAdHoc)
+
+    // Its time is up, so without limbo it's expired work.
+    repo.expiredClaims(g, now).map(_.id) shouldBe List(claim.id)
+
+    repo.setLimbo(g, claim.id, now.plusMinutes(10))
+    // Held open: still the spawn's holder, and not re-processed every sweep.
+    repo.expiredClaims(g, now) shouldBe empty
+    repo.expiredClaims(g, now.plusMinutes(5)) shouldBe empty
+    repo.activeClaim(g, spawn.id).map(_.userId) shouldBe Some("u1")
+    repo.activeClaim(g, spawn.id).flatMap(_.limboUntil).map(_.toInstant) shouldBe
+      Some(now.plusMinutes(10).toInstant)
+
+    // Window elapsed: now it ends for real.
+    repo.expiredClaims(g, now.plusMinutes(10)).map(_.id) shouldBe List(claim.id)
+  }
+
+  test("limbo leaves the deadline alone, so an early release can't be refunded twice") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    // Released early: two hours still on the clock.
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc)
+    repo.setLimbo(g, claim.id, now.plusMinutes(10))
+
+    val held = repo.activeClaim(g, spawn.id)
+    // `ends_at` untouched is what keeps the refund honest — the service reads
+    // limboUntil to know the refund has already been settled.
+    held.flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusHours(2).toInstant)
+    held.map(_.durationMinutes) shouldBe Some(120)
+
+    // A voluntarily released claim has a FUTURE ends_at, so the work list has to
+    // find it by its limbo window rather than by its deadline.
+    repo.expiredClaims(g, now.plusMinutes(10)).map(_.id) shouldBe List(claim.id)
   }
 
   test("cancelQueued clears exactly the named users, leaving the rest in order") {
@@ -274,7 +353,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
   test("dropGuildData removes claims, catalogue and settings together") {
     val (repo, g) = freshRepo()
-    repo.saveSettings(g, RespawnSettings("111", "222", 120, 240, 20, 240, 10))
+    repo.saveSettings(g, RespawnSettings("111", "222", 120, 240, 20, 240, 10, 10))
     val spawn = repo.addRespawn(g, "415", "My Own Name", "Orc Cult Fanatic", "Edron", "", "", Respawn.SourceCustom, "admin")
     repo.setThreadId(g, spawn.id, "5551234")
     repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)

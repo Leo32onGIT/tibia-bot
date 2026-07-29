@@ -19,14 +19,14 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val settings = RespawnSettings(
     forumChannel = "1", boardThread = "2", defaultDurationMinutes = 120, maxDurationMinutes = 240,
-    queueLimit = 20, staminaMinutes = 240, warnMinutes = 10)
+    queueLimit = 20, staminaMinutes = 240, warnMinutes = 10, handoverMinutes = 10)
 
   private def claim(userId: String, minutes: Int = 120, status: String = RespawnClaim.StatusActive,
                     position: Int = 0, character: String = "") = RespawnClaim(
     id = 10L, respawnId = 1L, userId = userId, userName = "someone", characterName = character,
     status = status, queuePosition = position, claimedAt = now, startsAt = Some(now),
     endsAt = Some(now.plusMinutes(minutes.toLong)), durationMinutes = minutes, warned = false,
-    kind = RespawnClaim.KindAdHoc)
+    kind = RespawnClaim.KindAdHoc, limboUntil = None, offerExpiresAt = None)
 
   // Passed explicitly rather than read from Config, which cannot initialise in
   // tests (it requires a populated environment) — the same reason UrlsSpec
@@ -67,10 +67,46 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     fields(embed).keys should not contain "Hunt end"
   }
 
-  test("the options field mirrors the guild's settings") {
-    val options = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs)))("Options")
-    options should include("Hunt Duration:** 2h")
-    options should include("Respawn Queue Limit:** 20")
+  test("the card carries no settings blurb — duration and queue limit aren't news to the reader") {
+    val free = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs)))
+    val taken = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), Nil, settings, image(cultOrcs)))
+    free.keys should not contain "Options"
+    taken.keys should not contain "Options"
+  }
+
+  test("a claim being handed over still shows its holder, and says why") {
+    val handingOver = claim("99", character = "Galarzaa").copy(limboUntil = Some(now.plusMinutes(10)))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(handingOver), Nil, settings, image(cultOrcs))
+    embed.getColorRaw shouldBe RespawnEmbeds.ClaimedColor
+    embed.getDescription should include("Galarzaa")
+    embed.getDescription should include("next person in line")
+    // The deadline has already passed, so showing it would read as "an hour ago"
+    // next to a claim the card says is still live.
+    fields(embed).keys should not contain "Hunt end"
+  }
+
+  test("the handover offer says what happens if it's ignored") {
+    val offer = claim("7", minutes = 90)
+    val text = RespawnEmbeds.handoverOffer(cultOrcs, offer, "Violent Bot Dev", now.plusMinutes(10))
+    text should include("415 — Cult Orcs")
+    text should include("Violent Bot Dev")
+    text should include("1h 30m")
+    // Silence costing the queue place is the whole point of confirming, so it
+    // must be stated rather than discovered.
+    text should include("lose your place")
+  }
+
+  test("a lapsed offer explains the spot is gone rather than going silent") {
+    RespawnEmbeds.handoverLapsed(cultOrcs) should include("415 — Cult Orcs")
+    RespawnEmbeds.handoverLapsed(cultOrcs) should include("moved on")
+  }
+
+  test("the expiry warning is addressed to one person and offers a way out") {
+    val text = RespawnEmbeds.expiryWarning(cultOrcs, claim("7"), 10)
+    text should include("10m")
+    text should include("/respawn extend")
+    // DM'd, so it must not carry a mention that would ping a shared thread.
+    text should not include "<@"
   }
 
   test("the queue is only shown when someone is waiting, and is numbered") {
@@ -132,6 +168,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     board.getDescription should include("4h")
     board.getDescription should include("server save")
     board.getDescription should include("Holding two respawns at once is fine")
+  }
+
+  test("the board post explains the handover confirmation, including the window") {
+    val board = RespawnEmbeds.boardPost(settings.copy(handoverMinutes = 10))
+    board.getDescription should include("DM you")
+    board.getDescription should include("10m")
+    board.getDescription should include("drop out of the queue")
   }
 
   test("the board post drops the stamina rules entirely when stamina is off") {

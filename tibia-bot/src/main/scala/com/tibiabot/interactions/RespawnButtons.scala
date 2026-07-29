@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, ReleaseOutcome, RespawnButtonId}
+import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
@@ -26,12 +26,6 @@ object RespawnButtons extends StrictLogging {
       reply(event, s"${Config.noEmoji} The respawn claim system isn't enabled on this bot.")
       return
     }
-    val guild = event.getGuild
-    if (guild == null) {
-      reply(event, s"${Config.noEmoji} That button only works inside a server.")
-      return
-    }
-
     RespawnButtonId.parse(event.getComponentId) match {
       case None =>
         // A button from an older deploy whose id format no longer parses.
@@ -40,38 +34,79 @@ object RespawnButtons extends StrictLogging {
         logger.debug(s"Ignoring unparseable respawn button id '${event.getComponentId}'")
         reply(event, s"${Config.noEmoji} That button is out of date — use `/respawn` instead.")
 
-      case Some((action, respawnId)) =>
-        val service = BotApp.respawnService
-        val user = event.getUser
-        val guildId = guild.getId
-
-        service.settings(guildId) match {
-          case None => reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
-          case Some(_) =>
-            BotApp.respawnService.listRespawns(guildId).find(_.id == respawnId) match {
-              case None =>
-                reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-
-              case Some(respawn) => action match {
-                case "claim" | "next" =>
-                  // Both buttons go through the same claim call: whether the
-                  // clicker ends up holding the spawn or queued behind it is a
-                  // function of the spawn's state right now, not of which
-                  // button the card happened to be showing when they clicked.
-                  val outcome = service.claim(guild, user.getId, user.getName, "", respawn.code, None)
-                  replyClaim(event, outcome)
-
-                case "leave" | "release" =>
-                  val outcome = service.release(guild, user.getId, Some(respawn.code))
-                  reply(event, renderRelease(outcome))
-
-                case other =>
-                  logger.warn(s"Unknown respawn button action '$other' in guild '$guildId'")
-                  reply(event, s"${Config.noEmoji} That button doesn't do anything.")
-              }
-            }
+      // Handover offers are answered in a DM, where there is no event guild —
+      // the guild id travels in the button id instead (see RespawnButtonId).
+      case Some(RespawnButtonId.OfferButton(accept, guildId, claimId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None =>
+            reply(event, s"${Config.noEmoji} That server is no longer reachable, so this offer has expired.")
+          case Some(offerGuild) =>
+            val outcome =
+              if (accept) BotApp.respawnService.acceptOffer(offerGuild, event.getUser.getId, claimId)
+              else BotApp.respawnService.declineOffer(offerGuild, event.getUser.getId, claimId)
+            replyOffer(event, outcome)
         }
+
+      case Some(RespawnButtonId.SpawnButton(action, respawnId)) =>
+        handleSpawnButton(event, action, respawnId)
     }
+  }
+
+  private def handleSpawnButton(event: ButtonInteractionEvent, action: String, respawnId: Long): Unit = {
+    val guild = event.getGuild
+    if (guild == null) {
+      reply(event, s"${Config.noEmoji} That button only works inside a server.")
+    } else {
+      val service = BotApp.respawnService
+      val user = event.getUser
+      val guildId = guild.getId
+
+      service.settings(guildId) match {
+        case None => reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
+        case Some(_) =>
+          service.listRespawns(guildId).find(_.id == respawnId) match {
+            case None =>
+              reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+
+            case Some(respawn) => action match {
+              case "claim" | "next" =>
+                // Both buttons go through the same claim call: whether the
+                // clicker ends up holding the spawn or queued behind it is a
+                // function of the spawn's state right now, not of which
+                // button the card happened to be showing when they clicked.
+                val outcome = service.claim(guild, user.getId, user.getName, "", respawn.code, None)
+                replyClaim(event, outcome)
+
+              case "leave" | "release" =>
+                val outcome = service.release(guild, user.getId, Some(respawn.code))
+                reply(event, renderRelease(outcome))
+
+              case other =>
+                logger.warn(s"Unknown respawn button action '$other' in guild '$guildId'")
+                reply(event, s"${Config.noEmoji} That button doesn't do anything.")
+            }
+          }
+      }
+    }
+  }
+
+  private def replyOffer(event: ButtonInteractionEvent, outcome: OfferOutcome): Unit = outcome match {
+    case OfferOutcome.Accepted(respawn, claim) =>
+      reply(event, s"${Config.yesEmoji} ${RespawnEmbeds.handoverAccepted(respawn, claim)}")
+
+    case OfferOutcome.Declined(respawn) =>
+      reply(event, s"${Config.yesEmoji} You've passed on **${respawn.displayName}** and left its queue.")
+
+    case OfferOutcome.NoStamina(needed, tank, resetsAt) =>
+      reply(event, s"${Config.noEmoji} That claim needs **${RespawnEmbeds.humanDuration(needed)}** but you only " +
+        s"have **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of stamina left, so the respawn has " +
+        s"moved on. Your tank refills at server save <t:${resetsAt.toInstant.getEpochSecond}:R>.")
+
+    case OfferOutcome.Gone =>
+      reply(event, s"${Config.noEmoji} That offer has already expired or been answered.")
+
+    case OfferOutcome.NotYours =>
+      reply(event, s"${Config.noEmoji} That offer wasn't for you.")
   }
 
   private def replyClaim(event: ButtonInteractionEvent, outcome: ClaimOutcome): Unit = outcome match {
@@ -81,7 +116,7 @@ object RespawnButtons extends StrictLogging {
 
     case ClaimOutcome.Queued(respawn, _, position) =>
       reply(event, s"${Config.yesEmoji} You're **#$position** in the queue for **${respawn.displayName}**. " +
-        "You'll be pinged here when it's your turn.")
+        "I'll DM you when it's your turn.")
 
     case ClaimOutcome.AlreadyHolding(respawn, claim) =>
       if (claim.isActive) reply(event, s"${Config.noEmoji} You're already on **${respawn.displayName}**.")
@@ -107,12 +142,16 @@ object RespawnButtons extends StrictLogging {
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
-    case ReleaseOutcome.Released(respawn, refunded, promoted) =>
+    case ReleaseOutcome.Released(respawn, refunded, offered) =>
       val refund = if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
-      val handover = promoted.map(claim => s" <@${claim.userId}> is up next.").getOrElse("")
+      val handover = offered
+        .map(claim => s" <@${claim.userId}> has been asked if they want it — it stays yours until they answer.")
+        .getOrElse("")
       s"${Config.yesEmoji} You've released **${respawn.displayName}**.$refund$handover"
     case ReleaseOutcome.LeftQueue(respawn) =>
       s"${Config.yesEmoji} You've left the queue for **${respawn.displayName}**."
+    case ReleaseOutcome.AlreadyHandingOver(spawnName) =>
+      s"${Config.noEmoji} **$spawnName** is already being handed over — waiting on the next person to answer."
     case ReleaseOutcome.NothingHeld =>
       s"${Config.noEmoji} You aren't holding or queued for that respawn."
     case ReleaseOutcome.NotConfigured =>

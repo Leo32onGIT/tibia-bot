@@ -59,10 +59,19 @@ final case class RespawnClaim(
   endsAt: Option[ZonedDateTime],
   durationMinutes: Int,
   warned: Boolean,
-  kind: String
+  kind: String,
+  limboUntil: Option[ZonedDateTime],
+  offerExpiresAt: Option[ZonedDateTime]
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
+  def isOffered: Boolean = status == RespawnClaim.StatusOffered
+
+  /** True while this claim's time is up but it is being held open because the
+   *  next person in line still has an unanswered handover offer. The spawn goes
+   *  on showing this claimant as its holder, and — because `endsAt` is left
+   *  untouched — no extra stamina is charged for the wait. */
+  def inLimbo(now: ZonedDateTime): Boolean = limboUntil.exists(_.isAfter(now))
 }
 
 object RespawnClaim {
@@ -71,10 +80,18 @@ object RespawnClaim {
   /** Waiting for the current claim to end; `startsAt`/`endsAt` are empty
    *  because the start time isn't known until the claim ahead actually ends. */
   val StatusQueued: String = "queued"
+  /** Reached the front of the queue and been sent a handover offer by DM, but
+   *  hasn't pressed Claim yet. `offerExpiresAt` is the deadline; letting it
+   *  lapse is treated exactly like leaving the queue.
+   *
+   *  A separate status from `queued` so an unanswered offer can't be handed out
+   *  twice, and so the person isn't silently given a spawn they may have walked
+   *  away from. */
+  val StatusOffered: String = "offered"
   /** Ran to completion. */
   val StatusFinished: String = "finished"
-  /** Released early, skipped for insufficient stamina, or force-cleared by an
-   *  admin. */
+  /** Released early, declined or ignored a handover offer, skipped for
+   *  insufficient stamina, or force-cleared by an admin. */
   val StatusCancelled: String = "cancelled"
 
   /** A claim someone made themselves via `/respawn claim` or the Next button. */
@@ -94,7 +111,10 @@ final case class RespawnSettings(
   maxDurationMinutes: Int,
   queueLimit: Int,
   staminaMinutes: Int,
-  warnMinutes: Int
+  warnMinutes: Int,
+  /** How long someone has to accept a handover offer before it's assumed they
+   *  walked away and the spawn moves on to the next person. */
+  handoverMinutes: Int
 )
 
 /** A user's remaining claim budget for the current server-save day.

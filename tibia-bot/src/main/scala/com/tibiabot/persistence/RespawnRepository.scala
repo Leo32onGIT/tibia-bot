@@ -62,7 +62,18 @@ trait RespawnRepository {
    *  the per-user stamina display. */
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
 
-  /** Claims whose `endsAt` has passed — the expiry sweep's work list. */
+  /** The expiry sweep's work list — active claims that are due to end.
+   *
+   *  Two cases, and neither reduces to the other:
+   *   - `limboUntil` unset and `endsAt` passed: the claim just ran out, so a
+   *     handover starts.
+   *   - `limboUntil` passed: the claim was already on its way out and its
+   *     handover window has elapsed, so it finishes now. `endsAt` may still be
+   *     in the *future* here, because a voluntary early release also enters
+   *     limbo without moving the deadline.
+   *
+   *  A claim inside an unelapsed limbo window is excluded: it is still showing
+   *  as the spawn's holder while the next person decides. */
   def expiredClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
   /** Active claims ending within `withinMinutes` that haven't been warned yet. */
@@ -80,13 +91,37 @@ trait RespawnRepository {
                    characterName: String, durationMinutes: Int, queueLimit: Int,
                    kind: String): Option[RespawnClaim]
 
-  /** Make one specific queued claim active, running from `startsAt`.
+  def findClaimById(guildId: String, claimId: Long): Option[RespawnClaim]
+
+  /** Make one specific offered claim active, running from `startsAt`.
    *
    *  Targets a claim id rather than "whatever is at the head" so the caller can
    *  reserve that person's stamina first and then promote exactly them. Returns
-   *  None if the row is no longer queued — which is the same check that makes
-   *  this safe against the claimant leaving the queue in between. */
+   *  None if the row is no longer in the offered state — which is what makes
+   *  this safe against the offer lapsing, or being declined, in between. */
   def promoteClaim(guildId: String, claimId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** Move a queued claim to `offered`, meaning its owner has been DMed and has
+   *  until `offerExpiresAt` to accept. Returns None if the row is no longer
+   *  queued (they left in the meantime). */
+  def offerClaim(guildId: String, claimId: Long, offerExpiresAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** The unanswered handover offer on a spawn, if any. While one exists the
+   *  spawn must not offer itself to anybody else. */
+  def offeredClaim(guildId: String, respawnId: Long): Option[RespawnClaim]
+
+  /** Offers whose deadline has passed — the owner is assumed away, so these are
+   *  cancelled and the spawn moves on. */
+  def expiredOffers(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Hold a finished-but-not-yet-handed-over claim open until `limboUntil`, so
+   *  the spawn keeps showing its previous holder while the next person decides.
+   *
+   *  Deliberately does **not** touch `ends_at` or `duration_minutes`: stamina
+   *  was reserved from the duration up front, so moving the deadline would
+   *  either charge for the wait or (via the release refund, which is capped by
+   *  time remaining) hand back minutes that were never spent. */
+  def setLimbo(guildId: String, claimId: Long, limboUntil: ZonedDateTime): Unit
 
   /** Cancel the queued claims of `userIds` on one spawn. Used to clear people
    *  who can no longer afford their claim out of the way rather than leaving
