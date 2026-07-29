@@ -12,8 +12,12 @@ object RespawnEmbeds {
 
   /** Green — the spawn is free to take. */
   val FreeColor: Int = 3066993
-  /** Red — someone is on it right now. */
-  val ClaimedColor: Int = 15158332
+  /** The bot's red (as used for hunted activity and ally deaths) — a spawn that's
+   *  taken, and a claim that's over. Named for the colour rather than either
+   *  meaning, since one red serves both. */
+  val RedColor: Int = 13773097
+  /** The bot's yellow (see GuildActivity.activityColor) — a claim nearing its end. */
+  val WarnColor: Int = 14397256
 
   /** Discord renders `<t:epoch:R>` as a live-updating "in 2 hours" that keeps
    *  counting down without the bot editing the message, which is why claim
@@ -66,7 +70,7 @@ object RespawnEmbeds {
 
     claim match {
       case Some(active) =>
-        embed.setColor(ClaimedColor)
+        embed.setColor(RedColor)
         embed.setDescription(s"This respawn is currently being used by ${claimantLabel(active)}.")
         // Deliberately identical whether or not a handover is pending. Anything
         // conditional on limbo would cost a card edit when the offer goes out and
@@ -97,8 +101,9 @@ object RespawnEmbeds {
    *  messages use, so a handover offer doesn't arrive as bare text while
    *  everything else is an embed. The spawn's creature goes in as a thumbnail
    *  rather than a full image: a DM is a notification, not a card to look at. */
-  def dmEmbed(title: String, body: String, thumbnailUrl: String = ""): MessageEmbed = {
-    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(title).setDescription(body)
+  def dmEmbed(title: String, body: String, thumbnailUrl: String = "",
+              color: Int = Embeds.BrandColor): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(color).setTitle(title).setDescription(body)
     if (thumbnailUrl.nonEmpty) embed.setThumbnail(thumbnailUrl)
     embed.build()
   }
@@ -151,9 +156,20 @@ object RespawnEmbeds {
   /** The "your time is nearly up" nudge, sent by DM rather than posted in the
    *  spawn's thread — it is aimed at one person, and a thread ping turns a
    *  shared card into a stream of notices nobody else needs. */
-  def expiryWarning(respawn: Respawn, claim: RespawnClaim, minutes: Int): String =
-    s"Your claim on **${respawn.displayName}** ends in ${humanDuration(minutes)}.\n" +
-      "Use `/respawn extend` if you want longer, or `/respawn release` to hand it over now."
+  /** Deliberately says nothing about `/respawn extend`: stretching a claim is the
+   *  exception, not the expected reply to this, and offering it up invites people
+   *  to hold spawns longer than they need. Leaving early is the useful action, so
+   *  that is the one that gets a button. */
+  def expiryWarning(respawn: Respawn, claim: RespawnClaim): String = {
+    val ends = claim.endsAt.map(relative).getOrElse("shortly")
+    s"Your claim on **${respawn.displayName}** ends $ends.\n" +
+      "Click the leave button below if you have left the respawn already."
+  }
+
+  /** Sent by DM once a claim has actually run out, so its holder knows the spawn
+   *  isn't theirs any more without going to look. */
+  def claimEnded(respawn: Respawn): String =
+    s"Your claim on **${respawn.displayName}** has ended."
 
   /** `/respawn list` — everything currently held, most-urgent first. */
   def activeClaimsList(claims: List[(Respawn, RespawnClaim, Int)]): MessageEmbed = {

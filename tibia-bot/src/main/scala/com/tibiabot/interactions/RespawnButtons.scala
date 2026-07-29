@@ -64,6 +64,25 @@ object RespawnButtons extends StrictLogging {
             reply(event, s"${Config.noEmoji} That button doesn't do anything.")
         }
 
+      // A spawn button pressed from a DM: no event guild, so it names its own.
+      case Some(RespawnButtonId.DmSpawnButton(action, guildId, respawnId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None =>
+            reply(event, s"${Config.noEmoji} That server is no longer reachable.")
+          case Some(dmGuild) =>
+            BotApp.respawnService.listRespawns(guildId).find(_.id == respawnId) match {
+              case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+              case Some(respawn) => action match {
+                case "leave" =>
+                  reply(event, renderRelease(
+                    BotApp.respawnService.release(dmGuild, event.getUser.getId, Some(respawn.code))))
+                case other =>
+                  logger.warn(s"Unknown respawn DM button action '$other' in guild '$guildId'")
+                  reply(event, s"${Config.noEmoji} That button doesn't do anything.")
+              }
+            }
+        }
+
       case Some(RespawnButtonId.SpawnButton(action, respawnId)) =>
         handleSpawnButton(event, action, respawnId)
     }

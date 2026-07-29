@@ -52,7 +52,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // The R-suffixed timestamp is what makes the card count down without the
     // bot editing it every minute.
     fields(embed)("Hunt end") should endWith(":R>")
-    embed.getColorRaw shouldBe RespawnEmbeds.ClaimedColor
+    embed.getColorRaw shouldBe RespawnEmbeds.RedColor
   }
 
   test("a claimant with no character is still pingable") {
@@ -110,12 +110,28 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.handoverLapsed(cultOrcs) should include("moved on")
   }
 
-  test("the expiry warning is addressed to one person and offers a way out") {
-    val text = RespawnEmbeds.expiryWarning(cultOrcs, claim("7"), 10)
-    text should include("10m")
-    text should include("/respawn extend")
+  test("the expiry warning counts down live and points at the Leave button") {
+    val text = RespawnEmbeds.expiryWarning(cultOrcs, claim("7"))
+    // A relative timestamp keeps counting down on its own; a baked-in "8m" is
+    // wrong the moment it's read.
+    text should include(":R>")
+    text should include("leave button")
+    // Extending is deliberately not suggested — it encourages holding spawns
+    // longer than needed.
+    text should not include "/respawn extend"
     // DM'd, so it must not carry a mention that would ping a shared thread.
     text should not include "<@"
+  }
+
+  test("a claim that ended says so plainly") {
+    RespawnEmbeds.claimEnded(cultOrcs) should include("415 — Cult Orcs")
+    RespawnEmbeds.claimEnded(cultOrcs) should include("has ended")
+  }
+
+  test("DM embeds carry the colour they're given, defaulting to the brand") {
+    RespawnEmbeds.dmEmbed("t", "b").getColorRaw shouldBe Embeds.BrandColor
+    RespawnEmbeds.dmEmbed("t", "b", "", RespawnEmbeds.WarnColor).getColorRaw shouldBe RespawnEmbeds.WarnColor
+    RespawnEmbeds.dmEmbed("t", "b", "", RespawnEmbeds.RedColor).getColorRaw shouldBe RespawnEmbeds.RedColor
   }
 
   test("the queue is only shown when someone is waiting, and is numbered") {

@@ -50,6 +50,14 @@ class StaminaSpec extends AnyFunSuite with Matchers {
       Some(RespawnButtonId.OfferButton(accept = false, "1082484147492237515", 42L))
   }
 
+  test("a DM Leave button carries its guild, since a DM interaction has none") {
+    RespawnButtonId.parse(RespawnButtonId.dmLeave("1082484147492237515", 415L)) shouldBe
+      Some(RespawnButtonId.DmSpawnButton("leave", "1082484147492237515", 415L))
+    // Must not be confused with the in-thread Leave, which has no guild in it.
+    RespawnButtonId.parse(RespawnButtonId.leave(415L)) shouldBe
+      Some(RespawnButtonId.SpawnButton("leave", 415L))
+  }
+
   test("offer button ids stay inside Discord's 100-character component-id limit") {
     // Real snowflakes are 18-19 digits and claim ids grow without bound; an id
     // over the limit is rejected by Discord when the message is sent, so the

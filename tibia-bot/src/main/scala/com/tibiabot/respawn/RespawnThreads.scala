@@ -65,6 +65,12 @@ object RespawnThreads extends StrictLogging {
       Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
     )
 
+  /** The lone Leave button on a reminder DM, for someone who has already left the
+   *  respawn in game. Carries the guild for the same reason the offer buttons do:
+   *  a DM interaction has no guild of its own. */
+  def reminderButtons(guildId: String, respawnId: Long): ActionRow =
+    ActionRow.of(Button.danger(RespawnButtonId.dmLeave(guildId, respawnId), "Leave"))
+
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
    *  exactly like leaving it. */
@@ -382,6 +388,9 @@ object RespawnButtonId {
     if (!modalId.startsWith(marker)) None else Try(modalId.stripPrefix(marker).toLong).toOption
   }
 
+  /** Leave, pressed from a DM — so it carries the guild the claim belongs to. */
+  def dmLeave(guildId: String, respawnId: Long): String = s"${Prefix}dmleave:$guildId:$respawnId"
+
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
 
@@ -397,6 +406,8 @@ object RespawnButtonId {
   final case class SpawnButton(action: String, respawnId: Long) extends Action
   /** A button on the pinned board post — "claim" or "config". */
   final case class BoardButton(what: String) extends Action
+  /** A spawn button pressed from a DM, which is why it names its own guild. */
+  final case class DmSpawnButton(action: String, guildId: String, respawnId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
 
@@ -405,6 +416,8 @@ object RespawnButtonId {
   def parse(componentId: String): Option[Action] =
     componentId.stripPrefix(Prefix).split(':') match {
       case Array("board", what) => Some(BoardButton(what))
+      case Array("dmleave", guildId, respawnId) =>
+        Try(respawnId.toLong).toOption.map(DmSpawnButton("leave", guildId, _))
       case Array("accept", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>

@@ -469,7 +469,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           repository.cancelClaim(guildId, offer.id)
           repository.findById(guildId, offer.respawnId).foreach { respawn =>
             RespawnThreads.dm(guild, offer.userId,
-              RespawnEmbeds.dmEmbed("Handover expired", RespawnEmbeds.handoverLapsed(respawn), imageFor(respawn)))
+              RespawnEmbeds.dmEmbed("Handover expired", RespawnEmbeds.handoverLapsed(respawn),
+                imageFor(respawn), RespawnEmbeds.RedColor))
             logger.info(s"Handover offer ${offer.id} on '${respawn.code}' in guild '$guildId' lapsed unanswered")
           }
         }.failed.foreach { error =>
@@ -484,12 +485,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // Its handover window is up and nobody took it, so the claim ends
               // for real. Whoever is next in the queue gets their own offer.
               repository.finishClaim(guildId, claim.id)
+              notifyClaimEnded(guild, respawn, claim)
               beginHandover(guild, respawn, config, now, outgoing = None)
             } else {
               // Time's up: start the handover. The claim stays active — and so
               // stays the spawn's holder — until someone accepts or the window
               // lapses. beginHandover finishes it if there's nobody waiting.
-              beginHandover(guild, respawn, config, now, outgoing = Some(claim))
+              beginHandover(guild, respawn, config, now, outgoing = Some(claim), notifyOutgoing = true)
             }
           }
         }.failed.foreach { error =>
@@ -506,15 +508,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           if (due) {
             repository.markWarned(guildId, claim.id)
             repository.findById(guildId, claim.respawnId).foreach { respawn =>
-              val remaining = claim.endsAt
-                .map(end => math.max(1, java.time.Duration.between(now, end).toMinutes).toInt)
-                .getOrElse(lead)
               // DM only, with no thread fallback: a nudge about your own claim
               // isn't worth pinging a shared thread for, and missing it costs
               // nothing — the claim ends the same way either way.
               RespawnThreads.dm(guild, claim.userId,
-                RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim, remaining),
-                  imageFor(respawn)))
+                RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
+                  imageFor(respawn), RespawnEmbeds.WarnColor),
+                Some(RespawnThreads.reminderButtons(guildId, respawn.id)))
             }
           }
         }.failed.foreach { error =>
@@ -541,7 +541,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Returns the offer that went out, if any.
    */
   private def beginHandover(guild: Guild, respawn: Respawn, config: RespawnSettings, now: ZonedDateTime,
-                            outgoing: Option[RespawnClaim]): Option[RespawnClaim] = {
+                            outgoing: Option[RespawnClaim],
+                            notifyOutgoing: Boolean = false): Option[RespawnClaim] = {
     val guildId = guild.getId
     val boundary = resetBoundary(now)
 
@@ -589,7 +590,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
         case None =>
           // Nobody to hand it to, so the spawn really is done.
-          outgoing.foreach(claim => repository.finishClaim(guildId, claim.id))
+          outgoing.foreach { claim =>
+            repository.finishClaim(guildId, claim.id)
+            // Only when the claim ran out on its own — someone who pressed Leave
+            // does not need telling that it ended.
+            if (notifyOutgoing) notifyClaimEnded(guild, respawn, claim)
+          }
           // Use the thread refreshThread just resolved rather than re-deriving it
           // from `respawn`: that is a snapshot taken before the refresh, so on a
           // spawn's first claim its threadId is still empty here.
@@ -633,7 +639,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // Close the outgoing holder before promoting, so a spawn never has
               // two active claims at once.
               respawn.foreach { r =>
-                activeHolder(guildId, r.id).foreach(previous => repository.finishClaim(guildId, previous.id))
+                activeHolder(guildId, r.id).foreach { previous =>
+                  repository.finishClaim(guildId, previous.id)
+                  notifyClaimEnded(guild, r, previous)
+                }
               }
               repository.promoteClaim(guildId, claim.id, now) match {
                 case None =>
@@ -669,6 +678,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             respawn.map(OfferOutcome.Declined).getOrElse(OfferOutcome.Gone)
         }
     }
+
+  /** Tell a holder their claim is over. Only for claims that ended on their own —
+   *  by running out, or by being taken over once the handover window closed. */
+  private def notifyClaimEnded(guild: Guild, respawn: Respawn, claim: RespawnClaim): Unit =
+    RespawnThreads.dm(guild, claim.userId,
+      RespawnEmbeds.dmEmbed("Claim ended", RespawnEmbeds.claimEnded(respawn),
+        imageFor(respawn), RespawnEmbeds.RedColor))
 
   /** Rewrite a spawn's post to match the database — the one function that keeps
    *  Discord and the claim state in step, called after every mutation. Creates
