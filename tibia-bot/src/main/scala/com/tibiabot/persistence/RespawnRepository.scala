@@ -4,6 +4,17 @@ import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSetti
 
 import java.time.ZonedDateTime
 
+/** What bringing a guild's catalogue in line with the bundled file did.
+ *
+ *  `inUse` is the honest part: a code dropped from the file that somebody is
+ *  hunting, queued for or has booked is left where it is, because removing it
+ *  would end a hunt in progress. It is counted rather than silently skipped, so
+ *  whoever ran the repair knows there is something to come back to.
+ */
+final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
+  def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
+}
+
 /** Persistence port for the respawn claim system's per-guild tables
  *  (`respawns`, `respawn_claims`, `respawn_settings`, `respawn_stamina`).
  *
@@ -48,6 +59,17 @@ trait RespawnRepository {
   /** Bulk-insert seed rows, skipping codes the guild already has. Returns how
    *  many were actually inserted. */
   def importSeed(guildId: String, spawns: List[(String, String, String, String)]): Int
+
+  /** Bring the guild's seed-derived rows in line with the bundled file: add
+   *  codes it lacks, correct the name and city of ones that changed, and retire
+   *  ones the file no longer has.
+   *
+   *  Only rows whose `source` is seed are touched, so a spawn a guild added
+   *  itself is never rewritten or removed by an edit to the bundled file. A
+   *  retired code that somebody is still hunting or has booked is left where it
+   *  is and counted in [[SeedSync.inUse]] — the catalogue can wait, a hunt in
+   *  progress cannot. */
+  def syncSeed(guildId: String, spawns: List[(String, String, String, String)]): SeedSync
 
   /** Bring seed-derived rows' `creature` back in line with the bundled list,
    *  returning how many actually changed.

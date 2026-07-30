@@ -104,6 +104,82 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.importSeed(g, batch) shouldBe 0 // idempotent
   }
 
+  test("syncSeed adds, renames and retires so an edited seed file reaches an existing guild") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(
+      ("415", "Edron", "Cult Orcs", ""),
+      ("806", "Port Hope", "Hydra Mountain", ""),
+      ("999", "Nowhere", "A Mistake", "")))
+
+    // The file changes: 806 is renamed and moved, 999 is dropped, 1501 is new.
+    val edited = List(
+      ("415", "Edron", "Cult Orcs", ""),
+      ("806", "Liberty Bay", "Hydra Cave", ""),
+      ("1501", "Roshamuul", "Dark Grounds", ""))
+    val sync = repo.syncSeed(g, edited)
+
+    sync.added shouldBe 1
+    sync.updated shouldBe 1
+    sync.retired shouldBe 1
+    sync.inUse shouldBe 0
+
+    repo.findByCode(g, "806").map(_.name) shouldBe Some("Hydra Cave")
+    repo.findByCode(g, "806").map(_.region) shouldBe Some("Liberty Bay")
+    repo.findByCode(g, "1501").map(_.name) shouldBe Some("Dark Grounds")
+    repo.findByCode(g, "999") shouldBe None
+
+    // Idempotent: running it again finds everything already in step.
+    val again = repo.syncSeed(g, edited)
+    again.changedAnything shouldBe false
+  }
+
+  test("syncSeed never rewrites or retires a spawn the guild added itself") {
+    val (repo, g) = freshRepo()
+    repo.addRespawn(g, "415", "My Own Name", "", "My Own City", "", "", Respawn.SourceCustom, "admin")
+    repo.addRespawn(g, "7777", "House Spawn", "", "Thais", "", "", Respawn.SourceCustom, "admin")
+
+    val sync = repo.syncSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+
+    sync.updated shouldBe 0
+    sync.retired shouldBe 0
+    repo.findByCode(g, "415").map(_.name) shouldBe Some("My Own Name")
+    // Not in the bundled file at all, and still here — the file only speaks for
+    // the rows that came from it.
+    repo.findByCode(g, "7777") should not be empty
+  }
+
+  test("syncSeed leaves a dropped code alone while somebody is on it") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+    val spawn = repo.findByCode(g, "415").get
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc)
+
+    // 415 is gone from the file, but ending somebody's hunt to tidy a catalogue
+    // is the wrong trade — it is reported instead.
+    val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
+    sync.retired shouldBe 0
+    sync.inUse shouldBe 1
+    repo.findByCode(g, "415") should not be empty
+
+    // Once the hunt is over it retires on the next repair.
+    repo.finishClaim(g, repo.activeClaim(g, spawn.id).get.id, RespawnClaim.Outcome.Completed)
+    repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", ""))).retired shouldBe 1
+    repo.findByCode(g, "415") shouldBe None
+  }
+
+  test("syncSeed keeps a dropped code that is only booked for later") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+    val spawn = repo.findByCode(g, "415").get
+    repo.reserveFor(g, spawn.id, "u2", "Two", now.plusHours(3), 120)
+
+    // A booking is a hunt that hasn't happened yet; removing the spawn under it
+    // would cancel somebody's evening.
+    val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
+    sync.inUse shouldBe 1
+    repo.findByCode(g, "415") should not be empty
+  }
+
   test("syncSeedCreatures updates seed rows, and only what actually changed") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", ""), ("806", "Port Hope", "Hydra Mountain", "Hydra")))

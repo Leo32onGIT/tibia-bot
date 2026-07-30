@@ -2,7 +2,7 @@ package com.tibiabot.respawn
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{ClashVerdict, Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.RespawnRepository
+import com.tibiabot.persistence.{RespawnRepository, SeedSync}
 import com.tibiabot.presentation.RespawnEmbeds
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
@@ -251,6 +251,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  how many entries were added. */
   def importSeed(guildId: String): Int =
     repository.importSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
+
+  /** Bring a guild's catalogue in line with the bundled file: codes it lacks,
+   *  names and cities that have changed, and codes the file has dropped.
+   *
+   *  What `/repair` runs, and — with no catalogue commands left — the only way an
+   *  edit to respawns.json reaches a guild that was set up before it. */
+  def syncSeed(guildId: String): SeedSync =
+    repository.syncSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
 
   // --- stamina ------------------------------------------------------------
 

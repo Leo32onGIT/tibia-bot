@@ -1,7 +1,7 @@
 package com.tibiabot.persistence.jdbc
 
 import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.{ConnectionProvider, RespawnRepository}
+import com.tibiabot.persistence.{ConnectionProvider, RespawnRepository, SeedSync}
 
 import java.sql.{Connection, ResultSet, Timestamp}
 import java.time.{ZoneOffset, ZonedDateTime}
@@ -441,6 +441,61 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.executeBatch().sum
       } finally statement.close()
     }
+
+  def syncSeed(guildId: String, spawns: List[(String, String, String, String)]): SeedSync = {
+    val added = importSeed(guildId, spawns)
+    val updated = updateSeedRows(guildId, spawns)
+
+    // Diffed in Scala rather than with a 280-placeholder NOT IN: the catalogue
+    // is small, and the comparison is easier to read here than in SQL.
+    val wanted = spawns.map(_._1.trim.toLowerCase).toSet
+    val orphans = listRespawns(guildId)
+      .filter(_.source == Respawn.SourceSeed)
+      .filterNot(respawn => wanted.contains(respawn.code.trim.toLowerCase))
+    val (busy, free) = orphans.partition(respawn => hasOpenClaims(guildId, respawn.id))
+    free.foreach(respawn => removeRespawn(guildId, respawn.id))
+
+    SeedSync(added, updated, free.size, busy.size)
+  }
+
+  /** Correct the name and city of seed rows the bundled file has changed.
+   *
+   *  `creature` is deliberately not touched here — syncSeedCreatures owns it,
+   *  runs on boot, and honours the `creature_pinned` flag a guild sets to keep
+   *  its own choice. Two writers of one column would fight. */
+  private def updateSeedRows(guildId: String, spawns: List[(String, String, String, String)]): Int =
+    withGuildTransaction(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """UPDATE respawns SET name = ?, region = ?
+          |WHERE LOWER(code) = LOWER(?)
+          |  AND source = 'seed'
+          |  AND (name <> ? OR region <> ?);""".stripMargin)
+      try {
+        spawns.foreach { case (code, region, name, _) =>
+          statement.setString(1, name)
+          statement.setString(2, region)
+          statement.setString(3, code)
+          // Same trick as syncSeedCreatures: comparing makes this a no-op once a
+          // guild is in step, so the count is what actually changed.
+          statement.setString(4, name)
+          statement.setString(5, region)
+          statement.addBatch()
+        }
+        statement.executeBatch().sum
+      } finally statement.close()
+    }
+
+  /** Whether anybody is holding, waiting for, or has booked this spawn. */
+  private def hasOpenClaims(guildId: String, respawnId: Long): Boolean = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """SELECT 1 FROM respawn_claims
+        |WHERE respawn_id = ? AND status IN ('active', 'queued', 'offered', 'reserved')
+        |LIMIT 1;""".stripMargin)
+    try {
+      statement.setLong(1, respawnId)
+      statement.executeQuery().next()
+    } finally statement.close()
+  }
 
   def syncSeedCreatures(guildId: String, creaturesByCode: List[(String, String)]): Int =
     withGuildTransaction(guildId) { conn =>

@@ -264,6 +264,23 @@ final class ChannelService(
       .setDescription(s"The bot will poke:\n${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n${Config.masslogEmoji}<@&$masslogRoleId> If enemies masslog on **$world**")
       .build()
 
+  /** What a seed sync did, in words. Silent when nothing changed, so a repair
+   *  run for some other reason doesn't report a catalogue that is already right.
+   *  A code left alone because somebody is on it is always mentioned — it is the
+   *  one part that needs coming back to. */
+  private def seedSummary(sync: com.tibiabot.persistence.SeedSync): String = {
+    val parts = List(
+      Option(sync.added).filter(_ > 0).map(n => s"added **$n**"),
+      Option(sync.updated).filter(_ > 0).map(n => s"renamed **$n**"),
+      Option(sync.retired).filter(_ > 0).map(n => s"retired **$n**")
+    ).flatten
+    val held = if (sync.inUse > 0)
+      s" **${sync.inUse}** dropped from the list are still in use, so I've left them."
+    else ""
+    if (parts.isEmpty) s"The catalogue was already up to date.$held"
+    else s"Catalogue: ${parts.mkString(", ")}.$held"
+  }
+
   /** Create the respawn system's `📅・sᴘᴀᴡɴs` forum and its pinned board post in
    *  the guild's admin category, seeding the catalogue on the way.
    *
@@ -318,12 +335,12 @@ final class ChannelService(
           // everyone without Manage Threads.
           com.tibiabot.respawn.RespawnThreads.refreshBoard(guild, settings)
           // The channel survived; the board post may not have.
-          // Pick up spawns added to the bundled catalogue since this guild was set
-          // up. importSeed only ever adds codes the guild doesn't have, so a
-          // guild's own edits survive it — and the board is drawn from the result,
-          // which is the only way a new spawn reaches an existing forum now that
-          // there are no catalogue commands.
-          val added = respawnService.importSeed(guild.getId)
+          // Bring the catalogue in line with the bundled file — added codes,
+          // renamed ones, and ones the file has dropped. Only rows that came from
+          // the seed are touched. This is the only way an edit to respawns.json
+          // reaches a guild that already exists, now that there are no catalogue
+          // commands.
+          val sync = respawnService.syncSeed(guild.getId)
 
           val boardMissing = com.tibiabot.respawn.RespawnThreads
             .resolveThread(guild, existing, settings.boardThread).isEmpty
@@ -332,14 +349,12 @@ final class ChannelService(
               respawnService.listRespawns(guild.getId))
             respawnService.updateChannels(guild.getId, existing.getId, boardId)
             s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its board post was " +
-              s"missing, so I've recreated it with **$added** new respawns in the catalogue."
+              s"missing, so I've recreated it. ${seedSummary(sync)}"
           } else {
             val redrawn = com.tibiabot.respawn.RespawnThreads
               .redrawBoard(guild, settings, respawnService.listRespawns(guild.getId))
-            if (added > 0 && redrawn)
-              s"${Config.yesEmoji} Added **$added** new respawns to <#${existing.getId}> and redrew its board."
-            else if (redrawn)
-              s"${Config.yesEmoji} <#${existing.getId}> is set up already — I've redrawn its board."
+            if (redrawn)
+              s"${Config.yesEmoji} Redrew the board on <#${existing.getId}>. ${seedSummary(sync)}"
             else
               s"${Config.noEmoji} <#${existing.getId}> already exists; I couldn't redraw its board."
           }
