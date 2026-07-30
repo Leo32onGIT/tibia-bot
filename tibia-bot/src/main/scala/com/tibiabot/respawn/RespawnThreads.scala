@@ -244,7 +244,7 @@ object RespawnThreads extends StrictLogging {
     RespawnBoardImage.render(spawns)
       .foreach(png => message.setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName)))
 
-    val post = forum.createForumPost("📅 Respawn codes", message.build())
+    val post = forum.createForumPost("📅 Respawn Claims", message.build())
       .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
       .complete()
     val thread = post.getThreadChannel

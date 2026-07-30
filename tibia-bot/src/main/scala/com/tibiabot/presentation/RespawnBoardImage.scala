@@ -45,6 +45,9 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
    *  tight enough to be compact is one nobody can scan. */
   private val CityGap = 24
   private val ColumnGap = 40
+  /** Between a code and the name it belongs to. Fixed, so every name in a column
+   *  starts at the same x however wide its code is. */
+  private val CodeGap = 10
   private val Padding = 28
   private val FooterHeight = 26
   private val Columns = 4
@@ -140,13 +143,16 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
     val nameMetrics = scratch.getFontMetrics(nameFont)
     val footerMetrics = scratch.getFontMetrics(footerFont)
 
-    def rowWidth(row: Respawn): Int =
-      codeMetrics.stringWidth(row.code + "  ") + nameMetrics.stringWidth(row.name)
-
-    val widths = columns.map { column =>
-      column.map { block =>
-        (cityMetrics.stringWidth(block.city) :: block.rows.map(rowWidth)).max
-      }.foldLeft(0)(math.max)
+    // Every name in a column starts at the same x, whatever its code measures.
+    // A column mixing `101` with `1406a` staggered them otherwise, which turns a
+    // list you scan down into a ragged edge that has to be read.
+    val codeWidths = columns.map { column =>
+      column.flatMap(_.rows).map(row => codeMetrics.stringWidth(row.code)).foldLeft(0)(math.max)
+    }
+    val widths = columns.zip(codeWidths).map { case (column, codeWidth) =>
+      val names = column.flatMap(_.rows).map(row => nameMetrics.stringWidth(row.name)).foldLeft(0)(math.max)
+      val cities = column.map(block => cityMetrics.stringWidth(block.city)).foldLeft(0)(math.max)
+      math.max(cities, codeWidth + CodeGap + names)
     }
     val tallest = columns.map(_.map(_.height).sum).foldLeft(0)(math.max)
 
@@ -162,7 +168,7 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
       g.fillRect(0, 0, width, height)
 
       var x = Padding
-      columns.zip(widths).foreach { case (column, columnWidth) =>
+      columns.zip(widths).zip(codeWidths).foreach { case ((column, columnWidth), codeWidth) =>
         var y = Padding + CitySize
         column.foreach { block =>
           g.setFont(cityFont)
@@ -170,13 +176,12 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
           g.drawString(block.city, x, y)
           y += CityHeight - 8
           block.rows.foreach { row =>
-            val code = row.code + "  "
             g.setFont(codeFont)
             g.setColor(CodeColor)
-            g.drawString(code, x, y)
+            g.drawString(row.code, x, y)
             g.setFont(nameFont)
             g.setColor(NameColor)
-            g.drawString(row.name, x + codeMetrics.stringWidth(code), y)
+            g.drawString(row.name, x + codeWidth + CodeGap, y)
             y += RowHeight
           }
           y += CityGap
@@ -184,10 +189,12 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
         x += columnWidth + ColumnGap
       }
 
-      val footer = s"${spawns.size} respawns"
       g.setFont(footerFont)
       g.setColor(FooterColor)
-      g.drawString(footer, width - Padding - footerMetrics.stringWidth(footer), height - Padding)
+      val count = s"${spawns.size} respawn codes"
+      g.drawString(count, Padding, height - Padding)
+      val mark = "Violent Bot"
+      g.drawString(mark, width - Padding - footerMetrics.stringWidth(mark), height - Padding)
     } finally {
       g.dispose()
       scratch.dispose()
