@@ -99,6 +99,39 @@ final class ChannelService(
     }).toMap)
   }
 
+  /** The bot's own override on its "Violent Bot" category.
+   *
+   *  MANAGE_PERMISSIONS is the load-bearing one. Discord only lets you write a
+   *  channel override if you either already hold every permission in it or hold
+   *  Manage Permissions *explicitly on that channel* — so without this, granting
+   *  the moderator role its access to the spawns forum fails, and takes the whole
+   *  forum setup down with it. The thread permissions are here for the same
+   *  reason: the forum override hands those to the moderator role, and you cannot
+   *  grant what you do not have.
+   *
+   *  Non-fatal. A bot invited without Manage Roles cannot grant itself Manage
+   *  Permissions either, and a guild in that position should still get its
+   *  channels — it just needs the permission adding by hand before the spawns
+   *  forum will set up.
+   */
+  private def setCategoryBotPerms(category: Category, botRole: Role): Unit =
+    try {
+      category.upsertPermissionOverride(botRole)
+        .grant(Permission.VIEW_CHANNEL)
+        .grant(Permission.MESSAGE_SEND)
+        .grant(Permission.MESSAGE_SEND_IN_THREADS)
+        .grant(Permission.MESSAGE_HISTORY)
+        .grant(Permission.MANAGE_THREADS)
+        .grant(Permission.MANAGE_CHANNEL)
+        .grant(Permission.MANAGE_PERMISSIONS)
+        .complete()
+    } catch {
+      case ex: Throwable =>
+        logger.warn(s"Could not give the bot full permissions on its category in guild " +
+          s"'${category.getGuild.getId}' — the spawns forum will not set up until someone " +
+          s"grants Manage Roles by hand", ex)
+    }
+
   /** The @everyone override on the bot's "Violent Bot" category.
    *
    *  Members may see it — that is how they read the notifications channel and the
@@ -262,10 +295,14 @@ final class ChannelService(
     }
 
     try {
-      // Re-assert the category's @everyone override, since the forum inherits
-      // from it — this is what migrates categories created before the deny.
-      Option(guild.getCategoryById(discordConfig.getOrElse("admin_category", "0")))
-        .foreach(setCategoryPublicPerms(_, guild.getPublicRole, visible = true))
+      // Re-assert the category's overrides. The @everyone one because the forum
+      // inherits from it, and the bot's because Manage Permissions there is what
+      // lets the moderator override below be written at all — both migrate
+      // categories created before those rules existed.
+      Option(guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))).foreach { category =>
+        setCategoryBotPerms(category, guild.getBotRole)
+        setCategoryPublicPerms(category, guild.getPublicRole, visible = true)
+      }
 
       com.tibiabot.respawn.RespawnThreads.findForum(guild, settings) match {
         case Some(existing) =>
@@ -296,10 +333,7 @@ final class ChannelService(
           var adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
           if (adminCategory == null) {
             val newAdminCategory = guild.createCategory("Violent Bot").complete()
-            newAdminCategory.upsertPermissionOverride(guild.getBotRole)
-              .grant(Permission.VIEW_CHANNEL)
-              .grant(Permission.MESSAGE_SEND)
-              .complete()
+            setCategoryBotPerms(newAdminCategory, guild.getBotRole)
             setCategoryPublicPerms(newAdminCategory, guild.getPublicRole, visible = true)
             discordUpdateConfig(guild, newAdminCategory.getId, "", "", "", "")
             adminCategory = newAdminCategory
@@ -400,10 +434,7 @@ final class ChannelService(
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
         val adminCategory = guild.createCategory("Violent Bot").complete()
-        adminCategory.upsertPermissionOverride(botRole)
-          .grant(Permission.VIEW_CHANNEL)
-          .grant(Permission.MESSAGE_SEND)
-          .complete()
+        setCategoryBotPerms(adminCategory, botRole)
         setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = true)
         val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategory).complete()
         // hide this channel from @everyone; only the bot can view/post
@@ -431,10 +462,7 @@ final class ChannelService(
         if (adminCategoryCheck == null) {
           // admin category has been deleted
           val adminCategory = guild.createCategory("Violent Bot").complete()
-          adminCategory.upsertPermissionOverride(botRole)
-            .grant(Permission.VIEW_CHANNEL)
-            .grant(Permission.MESSAGE_SEND)
-            .complete()
+          setCategoryBotPerms(adminCategory, botRole)
           setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = false)
           discordUpdateConfig(guild, adminCategory.getId, "", "", "", world)
           adminCategoryCheck = adminCategory
