@@ -121,6 +121,11 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.yesEmoji} **${respawn.displayName}** has gone to " +
                   s"<@$toUserId> for that slot. Your booking still stands for the days after.")
                 clearOfferButtons(event)
+              case SlotAnswer.PassedUnclaimed(respawn) =>
+                respond.text(s"${Config.yesEmoji} You've given up that slot on " +
+                  s"**${respawn.displayName}** — the hunt they'd booked around it no longer fits, " +
+                  "so it's simply free now. Your booking still stands for the days after.")
+                clearOfferButtons(event)
               case SlotAnswer.NotYours =>
                 respond.text(s"${Config.noEmoji} That slot isn't yours.")
               case SlotAnswer.Gone =>
@@ -246,11 +251,17 @@ object RespawnButtons extends StrictLogging {
                 // booking here, in which case there is nothing to create.
                 service.schedulesForUser(guildId, user.getId).find(_.respawnId == respawn.id) match {
                   case Some(existing) =>
-                    event.replyEmbeds(RespawnEmbeds.schedulesEmbed(List((existing, respawn)),
-                        java.time.ZonedDateTime.now()))
-                      .setComponents(RespawnThreads.scheduleButtons(existing.id))
-                      .setEphemeral(true)
-                      .queue()
+                    // Deferred, unlike the modal branch below: showing the spawn's
+                    // whole evening costs two more reads, and a modal is the only
+                    // thing that can't follow a defer.
+                    event.deferReply(true).queue()
+                    val deferredRespond = new Responder(event, deferred = true)
+                    val now = java.time.ZonedDateTime.now()
+                    deferredRespond.embed(
+                      RespawnEmbeds.bookingPanel(respawn, existing,
+                        service.reservationsFor(guildId, respawn.id, now),
+                        service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
+                      Some(RespawnThreads.scheduleButtons(existing.id)))
                   case None =>
                     // A moderator with no booking of their own sees the ones that
                     // exist here, so they can act on somebody else's rather than

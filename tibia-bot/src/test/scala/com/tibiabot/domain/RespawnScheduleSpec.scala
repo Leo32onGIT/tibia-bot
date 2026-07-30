@@ -240,4 +240,75 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     RespawnSchedule.upcomingStarts(anchor, berlin, 0) shouldBe empty
     RespawnSchedule.upcomingStarts(anchor, berlin, -1) shouldBe empty
   }
+
+  // --- clashing with slots somebody has already booked ---------------------
+
+  private val window = (anchor.minusDays(1), anchor.plusDays(2))
+
+  private def slot(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u2",
+                   scheduleId: Option[Long] = Some(9L), askedAt: Option[ZonedDateTime] = None) =
+    RespawnClaim(7L, 1L, owner, owner, "", RespawnClaim.StatusReserved, 0, anchor,
+      Some(start), Some(start.plusMinutes(durationMinutes.toLong)), durationMinutes,
+      warned = false, RespawnClaim.KindScheduled, None, None, None, None,
+      scheduleId = scheduleId, askedAt = askedAt)
+
+  private def oneOff(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u1") =
+    RespawnSchedule(0L, 1L, owner, owner, "", start, RespawnSchedule.Daily, durationMinutes,
+      active = true, createdAt = anchor, daysOfWeek = RespawnSchedule.OneOff)
+
+  test("a booking runs over a slot it overlaps, whichever end it hangs off") {
+    val booked = slot(anchor)
+    oneOff(anchor.plusMinutes(60)).overlapsSlot(booked, window._1, window._2) shouldBe true
+    oneOff(anchor.minusMinutes(60)).overlapsSlot(booked, window._1, window._2) shouldBe true
+    // Touching end to end is not an overlap: one starts exactly as the other stops.
+    oneOff(anchor.plusMinutes(120)).overlapsSlot(booked, window._1, window._2) shouldBe false
+    oneOff(anchor.minusMinutes(120)).overlapsSlot(booked, window._1, window._2) shouldBe false
+  }
+
+  test("a repeating booking runs over a slot on any night it lands on") {
+    // Tomorrow's slot, hit by the second occurrence of a daily booking.
+    schedule().overlapsSlot(slot(anchor.plusDays(1)), window._1, window._2) shouldBe true
+    // The same slot, missed by a booking that only runs the day the anchor is on.
+    onlyOn(anchor.getDayOfWeek).overlapsSlot(slot(anchor.plusDays(1)), window._1, window._2) shouldBe false
+  }
+
+  test("a clash with a slot nobody has asked about becomes a question for its owner") {
+    val booked = slot(anchor)
+    RespawnSchedule.verdict(oneOff(anchor), Nil, List(booked)) shouldBe ClashVerdict.Ask(booked)
+  }
+
+  test("your own booking is never something to ask yourself about") {
+    // Whether it is seen as a slot or as the rule behind it.
+    RespawnSchedule.verdict(oneOff(anchor), Nil, List(slot(anchor, owner = "u1"))) shouldBe
+      ClashVerdict.Yours
+    RespawnSchedule.verdict(oneOff(anchor), List(schedule()), List(slot(anchor))) shouldBe
+      ClashVerdict.Yours
+  }
+
+  test("a repeating booking is refused rather than asked about") {
+    // One evening's answer cannot settle every night from now on.
+    RespawnSchedule.verdict(schedule(days = RespawnSchedule.EveryDay).copy(userId = "u3"),
+      Nil, List(slot(anchor))) shouldBe ClashVerdict.Repeats
+  }
+
+  test("a rule whose slot hasn't been booked yet is too far ahead to ask about") {
+    val theirs = schedule().copy(id = 9L, userId = "u2")
+    // The rule clashes, but the night in question is past the look-ahead, so no
+    // slot of it exists to hang the question on.
+    RespawnSchedule.verdict(oneOff(anchor), List(theirs), Nil) shouldBe ClashVerdict.TooFarAhead
+    // The same rule, once that night's slot is on the books.
+    RespawnSchedule.verdict(oneOff(anchor), List(theirs), List(slot(anchor, scheduleId = Some(9L)))) shouldBe
+      ClashVerdict.Ask(slot(anchor, scheduleId = Some(9L)))
+  }
+
+  test("a booking across two slots has nobody single to ask") {
+    RespawnSchedule.verdict(oneOff(anchor, durationMinutes = 240),
+      Nil, List(slot(anchor), slot(anchor.plusMinutes(120), owner = "u3"))) shouldBe
+      ClashVerdict.ManySlots
+  }
+
+  test("a slot its owner has already been asked about is not asked about again") {
+    RespawnSchedule.verdict(oneOff(anchor), Nil, List(slot(anchor, askedAt = Some(anchor)))) shouldBe
+      ClashVerdict.AlreadyAsked
+  }
 }

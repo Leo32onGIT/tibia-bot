@@ -396,14 +396,34 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     repo.requestableSlot(g, spawn.id, now).map(_.id) shouldBe Some(slot.id)
 
-    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
     asked.flatMap(_.requesterUserId) shouldBe Some("u2")
     asked.flatMap(_.askedAt) should not be empty
 
     // The rule: once asked, never again — and two people pressing Request at the
     // same moment cannot both get in.
-    repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60)) shouldBe None
+    repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60), None) shouldBe None
     repo.requestableSlot(g, spawn.id, now) shouldBe None
+  }
+
+  test("a request raised by booking over a slot remembers the window that was booked") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    // They booked three hours from an hour before the slot, which is a different
+    // window from the one they are asking about — so it has to be stored, not
+    // inferred from the slot when the answer comes back.
+    val wanted = now.plusHours(1)
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+      Some((wanted, 180))).get
+
+    asked.requestedSlot.map(_._2) shouldBe Some(180)
+    asked.requestedSlot.map(_._1.toInstant) shouldBe Some(wanted.toInstant)
+    // A Request-button ask leaves it empty, which is what tells the two apart.
+    repo.findClaimById(g, slot.id).flatMap(_.requestedSlot) should not be empty
   }
 
   test("keeping a slot clears the request but not the fact it was asked") {
@@ -412,10 +432,15 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+      Some((now.plusHours(1), 180)))
 
     val kept = repo.keepOccurrence(g, slot.id)
     kept.flatMap(_.requesterUserId) shouldBe None
+    // The window they wanted goes with the request: it describes a booking that
+    // is not going to happen now, and leaving it would make the slot look asked
+    // about by somebody who has been told no.
+    kept.flatMap(_.requestedSlot) shouldBe None
     // Still asked, so nobody else may ask about this slot either.
     kept.flatMap(_.askedAt) should not be empty
     kept.map(_.isReserved) shouldBe Some(true)
@@ -429,7 +454,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
 
     repo.expiredRequests(g, now.plusMinutes(59)) shouldBe empty
     repo.expiredRequests(g, now.plusMinutes(60)).map(_.id) shouldBe List(slot.id)

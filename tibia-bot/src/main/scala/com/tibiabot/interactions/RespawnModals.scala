@@ -3,7 +3,7 @@ package com.tibiabot.interactions
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
 import com.tibiabot.domain.Respawn
 import com.tibiabot.commands.Permissions
-import com.tibiabot.respawn.RespawnButtonId
+import com.tibiabot.respawn.{RespawnButtonId, ScheduleResult}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.checkbox.Checkbox
@@ -343,11 +343,21 @@ object RespawnModals extends StrictLogging {
               service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
                 firstStart, duration, daysOfWeek) match {
                 case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
-                case Right(schedule) =>
+                case Right(ScheduleResult.Booked(schedule)) =>
                   reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
                     s"${schedule.repeatLabel} for " +
                     s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
                     s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
+                // Deliberately not phrased as a booking. Nothing has been written
+                // for them, and telling somebody they have a slot they may not get
+                // is worse than making them wait for the answer.
+                case Right(ScheduleResult.Requested(_, slot, deadline)) =>
+                  reply(event, s"${Config.yesEmoji} That time is <@${slot.userId}>'s, so I've asked " +
+                    "whether they're actually hunting it.\nIf they say no, or don't answer by " +
+                    s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
+                    s"booked for you from <t:$startEpoch:t> for " +
+                    s"${RespawnEmbeds.humanDuration(duration)} and I'll DM you. " +
+                    "Nothing is held for you until then.")
               }
             }
         }

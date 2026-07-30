@@ -1,7 +1,7 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.Config
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
+import com.tibiabot.domain.{ClashVerdict, Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.RespawnRepository
 import com.tibiabot.presentation.RespawnEmbeds
 import com.tibiabot.scheduler.ServerSaveSchedule
@@ -64,6 +64,23 @@ object RequestOutcome {
   case object NotConfigured extends RequestOutcome
 }
 
+/** What booking a slot did.
+ *
+ *  Two outcomes rather than one because a booking that clashes with somebody
+ *  else's is not always a refusal any more: a one-off over a slot nobody has
+ *  asked about becomes a question for its owner, and the answer decides whether
+ *  the booking happens at all. Nothing is written for the asker until then, so
+ *  there is no half-made booking to explain or clean up. */
+sealed trait ScheduleResult
+object ScheduleResult {
+  /** The slot was free and is now theirs. */
+  final case class Booked(schedule: RespawnSchedule) extends ScheduleResult
+  /** It clashed, and the clashing slot's owner has been asked whether they are
+   *  actually hunting it. */
+  final case class Requested(respawn: Respawn, slot: RespawnClaim, deadline: ZonedDateTime)
+    extends ScheduleResult
+}
+
 /** The result of a slot owner answering "are you hunting tonight?". */
 sealed trait SlotAnswer
 object SlotAnswer {
@@ -71,6 +88,10 @@ object SlotAnswer {
   final case class Kept(respawn: Respawn) extends SlotAnswer
   /** They are not, so it passes to whoever asked. */
   final case class Passed(respawn: Respawn, toUserId: String) extends SlotAnswer
+  /** They are not — but the asker had booked a longer window than the slot they
+   *  asked about, and the rest of it is somebody else's now. The slot is given up
+   *  all the same; it simply goes back to being free rather than to them. */
+  final case class PassedUnclaimed(respawn: Respawn) extends SlotAnswer
   /** Already answered, lapsed, or the slot is gone. */
   case object Gone extends SlotAnswer
   case object NotYours extends SlotAnswer
@@ -633,14 +654,16 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   /** Book a slot on a spawn, repeating on chosen weekdays or happening once.
    *
-   *  Refused when it would overlap one that already exists: two bookings on the
-   *  same spawn at the same time is not a state the handover rules can resolve,
-   *  and silently letting the second win would take a slot from somebody who had
-   *  it first. */
+   *  Two bookings on the same spawn at the same time is not a state the handover
+   *  rules can resolve, and silently letting the second win would take a slot from
+   *  somebody who had it first — so a clash is never simply allowed. What it does
+   *  instead depends on the clash: a one-off over a single booked slot nobody has
+   *  asked about becomes a question for that slot's owner (see [[askForClash]]),
+   *  and anything else is still refused outright. */
   def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
                   characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay,
-                  now: ZonedDateTime = ZonedDateTime.now()): Either[String, RespawnSchedule] =
+                  now: ZonedDateTime = ZonedDateTime.now()): Either[String, ScheduleResult] =
     settings(guild.getId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
@@ -655,21 +678,106 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else {
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
             firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
-          repository.schedulesForRespawn(guildId, respawn.id).find(overlaps(_, candidate)) match {
-            case Some(clash) =>
-              val when = clash.nextStartAtOrAfter(now)
-                .map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
-              Left(s"That clashes with <@${clash.userId}>'s slot on this respawn " +
-                s"($when for ${RespawnEmbeds.humanDuration(clash.durationMinutes)}).")
-            case None =>
-              val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
-                firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
-              materialise(guildId, saved, now)
-              refreshThread(guild, respawn, config)
-              Right(saved)
-          }
+          val schedules = repository.schedulesForRespawn(guildId, respawn.id).filter(overlaps(_, candidate))
+          val slots = clashingReservations(guildId, respawn.id, candidate, now)
+          if (schedules.isEmpty && slots.isEmpty) {
+            val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
+              firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
+            materialise(guildId, saved, now)
+            refreshThread(guild, respawn, config)
+            Right(ScheduleResult.Booked(saved))
+          } else askForClash(guild, respawn, config, candidate, schedules, slots, now)
         }
     }
+
+  /** A booking that clashes: ask the other person, or refuse.
+   *
+   *  Only one shape of clash is worth asking about — a booking that happens once,
+   *  landing on exactly one booked slot, owned by somebody else, that nobody has
+   *  asked about yet. Everything else is refused, and each refusal says which
+   *  rule it fell foul of:
+   *
+   *  A repeating booking is refused because the question is about one evening,
+   *  and an answer for tonight cannot stand in for every Tuesday from now on. A
+   *  clash across two slots is refused because it would mean asking two people
+   *  and granting the booking only if both said yes, which is a negotiation
+   *  rather than a request. A clash with a schedule whose occurrence has not been
+   *  booked yet is refused because there is no slot to attach the question to —
+   *  it is simply too far ahead, and nearer the day it becomes askable.
+   *
+   *  Nothing is written for the asker here. Their booking exists only as the
+   *  window recorded against the slot they asked for, and is created if and when
+   *  the answer goes their way — so a refused request leaves nothing behind. */
+  private def askForClash(guild: Guild, respawn: Respawn, config: RespawnSettings,
+                          candidate: RespawnSchedule, schedules: List[RespawnSchedule],
+                          slots: List[RespawnClaim], now: ZonedDateTime): Either[String, ScheduleResult] = {
+    val guildId = guild.getId
+    def refuse(why: String): Either[String, ScheduleResult] =
+      Left(clashMessage(schedules, slots, now) + why)
+
+    RespawnSchedule.verdict(candidate, schedules, slots) match {
+      case ClashVerdict.Yours =>
+        Left("You already have a booking on this respawn over that time.")
+      case ClashVerdict.Repeats =>
+        refuse(" A booking that repeats has to go on a time nobody else has taken.")
+      case ClashVerdict.TooFarAhead =>
+        refuse(" It's too far ahead to ask them about — try again nearer the day.")
+      case ClashVerdict.AlreadyAsked =>
+        refuse(" Its owner has already been asked about that slot once, which is the limit.")
+      case ClashVerdict.ManySlots =>
+        refuse(" It runs over more than one booking, so there's nobody single to ask.")
+
+      case ClashVerdict.Ask(slot) =>
+        // Never wait past the slot it is about: an answer that arrives after the
+        // hunt started is no use to anybody.
+        val slotStart = slot.startsAt.getOrElse(now)
+        val wanted = now.plusMinutes(Config.Respawn.bookingRequestResponseMinutes.toLong)
+        val deadline = if (wanted.isAfter(slotStart)) slotStart else wanted
+        val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
+
+        repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
+          now, deadline, theirs) match {
+          case None => refuse(" Somebody else asked about it first.")
+          case Some(asked) =>
+            RespawnThreads.dm(guild, asked.userId,
+              RespawnEmbeds.dmEmbed("Are you hunting tonight?",
+                RespawnEmbeds.slotRequest(respawn, asked, candidate.userName, deadline, theirs),
+                imageFor(respawn), RespawnEmbeds.WarnColor),
+              Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
+            refreshThread(guild, respawn, config)
+            Right(ScheduleResult.Requested(respawn, asked, deadline))
+        }
+    }
+  }
+
+  /** Who a clash is with, preferring a booked slot over the rule behind it — the
+   *  slot knows the night it is actually on. */
+  private def clashMessage(schedules: List[RespawnSchedule], slots: List[RespawnClaim],
+                           now: ZonedDateTime): String = {
+    val (who, when, minutes) = slots.headOption match {
+      case Some(slot) => (slot.userId, slot.startsAt, slot.durationMinutes)
+      case None =>
+        val schedule = schedules.head
+        (schedule.userId, schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
+    }
+    val at = when.map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
+    s"That clashes with <@$who>'s slot on this respawn ($at for ${RespawnEmbeds.humanDuration(minutes)})."
+  }
+
+  /** Booked slots on a spawn that any occurrence of `candidate` would run over.
+   *
+   *  Checked alongside the schedule-to-schedule rule rather than instead of it,
+   *  because the two see different things. A slot handed to whoever asked for it
+   *  is a booking with no schedule behind it, so comparing rules alone would let
+   *  somebody book straight over it; and a rule whose next occurrence is beyond
+   *  the look-ahead has no slot yet, so comparing slots alone would let two
+   *  standing bookings collide the day they finally meet. */
+  private def clashingReservations(guildId: String, respawnId: Long, candidate: RespawnSchedule,
+                                   now: ZonedDateTime): List[RespawnClaim] = {
+    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    repository.reservationsFor(guildId, respawnId, now)
+      .filter(candidate.overlapsSlot(_, now, horizon))
+  }
 
   /** Whether two bookings on the same spawn ever run at the same time. The rule
    *  itself lives in the domain, where it is testable without a database. */
@@ -738,12 +846,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             val wanted = now.plusMinutes(Config.Respawn.requestResponseMinutes.toLong)
             val deadline = if (wanted.isAfter(slotStart)) slotStart else wanted
 
-            repository.requestOccurrence(guildId, slot.id, requesterId, requesterName, now, deadline) match {
+            // No wanted window: pressing Request asks for this slot as it stands.
+            repository.requestOccurrence(guildId, slot.id, requesterId, requesterName, now,
+                deadline, None) match {
               case None => RequestOutcome.AlreadyAsked(respawn)
               case Some(asked) =>
                 RespawnThreads.dm(guild, asked.userId,
                   RespawnEmbeds.dmEmbed("Are you hunting tonight?",
-                    RespawnEmbeds.slotRequest(respawn, asked, requesterName, deadline),
+                    RespawnEmbeds.slotRequest(respawn, asked, requesterName, deadline, None),
                     imageFor(respawn), RespawnEmbeds.WarnColor),
                   Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
                 refreshThread(guild, respawn, config)
@@ -771,27 +881,48 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
 
   /** The owner isn't hunting it, or never answered: the slot passes to whoever
-   *  asked, as a booking of their own at the same time. */
+   *  asked, as a booking of their own.
+   *
+   *  What they get is the window they asked for, which is this slot when they
+   *  pressed Request and their own when they asked by trying to book over it.
+   *  The second can be longer than the slot being given up, so it is checked
+   *  against the rest of the evening first: the owner has said they aren't
+   *  hunting either way, so their slot goes regardless, but the asker is only
+   *  given a window that is genuinely free. */
   def passSlot(guild: Guild, userId: String, claimId: Long, outcome: String,
                now: ZonedDateTime = ZonedDateTime.now()): SlotAnswer =
     withOwnedSlot(guild, userId, claimId) { (config, respawn, slot) =>
-      slot.requesterUserId match {
-        case None => SlotAnswer.Gone
-        case Some(requester) =>
-          val guildId = guild.getId
+      val guildId = guild.getId
+      val granted = slot.requestedSlot.orElse(slot.startsAt.map(_ -> slot.durationMinutes))
+      (slot.requesterUserId, granted) match {
+        case (None, _) | (_, None) => SlotAnswer.Gone
+        case (Some(requester), Some((start, minutes))) =>
+          val end = start.plusMinutes(minutes.toLong)
+          val inTheWay = repository.reservationsFor(guildId, respawn.id, now)
+            .filter(_.id != slot.id)
+            .filter(other => other.startsAt.exists { otherStart =>
+              otherStart.isBefore(end) && start.isBefore(otherStart.plusMinutes(other.durationMinutes.toLong))
+            })
           repository.cancelClaim(guildId, slot.id, outcome)
-          // A booking of their own rather than a rewritten row: the slot is no
-          // longer an occurrence of anybody's standing rule, and the audit trail
-          // keeps both halves of what happened.
-          slot.startsAt.foreach { start =>
+          if (inTheWay.nonEmpty) {
+            RespawnThreads.dm(guild, requester,
+              RespawnEmbeds.dmEmbed("The slot is free, but not yours",
+                RespawnEmbeds.slotRequestBlocked(respawn, start, minutes), imageFor(respawn),
+                RespawnEmbeds.WarnColor))
+            refreshThread(guild, respawn, config)
+            SlotAnswer.PassedUnclaimed(respawn)
+          } else {
+            // A booking of their own rather than a rewritten row: the slot is no
+            // longer an occurrence of anybody's standing rule, and the audit trail
+            // keeps both halves of what happened.
             repository.reserveFor(guildId, respawn.id, requester,
-              slot.requesterUserName.getOrElse(""), start, slot.durationMinutes)
+              slot.requesterUserName.getOrElse(""), start, minutes)
+            RespawnThreads.dm(guild, requester,
+              RespawnEmbeds.dmEmbed("The slot is yours",
+                RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
+            refreshThread(guild, respawn, config)
+            SlotAnswer.Passed(respawn, requester)
           }
-          RespawnThreads.dm(guild, requester,
-            RespawnEmbeds.dmEmbed("The slot is yours",
-              RespawnEmbeds.slotRequestGranted(respawn, slot), imageFor(respawn)))
-          refreshThread(guild, respawn, config)
-          SlotAnswer.Passed(respawn, requester)
       }
     }
 

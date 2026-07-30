@@ -78,7 +78,16 @@ final case class RespawnClaim(
   /** How long the owner has to answer before the slot passes to whoever asked. */
   requestDeadline: Option[ZonedDateTime] = None,
   requesterUserId: Option[String] = None,
-  requesterUserName: Option[String] = None
+  requesterUserName: Option[String] = None,
+  /** The slot the requester actually wants, when the request came from them
+   *  trying to book over this one rather than from the Request button.
+   *
+   *  Both empty for a Request-button ask, which is what tells [[requestedSlot]]
+   *  apart from it: that flow hands over this slot as it stands, while a booking
+   *  request is for a window of the asker's own choosing that merely overlaps
+   *  this one. */
+  requestedStartsAt: Option[ZonedDateTime] = None,
+  requestedDurationMinutes: Option[Int] = None
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -107,6 +116,14 @@ final case class RespawnClaim(
 
   /** Whether somebody is waiting on the owner's answer right now. */
   def requestPending: Boolean = isReserved && requesterUserId.isDefined
+
+  /** The window the asker wants, when they asked by trying to book over this
+   *  slot. Empty for a Request-button ask, where what they want *is* this slot. */
+  def requestedSlot: Option[(ZonedDateTime, Int)] =
+    for {
+      start <- requestedStartsAt
+      minutes <- requestedDurationMinutes
+    } yield (start, minutes)
 
   /** True while this claim's time is up but it is being held open because the
    *  next person in line still has an unanswered handover offer. The spawn goes
@@ -298,6 +315,42 @@ final case class RespawnSchedule(
 
   /** How this booking recurs, in words: "once", "every day", "every Tue, Wed". */
   def repeatLabel: String = RespawnSchedule.repeatLabel(daysOfWeek)
+
+  /** Whether any slot this booking produces between `from` and `to` runs over an
+   *  already-booked one.
+   *
+   *  Needed alongside [[RespawnSchedule.clash]] because a slot handed to whoever
+   *  asked for it has no schedule behind it — comparing rules to rules cannot see
+   *  it, and would let somebody book straight over it. */
+  def overlapsSlot(slot: RespawnClaim, from: ZonedDateTime, to: ZonedDateTime): Boolean =
+    slot.startsAt.exists { start =>
+      val end = start.plusMinutes(slot.durationMinutes.toLong)
+      occurrencesBetween(from, to).exists(occurrence =>
+        occurrence.isBefore(end) && start.isBefore(endOf(occurrence)))
+    }
+}
+
+/** What to do about a booking that clashes with one already there.
+ *
+ *  Only one shape of clash is worth putting to the other person, and the rest
+ *  are refusals with different reasons — which the caller needs to keep apart,
+ *  since "try again nearer the day" and "that time is taken" ask for very
+ *  different things from whoever is booking. */
+sealed trait ClashVerdict
+object ClashVerdict {
+  /** Ask this slot's owner whether they are actually hunting it. */
+  final case class Ask(slot: RespawnClaim) extends ClashVerdict
+  /** The clash is with the asker's own booking. */
+  case object Yours extends ClashVerdict
+  /** A repeating booking, where an answer about one evening cannot settle every
+   *  week from now on. */
+  case object Repeats extends ClashVerdict
+  /** The clashing rule's slot hasn't been booked yet — too far ahead to ask. */
+  case object TooFarAhead extends ClashVerdict
+  /** It runs over more than one booking, so there is nobody single to ask. */
+  case object ManySlots extends ClashVerdict
+  /** That slot's owner has already been asked once, which is the limit. */
+  case object AlreadyAsked extends ClashVerdict
 }
 
 object RespawnSchedule {
@@ -344,6 +397,29 @@ object RespawnSchedule {
       slotsOfB.exists(startB => startA.isBefore(b.endOf(startB)) && startB.isBefore(endA))
     }
   }
+
+  /** What a clashing booking should do about it, given the rules and the booked
+   *  slots it runs over.
+   *
+   *  A judgement rather than a refusal, and pure so the whole table can be
+   *  checked without a database. The order matters: "that's your own booking"
+   *  outranks every other complaint, and a repeating booking is settled before
+   *  anything is said about which slots it hit, since the answer would be the
+   *  same however many there were. */
+  def verdict(candidate: RespawnSchedule, schedules: List[RespawnSchedule],
+              slots: List[RespawnClaim]): ClashVerdict =
+    if (slots.exists(_.userId == candidate.userId) || schedules.exists(_.userId == candidate.userId))
+      ClashVerdict.Yours
+    else if (candidate.repeats) ClashVerdict.Repeats
+    // Every clashing rule has to have produced one of these slots, or the ask
+    // would have nothing to hang on.
+    else if (!schedules.forall(schedule => slots.exists(_.scheduleId.contains(schedule.id))))
+      ClashVerdict.TooFarAhead
+    else slots match {
+      case slot :: Nil if slot.requestable => ClashVerdict.Ask(slot)
+      case _ :: Nil                        => ClashVerdict.AlreadyAsked
+      case _                               => ClashVerdict.ManySlots
+    }
 
   /** How a mask reads to a person. Named days rather than a count, because
    *  "every Tue, Wed, Thu, Sun" is the thing a team checks at a glance. */

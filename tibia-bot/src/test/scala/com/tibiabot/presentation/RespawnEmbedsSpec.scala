@@ -1,6 +1,6 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, Stamina}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -295,5 +295,78 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   test("the board post drops the stamina rules entirely when stamina is off") {
     val board = RespawnEmbeds.boardPost(settings.copy(staminaMinutes = 0))
     board.getDescription should include("no daily limit")
+  }
+
+  // --- pressing Schedule on a respawn you have already booked ---------------
+
+  private def booking(userId: String = "99", minutes: Int = 120,
+                      days: Int = RespawnSchedule.EveryDay) =
+    RespawnSchedule(5L, 1L, userId, "someone", "", now.plusHours(2), RespawnSchedule.Daily,
+      minutes, active = true, createdAt = now, daysOfWeek = days)
+
+  private def reserved(userId: String, at: ZonedDateTime, minutes: Int = 120,
+                       requester: Option[String] = None) =
+    claim(userId, minutes, RespawnClaim.StatusReserved).copy(
+      startsAt = Some(at), endsAt = Some(at.plusMinutes(minutes.toLong)),
+      requesterUserId = requester)
+
+  test("the booking panel shows the whole evening, not just your own slot") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+      List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4))),
+      holder = None, now, image(cultOrcs))
+
+    embed.getTitle shouldBe "415 — Cult Orcs"
+    embed.getDescription should include("Free right now")
+    embed.getDescription should include("every day")
+    val booked = fields(embed)("Booked")
+    // Yours is marked rather than filtered out, so the order still reads as the
+    // evening it is.
+    booked should include("➤")
+    booked should include("<@99>")
+    booked should include("<@77>")
+    booked.linesIterator.count(_.startsWith("➤")) shouldBe 1
+  }
+
+  test("the booking panel says who is on the respawn now, which is a different question") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+      List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
+    embed.getDescription should include("<@55>")
+    embed.getDescription should include("Your booking is every day")
+  }
+
+  test("a slot somebody is waiting on an answer for says so") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+      List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4), requester = Some("12"))),
+      holder = None, now, image(cultOrcs))
+    fields(embed)("Booked") should include("asked")
+  }
+
+  test("being asked for a slot reads differently from being asked about a booking over it") {
+    val slot = reserved("99", now.plusHours(2))
+    val deadline = now.plusMinutes(60)
+
+    val pressed = RespawnEmbeds.slotRequest(cultOrcs, slot, "Bubble", deadline, None)
+    pressed should include("would like")
+    pressed should include("Yes, I'm hunting")
+
+    // The times have to add up: what they want is their own window, which merely
+    // runs across this slot.
+    val booked = RespawnEmbeds.slotRequest(cultOrcs, slot, "Bubble", deadline,
+      Some((now.plusHours(1), 180)))
+    booked should include("wants to book")
+    booked should include("3h")
+    booked should include("runs over your slot")
+  }
+
+  test("a granted slot is the window that was asked for, not the one given up") {
+    val granted = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180)
+    granted should include("3h")
+    granted should include("no need to claim it")
+
+    // And when it no longer fits, that is said plainly rather than silently
+    // dropped — the time really is free, it just isn't theirs.
+    val blocked = RespawnEmbeds.slotRequestBlocked(cultOrcs, now.plusHours(1), 180)
+    blocked should include("given up")
+    blocked should include("hasn't been booked for you")
   }
 }

@@ -246,10 +246,15 @@ trait RespawnRepository {
   /** Ask the owner of a booked slot whether they are actually hunting it.
    *
    *  Returns None if the slot is gone or has already been asked about — which is
-   *  what enforces "asked once per slot", and stops two people racing to ask. */
+   *  what enforces "asked once per slot", and stops two people racing to ask.
+   *
+   *  `wanted` is the window the asker actually booked for, when the ask came from
+   *  them trying to book over this slot; None when they pressed Request, where
+   *  what they want is this slot exactly as it stands. */
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
                         requesterUserName: String, askedAt: ZonedDateTime,
-                        deadline: ZonedDateTime): Option[RespawnClaim]
+                        deadline: ZonedDateTime,
+                        wanted: Option[(ZonedDateTime, Int)] = None): Option[RespawnClaim]
 
   /** The soonest booked slot on a spawn nobody has asked about yet. */
   def requestableSlot(guildId: String, respawnId: Long, now: ZonedDateTime): Option[RespawnClaim]

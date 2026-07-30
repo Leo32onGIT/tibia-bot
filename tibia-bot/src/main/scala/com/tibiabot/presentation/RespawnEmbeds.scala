@@ -122,35 +122,102 @@ object RespawnEmbeds {
     embed.build()
   }
 
+  /** What somebody already holding a booking on a spawn sees when they press
+   *  Schedule on it.
+   *
+   *  The whole spawn rather than just their own row: the reason they can't book
+   *  again is that the times around theirs belong to other people, and a list of
+   *  one booking says nothing about that. Their own line is marked rather than
+   *  filtered out, so the ordering still reads as the evening it is.
+   *
+   *  `mine` is the schedule behind their booking, which is what carries the
+   *  repeat — the occurrence rows know only their own start.
+   */
+  def bookingPanel(respawn: Respawn, mine: RespawnSchedule, reservations: List[RespawnClaim],
+                   holder: Option[RespawnClaim], now: ZonedDateTime, imageUrl: String): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
+    if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
+
+    val state = holder match {
+      case Some(active) =>
+        val until = active.endsAt.map(end => s" until ${clockTime(end)}").getOrElse("")
+        s"Being hunted by ${claimantLabel(active)}$until."
+      case None => "Free right now."
+    }
+    val yours = mine.nextStartAtOrAfter(now)
+      .map(start => s"Your booking is ${mine.repeatLabel} at ${clockTime(start)} " +
+        s"for ${humanDuration(mine.durationMinutes)}.")
+      .getOrElse(s"Your booking on this respawn has been and gone.")
+    embed.setDescription(s"$state $yours")
+
+    if (reservations.nonEmpty) {
+      // No cap: this is somebody looking at one spawn's evening on purpose, so
+      // the three-line summary the claim card uses would hide the very slots they
+      // are trying to book around. truncateLines keeps it inside the field limit.
+      val lines = reservations.map { slot =>
+        val when = slot.startsAt.map(dateTime).getOrElse("?")
+        val pending = if (slot.requestPending) " · *asked*" else ""
+        // An arrow rather than a highlight — an embed has no way to shade a line,
+        // and bolding alone doesn't survive a list where every name is bold.
+        val marker = if (slot.userId == mine.userId) "➤ " else ""
+        s"$marker$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+      }
+      embed.addField("Booked", truncateLines(lines, 1000), false)
+    }
+
+    embed.setFooter("Cancel yours to free it up. Only one booking per respawn each.")
+    embed.build()
+  }
+
   /** DM'd to a slot's owner when somebody asks for it.
    *
    *  Says plainly that silence hands the slot over — the deadline is the whole
    *  mechanism, and somebody should not discover it by losing a hunt. */
   def slotRequest(respawn: Respawn, slot: RespawnClaim, requesterName: String,
-                  deadline: ZonedDateTime): String = {
+                  deadline: ZonedDateTime, wanted: Option[(ZonedDateTime, Int)] = None): String = {
     val window = (slot.startsAt, slot.endsAt) match {
       case (Some(start), Some(end)) => s"${clockTime(start)}–${clockTime(end)}"
       case (Some(start), None)      => clockTime(start)
       case _                        => "your booked slot"
     }
-    s"**$requesterName** would like **${respawn.displayName}** at $window.\n" +
-      "Are you hunting it? Press **Yes, I'm hunting** to keep it.\n" +
+    // Two ways to be asked, and they read differently. Pressing Request is
+    // somebody wanting the slot itself; booking over it is somebody planning a
+    // hunt of their own that happens to run across it, and saying so is what
+    // makes the times in the message add up.
+    val opening = wanted match {
+      case Some((start, minutes)) =>
+        s"**$requesterName** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
+          s"for ${humanDuration(minutes)}, which runs over your slot at $window."
+      case None =>
+        s"**$requesterName** would like **${respawn.displayName}** at $window."
+    }
+    s"$opening\nAre you hunting it? Press **Yes, I'm hunting** to keep it.\n" +
       s"If you don't answer by ${relative(deadline)} the slot goes to them."
   }
 
   /** DM'd to whoever asked, once the owner says they are hunting after all. */
   def slotRequestDeclined(respawn: Respawn, slot: RespawnClaim): String = {
     val when = slot.startsAt.map(dateTime).getOrElse("their booked slot")
-    s"<@${slot.userId}> is hunting **${respawn.displayName}** at $when, so it stays theirs.\n" +
+    val booking = if (slot.requestedSlot.isDefined) " Your booking wasn't made." else ""
+    s"<@${slot.userId}> is hunting **${respawn.displayName}** at $when, so it stays theirs.$booking\n" +
       "You can still queue for it once their hunt starts."
   }
 
-  /** DM'd to whoever asked, once the slot passes to them. */
-  def slotRequestGranted(respawn: Respawn, slot: RespawnClaim): String = {
-    val when = slot.startsAt.map(dateTime).getOrElse("the booked time")
-    s"**${respawn.displayName}** is yours at $when for " +
-      s"${humanDuration(slot.durationMinutes)} — it'll start on its own, no need to claim it."
-  }
+  /** DM'd to whoever asked, once the slot passes to them. The window is passed in
+   *  rather than read off the slot: what they get is what they asked for, which
+   *  is the slot itself only when they asked for it with the Request button. */
+  def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
+    s"**${respawn.displayName}** is yours at ${dateTime(start)} for " +
+      s"${humanDuration(minutes)} — it'll start on its own, no need to claim it."
+
+  /** DM'd to whoever asked when the slot was given up but their own window has
+   *  since been booked around them. Says what happened rather than just failing:
+   *  the time really is free now, and they can take it the ordinary way. */
+  def slotRequestBlocked(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
+    s"The slot you asked about on **${respawn.displayName}** has been given up, but the " +
+      s"${humanDuration(minutes)} you wanted from ${dateTime(start)} now runs over somebody " +
+      "else's booking, so it hasn't been booked for you.\n" +
+      "Book a shorter slot, or claim it on the night."
 
   /** DM'd shortly before a booked slot begins, so its owner can be there for it —
    *  or free it up if they can't. */

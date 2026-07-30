@@ -147,6 +147,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_id VARCHAR(255);")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
+      // The window the asker wants, when they asked by trying to book over this
+      // slot. Null for a Request-button ask, where the slot itself is what they
+      // are asking for.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_starts_at TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_duration_minutes INT;")
       // The materialiser's uniqueness rule, enforced by the database rather than
       // by a read-then-write: two sweeps racing would otherwise both find a slot
       // unbooked and both book it.
@@ -217,7 +224,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       askedAt = optionalZoned(result, "asked_at"),
       requestDeadline = optionalZoned(result, "request_deadline"),
       requesterUserId = Option(result.getString("requester_user_id")).filter(_.nonEmpty),
-      requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty)
+      requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty),
+      requestedStartsAt = optionalZoned(result, "requested_starts_at"),
+      requestedDurationMinutes = {
+        val minutes = result.getInt("requested_duration_minutes")
+        if (result.wasNull()) None else Some(minutes)
+      }
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -1044,13 +1056,15 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
                         requesterUserName: String, askedAt: ZonedDateTime,
-                        deadline: ZonedDateTime): Option[RespawnClaim] =
+                        deadline: ZonedDateTime,
+                        wanted: Option[(ZonedDateTime, Int)]): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
       // `asked_at IS NULL` is the whole rule: the owner is asked once per slot,
       // and two people pressing Request at the same moment cannot both get in.
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
-          |SET asked_at = ?, request_deadline = ?, requester_user_id = ?, requester_user_name = ?
+          |SET asked_at = ?, request_deadline = ?, requester_user_id = ?, requester_user_name = ?,
+          |    requested_starts_at = ?, requested_duration_minutes = ?
           |WHERE id = ? AND status = 'reserved' AND asked_at IS NULL
           |RETURNING *;""".stripMargin)
       try {
@@ -1058,7 +1072,15 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(2, Timestamp.from(deadline.toInstant))
         statement.setString(3, requesterUserId)
         statement.setString(4, requesterUserName)
-        statement.setLong(5, claimId)
+        wanted match {
+          case Some((start, minutes)) =>
+            statement.setTimestamp(5, Timestamp.from(start.toInstant))
+            statement.setInt(6, minutes)
+          case None =>
+            statement.setNull(5, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setNull(6, java.sql.Types.INTEGER)
+        }
+        statement.setLong(7, claimId)
         val result = statement.executeQuery()
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
@@ -1103,7 +1125,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     // Request button must not come back for it.
     val statement = conn.prepareStatement(
       """UPDATE respawn_claims
-        |SET request_deadline = NULL, requester_user_id = NULL, requester_user_name = NULL
+        |SET request_deadline = NULL, requester_user_id = NULL, requester_user_name = NULL,
+        |    requested_starts_at = NULL, requested_duration_minutes = NULL
         |WHERE id = ? AND status = 'reserved'
         |RETURNING *;""".stripMargin)
     try {
