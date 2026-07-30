@@ -37,6 +37,14 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
         statement.execute("ALTER TABLE discord_info ADD COLUMN boosted_messageid VARCHAR(255) DEFAULT '0'")
       }
 
+      val moderatorRoleExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'moderator_role'")
+      val moderatorRoleExists = moderatorRoleExistsQuery.next()
+      moderatorRoleExistsQuery.close()
+
+      if (!moderatorRoleExists) {
+        statement.execute("ALTER TABLE discord_info ADD COLUMN moderator_role VARCHAR(255) DEFAULT '0'")
+      }
+
       val result = statement.executeQuery(s"SELECT * FROM discord_info")
       var configMap = Map[String, String]()
       while (result.next()) {
@@ -47,6 +55,7 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
         configMap += ("boosted_channel" -> result.getString("boosted_channel"))
         configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
         configMap += ("last_world" -> result.getString("last_world"))
+        configMap += ("moderator_role" -> Option(result.getString("moderator_role")).getOrElse("0"))
         configMap += ("flags" -> result.getString("flags"))
         configMap += ("created" -> result.getString("created"))
       }
@@ -70,6 +79,15 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       statement.executeUpdate()
 
       statement.close()
+    }
+
+  def setModeratorRole(guildId: String, roleId: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      val statement = conn.prepareStatement("UPDATE discord_info SET moderator_role = ?;")
+      try {
+        statement.setString(1, roleId)
+        statement.executeUpdate()
+      } finally statement.close()
     }
 
   def update(guildId: String, adminCategory: String, adminChannel: String, boostedChannel: String,

@@ -117,8 +117,9 @@ object RespawnCommands {
 
   private def handleAdmin(event: SlashCommandInteractionEvent, subcommand: String,
                           options: Map[String, String]): Unit = {
-    if (!Permissions.callerHasManageServer(event)) {
-      reply(event, s"${Config.noEmoji} `/respawn admin` requires the **Manage Server** permission.")
+    if (!Permissions.callerIsModerator(event, BotApp.moderatorRoleId(event.getGuild.getId))) {
+      reply(event, s"${Config.noEmoji} `/respawn admin` needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
       return
     }
 

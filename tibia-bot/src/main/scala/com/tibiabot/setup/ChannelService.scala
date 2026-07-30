@@ -102,6 +102,30 @@ final class ChannelService(
   /** Reuse the guild's existing role of this name, or create it with the given
    *  colour. Used by /setup only; /repair looks up roles by stored id instead
    *  and creates its own replacements inline if they're missing. */
+  /** Create (or adopt) the guild's moderator role and remember its id.
+   *
+   *  Reuses an existing role of the same name, so a server that already made one
+   *  by hand — or is being repaired — keeps whatever members it already has
+   *  rather than getting a second, empty role. */
+  private def ensureModeratorRole(guild: Guild): Option[Role] =
+    try {
+      val role = getOrCreateRole(guild, com.tibiabot.commands.Permissions.ModeratorRoleName, new Color(114, 137, 218))
+      discordConfigRepository.setModeratorRole(guild.getId, role.getId)
+      Some(role)
+    } catch {
+      case ex: Throwable =>
+        // Never fail a /setup over this — the world's channels are the point, and
+        // the commands stay usable by anyone with Manage Server regardless.
+        logger.warn(s"Could not create the moderator role in guild '${guild.getId}'", ex)
+        None
+    }
+
+  /** The guild's stored moderator role, if it still exists. */
+  private def moderatorRole(guild: Guild): Option[Role] =
+    discordRetrieveConfig(guild).get("moderator_role")
+      .filter(id => id.nonEmpty && id != "0")
+      .flatMap(id => Option(guild.getRoleById(id)))
+
   private def getOrCreateRole(guild: Guild, name: String, color: Color): Role = {
     val existing = guild.getRolesByName(name, true)
     if (!existing.isEmpty) existing.get(0)
@@ -224,6 +248,10 @@ final class ChannelService(
     try {
       com.tibiabot.respawn.RespawnThreads.findForum(guild, settings) match {
         case Some(existing) =>
+          // Re-assert the moderator role's access every time: the role may have
+          // been created after the forum was, or its override removed by hand.
+          ensureModeratorRole(guild).foreach(
+            com.tibiabot.respawn.RespawnThreads.grantModeratorAccess(existing, _))
           // The channel survived; the board post may not have.
           val boardMissing = com.tibiabot.respawn.RespawnThreads
             .resolveThread(guild, existing, settings.boardThread).isEmpty
@@ -250,7 +278,8 @@ final class ChannelService(
           }
 
           val (forumId, boardId) =
-            com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings)
+            com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings,
+              ensureModeratorRole(guild))
           respawnService.updateChannels(guild.getId, forumId, boardId)
 
           // Seeding here rather than on first claim means the autocomplete has
@@ -457,6 +486,11 @@ final class ChannelService(
           guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true, excludeAll, Config.Respawn.enabled).asJava).queue()
         }
         startBot(Some(guild), Some(world))
+
+        // The delegation role, so hunted/allies/respawn management can be handed
+        // out without granting Manage Server. Idempotent — adopts an existing
+        // role of the same name rather than making a second one.
+        ensureModeratorRole(guild)
 
         // Respawn forum, when the feature is switched on for this deployment.
         // Self-guarding and idempotent, so it's safe to call on every /setup:
@@ -985,6 +1019,8 @@ final class ChannelService(
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
+      // Recreate the moderator role if it was deleted, and re-store its id.
+      ensureModeratorRole(guild)
       // Recreate the respawn forum/board if either has been deleted. Outside
       // the block above because that one only runs when a *world* channel is
       // missing, and the forum is guild-level — it can be deleted on its own.

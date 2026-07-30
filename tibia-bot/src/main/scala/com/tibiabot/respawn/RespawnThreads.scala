@@ -9,7 +9,7 @@ import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, ThreadChannel}
 import net.dv8tion.jda.api.entities.channel.forums.{ForumTag, ForumTagData, ForumTagSnowflake}
 import net.dv8tion.jda.api.entities.emoji.Emoji
-import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
+import net.dv8tion.jda.api.entities.{Guild, MessageEmbed, Role}
 import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder
 
 import scala.jdk.CollectionConverters._
@@ -94,7 +94,29 @@ object RespawnThreads extends StrictLogging {
    *                  placed alongside the command-log and notifications channels
    *                  rather than in its own category.
    */
-  def createForum(guild: Guild, category: Category, settings: RespawnSettings): (String, String) = {
+  /** Give the guild's moderator role a working set of powers over the spawns
+   *  forum: see it, talk in a claim, and manage or delete posts when a thread
+   *  needs cleaning up.
+   *
+   *  Creating posts is deliberately left denied — every post here has to
+   *  correspond to a catalogue entry the bot tracks, and the bot makes them
+   *  itself. Applied separately from [[createForum]] so `/repair` can hand the
+   *  powers to a forum that already exists. */
+  def grantModeratorAccess(forum: ForumChannel, moderatorRole: Role): Unit =
+    Try(
+      forum.upsertPermissionOverride(moderatorRole)
+        .grant(Permission.VIEW_CHANNEL)
+        .grant(Permission.MESSAGE_SEND_IN_THREADS)
+        .grant(Permission.MESSAGE_HISTORY)
+        .grant(Permission.MANAGE_THREADS)
+        .complete()
+    ).failed.foreach { error =>
+      logger.warn(s"Could not grant the moderator role access to the respawn forum " +
+        s"in guild '${forum.getGuild.getId}'", error)
+    }
+
+  def createForum(guild: Guild, category: Category, settings: RespawnSettings,
+                  moderatorRole: Option[Role]): (String, String) = {
     val botRole = guild.getBotRole
     val publicRole = guild.getPublicRole
 
@@ -129,6 +151,8 @@ object RespawnThreads extends StrictLogging {
       .grant(Permission.MESSAGE_HISTORY)
       .deny(Permission.CREATE_PUBLIC_THREADS)
       .complete()
+
+    moderatorRole.foreach(grantModeratorAccess(forum, _))
 
     val boardId = postBoard(forum, settings)
     (forum.getId, boardId)

@@ -17,7 +17,8 @@ object AlliesCommands {
     val reasonOption: String = options.getOrElse("reason", "none")
     val worldOption: String = options.getOrElse("world", "")
 
-    val authed = Permissions.callerHasManageServer(event)
+    // Manage Server or the guild's moderator role — see Permissions.isModerator.
+    val authed = Permissions.callerIsModerator(event, BotApp.moderatorRoleId(event.getGuild.getId))
 
     subCommand match {
       case "player" =>

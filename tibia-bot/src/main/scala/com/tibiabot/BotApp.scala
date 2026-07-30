@@ -172,6 +172,18 @@ object BotApp extends App with StrictLogging {
   // Galthen's Satchel cooldown tracking
   val galthenService = new galthen.GalthenService(galthenRepository, connectionProvider, discordGateway)
 
+  /** The guild's "Violent Bot Moderator" role id, or "0" if it has none.
+   *
+   *  Read per invocation rather than cached: it changes on /setup and /repair,
+   *  and a stale id would silently lock out everyone holding the role. */
+  def moderatorRoleId(guildId: String): String =
+    try discordConfigRepository.getConfig(guildId).getOrElse("moderator_role", "0")
+    catch {
+      // A guild with no config yet has no role either; falling back to "0" means
+      // the check simply reduces to Manage Server.
+      case _: Throwable => "0"
+    }
+
   // Respawn claim system — see respawn.RespawnService. Constructed regardless of
   // Config.Respawn.enabled (it does no I/O until called, and the repository
   // creates its tables lazily on first use); the flag gates command
