@@ -34,6 +34,17 @@ object RespawnModals extends StrictLogging {
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
 
+  /** Discord rejects a modal outright if a label runs past 45 characters or its
+   *  description past 100 — the interaction fails rather than the text being
+   *  trimmed. Several of these interpolate a Discord username or a spawn name,
+   *  neither of which the bot bounds, so everything goes through here. */
+  private[interactions] def clamp(text: String, max: Int): String =
+    if (text.length <= max) text else text.take(max - 1).trim + "\u2026"
+
+  private def label(text: String, description: String, input: TextInput): Label =
+    Label.of(clamp(text, Label.LABEL_MAX_LENGTH), clamp(description, Label.DESCRIPTION_MAX_LENGTH), input)
+
+
   // --- opening ------------------------------------------------------------
 
   /** Prompt for a spawn to claim. Free text rather than a dropdown because a
@@ -43,7 +54,7 @@ object RespawnModals extends StrictLogging {
   def claimModal: Modal =
     Modal.create(RespawnButtonId.modalClaim, "Claim a respawn")
       .addComponents(
-        Label.of("Which respawn?", "Its code or name — for example 415, or Cult Orcs",
+        label("Which respawn?", "Its code or name — for example 415, or Cult Orcs",
           TextInput.create(SpawnField, TextInputStyle.SHORT)
             .setPlaceholder("415")
             .setRequired(true)
@@ -65,14 +76,14 @@ object RespawnModals extends StrictLogging {
 
     Modal.create(RespawnButtonId.modalConfig, "Your respawn settings")
       .addComponents(
-        Label.of("Default claim length (minutes)",
+        label("Default claim length (minutes)",
           s"How long your claims run when you don't say. 5–$maxDuration.",
           TextInput.create(DurationField, TextInputStyle.SHORT)
             .setValue(currentDuration)
             .setRequired(true)
             .setMaxLength(4)
             .build()),
-        Label.of("Remind me this many minutes before the end",
+        label("Remind me this many minutes before the end",
           "0 turns reminders off. Up to 720 (12 hours).",
           TextInput.create(WarnField, TextInputStyle.SHORT)
             .setValue(currentWarn)
@@ -95,7 +106,7 @@ object RespawnModals extends StrictLogging {
 
     Modal.create(RespawnButtonId.modalDuration(respawn.id), "Hunt duration")
       .addComponents(
-        Label.of(s"How long for, in total? (minutes)",
+        label("How long for, in total? (minutes)",
           s"${respawn.displayName} — 5 to $maxDuration. Counts from when the hunt started.",
           TextInput.create(DurationField, TextInputStyle.SHORT)
             .setValue(current)
@@ -115,8 +126,11 @@ object RespawnModals extends StrictLogging {
 
     Modal.create(RespawnButtonId.modalHolderDuration(respawn.id), "Change hunt duration")
       .addComponents(
-        Label.of(s"Total hunt length for $who (minutes)",
-          s"${respawn.displayName} - 5 to $maxDuration, counting from when their hunt started.",
+        // Whose hunt it is goes in the description, not the label: a Discord
+        // username can be 32 characters on its own and the label allows 45 in
+        // total, so interpolating one there fails the interaction outright.
+        label("Total hunt length (minutes)",
+          s"${respawn.displayName}, held by $who. 5 to $maxDuration, from when their hunt started.",
           TextInput.create(DurationField, TextInputStyle.SHORT)
             .setValue(holder.map(_.durationMinutes.toString).getOrElse(""))
             .setRequired(true)
@@ -132,11 +146,11 @@ object RespawnModals extends StrictLogging {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
       .addComponents(
-        Label.of("Default claim length (minutes)", "Used when a member has not set their own.",
+        label("Default claim length (minutes)", "Used when a member has not set their own.",
           numberInput("default", settings.map(_.defaultDurationMinutes))),
-        Label.of("Maximum claim length (minutes)", "The longest any single claim may run.",
+        label("Maximum claim length (minutes)", "The longest any single claim may run.",
           numberInput("max", settings.map(_.maxDurationMinutes))),
-        Label.of("Queue limit", "How many people may wait behind a claim.",
+        label("Queue limit", "How many people may wait behind a claim.",
           numberInput("queue", settings.map(_.queueLimit)))
       )
       .build()
@@ -148,12 +162,12 @@ object RespawnModals extends StrictLogging {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalTimers, "Server timers")
       .addComponents(
-        Label.of("Daily stamina per member (minutes)", "0 means unlimited claiming.",
+        label("Daily stamina per member (minutes)", "0 means unlimited claiming.",
           numberInput("stamina", settings.map(_.staminaMinutes))),
-        Label.of("Default reminder (minutes before the end)",
+        label("Default reminder (minutes before the end)",
           "Members can override this for themselves. 0 turns it off.",
           numberInput("warn", settings.map(_.warnMinutes))),
-        Label.of("Handover window (minutes)",
+        label("Handover window (minutes)",
           "How long the next in line has to accept before it passes on.",
           numberInput("handover", settings.map(_.handoverMinutes)))
       )
