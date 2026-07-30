@@ -117,6 +117,20 @@ final case class RespawnClaim(
   /** Whether somebody is waiting on the owner's answer right now. */
   def requestPending: Boolean = isReserved && requesterUserId.isDefined
 
+  /** When a booked slot is due to finish, whatever time it actually starts.
+   *
+   *  A booking is a window rather than a stopwatch: a slot that starts late runs
+   *  to the end it was booked for, and the minutes lost to a late start are lost.
+   *  Running the full length from a late start would push it into whatever is
+   *  booked next, which is somebody else's hunt. */
+  def bookedEnd: Option[ZonedDateTime] =
+    endsAt.orElse(startsAt.map(_.plusMinutes(durationMinutes.toLong)))
+
+  /** How much of that window is still to come at `now`. Never negative. */
+  def minutesLeftAt(now: ZonedDateTime): Int =
+    bookedEnd.map(end => math.max(0L, java.time.Duration.between(now, end).toMinutes).toInt)
+      .getOrElse(0)
+
   /** The window the asker wants, when they asked by trying to book over this
    *  slot. Empty for a Request-button ask, where what they want *is* this slot. */
   def requestedSlot: Option[(ZonedDateTime, Int)] =

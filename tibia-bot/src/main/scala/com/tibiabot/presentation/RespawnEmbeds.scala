@@ -246,10 +246,10 @@ object RespawnEmbeds {
   }
 
   /** DM'd when a booked slot can't start because the tank is spent. */
-  def slotNoStamina(respawn: Respawn, slot: RespawnClaim, stamina: Stamina,
+  def slotNoStamina(respawn: Respawn, needed: Int, stamina: Stamina,
                     resetsAt: ZonedDateTime): String =
     s"Your booked slot on **${respawn.displayName}** needed " +
-      s"**${humanDuration(slot.durationMinutes)}** but you have " +
+      s"**${humanDuration(needed)}** but you have " +
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
       s"Your tank refills at server save ${relative(resetsAt)}."
 

@@ -1114,6 +1114,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     repository.findById(guildId, slot.respawnId).foreach { respawn =>
       val boundary = resetBoundary(now)
       val holder = repository.activeClaim(guildId, respawn.id)
+      // A slot ends when it was booked to end, however late it starts.
+      //
+      // Starting it late and running the full length instead would push it past
+      // its booked end and into whatever is booked next — and when that slot came
+      // due it would find the spawn held, cancel its owner's booking and drop them
+      // into the queue. A booking is a window, not a stopwatch: confirming one
+      // takes what is left of it, and the minutes lost to a late start are lost.
+      val bookedEnd = slot.bookedEnd.getOrElse(now.plusMinutes(slot.durationMinutes.toLong))
+      // Charged for what they actually get. A window already fully gone by never
+      // reaches here — the sweep closes those as missed first.
+      val remaining = slot.minutesLeftAt(now)
 
       if (holder.isDefined) {
         // Cancel the booking and take a queue place instead, so the existing
@@ -1125,22 +1136,22 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           RespawnEmbeds.dmEmbed("Your slot is taken", RespawnEmbeds.slotOccupied(respawn, holder),
             imageFor(respawn), RespawnEmbeds.WarnColor))
         refreshThread(guild, respawn, config)
-      } else if (!repository.reserveStamina(guildId, slot.userId, slot.durationMinutes,
+      } else if (!repository.reserveStamina(guildId, slot.userId, remaining,
                    config.staminaMinutes, boundary)) {
         repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.NoStamina)
         val tank = repository.stamina(guildId, slot.userId, config.staminaMinutes, boundary)
         RespawnThreads.dm(guild, slot.userId,
           RespawnEmbeds.dmEmbed("Slot skipped",
-            RespawnEmbeds.slotNoStamina(respawn, slot, tank, ServerSaveSchedule.nextServerSave(now)),
+            RespawnEmbeds.slotNoStamina(respawn, remaining, tank, ServerSaveSchedule.nextServerSave(now)),
             imageFor(respawn), RespawnEmbeds.RedColor))
         refreshThread(guild, respawn, config)
       } else {
-        // Runs from now rather than from the booked start, so a sweep landing a
-        // few seconds late doesn't quietly shorten the hunt.
-        repository.startReservation(guildId, slot.id, now, now.plusMinutes(slot.durationMinutes.toLong)) match {
+        // Only what is left of the booked window is charged for, so a late start
+        // costs its owner nothing out of the day's tank beyond the hunt they get.
+        repository.startReservation(guildId, slot.id, now, bookedEnd) match {
           case None =>
             // Something else already started it; hand the stamina straight back.
-            repository.refundStamina(guildId, slot.userId, slot.durationMinutes, boundary)
+            repository.refundStamina(guildId, slot.userId, remaining, boundary)
           case Some(started) =>
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,

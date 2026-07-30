@@ -272,6 +272,27 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     onlyOn(anchor.getDayOfWeek).overlapsSlot(slot(anchor.plusDays(1)), window._1, window._2) shouldBe false
   }
 
+  test("a booked slot ends when it was booked to, however late it starts") {
+    val booked = slot(anchor, durationMinutes = 120)
+    // Answering four minutes into your own hunt costs you those four minutes —
+    // it does not move the end. Running the full length from a late start would
+    // push into whatever is booked next, and the person who booked it would find
+    // the spawn held and lose their slot to a queue place.
+    booked.bookedEnd shouldBe Some(anchor.plusMinutes(120))
+    booked.minutesLeftAt(anchor) shouldBe 120
+    booked.minutesLeftAt(anchor.plusMinutes(4)) shouldBe 116
+    // Nothing left, and never a negative — a window fully gone by is closed as
+    // missed rather than started.
+    booked.minutesLeftAt(anchor.plusMinutes(120)) shouldBe 0
+    booked.minutesLeftAt(anchor.plusHours(3)) shouldBe 0
+  }
+
+  test("a slot with no end recorded falls back to its booked length") {
+    val open = slot(anchor, durationMinutes = 90).copy(endsAt = None)
+    open.bookedEnd shouldBe Some(anchor.plusMinutes(90))
+    open.minutesLeftAt(anchor.plusMinutes(30)) shouldBe 60
+  }
+
   test("a clash with a slot nobody has asked about becomes a question for its owner") {
     val booked = slot(anchor)
     RespawnSchedule.verdict(oneOff(anchor), Nil, List(booked)) shouldBe ClashVerdict.Ask(booked)
