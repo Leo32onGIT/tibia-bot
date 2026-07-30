@@ -83,10 +83,10 @@ object RespawnEmbeds {
         // way — so there is nothing to say.
         active.startsAt.foreach(start => embed.addField("Hunt start", clockTime(start), true))
         active.endsAt.foreach(end => embed.addField("Hunt end", clockTime(end), true))
-        embed.addField("Duration", humanDuration(active.durationMinutes), true)
         // A relative timestamp, so "in 40 minutes" counts itself down in every
-        // reader's client without the bot editing the card. An end time alone
-        // makes you do the subtraction; this is the number people actually want.
+        // reader's client without the bot editing the card. It also says what a
+        // Duration field used to: the length is start to end, which is now two
+        // fields along, and the time left is the part anyone still cares about.
         active.endsAt.foreach(end => embed.addField("Time left", relative(end), true))
       case None =>
         embed.setColor(FreeColor)

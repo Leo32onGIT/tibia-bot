@@ -76,13 +76,15 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     taken.keys should not contain "Options"
   }
 
-  test("a claim shows start, end and duration, all as clock times") {
+  test("a claim shows start and end as clock times, and nothing restating them") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", minutes = 90)), Nil, Nil, settings, image(cultOrcs))
     // Start and end as short time: the clock time a hunt runs to is what someone
     // deciding whether to queue needs, and it is the same for every reader.
     fields(embed)("Hunt start") should endWith(":t>")
     fields(embed)("Hunt end") should endWith(":t>")
-    fields(embed)("Duration") shouldBe "1h 30m"
+    // No Duration: it is start to end, both of which are right there, and the
+    // part still worth reading is Time left.
+    fields(embed).keys should not contain "Duration"
   }
 
   test("a claim shows how long is left, relative, off the same instant as the end") {
