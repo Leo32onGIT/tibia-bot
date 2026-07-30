@@ -6,6 +6,7 @@ import com.tibiabot.commands.Permissions
 import com.tibiabot.respawn.RespawnButtonId
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.components.checkbox.Checkbox
 import net.dv8tion.jda.api.components.label.{Label, LabelChildComponent}
 import net.dv8tion.jda.api.components.selections.{SelectOption, StringSelectMenu}
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
@@ -33,6 +34,8 @@ object RespawnModals extends StrictLogging {
   private val SpawnField = "spawn"
   private val DurationField = "duration"
   private val StartField = "start"
+  private val RepeatField = "repeat"
+  private val DaysField = "days"
   private val WarnField = "warn"
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
@@ -186,7 +189,7 @@ object RespawnModals extends StrictLogging {
       .setMaxLength(4)
       .build()
 
-  /** Book a repeating slot.
+  /** Book a slot, repeating or not.
    *
    *  The start is picked from a menu rather than typed, since there is no way to
    *  type an hour that means the same thing to everyone reading it. Each option's
@@ -212,9 +215,21 @@ object RespawnModals extends StrictLogging {
       }.asJava)
       .build()
 
-    Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a repeating slot")
+    // Multi-select, and optional: no days chosen means every day, which is what
+    // a repeating booking meant before weekdays existed.
+    val dayMenu = StringSelectMenu.create(DaysField)
+      .setPlaceholder("Every day")
+      .addOptions(java.time.DayOfWeek.values().toList.map { day =>
+        SelectOption.of(
+          day.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH),
+          day.getValue.toString)
+      }.asJava)
+      .setRequiredRange(0, 7)
+      .build()
+
+    Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a slot")
       .addComponents(
-        label("First slot starts at", s"${respawn.displayName} — it then repeats every 24 hours.",
+        label("Slot starts at", s"${respawn.displayName} — server time, so SS+1 is an hour after save.",
           startMenu),
         // A typed length, the same as every other duration prompt — there is no
         // reason for this one to work differently from the Config and Hunt
@@ -223,7 +238,13 @@ object RespawnModals extends StrictLogging {
           TextInput.create(DurationField, TextInputStyle.SHORT)
             .setRequired(true)
             .setMaxLength(4)
-            .build())
+            .build()),
+        // Default on, because a standing booking is what most people are here
+        // for. Turning it off books the one slot and nothing after it, which is
+        // how you hold a spawn for a particular night.
+        label("Repeat this booking", "Turn off to book the one slot only.",
+          Checkbox.of(RepeatField, true)),
+        label("Repeat on", "Leave empty for every day. Ignored when repeat is off.", dayMenu)
       )
       .build()
   }
@@ -285,6 +306,17 @@ object RespawnModals extends StrictLogging {
   private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit = {
     val guild = event.getGuild
     val service = BotApp.respawnService
+    // Off means one slot and no more; on with nothing picked means every day,
+    // matching what a repeating booking was before weekdays were a choice.
+    val repeats = Option(event.getValue(RepeatField)).forall(_.getAsBoolean)
+    val chosenDays = Option(event.getValue(DaysField))
+      .map(_.getAsStringList.asScala.toList).getOrElse(Nil)
+      .flatMap(day => Try(java.time.DayOfWeek.of(day.toInt)).toOption)
+    val daysOfWeek =
+      if (!repeats) com.tibiabot.domain.RespawnSchedule.OneOff
+      else if (chosenDays.isEmpty) com.tibiabot.domain.RespawnSchedule.EveryDay
+      else com.tibiabot.domain.RespawnSchedule.maskOf(chosenDays)
+
     // The start comes back from a select menu, so it is a value the bot itself
     // put there — an absolute epoch second, not an offset. The length is typed,
     // so it is the one that can arrive as anything.
@@ -300,15 +332,16 @@ object RespawnModals extends StrictLogging {
             val existing = service.schedulesForUser(guild.getId, event.getUser.getId)
             if (existing.size >= com.tibiabot.Config.Respawn.maxSchedulesPerUser)
               reply(event, s"${Config.noEmoji} You already have " +
-                s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} repeating slots — cancel one first.")
+                s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} bookings — cancel one first.")
             else {
               val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
                 .atZone(java.time.ZoneOffset.UTC)
               service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
-                firstStart, duration) match {
+                firstStart, duration, daysOfWeek) match {
                 case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
                 case Right(schedule) =>
-                  reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** every day for " +
+                  reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
+                    s"${schedule.repeatLabel} for " +
                     s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
                     s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
               }

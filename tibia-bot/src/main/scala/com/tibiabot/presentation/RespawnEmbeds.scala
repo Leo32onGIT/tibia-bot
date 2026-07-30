@@ -195,13 +195,16 @@ object RespawnEmbeds {
       .setTitle(if (everyones) "Booked slots on this server" else "Your booked slots")
     if (entries.isEmpty) {
       embed.setDescription(
-        if (everyones) "Nobody has booked a repeating slot yet."
-        else "You have no repeating slots. Use **Schedule** on a respawn's post to book one.")
+        if (everyones) "Nobody has booked a slot yet."
+        else "You have no booked slots. Use **Schedule** on a respawn's post to book one.")
     } else {
       embed.setDescription(truncateLines(entries.map { case (schedule, respawn) =>
-        val next = schedule.nextStartAtOrAfter(now)
         val who = if (everyones) s" — <@${schedule.userId}>" else ""
-        s"**${respawn.displayName}**$who\n\u2003every day, next ${dateTime(next)} " +
+        // A spent one-off can still be listed for the moment between its slot
+        // passing and the sweep retiring it, so there may be no next slot.
+        val next = schedule.nextStartAtOrAfter(now)
+          .map(start => s", next ${dateTime(start)}").getOrElse(", done")
+        s"**${respawn.displayName}**$who\n\u2003${schedule.repeatLabel}$next " +
           s"for ${humanDuration(schedule.durationMinutes)}"
       }))
     }

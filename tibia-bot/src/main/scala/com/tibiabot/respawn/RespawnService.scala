@@ -631,14 +631,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule] =
     repository.findSchedule(guildId, scheduleId)
 
-  /** Book a repeating slot on a spawn.
+  /** Book a slot on a spawn, repeating on chosen weekdays or happening once.
    *
-   *  Refused when it would overlap one that already exists: two standing
-   *  bookings on the same spawn at the same time is not a state the handover
-   *  rules can resolve, and silently letting the second win would take a slot
-   *  from somebody who had it first. */
+   *  Refused when it would overlap one that already exists: two bookings on the
+   *  same spawn at the same time is not a state the handover rules can resolve,
+   *  and silently letting the second win would take a slot from somebody who had
+   *  it first. */
   def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
                   characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
+                  daysOfWeek: Int = RespawnSchedule.EveryDay,
                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, RespawnSchedule] =
     settings(guild.getId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
@@ -650,18 +651,19 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else if (!firstStart.isAfter(now))
           Left("The first slot has to start in the future.")
         else if (durationMinutes >= RespawnSchedule.Daily)
-          Left("A daily slot has to be shorter than a day.")
+          Left("A slot has to be shorter than a day.")
         else {
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
-            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now)
+            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
           repository.schedulesForRespawn(guildId, respawn.id).find(overlaps(_, candidate)) match {
             case Some(clash) =>
+              val when = clash.nextStartAtOrAfter(now)
+                .map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
               Left(s"That clashes with <@${clash.userId}>'s slot on this respawn " +
-                s"(<t:${clash.nextStartAtOrAfter(now).toInstant.getEpochSecond}:t> for " +
-                s"${RespawnEmbeds.humanDuration(clash.durationMinutes)}).")
+                s"($when for ${RespawnEmbeds.humanDuration(clash.durationMinutes)}).")
             case None =>
               val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
-                firstStart, RespawnSchedule.Daily, durationMinutes)
+                firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
               materialise(guildId, saved, now)
               refreshThread(guild, respawn, config)
               Right(saved)
@@ -669,23 +671,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
     }
 
-  /** Two daily schedules on the same spawn clash if their windows overlap on any
-   *  day. With both repeating every 24h, comparing one day's worth of offsets is
-   *  enough — the pattern is the same every day after that. */
-  private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean = {
-    val day = RespawnSchedule.Daily.toLong
-    def offset(schedule: RespawnSchedule): Long = {
-      val raw = java.time.Duration.between(a.anchorAt, schedule.anchorAt).toMinutes % day
-      if (raw < 0) raw + day else raw
-    }
-    val (startA, startB) = (offset(a), offset(b))
-    // Compare on a circle: a window can wrap past midnight relative to the other.
-    def clashes(first: Long, firstLength: Int, second: Long, secondLength: Int): Boolean = {
-      val gap = ((second - first) % day + day) % day
-      gap < firstLength.toLong || (day - gap) < secondLength.toLong
-    }
-    clashes(startA, a.durationMinutes, startB, b.durationMinutes)
-  }
+  /** Whether two bookings on the same spawn ever run at the same time. The rule
+   *  itself lives in the domain, where it is testable without a database. */
+  private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean =
+    RespawnSchedule.clash(a, b)
 
   /** Retire a schedule and drop the slots it had booked but not yet started. */
   def cancelSchedule(guild: Guild, scheduleId: Long): Option[RespawnSchedule] = {
@@ -708,14 +697,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  unique in the database, so re-running on every sweep books nothing twice. */
   private def materialise(guildId: String, schedule: RespawnSchedule, now: ZonedDateTime): Int = {
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
-    var start = schedule.nextStartAtOrAfter(now)
-    var booked = 0
-    while (!start.isAfter(horizon)) {
-      if (repository.reserveOccurrence(guildId, schedule.id, schedule.respawnId, schedule.userId,
-        schedule.userName, schedule.characterName, start, schedule.durationMinutes).isDefined) booked += 1
-      start = start.plusMinutes(schedule.periodMinutes.toLong)
+    schedule.occurrencesBetween(now, horizon).count { start =>
+      repository.reserveOccurrence(guildId, schedule.id, schedule.respawnId, schedule.userId,
+        schedule.userName, schedule.characterName, start, schedule.durationMinutes).isDefined
     }
-    booked
   }
 
   // --- asking for a booked slot -------------------------------------------
@@ -847,7 +832,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
       // Book upcoming slots, so they show on the card before they begin.
       repository.activeSchedules(guildId).foreach { schedule =>
-        Try(materialise(guildId, schedule, now)).failed.foreach { error =>
+        Try {
+          materialise(guildId, schedule, now)
+          // A one-off whose slot has gone by is spent. Retiring it keeps it out
+          // of the owner's booking list and off their allowance — the slot it
+          // booked is a claim row of its own and is untouched by this.
+          if (schedule.nextStartAtOrAfter(now).isEmpty)
+            repository.deactivateSchedule(guildId, schedule.id)
+        }.failed.foreach { error =>
           logger.warn(s"Failed to book slots for respawn schedule ${schedule.id} in guild '$guildId'", error)
         }
       }

@@ -204,20 +204,21 @@ object RespawnClaim {
   val KindScheduled: String = "scheduled"
 }
 
-/** A standing booking on a respawn: the same slot, repeating.
+/** A booking on a respawn: one slot, repeating on chosen weekdays or not at all.
  *
- *  Recurrence is deliberately free of any timezone. The rule is an **anchor
- *  instant** plus a period, so the next slot is pure arithmetic on instants and
- *  every time the bot shows is a Discord timestamp rendered in each reader's own
- *  zone. Nothing in here has to know what "20:00" means to anybody.
+ *  The rule is an **anchor instant** plus a period, so a slot's time of day is
+ *  pure arithmetic on instants and every time the bot shows is a Discord
+ *  timestamp rendered in each reader's own zone.
  *
- *  The trade is that a slot stays fixed in absolute terms, so after a daylight
- *  saving change it lands an hour off relative to Tibia's server time. Editing
- *  the schedule re-anchors it.
+ *  [[RespawnSchedule.daysOfWeek]] is the one part that needs a calendar, and it
+ *  is read in server time — the same clock the SS labels use, and the one whose
+ *  "Tuesday" a Tibia team means when they say Tuesday. `0` means the booking
+ *  does not repeat at all: a single slot, held ahead of time.
  *
- *  Phase 1 is daily-only (`periodMinutes` = 1440). Choosing weekdays would mean
- *  knowing which day a slot falls on, which needs a timezone — so it is left out
- *  rather than smuggled back in.
+ *  The trade on the anchor is that a slot stays fixed in absolute terms, so
+ *  after a daylight saving change it lands an hour off relative to server time —
+ *  and a slot within an hour of midnight can land on the neighbouring day.
+ *  Editing the schedule re-anchors it.
  */
 final case class RespawnSchedule(
   id: Long,
@@ -231,21 +232,57 @@ final case class RespawnSchedule(
   periodMinutes: Int,
   durationMinutes: Int,
   active: Boolean,
-  createdAt: ZonedDateTime
+  createdAt: ZonedDateTime,
+  /** Which weekdays this repeats on, as a bitmask — Monday is the low bit. Last
+   *  in the list only so adding it left every existing construction alone. */
+  daysOfWeek: Int = RespawnSchedule.EveryDay
 ) {
-  /** The first slot starting at or after `from`.
+  /** A booking that comes back around, as opposed to a single slot held ahead of
+   *  time. */
+  def repeats: Boolean = daysOfWeek != RespawnSchedule.OneOff
+
+  /** Whether this booking runs on the weekday `when` falls on, read in server
+   *  time. */
+  def coversDay(when: ZonedDateTime): Boolean =
+    repeats && (daysOfWeek & RespawnSchedule.bitFor(
+      when.withZoneSameInstant(time.Clock.Berlin).getDayOfWeek)) != 0
+
+  /** The first slot starting at or after `from`, if there is one.
    *
-   *  Pure instant arithmetic, which is what keeps this timezone-free — and
-   *  testable without a clock. */
-  def nextStartAtOrAfter(from: ZonedDateTime): ZonedDateTime = {
+   *  `None` once a one-off booking has been and gone: a booking that does not
+   *  repeat genuinely has no next slot, and saying so is what lets the caller
+   *  stop asking. */
+  def nextStartAtOrAfter(from: ZonedDateTime): Option[ZonedDateTime] = {
     val period = math.max(1, periodMinutes).toLong
     val elapsed = java.time.Duration.between(anchorAt, from).toMinutes
-    if (elapsed <= 0) anchorAt
+    // Round up, so a slot already under way is not offered as the next one.
+    val firstDue =
+      if (elapsed <= 0) anchorAt
+      else anchorAt.plusMinutes(((elapsed + period - 1) / period) * period)
+
+    if (!repeats) Some(anchorAt).filter(!_.isBefore(from))
     else {
-      // Round up, so a slot already under way is not offered as the next one.
-      val periodsAway = (elapsed + period - 1) / period
-      anchorAt.plusMinutes(periodsAway * period)
+      // A week of steps always reaches the next allowed weekday, whatever the
+      // period — and cannot spin if a bad row stored a silly one.
+      val stepsPerWeek = math.max(1, (7L * RespawnSchedule.Daily / period).toInt)
+      Iterator.iterate(firstDue)(_.plusMinutes(period))
+        .take(stepsPerWeek + 1).find(coversDay)
     }
+  }
+
+  /** Every slot starting inside a window. Bounded, so a bad row cannot make this
+   *  run away. */
+  def occurrencesBetween(from: ZonedDateTime, to: ZonedDateTime): List[ZonedDateTime] = {
+    val found = List.newBuilder[ZonedDateTime]
+    var cursor = nextStartAtOrAfter(from)
+    var guard = 0
+    while (cursor.exists(!_.isAfter(to)) && guard < RespawnSchedule.OccurrenceLimit) {
+      val start = cursor.get
+      found += start
+      cursor = nextStartAtOrAfter(start.plusMinutes(1))
+      guard += 1
+    }
+    found.result()
   }
 
   /** Whether `start` is genuinely one of this schedule's slots — the guard
@@ -253,15 +290,69 @@ final case class RespawnSchedule(
   def startsAt(start: ZonedDateTime): Boolean = {
     val period = math.max(1, periodMinutes).toLong
     val elapsed = java.time.Duration.between(anchorAt, start).toMinutes
-    elapsed >= 0 && elapsed % period == 0
+    if (!repeats) elapsed == 0
+    else elapsed >= 0 && elapsed % period == 0 && coversDay(start)
   }
 
   def endOf(start: ZonedDateTime): ZonedDateTime = start.plusMinutes(durationMinutes.toLong)
+
+  /** How this booking recurs, in words: "once", "every day", "every Tue, Wed". */
+  def repeatLabel: String = RespawnSchedule.repeatLabel(daysOfWeek)
 }
 
 object RespawnSchedule {
-  /** The only period phase 1 offers. */
+  /** The only period on offer: a slot recurs at the same time of day, and
+   *  the day mask decides which days it is allowed to land on. */
   val Daily: Int = 24 * 60
+
+  /** A booking that happens once and is then spent. */
+  val OneOff: Int = 0
+
+  /** All seven days set — what a plain daily booking is, and what every schedule
+   *  made before weekdays existed becomes. */
+  val EveryDay: Int = 127
+
+  /** Ceiling on how many slots a window walk will produce, so a nonsense period
+   *  or an over-wide window cannot spin. */
+  private[domain] val OccurrenceLimit: Int = 400
+
+  def bitFor(day: java.time.DayOfWeek): Int = 1 << (day.getValue - 1)
+
+  def maskOf(days: Iterable[java.time.DayOfWeek]): Int =
+    days.foldLeft(0)((mask, day) => mask | bitFor(day))
+
+  def daysIn(mask: Int): List[java.time.DayOfWeek] =
+    java.time.DayOfWeek.values().toList.filter(day => (mask & bitFor(day)) != 0)
+
+  /** Whether two bookings on the same spawn ever run at the same time.
+   *
+   *  Answered by walking the slots each one actually produces rather than by
+   *  arithmetic on offsets: with weekday masks and one-offs in the mix, "same
+   *  time of day" is no longer the same question as "same slot", and a rule
+   *  clever enough to answer it in closed form would be a rule nobody could
+   *  check. A week and a bit from the later anchor covers every case — the
+   *  patterns repeat weekly — and starting a day early catches a window that
+   *  opens before that anchor and runs past it.
+   */
+  def clash(a: RespawnSchedule, b: RespawnSchedule): Boolean = {
+    val later = if (a.anchorAt.isAfter(b.anchorAt)) a.anchorAt else b.anchorAt
+    val from = later.minusDays(1)
+    val to = from.plusDays(9)
+    val slotsOfB = b.occurrencesBetween(from, to)
+    a.occurrencesBetween(from, to).exists { startA =>
+      val endA = a.endOf(startA)
+      slotsOfB.exists(startB => startA.isBefore(b.endOf(startB)) && startB.isBefore(endA))
+    }
+  }
+
+  /** How a mask reads to a person. Named days rather than a count, because
+   *  "every Tue, Wed, Thu, Sun" is the thing a team checks at a glance. */
+  def repeatLabel(mask: Int): String =
+    if (mask == OneOff) "once"
+    else if (mask == EveryDay) "every day"
+    else daysIn(mask)
+      .map(_.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH))
+      .mkString("every ", ", ", "")
 
   /** The next `count` half hours in `zone`, for the schedule picker.
    *

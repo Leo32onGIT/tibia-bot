@@ -194,7 +194,8 @@ trait RespawnRepository {
 
   def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
                   characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
-                  durationMinutes: Int): RespawnSchedule
+                  durationMinutes: Int,
+                  daysOfWeek: Int = RespawnSchedule.EveryDay): RespawnSchedule
 
   def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule]
 

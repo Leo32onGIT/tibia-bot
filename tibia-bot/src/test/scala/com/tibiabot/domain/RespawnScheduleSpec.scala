@@ -3,44 +3,53 @@ package com.tibiabot.domain
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.time.{ZoneOffset, ZonedDateTime}
+import java.time.{DayOfWeek, ZoneOffset, ZonedDateTime}
 
-/** The recurrence arithmetic behind repeating slots.
+/** The recurrence arithmetic behind booked slots.
  *
- *  Deliberately free of any timezone: a schedule is an anchor instant plus a
- *  period, so working out the next slot is pure arithmetic on instants and every
- *  time shown is a Discord timestamp rendered in the reader's own zone. These
- *  tests are the guard on that — anything that needed a zone would show up here
- *  as a case that can't be expressed.
+ *  The time of day is an anchor instant plus a period, so working it out is pure
+ *  arithmetic on instants and every time shown is a Discord timestamp rendered
+ *  in the reader's own zone. Which weekday a slot falls on is the one part that
+ *  needs a calendar, and it is answered in server time — the anchor below is
+ *  20:00 UTC on Thursday 30 July 2026, which is 22:00 Thursday in Berlin, so the
+ *  two agree here and the weekday cases say what they mean.
  */
 class RespawnScheduleSpec extends AnyFunSuite with Matchers {
 
+  private implicit class Pipe[A](value: A) {
+    def |>[B](f: A => B): B = f(value)
+  }
+
+
   private val anchor = ZonedDateTime.parse("2026-07-30T20:00:00Z")
 
-  private def schedule(durationMinutes: Int = 120, period: Int = RespawnSchedule.Daily) =
+  private def schedule(durationMinutes: Int = 120, period: Int = RespawnSchedule.Daily,
+                       days: Int = RespawnSchedule.EveryDay) =
     RespawnSchedule(1L, 1L, "u1", "One", "", anchor, period, durationMinutes,
-      active = true, createdAt = anchor)
+      active = true, createdAt = anchor, daysOfWeek = days)
+
+  private def onlyOn(days: DayOfWeek*) = schedule(days = RespawnSchedule.maskOf(days))
 
   test("before the first slot, the next one is the anchor itself") {
-    schedule().nextStartAtOrAfter(anchor.minusHours(5)) shouldBe anchor
-    schedule().nextStartAtOrAfter(anchor) shouldBe anchor
+    schedule().nextStartAtOrAfter(anchor.minusHours(5)) shouldBe Some(anchor)
+    schedule().nextStartAtOrAfter(anchor) shouldBe Some(anchor)
   }
 
   test("a slot already under way is not offered as the next one") {
     // Mid-slot: the next start is tomorrow's, not the one running now.
-    schedule().nextStartAtOrAfter(anchor.plusMinutes(30)) shouldBe anchor.plusDays(1)
+    schedule().nextStartAtOrAfter(anchor.plusMinutes(30)) shouldBe Some(anchor.plusDays(1))
   }
 
   test("the next slot rolls forward a whole number of days, however far ahead you ask") {
-    schedule().nextStartAtOrAfter(anchor.plusDays(1)) shouldBe anchor.plusDays(1)
-    schedule().nextStartAtOrAfter(anchor.plusDays(3).plusMinutes(1)) shouldBe anchor.plusDays(4)
-    schedule().nextStartAtOrAfter(anchor.plusDays(365)) shouldBe anchor.plusDays(365)
+    schedule().nextStartAtOrAfter(anchor.plusDays(1)) shouldBe Some(anchor.plusDays(1))
+    schedule().nextStartAtOrAfter(anchor.plusDays(3).plusMinutes(1)) shouldBe Some(anchor.plusDays(4))
+    schedule().nextStartAtOrAfter(anchor.plusDays(365)) shouldBe Some(anchor.plusDays(365))
   }
 
   test("the answer is the same instant whatever zone the question is asked in") {
-    // The whole point of anchoring on an instant: no zone can change the result.
+    // The time of day is anchored on an instant: no zone can change the result.
     val inTokyo = anchor.plusMinutes(30).withZoneSameInstant(ZoneOffset.ofHours(9))
-    schedule().nextStartAtOrAfter(inTokyo).toInstant shouldBe anchor.plusDays(1).toInstant
+    schedule().nextStartAtOrAfter(inTokyo).map(_.toInstant) shouldBe Some(anchor.plusDays(1).toInstant)
   }
 
   test("only real slot times are recognised as starts") {
@@ -49,6 +58,133 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     schedule().startsAt(anchor.plusMinutes(1)) shouldBe false
     // Before the schedule existed is not a slot, however well it lines up.
     schedule().startsAt(anchor.minusDays(1)) shouldBe false
+  }
+
+  // --- one-off bookings -----------------------------------------------------
+
+  test("a one-off booking has its slot and then no more") {
+    val once = schedule(days = RespawnSchedule.OneOff)
+    once.repeats shouldBe false
+    once.nextStartAtOrAfter(anchor.minusHours(5)) shouldBe Some(anchor)
+    once.nextStartAtOrAfter(anchor) shouldBe Some(anchor)
+    // Once it has started it is spent, which is what retires the booking.
+    once.nextStartAtOrAfter(anchor.plusMinutes(1)) shouldBe None
+    once.nextStartAtOrAfter(anchor.plusDays(1)) shouldBe None
+  }
+
+  test("a one-off recognises its own slot and nothing a day later") {
+    val once = schedule(days = RespawnSchedule.OneOff)
+    once.startsAt(anchor) shouldBe true
+    once.startsAt(anchor.plusDays(1)) shouldBe false
+    once.occurrencesBetween(anchor.minusDays(1), anchor.plusDays(30)) shouldBe List(anchor)
+  }
+
+  // --- weekdays -------------------------------------------------------------
+
+  test("a booking only lands on the days it was given") {
+    // The anchor is a Thursday. Asking from the anchor, a Tue/Sun booking skips
+    // to Sunday rather than starting on the Thursday it was anchored to.
+    val teamNights = onlyOn(DayOfWeek.TUESDAY, DayOfWeek.SUNDAY)
+    val next = teamNights.nextStartAtOrAfter(anchor)
+    next shouldBe Some(anchor.plusDays(3))
+    next.map(_.getDayOfWeek) shouldBe Some(DayOfWeek.SUNDAY)
+
+    teamNights.nextStartAtOrAfter(anchor.plusDays(3).plusMinutes(1))
+      .map(_.getDayOfWeek) shouldBe Some(DayOfWeek.TUESDAY)
+  }
+
+  test("a weekday booking repeats week after week without drifting") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    val starts = tuesdays.occurrencesBetween(anchor, anchor.plusDays(28))
+    starts.map(_.getDayOfWeek).distinct shouldBe List(DayOfWeek.TUESDAY)
+    starts.size shouldBe 4
+    // Exactly a week apart, so the time of day never slides.
+    starts.sliding(2).foreach { case Seq(a, b) => b shouldBe a.plusDays(7) }
+  }
+
+  test("a weekday not in the mask is not a start, however well it lines up") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    tuesdays.startsAt(anchor) shouldBe false
+    tuesdays.startsAt(anchor.plusDays(5)) shouldBe true
+  }
+
+  test("every day and all seven days chosen are the same booking") {
+    val all = onlyOn(DayOfWeek.values(): _*)
+    all.daysOfWeek shouldBe RespawnSchedule.EveryDay
+    all.occurrencesBetween(anchor, anchor.plusDays(6)) shouldBe
+      schedule().occurrencesBetween(anchor, anchor.plusDays(6))
+  }
+
+  test("how a booking recurs reads as words, not a bitmask") {
+    RespawnSchedule.repeatLabel(RespawnSchedule.OneOff) shouldBe "once"
+    RespawnSchedule.repeatLabel(RespawnSchedule.EveryDay) shouldBe "every day"
+    RespawnSchedule.maskOf(Seq(DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.SUNDAY)) |> { mask =>
+      RespawnSchedule.repeatLabel(mask) shouldBe "every Tue, Wed, Sun"
+      RespawnSchedule.daysIn(mask) shouldBe
+        List(DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.SUNDAY)
+    }
+  }
+
+  test("a window with no slots in it comes back empty rather than looping") {
+    onlyOn(DayOfWeek.TUESDAY).occurrencesBetween(anchor, anchor.plusDays(2)) shouldBe empty
+    schedule(days = RespawnSchedule.OneOff)
+      .occurrencesBetween(anchor.plusDays(1), anchor.plusDays(400)) shouldBe empty
+  }
+
+  // --- clashes --------------------------------------------------------------
+
+  test("two bookings clash when their windows overlap on a day they share") {
+    val evening = schedule(durationMinutes = 120)
+    val overlapping = evening.copy(anchorAt = anchor.plusMinutes(60), userId = "u2")
+    val after = evening.copy(anchorAt = anchor.plusMinutes(120), userId = "u2")
+
+    RespawnSchedule.clash(evening, overlapping) shouldBe true
+    // Starting exactly as the other ends is not an overlap — that is a handover.
+    RespawnSchedule.clash(evening, after) shouldBe false
+  }
+
+  test("bookings on different weekdays never clash, however well the times line up") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    val wednesdays = onlyOn(DayOfWeek.WEDNESDAY).copy(userId = "u2")
+    // Same time of day, same spawn — but they are never in the room together.
+    RespawnSchedule.clash(tuesdays, wednesdays) shouldBe false
+    RespawnSchedule.clash(tuesdays, onlyOn(DayOfWeek.TUESDAY, DayOfWeek.FRIDAY)) shouldBe true
+  }
+
+  test("a one-off only clashes on the day it actually falls on") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    // The anchor is a Thursday, so a one-off there misses the Tuesday booking;
+    // five days on it lands squarely on one.
+    val onThursday = schedule(days = RespawnSchedule.OneOff).copy(userId = "u2")
+    val onTuesday = onThursday.copy(anchorAt = anchor.plusDays(5))
+
+    RespawnSchedule.clash(tuesdays, onThursday) shouldBe false
+    RespawnSchedule.clash(tuesdays, onTuesday) shouldBe true
+  }
+
+  test("two one-offs on the same weekday but different weeks do not clash") {
+    // The old offset arithmetic could not tell these apart: same time of day,
+    // same weekday, and no shared slot at all.
+    val first = schedule(days = RespawnSchedule.OneOff)
+    val weekLater = first.copy(anchorAt = anchor.plusDays(7), userId = "u2")
+    RespawnSchedule.clash(first, weekLater) shouldBe false
+    RespawnSchedule.clash(first, first.copy(userId = "u2")) shouldBe true
+  }
+
+  test("a booking that has not started yet cannot clash with one already spent") {
+    val spent = schedule(days = RespawnSchedule.OneOff)
+    val muchLater = schedule().copy(anchorAt = anchor.plusDays(30), userId = "u2")
+    RespawnSchedule.clash(spent, muchLater) shouldBe false
+  }
+
+  test("a window running past midnight still clashes with the next day's booking") {
+    // 23:00 for three hours reaches into Friday, where a Friday booking is
+    // waiting — the case a same-day comparison would miss.
+    val lateThursday = onlyOn(DayOfWeek.THURSDAY)
+      .copy(anchorAt = anchor.plusHours(1), durationMinutes = 180)
+    val earlyFriday = onlyOn(DayOfWeek.FRIDAY)
+      .copy(anchorAt = anchor.plusHours(3), durationMinutes = 60, userId = "u2")
+    RespawnSchedule.clash(lateThursday, earlyFriday) shouldBe true
   }
 
   test("a slot ends its duration after it starts") {
@@ -61,8 +197,8 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     // the look-ahead. Both clamp to a one-minute period and still answer with a
     // time at or after the one asked about.
     val from = anchor.plusMinutes(5)
-    schedule(period = 0).nextStartAtOrAfter(from) shouldBe from
-    schedule(period = -10).nextStartAtOrAfter(from) shouldBe from
+    schedule(period = 0).nextStartAtOrAfter(from) shouldBe Some(from)
+    schedule(period = -10).nextStartAtOrAfter(from) shouldBe Some(from)
   }
 
   test("the picker offers half hours in the guild's own clock") {

@@ -131,6 +131,11 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |);""".stripMargin)
       statement.executeUpdate(
         "CREATE INDEX IF NOT EXISTS respawn_schedules_by_respawn ON respawn_schedules (respawn_id, active);")
+      // Weekday mask, Monday the low bit. Defaulting to all seven is what makes
+      // every booking that predates weekdays keep behaving as the daily slot it
+      // was, rather than quietly becoming a one-off.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_schedules ADD COLUMN IF NOT EXISTS days_of_week SMALLINT NOT NULL DEFAULT 127;")
 
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS schedule_id BIGINT;")
@@ -857,7 +862,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       periodMinutes = result.getInt("period_minutes"),
       durationMinutes = result.getInt("duration_minutes"),
       active = result.getBoolean("active"),
-      createdAt = toZoned(result.getTimestamp("created_at"))
+      createdAt = toZoned(result.getTimestamp("created_at")),
+      daysOfWeek = result.getInt("days_of_week")
     )
 
   private def collectSchedules(result: ResultSet): List[RespawnSchedule] = {
@@ -868,12 +874,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
                   characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
-                  durationMinutes: Int): RespawnSchedule = withGuild(guildId) { conn =>
+                  durationMinutes: Int,
+                  daysOfWeek: Int = RespawnSchedule.EveryDay): RespawnSchedule = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_schedules
         |(respawn_id, user_id, user_name, character_name, anchor_at, period_minutes,
-        | duration_minutes, active, created_at)
-        |VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, NOW())
+        | duration_minutes, days_of_week, active, created_at)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, NOW())
         |RETURNING *;""".stripMargin)
     try {
       statement.setLong(1, respawnId)
@@ -883,6 +890,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setTimestamp(5, Timestamp.from(anchorAt.toInstant))
       statement.setInt(6, periodMinutes)
       statement.setInt(7, durationMinutes)
+      statement.setInt(8, daysOfWeek)
       val result = statement.executeQuery()
       result.next()
       readSchedule(result)

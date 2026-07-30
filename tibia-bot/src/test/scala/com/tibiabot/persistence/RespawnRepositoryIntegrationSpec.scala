@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs}
 import com.tibiabot.persistence.jdbc.JdbcRespawnRepository
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -461,6 +461,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "Char", now.plusHours(2), 1440, 120)
     schedule.periodMinutes shouldBe 1440
+    // Left unsaid, a booking repeats every day — which is what every schedule
+    // written before weekdays existed has to keep meaning.
+    schedule.daysOfWeek shouldBe RespawnSchedule.EveryDay
     repo.schedulesForUser(g, "owner").map(_.id) shouldBe List(schedule.id)
     repo.schedulesForRespawn(g, spawn.id).map(_.id) shouldBe List(schedule.id)
 
@@ -475,6 +478,21 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.cancelReservationsOf(g, schedule.id, RespawnClaim.Outcome.ScheduleCancelled)
     repo.activeSchedules(g) shouldBe empty
     repo.reservationsFor(g, spawn.id, now) shouldBe empty
+  }
+
+  test("weekday and one-off bookings survive the round trip") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "416", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val teamNights = RespawnSchedule.maskOf(
+      Seq(java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.SUNDAY))
+
+    val weekly = repo.addSchedule(g, spawn.id, "u1", "One", "", now.plusHours(2), 1440, 120, teamNights)
+    val once = repo.addSchedule(g, spawn.id, "u2", "Two", "", now.plusHours(5), 1440, 60,
+      RespawnSchedule.OneOff)
+
+    repo.findSchedule(g, weekly.id).map(_.daysOfWeek) shouldBe Some(teamNights)
+    repo.findSchedule(g, weekly.id).map(_.repeatLabel) shouldBe Some("every Tue, Wed, Sun")
+    repo.findSchedule(g, once.id).map(_.repeats) shouldBe Some(false)
   }
 
   test("a slot's owner is nudged once, only inside the lead time") {
