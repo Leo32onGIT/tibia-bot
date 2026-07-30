@@ -10,7 +10,7 @@ import com.tibiabot.presentation.Embeds.BrandColor
 import com.tibiabot.state.StreamState
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
+import net.dv8tion.jda.api.entities.channel.concrete.{Category, TextChannel}
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
 import net.dv8tion.jda.api.events.guild.{GuildJoinEvent, GuildLeaveEvent}
@@ -97,6 +97,22 @@ final class ChannelService(
         discord.copy(boostedChannel = channelId)
       case other => other
     }).toMap)
+  }
+
+  /** The @everyone override on the bot's "Violent Bot" category.
+   *
+   *  Members may see it — that is how they read the notifications channel and the
+   *  spawns forum — but may not open posts or threads of their own. The spawns
+   *  forum deliberately inherits from here rather than carrying its own override,
+   *  so this is where the "one post per respawn, created by the bot" rule is
+   *  actually enforced.
+   *
+   *  One helper for all four creation sites, so a new one can't quietly forget
+   *  the deny. `visible` is false on the path that hides the category entirely. */
+  private def setCategoryPublicPerms(category: Category, publicRole: Role, visible: Boolean): Unit = {
+    val action = category.upsertPermissionOverride(publicRole)
+      .deny(Permission.CREATE_PUBLIC_THREADS)
+    (if (visible) action.grant(Permission.VIEW_CHANNEL) else action.deny(Permission.VIEW_CHANNEL)).queue()
   }
 
   /** Reuse the guild's existing role of this name, or create it with the given
@@ -246,6 +262,11 @@ final class ChannelService(
     }
 
     try {
+      // Re-assert the category's @everyone override, since the forum inherits
+      // from it — this is what migrates categories created before the deny.
+      Option(guild.getCategoryById(discordConfig.getOrElse("admin_category", "0")))
+        .foreach(setCategoryPublicPerms(_, guild.getPublicRole, visible = true))
+
       com.tibiabot.respawn.RespawnThreads.findForum(guild, settings) match {
         case Some(existing) =>
           // Re-assert the moderator role's access every time: the role may have
@@ -279,7 +300,7 @@ final class ChannelService(
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
-            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
+            setCategoryPublicPerms(newAdminCategory, guild.getPublicRole, visible = true)
             discordUpdateConfig(guild, newAdminCategory.getId, "", "", "", "")
             adminCategory = newAdminCategory
           }
@@ -383,7 +404,7 @@ final class ChannelService(
           .grant(Permission.VIEW_CHANNEL)
           .grant(Permission.MESSAGE_SEND)
           .complete()
-        adminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
+        setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = true)
         val adminChannel = guild.createTextChannel("🖥️・ᴄᴏᴍᴍᴀɴᴅ ʟᴏɢ", adminCategory).complete()
         // hide this channel from @everyone; only the bot can view/post
         adminChannel.upsertPermissionOverride(botRole).grant(Permission.MESSAGE_SEND).complete()
@@ -414,7 +435,7 @@ final class ChannelService(
             .grant(Permission.VIEW_CHANNEL)
             .grant(Permission.MESSAGE_SEND)
             .complete()
-          adminCategory.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
+          setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = false)
           discordUpdateConfig(guild, adminCategory.getId, "", "", "", world)
           adminCategoryCheck = adminCategory
         }
@@ -883,7 +904,7 @@ final class ChannelService(
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
-            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
+            setCategoryPublicPerms(newAdminCategory, guild.getPublicRole, visible = true)
             adminCategory = newAdminCategory
           }
           // create the channel
@@ -1008,7 +1029,7 @@ final class ChannelService(
               .grant(Permission.VIEW_CHANNEL)
               .grant(Permission.MESSAGE_SEND)
               .complete()
-            newAdminCategory.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
+            setCategoryPublicPerms(newAdminCategory, guild.getPublicRole, visible = true)
             adminCategory = newAdminCategory
           }
           // create the channel

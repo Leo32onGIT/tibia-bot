@@ -90,6 +90,32 @@ class StaminaSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.parse("respawn:") shouldBe None
   }
 
+  test("leaving a queue does not advance a handover, but declining an offer does") {
+    // The Leave bug: both were treated alike, so a queued member leaving made the
+    // service advance the handover — which closes out whoever it is replacing. The
+    // holder's live hunt was therefore ended by a third party abandoning the
+    // queue, or offered away mid-hunt when somebody else was still waiting.
+    val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusQueued, 1, now, None, None,
+      120, warned = false, kind = RespawnClaim.KindAdHoc, limboUntil = None,
+      offerExpiresAt = None, outcome = None, endedAt = None)
+
+    base.leavingAdvancesHandover shouldBe false
+    base.copy(status = RespawnClaim.StatusOffered).leavingAdvancesHandover shouldBe true
+    // An active holder pressing Leave takes the release path, not this one.
+    base.copy(status = RespawnClaim.StatusActive).leavingAdvancesHandover shouldBe false
+  }
+
+  test("only a claim already on its way out may be finished by a handover") {
+    val holder = RespawnClaim(1L, 1L, "holder", "H", "", RespawnClaim.StatusActive, 0, now, Some(now),
+      Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc,
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
+
+    // Mid-hunt, an hour still to run: a handover must not touch it.
+    holder.eligibleForHandover shouldBe false
+    // Time up, next person deciding: this is the one a handover closes out.
+    holder.copy(limboUntil = Some(now.plusMinutes(10))).eligibleForHandover shouldBe true
+  }
+
   test("a claim knows whether it is being handed over") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now), 120, warned = false, kind = RespawnClaim.KindAdHoc,

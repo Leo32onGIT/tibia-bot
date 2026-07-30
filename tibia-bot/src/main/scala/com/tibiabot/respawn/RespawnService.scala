@@ -268,7 +268,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
                   if (!tank.canAfford(minutes))
                     ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
-                  else if (repository.activeClaim(guildId, respawn.id).isDefined)
+                  // An outstanding offer means the spawn is already spoken for,
+                  // even though its previous holder may already have been closed
+                  // out. Without this, claiming it outright would leave two live
+                  // claims the moment the offer was accepted.
+                  else if (repository.activeClaim(guildId, respawn.id).isDefined ||
+                           repository.offeredClaim(guildId, respawn.id).isDefined)
                     enqueue(guild, respawn, config, userId, userName, characterName, minutes)
                   else
                     beginClaim(guild, respawn, config, userId, userName, characterName, minutes,
@@ -345,11 +350,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(claim) =>
             val respawn = repository.findById(guildId, claim.respawnId)
             if (claim.isQueued || claim.isOffered) {
-              // Declining an offer and leaving the queue are the same act, so
-              // they take the same path — only the audit entry distinguishes them.
               repository.cancelClaim(guildId, claim.id,
                 if (claim.isOffered) RespawnClaim.Outcome.Declined else RespawnClaim.Outcome.LeftQueue)
-              respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
+              // Only an *offered* claim leaving means a handover is in flight and
+              // has to move on. Somebody merely giving up a queue place changes
+              // nothing about the spawn itself — the holder is mid-hunt — so
+              // advancing here would hand their spawn away, or end it outright
+              // when they were the last one queued.
+              if (claim.leavingAdvancesHandover)
+                respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = handingOverHolder(guildId, r.id)))
+              else
+                respawn.foreach(refreshThread(guild, _, config))
               respawn.map(ReleaseOutcome.LeftQueue).getOrElse(ReleaseOutcome.NothingHeld)
             } else if (claim.limboUntil.isDefined) {
               // Already released or expired and waiting on a handover. Releasing
@@ -386,6 +397,16 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   /** The claim still shown as holding a spawn, including one in limbo. */
   private def activeHolder(guildId: String, respawnId: Long): Option[RespawnClaim] =
     repository.activeClaim(guildId, respawnId)
+
+  /** The holder of a spawn *that is already on its way out* — the only claim a
+   *  handover may legitimately finish.
+   *
+   *  A handover closes out whoever it is replacing, so passing it a claim that
+   *  isn't being handed over ends a hunt that is still running. Limbo is exactly
+   *  the marker for "this claim's time is up and the next person is deciding", so
+   *  requiring it makes the mistake impossible rather than merely unlikely. */
+  private def handingOverHolder(guildId: String, respawnId: Long): Option[RespawnClaim] =
+    repository.activeClaim(guildId, respawnId).filter(_.eligibleForHandover)
 
   /** Add time to the caller's active claim, within the guild's ceiling and
    *  their remaining stamina. Returns the new end time on success. */
@@ -718,7 +739,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // as a decline so the spawn moves on rather than stalling on them.
               repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.NoStamina)
               val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-              respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
+              respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = handingOverHolder(guildId, r.id)))
               OfferOutcome.NoStamina(claim.durationMinutes, tank, ServerSaveSchedule.nextServerSave(now))
             } else {
               // Close the outgoing holder before promoting, so a spawn never has
@@ -759,7 +780,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(claim) =>
             repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.Declined)
             val respawn = repository.findById(guildId, claim.respawnId)
-            respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
+            respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = handingOverHolder(guildId, r.id)))
             respawn.map(OfferOutcome.Declined).getOrElse(OfferOutcome.Gone)
         }
     }

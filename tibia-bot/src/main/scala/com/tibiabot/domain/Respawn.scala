@@ -73,6 +73,20 @@ final case class RespawnClaim(
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
   def isOffered: Boolean = status == RespawnClaim.StatusOffered
 
+  /** Whether this claim being given up means a handover is in flight and has to
+   *  move on to the next person.
+   *
+   *  True only for an *offered* claim. Somebody abandoning a mere queue place
+   *  changes nothing about the spawn — its holder is mid-hunt — and advancing a
+   *  handover closes out whoever it is replacing, so treating the two alike ended
+   *  a live hunt (or offered it away) because a third party left the queue. */
+  def leavingAdvancesHandover: Boolean = isOffered
+
+  /** Whether a handover may legitimately finish this claim. Limbo is the marker
+   *  for "time up, next person deciding", so anything without it is still a
+   *  running hunt and must be left alone. */
+  def eligibleForHandover: Boolean = limboUntil.isDefined
+
   /** True while this claim's time is up but it is being held open because the
    *  next person in line still has an unanswered handover offer. The spawn goes
    *  on showing this claimant as its holder, and — because `endsAt` is left
