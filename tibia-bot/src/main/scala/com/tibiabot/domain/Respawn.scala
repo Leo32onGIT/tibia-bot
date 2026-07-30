@@ -70,7 +70,15 @@ final case class RespawnClaim(
   endedAt: Option[ZonedDateTime],
   /** The recurring schedule this occurrence came from, for rows of kind
    *  `scheduled`. Empty for an ordinary claim. */
-  scheduleId: Option[Long]
+  scheduleId: Option[Long] = None,
+  /** When the slot's owner was asked whether they are actually hunting it. Set
+   *  once and never cleared, which is what makes "asked once per slot" hold: the
+   *  Request button is gone from then on, whatever the answer was. */
+  askedAt: Option[ZonedDateTime] = None,
+  /** How long the owner has to answer before the slot passes to whoever asked. */
+  requestDeadline: Option[ZonedDateTime] = None,
+  requesterUserId: Option[String] = None,
+  requesterUserName: Option[String] = None
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -92,6 +100,13 @@ final case class RespawnClaim(
    *  for "time up, next person deciding", so anything without it is still a
    *  running hunt and must be left alone. */
   def eligibleForHandover: Boolean = limboUntil.isDefined
+
+  /** Whether this slot can still be asked for. Once its owner has been asked the
+   *  answer stands for that slot, so nobody may ask again. */
+  def requestable: Boolean = isReserved && askedAt.isEmpty
+
+  /** Whether somebody is waiting on the owner's answer right now. */
+  def requestPending: Boolean = isReserved && requesterUserId.isDefined
 
   /** True while this claim's time is up but it is being held open because the
    *  next person in line still has an unanswered handover offer. The spawn goes
@@ -156,6 +171,10 @@ object RespawnClaim {
     val Missed: String = "missed"
     /** The schedule behind a reserved slot was cancelled before it started. */
     val ScheduleCancelled: String = "schedule-cancelled"
+    /** The slot's owner said they weren't hunting it, so it went to whoever asked. */
+    val GivenUp: String = "given-up"
+    /** The slot's owner never answered, so it went to whoever asked. */
+    val NoAnswer: String = "no-answer"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -172,6 +191,8 @@ object RespawnClaim {
       case NoStamina   => "dropped, out of stamina"
       case Missed      => "scheduled slot missed"
       case ScheduleCancelled => "schedule cancelled"
+      case GivenUp     => "given up for the night"
+      case NoAnswer    => "no answer, passed on"
       case other       => other
     }
   }

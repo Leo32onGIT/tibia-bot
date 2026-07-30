@@ -193,6 +193,11 @@ object Config {
      *  and plan around tonight's slot; short enough that a cancelled schedule
      *  leaves few bookings to clear. */
     val scheduleLookAheadMinutes: Int = respawn.getInt("schedule-look-ahead-minutes")
+    /** How long the owner of a booked slot has to say whether they are hunting it
+     *  before it passes to whoever asked. Always clamped to the slot's own start:
+     *  waiting an hour on a request made six hours ahead is pointless, and one
+     *  made five minutes ahead cannot wait longer than that. */
+    val requestResponseMinutes: Int = respawn.getInt("request-response-minutes")
     /** Most standing bookings one member may hold in a guild. */
     val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
     /** Shown as the claim embed's image when a spawn has no `creature` set —

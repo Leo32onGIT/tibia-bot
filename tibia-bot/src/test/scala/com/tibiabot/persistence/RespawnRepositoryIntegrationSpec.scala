@@ -387,6 +387,96 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
       List(Some(RespawnClaim.Outcome.Completed))
   }
 
+  test("a booked slot is asked about once, whatever the answer") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    repo.requestableSlot(g, spawn.id, now).map(_.id) shouldBe Some(slot.id)
+
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+    asked.flatMap(_.requesterUserId) shouldBe Some("u2")
+    asked.flatMap(_.askedAt) should not be empty
+
+    // The rule: once asked, never again — and two people pressing Request at the
+    // same moment cannot both get in.
+    repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60)) shouldBe None
+    repo.requestableSlot(g, spawn.id, now) shouldBe None
+  }
+
+  test("keeping a slot clears the request but not the fact it was asked") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+
+    val kept = repo.keepOccurrence(g, slot.id)
+    kept.flatMap(_.requesterUserId) shouldBe None
+    // Still asked, so nobody else may ask about this slot either.
+    kept.flatMap(_.askedAt) should not be empty
+    kept.map(_.isReserved) shouldBe Some(true)
+    repo.requestableSlot(g, spawn.id, now) shouldBe None
+    repo.expiredRequests(g, now.plusHours(1)) shouldBe empty
+  }
+
+  test("an unanswered request is picked up only once its deadline has gone by") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60))
+
+    repo.expiredRequests(g, now.plusMinutes(59)) shouldBe empty
+    repo.expiredRequests(g, now.plusMinutes(60)).map(_.id) shouldBe List(slot.id)
+  }
+
+  test("a slot handed on becomes the requester's own booking, and starts like any other") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    repo.cancelClaim(g, slot.id, RespawnClaim.Outcome.GivenUp)
+    val handed = repo.reserveFor(g, spawn.id, "u2", "Two", now.plusHours(2), 120)
+
+    // No schedule of their own — it is a one-off, not an occurrence of anybody's
+    // standing rule, and the audit keeps both halves of what happened.
+    handed.scheduleId shouldBe None
+    handed.isReserved shouldBe true
+    repo.reservationsFor(g, spawn.id, now).map(_.userId) shouldBe List("u2")
+    // The due-slot path keys off the status, so it activates like any other.
+    repo.dueReservations(g, now.plusHours(2)).map(_.id) shouldBe List(handed.id)
+    repo.claimHistory(g, spawn.id, 10).map(_.outcome) shouldBe
+      List(Some(RespawnClaim.Outcome.GivenUp))
+  }
+
+  test("schedules round-trip and cancelling drops the slots it had booked") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "Char", now.plusHours(2), 1440, 120)
+    schedule.periodMinutes shouldBe 1440
+    repo.schedulesForUser(g, "owner").map(_.id) shouldBe List(schedule.id)
+    repo.schedulesForRespawn(g, spawn.id).map(_.id) shouldBe List(schedule.id)
+
+    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "Char",
+      now.plusHours(2), 120) should not be empty
+    // Booking the same slot twice is a no-op, which is what makes the
+    // materialiser safe to run on every sweep.
+    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "Char",
+      now.plusHours(2), 120) shouldBe None
+
+    repo.deactivateSchedule(g, schedule.id)
+    repo.cancelReservationsOf(g, schedule.id, RespawnClaim.Outcome.ScheduleCancelled)
+    repo.activeSchedules(g) shouldBe empty
+    repo.reservationsFor(g, spawn.id, now) shouldBe empty
+  }
+
   test("member preferences round-trip, and distinguish 'off' from 'never chose'") {
     val (repo, g) = freshRepo()
     repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs.none("u1")

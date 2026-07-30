@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads}
+import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RequestOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -99,6 +99,33 @@ object RespawnButtons extends StrictLogging {
                   logger.warn(s"Unknown respawn DM button action '$other' in guild '$guildId'")
                   respond.text(s"${Config.noEmoji} That button doesn't do anything.")
               }
+            }
+        }
+
+      // The owner of a booked slot answering, from a DM — so the guild travels
+      // in the id, as with every other DM button.
+      case Some(RespawnButtonId.SlotAnswerButton(keep, guildId, claimId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None => respond.text(s"${Config.noEmoji} That server is no longer reachable.")
+          case Some(slotGuild) =>
+            val answer =
+              if (keep) BotApp.respawnService.keepSlot(slotGuild, event.getUser.getId, claimId)
+              else BotApp.respawnService.passSlot(slotGuild, event.getUser.getId, claimId,
+                com.tibiabot.domain.RespawnClaim.Outcome.GivenUp)
+            answer match {
+              case SlotAnswer.Kept(respawn) =>
+                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** stays yours — " +
+                  "I've let them know you're hunting it.")
+                clearOfferButtons(event)
+              case SlotAnswer.Passed(respawn, toUserId) =>
+                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** has gone to " +
+                  s"<@$toUserId> for that slot. Your booking still stands for the days after.")
+                clearOfferButtons(event)
+              case SlotAnswer.NotYours =>
+                respond.text(s"${Config.noEmoji} That slot isn't yours.")
+              case SlotAnswer.Gone =>
+                respond.text(s"${Config.noEmoji} That's already been answered or has expired.")
+                clearOfferButtons(event)
             }
         }
 
@@ -228,6 +255,10 @@ object RespawnButtons extends StrictLogging {
                     event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
                 }
 
+              case "request" =>
+                respond.embed(Embeds.response(renderRequest(
+                  service.requestSlot(guild, respawn, user.getId, user.getName))))
+
               case "holdercfg" =>
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
                 else event.replyModal(RespawnModals.holderDurationModal(guildId, respawn)).queue()
@@ -333,6 +364,22 @@ object RespawnButtons extends StrictLogging {
         s"${Config.noEmoji} The respawn claim system isn't set up here."
     }
     Embeds.response(text + extra)
+  }
+
+  private def renderRequest(outcome: RequestOutcome): String = outcome match {
+    case RequestOutcome.Sent(respawn, _, deadline) =>
+      s"${Config.yesEmoji} Asked the owner of the next booked slot on **${respawn.displayName}** " +
+        s"whether they're hunting it.\nIf they don't answer by " +
+        s"<t:${deadline.toInstant.getEpochSecond}:t>, the slot is yours."
+    case RequestOutcome.NothingBooked(respawn) =>
+      s"${Config.noEmoji} Nobody has booked **${respawn.displayName}**, so there's nothing to ask for."
+    case RequestOutcome.AlreadyAsked(respawn) =>
+      s"${Config.noEmoji} The next booked slot on **${respawn.displayName}** has already been asked " +
+        "about — its owner is only asked once. Queue for it instead once their hunt starts."
+    case RequestOutcome.OwnSlot(respawn) =>
+      s"${Config.noEmoji} That's your own booking on **${respawn.displayName}**."
+    case RequestOutcome.NotConfigured =>
+      s"${Config.noEmoji} The respawn claim system isn't set up here."
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {

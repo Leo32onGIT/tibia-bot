@@ -105,7 +105,10 @@ object RespawnEmbeds {
       // around it — and, from phase 2, ask for it.
       val shown = reservations.take(3).map { slot =>
         val when = slot.startsAt.map(dateTime).getOrElse("?")
-        s"$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}"
+        // Somebody is waiting on an answer — worth showing, or a second person
+        // finds the Request button gone with no explanation.
+        val pending = if (slot.requestPending) " · *asked*" else ""
+        s"$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
       }
       val overflow = if (reservations.size > 3) s"\n…and ${reservations.size - 3} more" else ""
       embed.addField("Booked", shown.mkString("\n") + overflow, false)
@@ -113,6 +116,36 @@ object RespawnEmbeds {
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
     embed.build()
+  }
+
+  /** DM'd to a slot's owner when somebody asks for it.
+   *
+   *  Says plainly that silence hands the slot over — the deadline is the whole
+   *  mechanism, and somebody should not discover it by losing a hunt. */
+  def slotRequest(respawn: Respawn, slot: RespawnClaim, requesterName: String,
+                  deadline: ZonedDateTime): String = {
+    val window = (slot.startsAt, slot.endsAt) match {
+      case (Some(start), Some(end)) => s"${clockTime(start)}–${clockTime(end)}"
+      case (Some(start), None)      => clockTime(start)
+      case _                        => "your booked slot"
+    }
+    s"**$requesterName** would like **${respawn.displayName}** at $window.\n" +
+      "Are you hunting it? Press **Yes, I'm hunting** to keep it.\n" +
+      s"If you don't answer by ${relative(deadline)} the slot goes to them."
+  }
+
+  /** DM'd to whoever asked, once the owner says they are hunting after all. */
+  def slotRequestDeclined(respawn: Respawn, slot: RespawnClaim): String = {
+    val when = slot.startsAt.map(dateTime).getOrElse("their booked slot")
+    s"<@${slot.userId}> is hunting **${respawn.displayName}** at $when, so it stays theirs.\n" +
+      "You can still queue for it once their hunt starts."
+  }
+
+  /** DM'd to whoever asked, once the slot passes to them. */
+  def slotRequestGranted(respawn: Respawn, slot: RespawnClaim): String = {
+    val when = slot.startsAt.map(dateTime).getOrElse("the booked time")
+    s"**${respawn.displayName}** is yours at $when for " +
+      s"${humanDuration(slot.durationMinutes)} — it'll start on its own, no need to claim it."
   }
 
   /** DM'd when a booked slot starts. */

@@ -52,6 +52,30 @@ object ReleaseOutcome {
   case object NotConfigured extends ReleaseOutcome
 }
 
+/** The result of asking for somebody's booked slot. */
+sealed trait RequestOutcome
+object RequestOutcome {
+  final case class Sent(respawn: Respawn, slot: RespawnClaim, deadline: ZonedDateTime) extends RequestOutcome
+  /** Nothing booked here, so there is nothing to ask for. */
+  final case class NothingBooked(respawn: Respawn) extends RequestOutcome
+  /** Its owner has already been asked about this slot — once is the rule. */
+  final case class AlreadyAsked(respawn: Respawn) extends RequestOutcome
+  final case class OwnSlot(respawn: Respawn) extends RequestOutcome
+  case object NotConfigured extends RequestOutcome
+}
+
+/** The result of a slot owner answering "are you hunting tonight?". */
+sealed trait SlotAnswer
+object SlotAnswer {
+  /** They are hunting it, so the request is refused and the slot stays theirs. */
+  final case class Kept(respawn: Respawn) extends SlotAnswer
+  /** They are not, so it passes to whoever asked. */
+  final case class Passed(respawn: Respawn, toUserId: String) extends SlotAnswer
+  /** Already answered, lapsed, or the slot is gone. */
+  case object Gone extends SlotAnswer
+  case object NotYours extends SlotAnswer
+}
+
 /** The result of answering a handover offer DM. */
 sealed trait OfferOutcome
 object OfferOutcome {
@@ -684,6 +708,118 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     booked
   }
 
+  // --- asking for a booked slot -------------------------------------------
+
+  /** The soonest booked slot on a spawn that nobody has asked about yet. */
+  def requestableSlot(guildId: String, respawnId: Long,
+                      now: ZonedDateTime = ZonedDateTime.now()): Option[RespawnClaim] =
+    repository.requestableSlot(guildId, respawnId, now)
+
+  /** Ask the owner of the next booked slot whether they are actually hunting it.
+   *
+   *  The owner is asked once per slot and the answer stands, so the Request
+   *  button disappears from that slot whatever they say — which is the point:
+   *  somebody who confirms they are hunting should not be pestered again by the
+   *  next person to come along. */
+  def requestSlot(guild: Guild, respawn: Respawn, requesterId: String, requesterName: String,
+                  now: ZonedDateTime = ZonedDateTime.now()): RequestOutcome =
+    settings(guild.getId) match {
+      case None => RequestOutcome.NotConfigured
+      case Some(config) =>
+        val guildId = guild.getId
+        repository.requestableSlot(guildId, respawn.id, now) match {
+          case None =>
+            // Either nothing is booked, or the only booking has been asked about.
+            if (repository.reservationsFor(guildId, respawn.id, now).isEmpty)
+              RequestOutcome.NothingBooked(respawn)
+            else RequestOutcome.AlreadyAsked(respawn)
+
+          case Some(slot) if slot.userId == requesterId => RequestOutcome.OwnSlot(respawn)
+
+          case Some(slot) =>
+            // Never wait past the slot it is about: an answer that arrives after
+            // the hunt started is no use to anybody.
+            val slotStart = slot.startsAt.getOrElse(now)
+            val wanted = now.plusMinutes(Config.Respawn.requestResponseMinutes.toLong)
+            val deadline = if (wanted.isAfter(slotStart)) slotStart else wanted
+
+            repository.requestOccurrence(guildId, slot.id, requesterId, requesterName, now, deadline) match {
+              case None => RequestOutcome.AlreadyAsked(respawn)
+              case Some(asked) =>
+                RespawnThreads.dm(guild, asked.userId,
+                  RespawnEmbeds.dmEmbed("Are you hunting tonight?",
+                    RespawnEmbeds.slotRequest(respawn, asked, requesterName, deadline),
+                    imageFor(respawn), RespawnEmbeds.WarnColor),
+                  Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
+                refreshThread(guild, respawn, config)
+                RequestOutcome.Sent(respawn, asked, deadline)
+            }
+        }
+    }
+
+  /** The owner says they are hunting it: the request is refused and the slot
+   *  stays theirs. */
+  def keepSlot(guild: Guild, userId: String, claimId: Long): SlotAnswer =
+    withOwnedSlot(guild, userId, claimId) { (config, respawn, slot) =>
+      repository.keepOccurrence(guild.getId, claimId) match {
+        case None => SlotAnswer.Gone
+        case Some(_) =>
+          slot.requesterUserId.foreach { requester =>
+            RespawnThreads.dm(guild, requester,
+              RespawnEmbeds.dmEmbed("Slot request declined",
+                RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
+                RespawnEmbeds.RedColor))
+          }
+          refreshThread(guild, respawn, config)
+          SlotAnswer.Kept(respawn)
+      }
+    }
+
+  /** The owner isn't hunting it, or never answered: the slot passes to whoever
+   *  asked, as a booking of their own at the same time. */
+  def passSlot(guild: Guild, userId: String, claimId: Long, outcome: String,
+               now: ZonedDateTime = ZonedDateTime.now()): SlotAnswer =
+    withOwnedSlot(guild, userId, claimId) { (config, respawn, slot) =>
+      slot.requesterUserId match {
+        case None => SlotAnswer.Gone
+        case Some(requester) =>
+          val guildId = guild.getId
+          repository.cancelClaim(guildId, slot.id, outcome)
+          // A booking of their own rather than a rewritten row: the slot is no
+          // longer an occurrence of anybody's standing rule, and the audit trail
+          // keeps both halves of what happened.
+          slot.startsAt.foreach { start =>
+            repository.reserveFor(guildId, respawn.id, requester,
+              slot.requesterUserName.getOrElse(""), start, slot.durationMinutes)
+          }
+          RespawnThreads.dm(guild, requester,
+            RespawnEmbeds.dmEmbed("The slot is yours",
+              RespawnEmbeds.slotRequestGranted(respawn, slot), imageFor(respawn)))
+          refreshThread(guild, respawn, config)
+          SlotAnswer.Passed(respawn, requester)
+      }
+    }
+
+  /** Shared guard for the two answers: the slot has to still be pending, and only
+   *  its owner may answer for it. `userId` empty means the sweep is answering on
+   *  a lapsed deadline, which bypasses the ownership check. */
+  private def withOwnedSlot(guild: Guild, userId: String, claimId: Long)
+                           (body: (RespawnSettings, Respawn, RespawnClaim) => SlotAnswer): SlotAnswer =
+    settings(guild.getId) match {
+      case None => SlotAnswer.Gone
+      case Some(config) =>
+        val guildId = guild.getId
+        repository.findClaimById(guildId, claimId) match {
+          case Some(slot) if userId.nonEmpty && slot.userId != userId => SlotAnswer.NotYours
+          case Some(slot) if !slot.requestPending => SlotAnswer.Gone
+          case Some(slot) =>
+            repository.findById(guildId, slot.respawnId)
+              .map(respawn => body(config, respawn, slot))
+              .getOrElse(SlotAnswer.Gone)
+          case None => SlotAnswer.Gone
+        }
+    }
+
   // --- lifecycle sweep ----------------------------------------------------
 
   /** Resolve everything whose time has come for one guild: expired claims get
@@ -703,6 +839,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       repository.activeSchedules(guildId).foreach { schedule =>
         Try(materialise(guildId, schedule, now)).failed.foreach { error =>
           logger.warn(s"Failed to book slots for respawn schedule ${schedule.id} in guild '$guildId'", error)
+        }
+      }
+
+      // Requests the owner never answered. Silence is treated as "not tonight",
+      // which is the point of the deadline — a slot cannot be held hostage by
+      // somebody who has stopped reading their DMs.
+      repository.expiredRequests(guildId, now).foreach { slot =>
+        Try(passSlot(guild, "", slot.id, RespawnClaim.Outcome.NoAnswer, now)).failed.foreach { error =>
+          logger.warn(s"Failed to pass on unanswered slot request ${slot.id} in guild '$guildId'", error)
         }
       }
 
@@ -1019,7 +1164,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       val queue = repository.offeredClaim(guildId, respawn.id).toList ++ repository.queueFor(guildId, respawn.id)
       val reservations = repository.reservationsFor(guildId, respawn.id, ZonedDateTime.now())
       val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config, imageFor(respawn))
-      val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
+      val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined,
+        requestable = reservations.exists(_.requestable))
 
       // Re-read after a possible create so the row carries the new thread id;
       // the create callback writes it, but the local `respawn` is a snapshot.

@@ -130,6 +130,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS schedule_id BIGINT;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS asked_at TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS request_deadline TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_id VARCHAR(255);")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
       // The materialiser's uniqueness rule, enforced by the database rather than
       // by a read-then-write: two sweeps racing would otherwise both find a slot
       // unbooked and both book it.
@@ -196,7 +204,11 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       offerExpiresAt = optionalZoned(result, "offer_expires_at"),
       outcome = Option(result.getString("outcome")).filter(_.nonEmpty),
       endedAt = optionalZoned(result, "ended_at"),
-      scheduleId = { val id = result.getLong("schedule_id"); if (result.wasNull()) None else Some(id) }
+      scheduleId = { val id = result.getLong("schedule_id"); if (result.wasNull()) None else Some(id) },
+      askedAt = optionalZoned(result, "asked_at"),
+      requestDeadline = optionalZoned(result, "request_deadline"),
+      requesterUserId = Option(result.getString("requester_user_id")).filter(_.nonEmpty),
+      requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty)
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -697,10 +709,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       // and NOW() keeps it off the signature of the dozen places a claim ends.
       // The status guard makes this idempotent — a claim that already ended keeps
       // its original outcome rather than being relabelled by a late second call.
+      // It has to list every *live* state, `reserved` included: a booked slot is
+      // cancelled when its owner gives it up, when the bot missed its window, and
+      // when it arrives to find the spawn taken. Leaving it out made all three
+      // silently do nothing.
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET status = ?, outcome = ?, ended_at = NOW()
-          |WHERE id = ? AND status IN ('active', 'queued', 'offered');""".stripMargin)
+          |WHERE id = ? AND status IN ('active', 'queued', 'offered', 'reserved');""".stripMargin)
       try {
         statement.setString(1, status)
         statement.setString(2, outcome)
@@ -981,6 +997,94 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setLong(3, claimId)
       val result = statement.executeQuery()
       if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String,
+                 startsAt: ZonedDateTime, durationMinutes: Int): RespawnClaim = withGuild(guildId) { conn =>
+    // No schedule_id: this is a one-off booking handed to whoever asked, not an
+    // occurrence of anybody's standing rule. It still activates through the same
+    // due-slot path, which keys off the status rather than the schedule.
+    val statement = conn.prepareStatement(
+      """INSERT INTO respawn_claims
+        |(respawn_id, user_id, user_name, character_name, status, queue_position,
+        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind)
+        |VALUES (?, ?, ?, '', 'reserved', 0, NOW(), ?,
+        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'adhoc')
+        |RETURNING *;""".stripMargin)
+    try {
+      statement.setLong(1, respawnId)
+      statement.setString(2, userId)
+      statement.setString(3, userName)
+      statement.setTimestamp(4, Timestamp.from(startsAt.toInstant))
+      statement.setTimestamp(5, Timestamp.from(startsAt.toInstant))
+      statement.setInt(6, durationMinutes)
+      statement.setInt(7, durationMinutes)
+      val result = statement.executeQuery()
+      result.next()
+      readClaim(result)
+    } finally statement.close()
+  }
+
+  def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
+                        requesterUserName: String, askedAt: ZonedDateTime,
+                        deadline: ZonedDateTime): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      // `asked_at IS NULL` is the whole rule: the owner is asked once per slot,
+      // and two people pressing Request at the same moment cannot both get in.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET asked_at = ?, request_deadline = ?, requester_user_id = ?, requester_user_name = ?
+          |WHERE id = ? AND status = 'reserved' AND asked_at IS NULL
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(askedAt.toInstant))
+        statement.setTimestamp(2, Timestamp.from(deadline.toInstant))
+        statement.setString(3, requesterUserId)
+        statement.setString(4, requesterUserName)
+        statement.setLong(5, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def requestableSlot(guildId: String, respawnId: Long, now: ZonedDateTime): Option[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+          |WHERE respawn_id = ? AND status = 'reserved' AND starts_at > ? AND asked_at IS NULL
+          |ORDER BY starts_at LIMIT 1;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setTimestamp(2, Timestamp.from(now.toInstant))
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def keepOccurrence(guildId: String, claimId: Long): Option[RespawnClaim] = withGuild(guildId) { conn =>
+    // asked_at deliberately survives: the answer stands for this slot, so the
+    // Request button must not come back for it.
+    val statement = conn.prepareStatement(
+      """UPDATE respawn_claims
+        |SET request_deadline = NULL, requester_user_id = NULL, requester_user_name = NULL
+        |WHERE id = ? AND status = 'reserved'
+        |RETURNING *;""".stripMargin)
+    try {
+      statement.setLong(1, claimId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def expiredRequests(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """SELECT * FROM respawn_claims
+        |WHERE status = 'reserved' AND requester_user_id IS NOT NULL AND request_deadline <= ?
+        |ORDER BY request_deadline;""".stripMargin)
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
     } finally statement.close()
   }
 

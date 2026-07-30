@@ -237,6 +237,29 @@ trait RespawnRepository {
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
                        endsAt: ZonedDateTime): Option[RespawnClaim]
 
+  /** Book a slot for somebody with no schedule of their own — used when a booked
+   *  slot passes to whoever asked for it. */
+  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String,
+                 startsAt: ZonedDateTime, durationMinutes: Int): RespawnClaim
+
+  /** Ask the owner of a booked slot whether they are actually hunting it.
+   *
+   *  Returns None if the slot is gone or has already been asked about — which is
+   *  what enforces "asked once per slot", and stops two people racing to ask. */
+  def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
+                        requesterUserName: String, askedAt: ZonedDateTime,
+                        deadline: ZonedDateTime): Option[RespawnClaim]
+
+  /** The soonest booked slot on a spawn nobody has asked about yet. */
+  def requestableSlot(guildId: String, respawnId: Long, now: ZonedDateTime): Option[RespawnClaim]
+
+  /** Clear the pending request from a slot its owner has confirmed they want.
+   *  `askedAt` stays set, so the slot cannot be asked about again. */
+  def keepOccurrence(guildId: String, claimId: Long): Option[RespawnClaim]
+
+  /** Requests whose deadline has gone by with no answer. */
+  def expiredRequests(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
   /** Drop the not-yet-started slots of a schedule, for when it is cancelled. */
   def cancelReservationsOf(guildId: String, scheduleId: Long, outcome: String): Unit
 

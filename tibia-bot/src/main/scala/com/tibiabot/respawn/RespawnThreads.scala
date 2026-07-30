@@ -41,19 +41,29 @@ object RespawnThreads extends StrictLogging {
   /** Buttons under a spawn's claim card. The respawn id is encoded into the id
    *  so a click needs no lookup of which post it came from — see
    *  [[RespawnButtonId]]. */
-  def claimButtons(respawnId: Long, claimed: Boolean): ActionRow =
+  def claimButtons(respawnId: Long, claimed: Boolean, requestable: Boolean): ActionRow = {
+    val request =
+      if (requestable) List(Button.secondary(RespawnButtonId.requestSlot(respawnId), "Request claim"))
+      else Nil
+    ActionRow.of((baseClaimButtons(respawnId, claimed) ++ request).asJava)
+  }
+
+  private def baseClaimButtons(respawnId: Long, claimed: Boolean): List[Button] =
+    claimRow(respawnId, claimed)
+
+  private def claimRow(respawnId: Long, claimed: Boolean): List[Button] =
     if (claimed)
       // One Leave button, not a separate Release: which of the two it means is
       // decided by whether the presser holds the spawn or is waiting for it, and
       // making the member pick the right word for their own state was needless.
-      ActionRow.of(
+      List(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
         Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
-      ActionRow.of(
+      List(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹")),
         Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅"))
       )
@@ -89,6 +99,13 @@ object RespawnThreads extends StrictLogging {
       Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
       Button.primary(RespawnButtonId.boardTimers, "Timers")
+    )
+
+  /** The Yes/No pair on a "are you hunting tonight?" DM. */
+  def slotAnswerButtons(guildId: String, claimId: Long): ActionRow =
+    ActionRow.of(
+      Button.success(RespawnButtonId.keepSlot(guildId, claimId), "Yes, I'm hunting"),
+      Button.danger(RespawnButtonId.passSlot(guildId, claimId), "Not tonight")
     )
 
   /** Shown when somebody already has a booking on this spawn — cancelling it is
@@ -468,6 +485,12 @@ object RespawnButtonId {
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
 
+  /** Ask the owner of a booked slot whether they are actually hunting it. */
+  def requestSlot(respawnId: Long): String = s"${Prefix}request:$respawnId"
+  /** The owner's answer, pressed in a DM — so it carries the guild. */
+  def keepSlot(guildId: String, claimId: Long): String = s"${Prefix}keepslot:$guildId:$claimId"
+  def passSlot(guildId: String, claimId: Long): String = s"${Prefix}passslot:$guildId:$claimId"
+
   /** Book, or cancel, a repeating slot on this spawn. */
   def spawnSchedule(respawnId: Long): String = s"${Prefix}schedule:$respawnId"
   def cancelSchedule(scheduleId: Long): String = s"${Prefix}unschedule:$scheduleId"
@@ -528,6 +551,8 @@ object RespawnButtonId {
   final case class BoardButton(what: String) extends Action
   /** A spawn button pressed from a DM, which is why it names its own guild. */
   final case class DmSpawnButton(action: String, guildId: String, respawnId: Long) extends Action
+  /** A booked slot's owner answering whether they are hunting it, from a DM. */
+  final case class SlotAnswerButton(keep: Boolean, guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
 
@@ -538,6 +563,10 @@ object RespawnButtonId {
       case Array("board", what) => Some(BoardButton(what))
       case Array("dmleave", guildId, respawnId) =>
         Try(respawnId.toLong).toOption.map(DmSpawnButton("leave", guildId, _))
+      case Array("keepslot", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = true, guildId, _))
+      case Array("passslot", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = false, guildId, _))
       case Array("accept", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>
