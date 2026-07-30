@@ -384,6 +384,10 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def removeRespawn(guildId: String, respawnId: Long): Unit = withGuildTransaction(guildId) { conn =>
     val claims = conn.prepareStatement("DELETE FROM respawn_claims WHERE respawn_id = ?;")
     try { claims.setLong(1, respawnId); claims.executeUpdate() } finally claims.close()
+    // Schedules go too, or they would keep booking slots on a spawn that no
+    // longer exists — the materialiser reads them, not the catalogue.
+    val schedules = conn.prepareStatement("DELETE FROM respawn_schedules WHERE respawn_id = ?;")
+    try { schedules.setLong(1, respawnId); schedules.executeUpdate() } finally schedules.close()
     val respawn = conn.prepareStatement("DELETE FROM respawns WHERE id = ?;")
     try { respawn.setLong(1, respawnId); respawn.executeUpdate() } finally respawn.close()
   }
@@ -1061,6 +1065,26 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
     }
+
+  def slotsNeedingReminder(guildId: String, now: ZonedDateTime, leadMinutes: Int): List[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+          |WHERE status = 'reserved' AND warned = FALSE AND starts_at > ? AND starts_at <= ?
+          |ORDER BY starts_at;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(now.toInstant))
+        statement.setTimestamp(2, Timestamp.from(now.plusMinutes(leadMinutes.toLong).toInstant))
+        collectClaims(statement.executeQuery())
+      } finally statement.close()
+    }
+
+  def allSchedules(guildId: String): List[RespawnSchedule] = withGuild(guildId) { conn =>
+    val statement = conn.createStatement()
+    try collectSchedules(statement.executeQuery(
+      "SELECT * FROM respawn_schedules WHERE active ORDER BY respawn_id, anchor_at;"))
+    finally statement.close()
+  }
 
   def keepOccurrence(guildId: String, claimId: Long): Option[RespawnClaim] = withGuild(guildId) { conn =>
     // asked_at deliberately survives: the answer stands for this slot, so the

@@ -124,6 +124,29 @@ object RespawnCommands {
             replyEmbed(event, RespawnEmbeds.staminaEmbed(tank, open, service.nextStaminaReset()))
         }
 
+      case "schedules" =>
+        val everyone = options.get("everyone").contains("true")
+        val moderator = Permissions.callerIsModerator(event, BotApp.moderatorRoleId(guild.getId))
+        if (everyone && !moderator) {
+          reply(event, s"${Config.noEmoji} Showing everyone's bookings needs the **Manage Server** " +
+            s"permission, or the **${Permissions.ModeratorRoleName}** role.")
+        } else {
+          val owner = if (everyone) None else Some(user.getId)
+          val entries = service.scheduleListing(guild.getId, owner)
+          val embed = RespawnEmbeds.schedulesEmbed(entries, java.time.ZonedDateTime.now(), everyone)
+          // A cancel button each, up to the five Discord allows in a row. Beyond
+          // that the button is on the respawn's own post anyway.
+          val buttons = entries.take(5).map { case (schedule, respawn) =>
+            net.dv8tion.jda.api.components.buttons.Button
+              .danger(com.tibiabot.respawn.RespawnButtonId.cancelSchedule(schedule.id),
+                respawn.code.take(20))
+          }
+          if (buttons.isEmpty) replyEmbed(event, embed)
+          else event.getHook.sendMessageEmbeds(embed)
+            .setComponents(net.dv8tion.jda.api.components.actionrow.ActionRow.of(buttons.asJava))
+            .queue()
+        }
+
       case other =>
         reply(event, s"${Config.noEmoji} Unknown `/respawn` subcommand: `$other`.")
     }

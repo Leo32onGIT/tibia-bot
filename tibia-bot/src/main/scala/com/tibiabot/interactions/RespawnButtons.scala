@@ -252,7 +252,20 @@ object RespawnButtons extends StrictLogging {
                       .setEphemeral(true)
                       .queue()
                   case None =>
-                    event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
+                    // A moderator with no booking of their own sees the ones that
+                    // exist here, so they can act on somebody else's rather than
+                    // being offered only the create form.
+                    val others = service.schedulesForRespawn(guildId, respawn.id)
+                    if (others.nonEmpty && RespawnModals.moderates(guild, event.getMember)) {
+                      event.deferReply(true).queue()
+                      val deferredRespond = new Responder(event, deferred = true)
+                      deferredRespond.embed(
+                        RespawnEmbeds.schedulesEmbed(others.map(_ -> respawn),
+                          java.time.ZonedDateTime.now(), everyones = true),
+                        Some(RespawnThreads.scheduleButtons(others.head.id)))
+                    } else {
+                      event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
+                    }
                 }
 
               case "request" =>

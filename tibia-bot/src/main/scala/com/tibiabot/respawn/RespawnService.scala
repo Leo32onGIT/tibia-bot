@@ -618,6 +618,16 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def schedulesForUser(guildId: String, userId: String): List[RespawnSchedule] =
     repository.schedulesForUser(guildId, userId)
 
+  /** Standing bookings paired with the spawn each is on, ready to render.
+   *
+   *  Resolves the spawn here rather than leaving the caller to: a schedule whose
+   *  spawn has since been removed would otherwise render as a blank line, and
+   *  dropping it is the honest answer. */
+  def scheduleListing(guildId: String, userId: Option[String]): List[(RespawnSchedule, Respawn)] = {
+    val schedules = userId.fold(repository.allSchedules(guildId))(repository.schedulesForUser(guildId, _))
+    schedules.flatMap(schedule => repository.findById(guildId, schedule.respawnId).map(schedule -> _))
+  }
+
   def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule] =
     repository.findSchedule(guildId, scheduleId)
 
@@ -839,6 +849,23 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       repository.activeSchedules(guildId).foreach { schedule =>
         Try(materialise(guildId, schedule, now)).failed.foreach { error =>
           logger.warn(s"Failed to book slots for respawn schedule ${schedule.id} in guild '$guildId'", error)
+        }
+      }
+
+      // Nudge whoever booked a slot that is about to start.
+      if (Config.Respawn.slotReminderMinutes > 0) {
+        repository.slotsNeedingReminder(guildId, now, Config.Respawn.slotReminderMinutes).foreach { slot =>
+          Try {
+            repository.markWarned(guildId, slot.id)
+            repository.findById(guildId, slot.respawnId).foreach { respawn =>
+              RespawnThreads.dm(guild, slot.userId,
+                RespawnEmbeds.dmEmbed("Your slot starts soon",
+                  RespawnEmbeds.slotReminder(respawn, slot), imageFor(respawn),
+                  RespawnEmbeds.WarnColor))
+            }
+          }.failed.foreach { error =>
+            logger.warn(s"Failed to remind about respawn slot ${slot.id} in guild '$guildId'", error)
+          }
         }
       }
 

@@ -477,6 +477,60 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.reservationsFor(g, spawn.id, now) shouldBe empty
   }
 
+  test("a slot's owner is nudged once, only inside the lead time") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    // Two hours out, a fifteen-minute lead says nothing yet.
+    repo.slotsNeedingReminder(g, now, 15) shouldBe empty
+    repo.slotsNeedingReminder(g, now.plusMinutes(110), 15).map(_.id) shouldBe List(slot.id)
+
+    // Nudged once — the sweep runs every thirty seconds, so this must not repeat.
+    repo.markWarned(g, slot.id)
+    repo.slotsNeedingReminder(g, now.plusMinutes(110), 15) shouldBe empty
+  }
+
+  test("starting a slot re-arms the reminder flag the nudge used") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+    repo.markWarned(g, slot.id)
+
+    // `warned` is reused for the start nudge while reserved. Activating has to
+    // clear it, or the claim-end reminder would be skipped for every booked hunt.
+    val started = repo.startReservation(g, slot.id, now.plusHours(2), now.plusHours(4))
+    started.map(_.warned) shouldBe Some(false)
+    repo.unwarnedActiveClaims(g, now.plusHours(2)).map(_.id) shouldBe List(slot.id)
+  }
+
+  test("removing a spawn takes its schedules, not just its claims") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    repo.allSchedules(g) should have size 1
+
+    // Left behind, they would go on booking slots on a spawn that no longer
+    // exists — the materialiser reads schedules, not the catalogue.
+    repo.removeRespawn(g, spawn.id)
+    repo.allSchedules(g) shouldBe empty
+  }
+
+  test("allSchedules spans owners, unlike the per-member view") {
+    val (repo, g) = freshRepo()
+    val one = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val two = repo.addRespawn(g, "806", "Hydra Mountain", "", "Port Hope", "", "", Respawn.SourceSeed, "seed")
+    repo.addSchedule(g, one.id, "u1", "One", "", now.plusHours(2), 1440, 120)
+    repo.addSchedule(g, two.id, "u2", "Two", "", now.plusHours(3), 1440, 60)
+
+    repo.allSchedules(g).map(_.userId) should contain theSameElementsAs List("u1", "u2")
+    repo.schedulesForUser(g, "u1").map(_.userId) shouldBe List("u1")
+  }
+
   test("member preferences round-trip, and distinguish 'off' from 'never chose'") {
     val (repo, g) = freshRepo()
     repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs.none("u1")

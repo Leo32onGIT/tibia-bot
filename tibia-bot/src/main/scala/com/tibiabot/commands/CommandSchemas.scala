@@ -295,7 +295,12 @@ object CommandSchemas {
             .setMinValue(1)
             .setMaxValue(25)
         ),
-      new SubcommandData("stamina", "Show how much claim time you have left today")
+      new SubcommandData("stamina", "Show how much claim time you have left today"),
+      new SubcommandData("schedules", "Show your repeating slot bookings")
+        .addOptions(
+          new OptionData(OptionType.BOOLEAN, "everyone",
+            "Show every booking on the server (moderators only)")
+        )
     )
     .addSubcommandGroups(
       new SubcommandGroupData("admin", "Manage the respawn catalogue and settings")

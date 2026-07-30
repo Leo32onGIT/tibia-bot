@@ -253,6 +253,16 @@ trait RespawnRepository {
   /** The soonest booked slot on a spawn nobody has asked about yet. */
   def requestableSlot(guildId: String, respawnId: Long, now: ZonedDateTime): Option[RespawnClaim]
 
+  /** Booked slots starting within `leadMinutes` whose owner hasn't been nudged.
+   *
+   *  Reuses the `warned` flag, which is otherwise meaningless on a reserved row —
+   *  `startReservation` clears it, so the claim-end reminder still fires normally
+   *  once the slot is running. */
+  def slotsNeedingReminder(guildId: String, now: ZonedDateTime, leadMinutes: Int): List[RespawnClaim]
+
+  /** Every live schedule with the spawn it belongs to, for moderators. */
+  def allSchedules(guildId: String): List[RespawnSchedule]
+
   /** Clear the pending request from a slot its owner has confirmed they want.
    *  `askedAt` stays set, so the slot cannot be asked about again. */
   def keepOccurrence(guildId: String, claimId: Long): Option[RespawnClaim]

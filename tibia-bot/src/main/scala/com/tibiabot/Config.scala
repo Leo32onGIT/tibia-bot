@@ -198,6 +198,10 @@ object Config {
      *  waiting an hour on a request made six hours ahead is pointless, and one
      *  made five minutes ahead cannot wait longer than that. */
     val requestResponseMinutes: Int = respawn.getInt("request-response-minutes")
+    /** How long before a booked slot starts its owner is reminded. 0 turns the
+     *  reminder off. Separate from the claim-end reminder members set for
+     *  themselves: this one is about a hunt that hasn't begun. */
+    val slotReminderMinutes: Int = respawn.getInt("slot-reminder-minutes")
     /** Most standing bookings one member may hold in a guild. */
     val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
     /** Shown as the claim embed's image when a spawn has no `creature` set —

@@ -148,6 +148,16 @@ object RespawnEmbeds {
       s"${humanDuration(slot.durationMinutes)} — it'll start on its own, no need to claim it."
   }
 
+  /** DM'd shortly before a booked slot begins, so its owner can be there for it —
+   *  or free it up if they can't. */
+  def slotReminder(respawn: Respawn, slot: RespawnClaim): String = {
+    val start = slot.startsAt.map(relative).getOrElse("shortly")
+    s"Your booked slot on **${respawn.displayName}** starts $start for " +
+      s"${humanDuration(slot.durationMinutes)}.\n" +
+      "It'll claim itself — nothing to do unless you're not coming, in which case " +
+      "cancel it from the respawn's post so somebody else can take it."
+  }
+
   /** DM'd when a booked slot starts. */
   def slotStarted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(clockTime).getOrElse("soon")
@@ -170,15 +180,24 @@ object RespawnEmbeds {
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
       s"Your tank refills at server save ${relative(resetsAt)}."
 
-  /** A member's standing bookings, for the Schedule panel. */
-  def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime): MessageEmbed = {
-    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Your booked slots")
+  /** Standing bookings, for the Schedule panel and `/respawn schedules`.
+   *
+   *  `everyones` switches from "yours" to the whole server, which is what a
+   *  moderator sees — and names the owner, since otherwise the list is a wall of
+   *  spawns with no way to tell whose is whose. */
+  def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime,
+                     everyones: Boolean = false): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
+      .setTitle(if (everyones) "Booked slots on this server" else "Your booked slots")
     if (entries.isEmpty) {
-      embed.setDescription("You have no repeating slots. Use **Schedule** on a respawn's post to book one.")
+      embed.setDescription(
+        if (everyones) "Nobody has booked a repeating slot yet."
+        else "You have no repeating slots. Use **Schedule** on a respawn's post to book one.")
     } else {
       embed.setDescription(truncateLines(entries.map { case (schedule, respawn) =>
         val next = schedule.nextStartAtOrAfter(now)
-        s"**${respawn.displayName}** — every day, next ${dateTime(next)} " +
+        val who = if (everyones) s" — <@${schedule.userId}>" else ""
+        s"**${respawn.displayName}**$who\n\u2003every day, next ${dateTime(next)} " +
           s"for ${humanDuration(schedule.durationMinutes)}"
       }))
     }
