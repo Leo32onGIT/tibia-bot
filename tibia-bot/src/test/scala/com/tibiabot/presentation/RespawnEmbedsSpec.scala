@@ -356,15 +356,20 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include("runs over your slot")
   }
 
-  test("the asker is never named — the answer shouldn't turn on who is asking") {
-    val slot = reserved("99", now.plusHours(2))
+  test("the asker is a mention, so it reads as their name in a DM they aren't in") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"))
     List(None, Some((now.plusHours(1), 180))).foreach { wanted =>
       val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), wanted)
-      text should include("Someone")
-      // DM'd, so a mention would ping as well as name them.
-      text should not include "<@"
+      text should include("<@42>")
       text should include("the slot goes to them")
     }
+  }
+
+  test("a request with no asker recorded still reads as a sentence") {
+    val text = RespawnEmbeds.slotRequest(cultOrcs, reserved("99", now.plusHours(2)),
+      now.plusMinutes(60), None)
+    text should include("Someone")
+    text should not include "<@"
   }
 
   test("the slot reminder says when and how long, and stops there") {

@@ -185,16 +185,17 @@ object RespawnEmbeds {
     // hunt of their own that happens to run across it, and saying so is what
     // makes the times in the message add up.
     //
-    // The asker is not named either way. Who wants the slot is not something the
-    // answer should turn on — a name invites weighing up who it is rather than
-    // whether you are hunting — and it keeps a request from reading as pressure
-    // from a particular person.
+    // The asker is a mention rather than a name: Discord resolves it by id, so it
+    // reads as their current display name in a DM they are not part of, and it
+    // notifies nobody — they are not a recipient of this channel. "Someone" is
+    // the fallback for a row written before the id was recorded.
+    val asker = slot.requesterUserId.map(id => s"<@$id>").getOrElse("Someone")
     val opening = wanted match {
       case Some((start, minutes)) =>
-        s"**Someone** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
+        s"**$asker** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
           s"for ${humanDuration(minutes)}, which runs over your slot at $window."
       case None =>
-        s"**Someone** would like **${respawn.displayName}** at $window."
+        s"**$asker** would like **${respawn.displayName}** at $window."
     }
     s"$opening\nIf you don't answer by ${relative(deadline)} the slot goes to them."
   }

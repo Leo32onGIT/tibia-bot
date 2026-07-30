@@ -763,7 +763,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 RespawnEmbeds.slotRequest(respawn, asked, deadline, theirs),
                 imageFor(respawn), RespawnEmbeds.WarnColor),
               Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
-            refreshThread(guild, respawn, config)
+            // No card rewrite. Asking changes nothing about who holds the spawn or
+            // what is booked — only the *asked* note and whether Request is
+            // offered — and card edits are the system's scarcest resource. Both
+            // catch up on the next refresh something real causes, and a Request
+            // button pressed in the meantime answers "already asked" for free.
             Right(ScheduleResult.Requested(respawn, asked, deadline))
         }
     }
@@ -872,7 +876,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                     RespawnEmbeds.slotRequest(respawn, asked, deadline, None),
                     imageFor(respawn), RespawnEmbeds.WarnColor),
                   Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
-                refreshThread(guild, respawn, config)
+                // No card rewrite — see the note in askForClash.
                 RequestOutcome.Sent(respawn, asked, deadline)
             }
         }
@@ -891,7 +895,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
                 RespawnEmbeds.RedColor))
           }
-          refreshThread(guild, respawn, config)
+          // Nor here: the slot stays exactly where it was, with the same owner
+          // and the same time. Only the *asked* note goes, which is not worth an
+          // edit of its own.
           SlotAnswer.Kept(respawn)
       }
     }
