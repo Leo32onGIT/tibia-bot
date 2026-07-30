@@ -77,7 +77,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |warned BOOLEAN NOT NULL DEFAULT FALSE,
           |kind VARCHAR(16) NOT NULL DEFAULT 'adhoc',
           |limbo_until TIMESTAMPTZ,
-          |offer_expires_at TIMESTAMPTZ
+          |offer_expires_at TIMESTAMPTZ,
+          |outcome VARCHAR(24),
+          |ended_at TIMESTAMPTZ
           |);""".stripMargin)
 
       // Columns added after the tables first shipped. `IF NOT EXISTS` makes each
@@ -92,6 +94,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS creature_pinned BOOLEAN NOT NULL DEFAULT FALSE;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS outcome VARCHAR(24);")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;")
+      // `/respawn log` reads one spawn's finished claims newest-first.
+      statement.executeUpdate(
+        "CREATE INDEX IF NOT EXISTS respawn_claims_history ON respawn_claims (respawn_id, ended_at DESC);")
 
       // The sweep scans by (status, ends_at) every 30 seconds and every claim
       // read is "this spawn's active row / this spawn's queue" — both hot
@@ -158,7 +167,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       warned = result.getBoolean("warned"),
       kind = Option(result.getString("kind")).getOrElse(RespawnClaim.KindAdHoc),
       limboUntil = optionalZoned(result, "limbo_until"),
-      offerExpiresAt = optionalZoned(result, "offer_expires_at")
+      offerExpiresAt = optionalZoned(result, "offer_expires_at"),
+      outcome = Option(result.getString("outcome")).filter(_.nonEmpty),
+      endedAt = optionalZoned(result, "ended_at")
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -626,14 +637,16 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     } finally statement.close()
   }
 
-  def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String]): Unit =
+  def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String], outcome: String): Unit =
     if (userIds.nonEmpty) withGuildTransaction(guildId) { conn =>
       val statement = conn.prepareStatement(
-        "UPDATE respawn_claims SET status = 'cancelled' WHERE respawn_id = ? AND status = 'queued' AND user_id = ?;")
+        """UPDATE respawn_claims SET status = 'cancelled', outcome = ?, ended_at = NOW()
+          |WHERE respawn_id = ? AND status = 'queued' AND user_id = ?;""".stripMargin)
       try {
         userIds.foreach { userId =>
-          statement.setLong(1, respawnId)
-          statement.setString(2, userId)
+          statement.setString(1, outcome)
+          statement.setLong(2, respawnId)
+          statement.setString(3, userId)
           statement.addBatch()
         }
         statement.executeBatch()
@@ -650,20 +663,44 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     } finally statement.close()
   }
 
-  private def setStatus(guildId: String, claimId: Long, status: String): Unit = withGuild(guildId) { conn =>
-    val statement = conn.prepareStatement("UPDATE respawn_claims SET status = ? WHERE id = ?;")
-    try {
-      statement.setString(1, status)
-      statement.setLong(2, claimId)
-      statement.executeUpdate()
-    } finally statement.close()
-  }
+  private def setStatus(guildId: String, claimId: Long, status: String, outcome: String): Unit =
+    withGuild(guildId) { conn =>
+      // ended_at comes from the database rather than being threaded through every
+      // caller: it is an audit timestamp where a second either way is irrelevant,
+      // and NOW() keeps it off the signature of the dozen places a claim ends.
+      // The status guard makes this idempotent — a claim that already ended keeps
+      // its original outcome rather than being relabelled by a late second call.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET status = ?, outcome = ?, ended_at = NOW()
+          |WHERE id = ? AND status IN ('active', 'queued', 'offered');""".stripMargin)
+      try {
+        statement.setString(1, status)
+        statement.setString(2, outcome)
+        statement.setLong(3, claimId)
+        statement.executeUpdate()
+      } finally statement.close()
+    }
 
-  def finishClaim(guildId: String, claimId: Long): Unit =
-    setStatus(guildId, claimId, RespawnClaim.StatusFinished)
+  def finishClaim(guildId: String, claimId: Long, outcome: String): Unit =
+    setStatus(guildId, claimId, RespawnClaim.StatusFinished, outcome)
 
-  def cancelClaim(guildId: String, claimId: Long): Unit =
-    setStatus(guildId, claimId, RespawnClaim.StatusCancelled)
+  def cancelClaim(guildId: String, claimId: Long, outcome: String): Unit =
+    setStatus(guildId, claimId, RespawnClaim.StatusCancelled, outcome)
+
+  def claimHistory(guildId: String, respawnId: Long, limit: Int): List[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+          |WHERE respawn_id = ? AND status IN ('finished', 'cancelled')
+          |ORDER BY ended_at DESC NULLS LAST, id DESC
+          |LIMIT ?;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setInt(2, limit)
+        collectClaims(statement.executeQuery())
+      } finally statement.close()
+    }
 
   def markWarned(guildId: String, claimId: Long): Unit = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement("UPDATE respawn_claims SET warned = TRUE WHERE id = ?;")

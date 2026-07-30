@@ -324,7 +324,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   /** Give up an active claim (refunding the unused time) or a queue slot.
    *  `query` narrows it to one spawn when the caller holds several. */
   def release(guild: Guild, userId: String, query: Option[String],
-              now: ZonedDateTime = ZonedDateTime.now()): ReleaseOutcome =
+              now: ZonedDateTime = ZonedDateTime.now(),
+              // What the audit log should say. Overridden by forceLeave, which is
+              // the same operation performed by somebody else.
+              outcome: String = RespawnClaim.Outcome.Released): ReleaseOutcome =
     settings(guild.getId) match {
       case None => ReleaseOutcome.NotConfigured
       case Some(config) =>
@@ -343,8 +346,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             val respawn = repository.findById(guildId, claim.respawnId)
             if (claim.isQueued || claim.isOffered) {
               // Declining an offer and leaving the queue are the same act, so
-              // they take the same path.
-              repository.cancelClaim(guildId, claim.id)
+              // they take the same path — only the audit entry distinguishes them.
+              repository.cancelClaim(guildId, claim.id,
+                if (claim.isOffered) RespawnClaim.Outcome.Declined else RespawnClaim.Outcome.LeftQueue)
               respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
               respawn.map(ReleaseOutcome.LeftQueue).getOrElse(ReleaseOutcome.NothingHeld)
             } else if (claim.limboUntil.isDefined) {
@@ -361,7 +365,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // claimant's until they take it or it lapses, so it can't be
               // sniped by a third party in between. beginHandover finishes the
               // claim itself when there's nobody to hand it to.
-              val offered = respawn.flatMap(beginHandover(guild, _, config, now, outgoing = Some(claim)))
+              val offered = respawn.flatMap(
+                beginHandover(guild, _, config, now, outgoing = Some(claim), outgoingOutcome = outcome))
               respawn.map(ReleaseOutcome.Released(_, refunded, offered)).getOrElse(ReleaseOutcome.NothingHeld)
             }
         }
@@ -487,7 +492,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                  now: ZonedDateTime = ZonedDateTime.now()): Option[RespawnClaim] = {
     val guildId = guild.getId
     repository.activeClaim(guildId, respawn.id).map { holder =>
-      release(guild, holder.userId, Some(respawn.code), now)
+      release(guild, holder.userId, Some(respawn.code), now, RespawnClaim.Outcome.Forced)
       RespawnThreads.dm(guild, holder.userId,
         RespawnEmbeds.dmEmbed("Claim ended by a moderator",
           s"A moderator has freed **${respawn.displayName}**, so it's no longer yours.",
@@ -510,13 +515,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       val active = repository.activeClaim(guildId, respawn.id)
       active.foreach { claim =>
         val refunded = refundFor(claim, now)
-        repository.cancelClaim(guildId, claim.id)
+        repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.Cleared)
         if (refunded > 0) repository.refundStamina(guildId, claim.userId, refunded, resetBoundary(now))
       }
       // The pending handover offer goes too — otherwise accepting it would
       // resurrect a claim on a spawn an admin just forced free.
-      repository.offeredClaim(guildId, respawn.id).foreach(offer => repository.cancelClaim(guildId, offer.id))
-      repository.queueFor(guildId, respawn.id).foreach(entry => repository.cancelClaim(guildId, entry.id))
+      repository.offeredClaim(guildId, respawn.id)
+        .foreach(offer => repository.cancelClaim(guildId, offer.id, RespawnClaim.Outcome.Cleared))
+      repository.queueFor(guildId, respawn.id)
+        .foreach(entry => repository.cancelClaim(guildId, entry.id, RespawnClaim.Outcome.Cleared))
       refreshThread(guild, respawn, config)
       active.isDefined
     }
@@ -542,7 +549,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // spawn with no pending offer and can move straight on to the next person.
       repository.expiredOffers(guildId, now).foreach { offer =>
         Try {
-          repository.cancelClaim(guildId, offer.id)
+          repository.cancelClaim(guildId, offer.id, RespawnClaim.Outcome.OfferLapsed)
           repository.findById(guildId, offer.respawnId).foreach { respawn =>
             RespawnThreads.dm(guild, offer.userId,
               RespawnEmbeds.dmEmbed("Handover expired", RespawnEmbeds.handoverLapsed(respawn),
@@ -560,7 +567,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (claim.limboUntil.isDefined) {
               // Its handover window is up and nobody took it, so the claim ends
               // for real. Whoever is next in the queue gets their own offer.
-              repository.finishClaim(guildId, claim.id)
+              repository.finishClaim(guildId, claim.id, RespawnClaim.Outcome.Completed)
               notifyClaimEnded(guild, respawn, claim)
               beginHandover(guild, respawn, config, now, outgoing = None)
             } else {
@@ -618,7 +625,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    */
   private def beginHandover(guild: Guild, respawn: Respawn, config: RespawnSettings, now: ZonedDateTime,
                             outgoing: Option[RespawnClaim],
-                            notifyOutgoing: Boolean = false): Option[RespawnClaim] = {
+                            notifyOutgoing: Boolean = false,
+                            outgoingOutcome: String = RespawnClaim.Outcome.Completed): Option[RespawnClaim] = {
     val guildId = guild.getId
     val boundary = resetBoundary(now)
 
@@ -632,7 +640,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       val (cannotAfford, next) = queue.span { entry =>
         !repository.stamina(guildId, entry.userId, config.staminaMinutes, boundary).canAfford(entry.durationMinutes)
       }
-      repository.cancelQueued(guildId, respawn.id, cannotAfford.map(_.userId).toSet)
+      repository.cancelQueued(guildId, respawn.id, cannotAfford.map(_.userId).toSet,
+        RespawnClaim.Outcome.NoStamina)
       cannotAfford.foreach { entry =>
         logger.info(s"Dropped queued respawn claim ${entry.id} on '${respawn.code}' in guild '$guildId' — " +
           s"user ${entry.userId} no longer has ${entry.durationMinutes}m of stamina")
@@ -667,7 +676,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         case None =>
           // Nobody to hand it to, so the spawn really is done.
           outgoing.foreach { claim =>
-            repository.finishClaim(guildId, claim.id)
+            repository.finishClaim(guildId, claim.id, outgoingOutcome)
             // Only when the claim ran out on its own — someone who pressed Leave
             // does not need telling that it ended.
             if (notifyOutgoing) notifyClaimEnded(guild, respawn, claim)
@@ -707,7 +716,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (!repository.reserveStamina(guildId, userId, claim.durationMinutes, config.staminaMinutes, boundary)) {
               // Their tank went elsewhere while the offer sat unanswered. Treat it
               // as a decline so the spawn moves on rather than stalling on them.
-              repository.cancelClaim(guildId, claim.id)
+              repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.NoStamina)
               val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
               respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
               OfferOutcome.NoStamina(claim.durationMinutes, tank, ServerSaveSchedule.nextServerSave(now))
@@ -716,7 +725,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // two active claims at once.
               respawn.foreach { r =>
                 activeHolder(guildId, r.id).foreach { previous =>
-                  repository.finishClaim(guildId, previous.id)
+                  repository.finishClaim(guildId, previous.id, RespawnClaim.Outcome.TakenOver)
                   notifyClaimEnded(guild, r, previous)
                 }
               }
@@ -748,7 +757,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(claim) if claim.userId != userId => OfferOutcome.NotYours
           case Some(claim) if !claim.isOffered => OfferOutcome.Gone
           case Some(claim) =>
-            repository.cancelClaim(guildId, claim.id)
+            repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.Declined)
             val respawn = repository.findById(guildId, claim.respawnId)
             respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = activeHolder(guildId, r.id)))
             respawn.map(OfferOutcome.Declined).getOrElse(OfferOutcome.Gone)
@@ -795,6 +804,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         (respawn, claim, repository.queueFor(guildId, claim.respawnId).size)
       }
     }
+
+  /** A spawn's recent claim history, newest first, for `/respawn log`.
+   *
+   *  Reads the claim rows that already exist rather than a separate audit store —
+   *  nothing here is ever deleted, only moved to a terminal status. */
+  def claimHistory(guildId: String, respawnId: Long, limit: Int = 10): List[RespawnClaim] =
+    repository.claimHistory(guildId, respawnId, limit)
 
   /** `/respawn status <spawn>` — one spawn's current state. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =

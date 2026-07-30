@@ -143,11 +143,21 @@ trait RespawnRepository {
   /** Cancel the queued claims of `userIds` on one spawn. Used to clear people
    *  who can no longer afford their claim out of the way rather than leaving
    *  them stuck at the head blocking everyone behind them. */
-  def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String]): Unit
+  def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String], outcome: String): Unit
 
-  def finishClaim(guildId: String, claimId: Long): Unit
+  /** The most recent finished claims on a spawn, newest first — the audit trail
+   *  behind `/respawn log`.
+   *
+   *  No separate history table: claim rows are never deleted, only moved to a
+   *  terminal status, so the trail is simply the rows that already exist. At a
+   *  few thousand claims a year per guild there is nothing to prune. */
+  def claimHistory(guildId: String, respawnId: Long, limit: Int): List[RespawnClaim]
 
-  def cancelClaim(guildId: String, claimId: Long): Unit
+  /** Close a claim that ran to its end. `outcome` records why, for the audit log
+   *  (see RespawnClaim.Outcome); `ended_at` is stamped by the database. */
+  def finishClaim(guildId: String, claimId: Long, outcome: String): Unit
+
+  def cancelClaim(guildId: String, claimId: Long, outcome: String): Unit
 
   def markWarned(guildId: String, claimId: Long): Unit
 

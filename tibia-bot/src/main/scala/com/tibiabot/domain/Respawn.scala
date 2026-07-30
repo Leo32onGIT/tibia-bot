@@ -61,7 +61,13 @@ final case class RespawnClaim(
   warned: Boolean,
   kind: String,
   limboUntil: Option[ZonedDateTime],
-  offerExpiresAt: Option[ZonedDateTime]
+  offerExpiresAt: Option[ZonedDateTime],
+  /** How this claim finished, once it has — see [[RespawnClaim.Outcome]]. Empty
+   *  while it is still running, and on rows that ended before this was recorded. */
+  outcome: Option[String],
+  /** When it actually stopped, which is not `endsAt`: a claim released early, or
+   *  taken over, ends before its deadline. The audit wants the real one. */
+  endedAt: Option[ZonedDateTime]
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -93,6 +99,51 @@ object RespawnClaim {
   /** Released early, declined or ignored a handover offer, skipped for
    *  insufficient stamina, or force-cleared by an admin. */
   val StatusCancelled: String = "cancelled"
+
+  /** Why a claim ended.
+   *
+   *  The status alone can't answer that — "cancelled" covers a member leaving
+   *  early, declining a handover, letting one lapse, running out of stamina and a
+   *  moderator stepping in, which are very different things when somebody is
+   *  auditing a dispute. Stored as a short string rather than an enum so an
+   *  unrecognised value from a future version reads as itself instead of failing
+   *  to parse. */
+  object Outcome {
+    /** Ran its full time. */
+    val Completed: String = "completed"
+    /** The holder gave it up early. */
+    val Released: String = "released"
+    /** A moderator moved the holder off it. */
+    val Forced: String = "forced"
+    /** An admin force-cleared the whole spawn. */
+    val Cleared: String = "cleared"
+    /** Someone else accepted the handover, so the previous claim ended. */
+    val TakenOver: String = "taken-over"
+    /** Left the queue before reaching the front. */
+    val LeftQueue: String = "left-queue"
+    /** Was offered the spawn and said no. */
+    val Declined: String = "declined"
+    /** Was offered the spawn and never answered. */
+    val OfferLapsed: String = "offer-lapsed"
+    /** Dropped from the queue because their stamina had gone elsewhere. */
+    val NoStamina: String = "no-stamina"
+
+    /** Plain-English form for the audit log. Unknown values are shown as-is
+     *  rather than hidden, so a row written by a newer version still says
+     *  something. */
+    def label(outcome: String): String = outcome match {
+      case Completed   => "ran its full time"
+      case Released    => "left early"
+      case Forced      => "moved off by a moderator"
+      case Cleared     => "cleared by an admin"
+      case TakenOver   => "handed over"
+      case LeftQueue   => "left the queue"
+      case Declined    => "declined the handover"
+      case OfferLapsed => "didn't answer the handover"
+      case NoStamina   => "dropped, out of stamina"
+      case other       => other
+    }
+  }
 
   /** A claim someone made themselves via `/respawn claim` or the Next button. */
   val KindAdHoc: String = "adhoc"

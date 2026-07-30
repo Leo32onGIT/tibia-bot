@@ -287,6 +287,14 @@ object CommandSchemas {
             .setRequired(true).setAutoComplete(true)
         ),
       new SubcommandData("list", "Show every respawn that's currently claimed"),
+      new SubcommandData("log", "Show a respawn's recent claim history")
+        .addOptions(
+          new OptionData(OptionType.STRING, "spawn", "The respawn code or name")
+            .setRequired(true).setAutoComplete(true),
+          new OptionData(OptionType.INTEGER, "limit", "How many entries to show (default 10)")
+            .setMinValue(1)
+            .setMaxValue(25)
+        ),
       new SubcommandData("stamina", "Show how much claim time you have left today")
     )
     .addSubcommandGroups(

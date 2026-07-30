@@ -292,6 +292,42 @@ object RespawnEmbeds {
       .build()
   }
 
+  /** A spawn's recent claim history, for `/respawn log`.
+   *
+   *  Absolute dates rather than relative ones: an audit is read to work out what
+   *  happened at a particular time, and "3 days ago" is the wrong shape for that.
+   *  Held time is shown alongside the booked length, since the gap between them
+   *  is usually the thing being questioned. */
+  def claimHistoryEmbed(respawn: Respawn, history: List[RespawnClaim]): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
+      .setTitle(s"Claim history — ${respawn.displayName}")
+    if (history.isEmpty) {
+      embed.setDescription("No finished claims on this respawn yet.")
+    } else {
+      val lines = history.map { claim =>
+        val who = if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
+                  else s"<@${claim.userId}>"
+        val when = claim.startsAt.orElse(claim.endedAt).orElse(Some(claim.claimedAt))
+          .map(t => s"<t:${t.toInstant.getEpochSecond}:f>").getOrElse("unknown")
+        val held = for {
+          start <- claim.startsAt
+          end <- claim.endedAt
+        } yield java.time.Duration.between(start, end).toMinutes.toInt
+        // A queue entry that never started has no held time, and saying "0m of 2h"
+        // would read as though they took it and did nothing.
+        val length = held match {
+          case Some(minutes) => s"held ${humanDuration(math.max(0, minutes))} of ${humanDuration(claim.durationMinutes)}"
+          case None          => s"booked ${humanDuration(claim.durationMinutes)}"
+        }
+        val why = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
+        s"$when — $who\n\u2003$length · $why"
+      }
+      embed.setDescription(truncateLines(lines))
+      embed.setFooter(s"${history.size} most recent")
+    }
+    embed.build()
+  }
+
   /** Keep a rendered list inside Discord's 4096-character description limit,
    *  dropping whole lines rather than cutting one mid-mention. */
   private def truncateLines(lines: List[String], limit: Int = 3900): String = {

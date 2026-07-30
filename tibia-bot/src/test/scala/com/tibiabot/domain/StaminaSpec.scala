@@ -93,7 +93,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("a claim knows whether it is being handed over") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now), 120, warned = false, kind = RespawnClaim.KindAdHoc,
-      limboUntil = None, offerExpiresAt = None)
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
     base.inLimbo(now) shouldBe false
     base.copy(limboUntil = Some(now.plusMinutes(10))).inLimbo(now) shouldBe true
     // The window having passed is exactly when the claim stops being the holder.
@@ -104,7 +104,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("an offered claim is neither active nor merely queued") {
     val offered = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusOffered, 1, now, None, None,
       120, warned = false, kind = RespawnClaim.KindAdHoc, limboUntil = None,
-      offerExpiresAt = Some(now.plusMinutes(10)))
+      offerExpiresAt = Some(now.plusMinutes(10)), outcome = None, endedAt = None)
     offered.isOffered shouldBe true
     offered.isActive shouldBe false
     offered.isQueued shouldBe false
@@ -113,7 +113,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("a claim knows which state it is in") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc,
-      limboUntil = None, offerExpiresAt = None)
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
     base.isActive shouldBe true
     base.isQueued shouldBe false
     base.copy(status = RespawnClaim.StatusQueued).isQueued shouldBe true

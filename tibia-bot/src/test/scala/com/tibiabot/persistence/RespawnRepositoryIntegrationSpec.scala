@@ -222,7 +222,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.expiredOffers(g, now.plusMinutes(9)) shouldBe empty
     repo.expiredOffers(g, now.plusMinutes(10)).map(_.userId) shouldBe List("u1")
 
-    repo.cancelClaim(g, queued.id)
+    repo.cancelClaim(g, queued.id, RespawnClaim.Outcome.Declined)
     repo.expiredOffers(g, now.plusMinutes(30)) shouldBe empty
     repo.offeredClaim(g, spawn.id) shouldBe None
   }
@@ -274,9 +274,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
     repo.enqueueClaim(g, spawn.id, "u3", "Three", "", 60, 20, RespawnClaim.KindAdHoc)
 
-    repo.cancelQueued(g, spawn.id, Set("u1", "u3"))
+    repo.cancelQueued(g, spawn.id, Set("u1", "u3"), RespawnClaim.Outcome.NoStamina)
     repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u2")
-    repo.cancelQueued(g, spawn.id, Set.empty) // no-op, must not throw
+    repo.cancelQueued(g, spawn.id, Set.empty, RespawnClaim.Outcome.NoStamina) // no-op, must not throw
   }
 
   test("expired and soon-to-expire claims are found by their deadlines") {
@@ -336,6 +336,49 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     requeued.flatMap(_.endsAt) shouldBe None
   }
 
+  test("claim history is the finished rows, newest first, with why each ended") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+
+    // Nothing is deleted, so history is simply the rows that already exist —
+    // which is why this needs no separate audit table.
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(4),
+      now.minusHours(2), 120, RespawnClaim.KindAdHoc)
+    repo.finishClaim(g, first.id, RespawnClaim.Outcome.Completed)
+    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now.minusHours(2),
+      now, 120, RespawnClaim.KindAdHoc)
+    repo.cancelClaim(g, second.id, RespawnClaim.Outcome.Forced)
+
+    val history = repo.claimHistory(g, spawn.id, 10)
+    history.map(_.userId) shouldBe List("u2", "u1")
+    history.map(_.outcome) shouldBe List(Some(RespawnClaim.Outcome.Forced),
+      Some(RespawnClaim.Outcome.Completed))
+    // ended_at is stamped by the database, so the audit shows when it really
+    // stopped rather than when it was scheduled to.
+    history.flatMap(_.endedAt) should have size 2
+
+    // A claim still running is not history.
+    repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", now, now.plusHours(1), 60,
+      RespawnClaim.KindAdHoc)
+    repo.claimHistory(g, spawn.id, 10).map(_.userId) shouldBe List("u2", "u1")
+
+    repo.claimHistory(g, spawn.id, 1).map(_.userId) shouldBe List("u2")
+  }
+
+  test("an already-ended claim keeps its original outcome") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60,
+      RespawnClaim.KindAdHoc)
+
+    repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
+    // A late second call — the sweep and a release racing, say — must not relabel
+    // why it ended, or the audit trail would depend on ordering.
+    repo.cancelClaim(g, claim.id, RespawnClaim.Outcome.Forced)
+    repo.claimHistory(g, spawn.id, 10).map(_.outcome) shouldBe
+      List(Some(RespawnClaim.Outcome.Completed))
+  }
+
   test("member preferences round-trip, and distinguish 'off' from 'never chose'") {
     val (repo, g) = freshRepo()
     repo.userPrefs(g, "u1") shouldBe RespawnUserPrefs.none("u1")
@@ -388,8 +431,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
 
     repo.openClaimsForUser(g, "u1") should have size 2
-    repo.finishClaim(g, finished.id)
-    repo.cancelClaim(g, cancelled.id)
+    repo.finishClaim(g, finished.id, RespawnClaim.Outcome.Completed)
+    repo.cancelClaim(g, cancelled.id, RespawnClaim.Outcome.Released)
     repo.openClaimsForUser(g, "u1") shouldBe empty
     repo.activeClaim(g, a.id) shouldBe None
   }

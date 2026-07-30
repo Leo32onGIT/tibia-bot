@@ -26,7 +26,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     id = 10L, respawnId = 1L, userId = userId, userName = "someone", characterName = character,
     status = status, queuePosition = position, claimedAt = now, startsAt = Some(now),
     endsAt = Some(now.plusMinutes(minutes.toLong)), durationMinutes = minutes, warned = false,
-    kind = RespawnClaim.KindAdHoc, limboUntil = None, offerExpiresAt = None)
+    kind = RespawnClaim.KindAdHoc, limboUntil = None, offerExpiresAt = None,
+    outcome = None, endedAt = None)
 
   // Passed explicitly rather than read from Config, which cannot initialise in
   // tests (it requires a populated environment) — the same reason UrlsSpec

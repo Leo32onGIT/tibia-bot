@@ -99,6 +99,21 @@ object RespawnCommands {
       case "list" =>
         replyEmbed(event, RespawnEmbeds.activeClaimsList(service.activeClaims(guild.getId)))
 
+      case "log" =>
+        // Moderator-gated: it's an audit tool, and it names who held a spawn and
+        // how each hold ended. Nothing here is secret — the thread shows most of
+        // it — so opening this up later is a one-line change.
+        if (!Permissions.callerIsModerator(event, BotApp.moderatorRoleId(guild.getId))) {
+          reply(event, s"${Config.noEmoji} `/respawn log` needs the **Manage Server** permission, " +
+            s"or the **${Permissions.ModeratorRoleName}** role.")
+        } else service.resolve(guild.getId, options.getOrElse("spawn", "")) match {
+          case None => reply(event, unknownSpawnText(options.getOrElse("spawn", "")))
+          case Some(respawn) =>
+            val limit = options.get("limit").flatMap(toInt).getOrElse(10)
+            replyEmbed(event, RespawnEmbeds.claimHistoryEmbed(respawn,
+              service.claimHistory(guild.getId, respawn.id, limit)))
+        }
+
       case "stamina" =>
         service.settings(guild.getId) match {
           case None => reply(event, notConfiguredText)
