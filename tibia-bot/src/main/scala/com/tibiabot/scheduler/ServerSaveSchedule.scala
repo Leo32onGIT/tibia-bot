@@ -31,12 +31,12 @@ object ServerSaveSchedule {
   }
 
   /** A time expressed the way Tibia players talk about it: hours either side of
-   *  server save. 10:00 Berlin is `SS+0`, 11:00 is `SS+1`, and the late hours
-   *  count down to the next save instead — 06:00 is `SS-4`, not `SS+20`.
+   *  server save. 10:00 Berlin is `SS+0`, 11:00 is `SS+1`, and only the last few
+   *  hours count down to the next save instead — 06:00 is `SS-4`.
    *
-   *  The switch happens at the halfway point, which is where the shorter of the
-   *  two readings changes over. Nobody says "SS+20" when "SS-4" means the same
-   *  evening.
+   *  The countdown starts at [[CountdownHours]] out, because that is as far back
+   *  as anyone actually says it. `SS-6` is a normal thing to hear and `SS-7` is
+   *  not, so 03:00 reads `SS+17` rather than `SS-7`.
    *
    *  Resolved to the half hour — `SS+1.5` — since that is the granularity the
    *  schedule picker offers. Anything finer rounds down to the half below it.
@@ -46,8 +46,13 @@ object ServerSaveSchedule {
   def serverSaveOffsetLabel(when: ZonedDateTime): String = {
     val sinceSave = Duration.between(lastServerSave(when), when).toMinutes / 30
     val halves = math.max(0L, math.min(47L, sinceSave)).toInt
-    if (halves <= 24) s"SS+${halfHours(halves)}" else s"SS-${halfHours(48 - halves)}"
+    if (halves < 48 - CountdownHours * 2) s"SS+${halfHours(halves)}"
+    else s"SS-${halfHours(48 - halves)}"
   }
+
+  /** How close to the next save the countdown form takes over. Six hours: the
+   *  band players talk about as SS-6 through SS-0. */
+  val CountdownHours: Int = 6
 
   /** Half hours as players write them: whole where it is whole, `.5` where it is
    *  not. `SS+1` rather than `SS+1.0`. */
