@@ -45,14 +45,11 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.humanDuration(45) shouldBe "45m"
   }
 
-  test("a claimed spawn names the holder and shows a live countdown") {
+  test("a claimed spawn names the holder") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", character = "Galarzaa")), Nil, settings, image(cultOrcs))
     embed.getTitle shouldBe "415 — Cult Orcs"
     embed.getDescription should include("Galarzaa")
     embed.getDescription should include("<@99>")
-    // The R-suffixed timestamp is what makes the card count down without the
-    // bot editing it every minute.
-    fields(embed)("Hunt end") should endWith(":R>")
     embed.getColorRaw shouldBe RespawnEmbeds.RedColor
   }
 
@@ -75,12 +72,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     taken.keys should not contain "Options"
   }
 
-  test("a claim shows when the hunt started as well as when it ends") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, settings, image(cultOrcs))
-    // Short time for the start — a relative "3 hours ago" says less than the
-    // clock time it began at.
+  test("a claim shows start, end and duration, all as clock times") {
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", minutes = 90)), Nil, settings, image(cultOrcs))
+    // Both as short time — a relative "in 2 hours" says less than the clock time
+    // the hunt actually runs to, and it read as "2 minutes ago" mid-handover.
     fields(embed)("Hunt start") should endWith(":t>")
-    fields(embed)("Hunt end") should endWith(":R>")
+    fields(embed)("Hunt end") should endWith(":t>")
+    fields(embed)("Duration") shouldBe "1h 30m"
   }
 
   test("a card renders identically whether or not a handover is pending") {
@@ -222,6 +220,47 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("the spawn moderator panel hides the queue count when nobody is waiting") {
     fields(RespawnEmbeds.spawnModeratorPanel(cultOrcs, Some(claim("99")), 0)).keys should not contain "Waiting"
+  }
+
+  test("the claim log shows each hunt's span, length and reason") {
+    val held = claim("99", minutes = 120, character = "Galarzaa").copy(
+      startsAt = Some(now.minusHours(3)),
+      endedAt = Some(now.minusHours(2)),
+      outcome = Some(RespawnClaim.Outcome.Released))
+    val text = RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(held)).getDescription
+    text should include("Galarzaa")
+    // Short date AND time: log entries span days, so a bare clock time would be
+    // ambiguous.
+    text should include(s"<t:${now.minusHours(3).toInstant.getEpochSecond}:f>")
+    text should include(s"<t:${now.minusHours(2).toInstant.getEpochSecond}:f>")
+    // Held against booked is usually the thing being questioned.
+    text should include("held 1h of 2h")
+    text should include("left early")
+  }
+
+  test("the claim log distinguishes a queue entry that never started") {
+    val neverStarted = claim("7", minutes = 60).copy(
+      startsAt = None, endsAt = None,
+      endedAt = Some(now),
+      outcome = Some(RespawnClaim.Outcome.LeftQueue))
+    val text = RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(neverStarted)).getDescription
+    text should include("never started")
+    // "held 0m of 1h" would read as though they took it and did nothing.
+    text should include("booked 1h")
+    text should not include "held"
+    text should include("left the queue")
+  }
+
+  test("a claim log entry with no recorded reason still renders") {
+    // Claims that ended before the outcome column existed.
+    val old = claim("7").copy(startsAt = Some(now.minusHours(1)), endedAt = Some(now), outcome = None)
+    RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(old)).getDescription should include("ended")
+  }
+
+  test("an empty claim log says so rather than rendering blank") {
+    val embed = RespawnEmbeds.claimHistoryEmbed(cultOrcs, Nil)
+    embed.getTitle should include("415 — Cult Orcs")
+    embed.getDescription should include("No finished claims")
   }
 
   test("the board post explains stamina and the two-spawn case the design allows") {

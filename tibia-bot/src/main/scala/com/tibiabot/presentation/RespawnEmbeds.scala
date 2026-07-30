@@ -24,9 +24,13 @@ object RespawnEmbeds {
    *  cards need no per-minute refresh. */
   private def relative(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:R>"
 
-  /** Wall-clock time in each reader's own timezone. Used for a hunt's start,
-   *  where a relative "3 hours ago" tells you less than when it actually began. */
+  /** Wall-clock time in each reader's own timezone, for a hunt's start and end —
+   *  a relative "3 hours ago" tells you less than the time it actually happened. */
   private def clockTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:t>"
+
+  /** Short date *and* time, for the audit log — its entries span days, where a
+   *  bare clock time would be ambiguous. */
+  private def dateTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:f>"
 
   /** "2h", "45m", "1h 30m" — durations read better than a raw minute count in
    *  an embed field. */
@@ -77,7 +81,8 @@ object RespawnEmbeds {
         // another when it resolves, and the spawn is still that person's either
         // way — so there is nothing to say.
         active.startsAt.foreach(start => embed.addField("Hunt start", clockTime(start), true))
-        active.endsAt.foreach(end => embed.addField("Hunt end", relative(end), true))
+        active.endsAt.foreach(end => embed.addField("Hunt end", clockTime(end), true))
+        embed.addField("Duration", humanDuration(active.durationMinutes), true)
       case None =>
         embed.setColor(FreeColor)
         embed.setDescription(s"This respawn is **free**.\nClaim it with `/respawn claim ${respawn.code}`.")
@@ -307,20 +312,28 @@ object RespawnEmbeds {
       val lines = history.map { claim =>
         val who = if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
                   else s"<@${claim.userId}>"
-        val when = claim.startsAt.orElse(claim.endedAt).orElse(Some(claim.claimedAt))
-          .map(t => s"<t:${t.toInstant.getEpochSecond}:f>").getOrElse("unknown")
+        // The end shown is when the hunt actually stopped, not when it was booked
+        // to — a claim released early or taken over ends before its deadline, and
+        // the real one is what an audit is looking for.
+        val span = (claim.startsAt, claim.endedAt) match {
+          case (Some(start), Some(end)) => s"${dateTime(start)} \u2192 ${dateTime(end)}"
+          case (Some(start), None)      => s"${dateTime(start)} \u2192 ?"
+          // A queue entry that never reached the front has no hunt at all.
+          case (None, Some(end))        => s"never started, ended ${dateTime(end)}"
+          case (None, None)             => s"queued ${dateTime(claim.claimedAt)}, never started"
+        }
         val held = for {
           start <- claim.startsAt
           end <- claim.endedAt
         } yield java.time.Duration.between(start, end).toMinutes.toInt
-        // A queue entry that never started has no held time, and saying "0m of 2h"
-        // would read as though they took it and did nothing.
+        // Saying "0m of 2h" for something that never started would read as though
+        // they took it and did nothing.
         val length = held match {
           case Some(minutes) => s"held ${humanDuration(math.max(0, minutes))} of ${humanDuration(claim.durationMinutes)}"
           case None          => s"booked ${humanDuration(claim.durationMinutes)}"
         }
         val why = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
-        s"$when — $who\n\u2003$length · $why"
+        s"$who\n\u2003$span\n\u2003$length \u00b7 $why"
       }
       embed.setDescription(truncateLines(lines))
       embed.setFooter(s"${history.size} most recent")
