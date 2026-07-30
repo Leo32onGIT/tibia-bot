@@ -36,7 +36,8 @@ object RespawnButtons extends StrictLogging {
   /** Actions that always end in a modal, and so must not be deferred. The two
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
-  private val ModalActions: Set[String] = Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg")
+  private val ModalActions: Set[String] =
+    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule")
 
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
@@ -98,6 +99,23 @@ object RespawnButtons extends StrictLogging {
                   logger.warn(s"Unknown respawn DM button action '$other' in guild '$guildId'")
                   respond.text(s"${Config.noEmoji} That button doesn't do anything.")
               }
+            }
+        }
+
+      // Cancelling carries the *schedule* id, not a respawn id.
+      case Some(RespawnButtonId.SpawnButton("unschedule", scheduleId)) =>
+        val guild = event.getGuild
+        if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+        else BotApp.respawnService.findSchedule(guild.getId, scheduleId) match {
+          case None => respond.text(s"${Config.noEmoji} That booking is already gone.")
+          case Some(schedule) if schedule.userId != event.getUser.getId &&
+                                 !RespawnModals.moderates(guild, event.getMember) =>
+            respond.text(s"${Config.noEmoji} That's somebody else's booking.")
+          case Some(_) =>
+            BotApp.respawnService.cancelSchedule(guild, scheduleId) match {
+              case None => respond.text(s"${Config.noEmoji} That booking is already gone.")
+              case Some(_) => respond.text(s"${Config.yesEmoji} Booking cancelled. " +
+                "Slots that hadn't started yet have been released.")
             }
         }
 
@@ -194,6 +212,20 @@ object RespawnButtons extends StrictLogging {
                       deferredRespond.embed(
                         RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize), Some(buttons))
                   }
+                }
+
+              case "schedule" =>
+                // Not deferred — this opens a modal, unless they already have a
+                // booking here, in which case there is nothing to create.
+                service.schedulesForUser(guildId, user.getId).find(_.respawnId == respawn.id) match {
+                  case Some(existing) =>
+                    event.replyEmbeds(RespawnEmbeds.schedulesEmbed(List((existing, respawn)),
+                        java.time.ZonedDateTime.now()))
+                      .setComponents(RespawnThreads.scheduleButtons(existing.id))
+                      .setEphemeral(true)
+                      .queue()
+                  case None =>
+                    event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
                 }
 
               case "holdercfg" =>

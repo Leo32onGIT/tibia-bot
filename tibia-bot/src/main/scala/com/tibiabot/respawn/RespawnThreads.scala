@@ -48,12 +48,14 @@ object RespawnThreads extends StrictLogging {
       // making the member pick the right word for their own state was needless.
       ActionRow.of(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
       ActionRow.of(
-        Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹"))
+        Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅"))
       )
 
   /** The buttons on the pinned board post, which is what makes the whole system
@@ -88,6 +90,11 @@ object RespawnThreads extends StrictLogging {
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
       Button.primary(RespawnButtonId.boardTimers, "Timers")
     )
+
+  /** Shown when somebody already has a booking on this spawn — cancelling it is
+   *  the only thing left to offer them. */
+  def scheduleButtons(scheduleId: Long): ActionRow =
+    ActionRow.of(Button.danger(RespawnButtonId.cancelSchedule(scheduleId), "Cancel booking"))
 
   /** The lone Leave button on a reminder DM, for someone who has already left the
    *  respawn in game. Carries the guild for the same reason the offer buttons do:
@@ -461,6 +468,10 @@ object RespawnButtonId {
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
 
+  /** Book, or cancel, a repeating slot on this spawn. */
+  def spawnSchedule(respawnId: Long): String = s"${Prefix}schedule:$respawnId"
+  def cancelSchedule(scheduleId: Long): String = s"${Prefix}unschedule:$scheduleId"
+
   /** Moderator actions reached from a spawn's Config panel. */
   def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
   def forceLeave(respawnId: Long): String = s"${Prefix}forceleave:$respawnId"
@@ -480,6 +491,7 @@ object RespawnButtonId {
   /** Carry the spawn, since a modal submission arrives with no memory of which
    *  card opened it. */
   def modalDuration(respawnId: Long): String = s"${ModalPrefix}duration:$respawnId"
+  def modalSchedule(respawnId: Long): String = s"${ModalPrefix}schedule:$respawnId"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
 
   /** Guild-wide settings, split across two modals because Discord caps a modal at

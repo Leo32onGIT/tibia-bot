@@ -67,11 +67,17 @@ final case class RespawnClaim(
   outcome: Option[String],
   /** When it actually stopped, which is not `endsAt`: a claim released early, or
    *  taken over, ends before its deadline. The audit wants the real one. */
-  endedAt: Option[ZonedDateTime]
+  endedAt: Option[ZonedDateTime],
+  /** The recurring schedule this occurrence came from, for rows of kind
+   *  `scheduled`. Empty for an ordinary claim. */
+  scheduleId: Option[Long]
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
   def isOffered: Boolean = status == RespawnClaim.StatusOffered
+  /** A scheduled slot that hasn't begun. It holds nothing yet — the spawn may be
+   *  free, or somebody else's, right now. */
+  def isReserved: Boolean = status == RespawnClaim.StatusReserved
 
   /** Whether this claim being given up means a handover is in flight and has to
    *  move on to the next person.
@@ -108,6 +114,10 @@ object RespawnClaim {
    *  twice, and so the person isn't silently given a spawn they may have walked
    *  away from. */
   val StatusOffered: String = "offered"
+  /** A scheduled slot that hasn't started yet. Visible on the spawn's card so
+   *  people can plan around it — and, from phase 2, ask for it. Becomes
+   *  [[StatusActive]] when its time comes. */
+  val StatusReserved: String = "reserved"
   /** Ran to completion. */
   val StatusFinished: String = "finished"
   /** Released early, declined or ignored a handover offer, skipped for
@@ -141,6 +151,11 @@ object RespawnClaim {
     val OfferLapsed: String = "offer-lapsed"
     /** Dropped from the queue because their stamina had gone elsewhere. */
     val NoStamina: String = "no-stamina"
+    /** A scheduled slot the bot never got to start — it was still reserved when
+     *  its window had already passed, which means the bot was down over it. */
+    val Missed: String = "missed"
+    /** The schedule behind a reserved slot was cancelled before it started. */
+    val ScheduleCancelled: String = "schedule-cancelled"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -155,6 +170,8 @@ object RespawnClaim {
       case Declined    => "declined the handover"
       case OfferLapsed => "didn't answer the handover"
       case NoStamina   => "dropped, out of stamina"
+      case Missed      => "scheduled slot missed"
+      case ScheduleCancelled => "schedule cancelled"
       case other       => other
     }
   }
@@ -164,6 +181,66 @@ object RespawnClaim {
   /** RESERVED — materialised from a recurring schedule. Not produced by any
    *  code path yet; see the scheduled-claim notes in RespawnService. */
   val KindScheduled: String = "scheduled"
+}
+
+/** A standing booking on a respawn: the same slot, repeating.
+ *
+ *  Recurrence is deliberately free of any timezone. The rule is an **anchor
+ *  instant** plus a period, so the next slot is pure arithmetic on instants and
+ *  every time the bot shows is a Discord timestamp rendered in each reader's own
+ *  zone. Nothing in here has to know what "20:00" means to anybody.
+ *
+ *  The trade is that a slot stays fixed in absolute terms, so after a daylight
+ *  saving change it lands an hour off relative to Tibia's server time. Editing
+ *  the schedule re-anchors it.
+ *
+ *  Phase 1 is daily-only (`periodMinutes` = 1440). Choosing weekdays would mean
+ *  knowing which day a slot falls on, which needs a timezone — so it is left out
+ *  rather than smuggled back in.
+ */
+final case class RespawnSchedule(
+  id: Long,
+  respawnId: Long,
+  userId: String,
+  userName: String,
+  characterName: String,
+  /** The first slot's start. Every later one is this plus a whole number of
+   *  periods. */
+  anchorAt: ZonedDateTime,
+  periodMinutes: Int,
+  durationMinutes: Int,
+  active: Boolean,
+  createdAt: ZonedDateTime
+) {
+  /** The first slot starting at or after `from`.
+   *
+   *  Pure instant arithmetic, which is what keeps this timezone-free — and
+   *  testable without a clock. */
+  def nextStartAtOrAfter(from: ZonedDateTime): ZonedDateTime = {
+    val period = math.max(1, periodMinutes).toLong
+    val elapsed = java.time.Duration.between(anchorAt, from).toMinutes
+    if (elapsed <= 0) anchorAt
+    else {
+      // Round up, so a slot already under way is not offered as the next one.
+      val periodsAway = (elapsed + period - 1) / period
+      anchorAt.plusMinutes(periodsAway * period)
+    }
+  }
+
+  /** Whether `start` is genuinely one of this schedule's slots — the guard
+   *  against materialising an occurrence at a time the rule never names. */
+  def startsAt(start: ZonedDateTime): Boolean = {
+    val period = math.max(1, periodMinutes).toLong
+    val elapsed = java.time.Duration.between(anchorAt, start).toMinutes
+    elapsed >= 0 && elapsed % period == 0
+  }
+
+  def endOf(start: ZonedDateTime): ZonedDateTime = start.plusMinutes(durationMinutes.toLong)
+}
+
+object RespawnSchedule {
+  /** The only period phase 1 offers. */
+  val Daily: Int = 24 * 60
 }
 
 /** A guild's respawn-system settings. Defaults come from Config.Respawn and are

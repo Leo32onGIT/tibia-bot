@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 
 import java.time.ZonedDateTime
 
@@ -189,6 +189,56 @@ trait RespawnRepository {
 
   /** Admin override — set a user's consumed minutes directly. */
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit
+
+  // --- schedules ----------------------------------------------------------
+
+  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
+                  characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
+                  durationMinutes: Int): RespawnSchedule
+
+  def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule]
+
+  /** Every live schedule in the guild — the materialiser's work list. */
+  def activeSchedules(guildId: String): List[RespawnSchedule]
+
+  def schedulesForRespawn(guildId: String, respawnId: Long): List[RespawnSchedule]
+
+  def schedulesForUser(guildId: String, userId: String): List[RespawnSchedule]
+
+  /** Retire a schedule. Kept rather than deleted so occurrences already in the
+   *  claim history still point at something. */
+  def deactivateSchedule(guildId: String, scheduleId: Long): Unit
+
+  // --- reserved occurrences -----------------------------------------------
+
+  /** Book one slot of a schedule, unless that exact slot is already booked.
+   *
+   *  Returns None when it exists, which is what makes the materialiser safe to
+   *  run on every sweep — the (schedule, start) pair is the identity of an
+   *  occurrence. */
+  def reserveOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
+                        userName: String, characterName: String, startsAt: ZonedDateTime,
+                        durationMinutes: Int): Option[RespawnClaim]
+
+  /** Slots booked on a spawn that haven't started, soonest first — what the card
+   *  shows and what an ad-hoc claim has to stop short of. */
+  def reservationsFor(guildId: String, respawnId: Long, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Booked slots whose start has arrived, across the guild. */
+  def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Booked slots whose whole window has already gone by without starting —
+   *  which means the bot was down over them. */
+  def missedReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Turn a booked slot into the live claim it was always going to be. Returns
+   *  None if it is no longer reserved, which is the guard against two sweeps
+   *  starting the same slot. */
+  def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
+                       endsAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** Drop the not-yet-started slots of a schedule, for when it is cancelled. */
+  def cancelReservationsOf(guildId: String, scheduleId: Long, outcome: String): Unit
 
   // --- member preferences -------------------------------------------------
 

@@ -1,7 +1,7 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.Config
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.RespawnRepository
 import com.tibiabot.presentation.RespawnEmbeds
 import com.tibiabot.scheduler.ServerSaveSchedule
@@ -22,6 +22,12 @@ object ClaimOutcome {
   final case class Claimed(respawn: Respawn, claim: RespawnClaim) extends ClaimOutcome
   /** The spawn was taken, so the caller is in line behind it. */
   final case class Queued(respawn: Respawn, claim: RespawnClaim, position: Int) extends ClaimOutcome
+  /** Granted, but cut short by a booked slot. `requested` is what they asked for
+   *  and `reservedFrom` is when the booking takes over. */
+  final case class Shortened(respawn: Respawn, claim: RespawnClaim, requested: Int,
+                             reservedFrom: Option[ZonedDateTime]) extends ClaimOutcome
+  /** Refused because a booked slot leaves too little time to be worth granting. */
+  final case class Reserved(respawn: Respawn, from: ZonedDateTime) extends ClaimOutcome
   /** The caller already holds or is queued for this spawn. */
   final case class AlreadyHolding(respawn: Respawn, claim: RespawnClaim) extends ClaimOutcome
   final case class QueueFull(respawn: Respawn, limit: Int) extends ClaimOutcome
@@ -232,7 +238,24 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  that would run into someone's reserved window — putting that logic here
    *  later means no call site changes.
    */
-  def endsAtFor(startsAt: ZonedDateTime, minutes: Int): ZonedDateTime = startsAt.plusMinutes(minutes.toLong)
+  def endsAtFor(startsAt: ZonedDateTime, minutes: Int,
+                nextReservation: Option[ZonedDateTime] = None): ZonedDateTime = {
+    val wanted = startsAt.plusMinutes(minutes.toLong)
+    // Stop short of a booked slot rather than running into it. Taking the
+    // reservation as a parameter keeps this pure and directly testable, which is
+    // the whole reason the deadline is computed here rather than at each caller.
+    nextReservation.filter(_.isBefore(wanted)).getOrElse(wanted)
+  }
+
+  /** The shortest claim worth granting. Below this, truncating against a booked
+   *  slot gives somebody a hunt that is over before they have walked there, so
+   *  the claim is refused with an explanation instead. */
+  val MinimumClaimMinutes: Int = 5
+
+  /** When the next booked slot on a spawn starts, if there is one. */
+  def nextReservationStart(guildId: String, respawnId: Long,
+                           now: ZonedDateTime = ZonedDateTime.now()): Option[ZonedDateTime] =
+    repository.reservationsFor(guildId, respawnId, now).flatMap(_.startsAt).headOption
 
   /** Claim a spawn, or join its queue if someone already holds it.
    *
@@ -292,17 +315,31 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                  now: ZonedDateTime): ClaimOutcome = {
     val guildId = guild.getId
     val boundary = resetBoundary(now)
+
+    // A booked slot cuts an ad-hoc claim short. Stamina is then charged for the
+    // shorter hunt, not the one that was asked for — nobody should pay for time
+    // a reservation takes back. A scheduled occurrence starting its own slot is
+    // exempt, or it would truncate against itself.
+    val reservation =
+      if (kind == RespawnClaim.KindScheduled) None else nextReservationStart(guildId, respawn.id, now)
+    val end = endsAtFor(now, minutes, reservation)
+    val granted = math.max(0, java.time.Duration.between(now, end).toMinutes).toInt
+    if (granted < MinimumClaimMinutes)
+      return ClaimOutcome.Reserved(respawn, reservation.getOrElse(end))
     // Re-check under the reservation itself rather than trusting the earlier
     // read: a second claim from the same user may have taken the room in
     // between, and reserveStamina writing nothing is the authoritative answer.
-    if (!repository.reserveStamina(guildId, userId, minutes, config.staminaMinutes, boundary)) {
+    if (!repository.reserveStamina(guildId, userId, granted, config.staminaMinutes, boundary)) {
       val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-      ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
+      ClaimOutcome.NoStamina(respawn, granted, tank, ServerSaveSchedule.nextServerSave(now))
     } else {
       val claim = repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
-        now, endsAtFor(now, minutes), minutes, kind)
+        now, end, granted, kind)
       refreshThread(guild, respawn, config)
-      ClaimOutcome.Claimed(respawn, claim)
+      // The caller is told when the hunt was shortened, rather than quietly
+      // getting less than they asked for.
+      if (granted < minutes) ClaimOutcome.Shortened(respawn, claim, minutes, reservation)
+      else ClaimOutcome.Claimed(respawn, claim)
     }
   }
 
@@ -549,6 +586,104 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       active.isDefined
     }
 
+  // --- schedules ----------------------------------------------------------
+
+  def schedulesForRespawn(guildId: String, respawnId: Long): List[RespawnSchedule] =
+    repository.schedulesForRespawn(guildId, respawnId)
+
+  def schedulesForUser(guildId: String, userId: String): List[RespawnSchedule] =
+    repository.schedulesForUser(guildId, userId)
+
+  def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule] =
+    repository.findSchedule(guildId, scheduleId)
+
+  /** Book a repeating slot on a spawn.
+   *
+   *  Refused when it would overlap one that already exists: two standing
+   *  bookings on the same spawn at the same time is not a state the handover
+   *  rules can resolve, and silently letting the second win would take a slot
+   *  from somebody who had it first. */
+  def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
+                  characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
+                  now: ZonedDateTime = ZonedDateTime.now()): Either[String, RespawnSchedule] =
+    settings(guild.getId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val guildId = guild.getId
+        if (durationMinutes < MinimumClaimMinutes || durationMinutes > config.maxDurationMinutes)
+          Left(s"A slot has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
+            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+        else if (!firstStart.isAfter(now))
+          Left("The first slot has to start in the future.")
+        else if (durationMinutes >= RespawnSchedule.Daily)
+          Left("A daily slot has to be shorter than a day.")
+        else {
+          val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
+            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now)
+          repository.schedulesForRespawn(guildId, respawn.id).find(overlaps(_, candidate)) match {
+            case Some(clash) =>
+              Left(s"That clashes with <@${clash.userId}>'s slot on this respawn " +
+                s"(<t:${clash.nextStartAtOrAfter(now).toInstant.getEpochSecond}:t> for " +
+                s"${RespawnEmbeds.humanDuration(clash.durationMinutes)}).")
+            case None =>
+              val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
+                firstStart, RespawnSchedule.Daily, durationMinutes)
+              materialise(guildId, saved, now)
+              refreshThread(guild, respawn, config)
+              Right(saved)
+          }
+        }
+    }
+
+  /** Two daily schedules on the same spawn clash if their windows overlap on any
+   *  day. With both repeating every 24h, comparing one day's worth of offsets is
+   *  enough — the pattern is the same every day after that. */
+  private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean = {
+    val day = RespawnSchedule.Daily.toLong
+    def offset(schedule: RespawnSchedule): Long = {
+      val raw = java.time.Duration.between(a.anchorAt, schedule.anchorAt).toMinutes % day
+      if (raw < 0) raw + day else raw
+    }
+    val (startA, startB) = (offset(a), offset(b))
+    // Compare on a circle: a window can wrap past midnight relative to the other.
+    def clashes(first: Long, firstLength: Int, second: Long, secondLength: Int): Boolean = {
+      val gap = ((second - first) % day + day) % day
+      gap < firstLength.toLong || (day - gap) < secondLength.toLong
+    }
+    clashes(startA, a.durationMinutes, startB, b.durationMinutes)
+  }
+
+  /** Retire a schedule and drop the slots it had booked but not yet started. */
+  def cancelSchedule(guild: Guild, scheduleId: Long): Option[RespawnSchedule] = {
+    val guildId = guild.getId
+    repository.findSchedule(guildId, scheduleId).map { schedule =>
+      repository.deactivateSchedule(guildId, scheduleId)
+      repository.cancelReservationsOf(guildId, scheduleId, RespawnClaim.Outcome.ScheduleCancelled)
+      for {
+        config <- settings(guildId)
+        respawn <- repository.findById(guildId, schedule.respawnId)
+      } refreshThread(guild, respawn, config)
+      schedule
+    }
+  }
+
+  /** Book every slot of a schedule that starts within the look-ahead.
+   *
+   *  Booking ahead is what makes a slot visible on the card — and, from phase 2,
+   *  requestable — before it begins. Idempotent: the (schedule, start) pair is
+   *  unique in the database, so re-running on every sweep books nothing twice. */
+  private def materialise(guildId: String, schedule: RespawnSchedule, now: ZonedDateTime): Int = {
+    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    var start = schedule.nextStartAtOrAfter(now)
+    var booked = 0
+    while (!start.isAfter(horizon)) {
+      if (repository.reserveOccurrence(guildId, schedule.id, schedule.respawnId, schedule.userId,
+        schedule.userName, schedule.characterName, start, schedule.durationMinutes).isDefined) booked += 1
+      start = start.plusMinutes(schedule.periodMinutes.toLong)
+    }
+    booked
+  }
+
   // --- lifecycle sweep ----------------------------------------------------
 
   /** Resolve everything whose time has come for one guild: expired claims get
@@ -563,6 +698,32 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def sweep(guild: Guild, now: ZonedDateTime = ZonedDateTime.now()): Unit =
     settings(guild.getId).foreach { config =>
       val guildId = guild.getId
+
+      // Book upcoming slots, so they show on the card before they begin.
+      repository.activeSchedules(guildId).foreach { schedule =>
+        Try(materialise(guildId, schedule, now)).failed.foreach { error =>
+          logger.warn(s"Failed to book slots for respawn schedule ${schedule.id} in guild '$guildId'", error)
+        }
+      }
+
+      // Slots whose whole window went by without starting — the bot was down over
+      // them. Closing them keeps the card honest and stops the due-slot query
+      // below trying to start a hunt that should already have finished.
+      repository.missedReservations(guildId, now).foreach { slot =>
+        Try {
+          repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.Missed)
+          repository.findById(guildId, slot.respawnId).foreach(refreshThread(guild, _, config))
+        }.failed.foreach { error =>
+          logger.warn(s"Failed to close missed respawn slot ${slot.id} in guild '$guildId'", error)
+        }
+      }
+
+      // Slots whose time has come.
+      repository.dueReservations(guildId, now).foreach { slot =>
+        Try(startSlot(guild, config, slot, now)).failed.foreach { error =>
+          logger.warn(s"Failed to start respawn slot ${slot.id} in guild '$guildId'", error)
+        }
+      }
 
       // Lapsed handover offers first. The offer window and the outgoing claim's
       // limbo window are set together and are the same length, so they elapse on
@@ -626,6 +787,58 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
     }
+
+  /** Turn a booked slot into a live claim.
+   *
+   *  Three ways this goes. If the spawn is free and the owner can afford it, they
+   *  simply take it. If somebody else is on it — an ad-hoc claim made before the
+   *  schedule existed, so truncation never applied — the owner goes to the front
+   *  of the queue and gets the spawn through the ordinary handover when that
+   *  claim ends. If their tank is spent, the slot is dropped and they are told,
+   *  the same as anyone else who cannot afford a claim.
+   */
+  private def startSlot(guild: Guild, config: RespawnSettings, slot: RespawnClaim,
+                        now: ZonedDateTime): Unit = {
+    val guildId = guild.getId
+    repository.findById(guildId, slot.respawnId).foreach { respawn =>
+      val boundary = resetBoundary(now)
+      val holder = repository.activeClaim(guildId, respawn.id)
+
+      if (holder.isDefined) {
+        // Cancel the booking and take a queue place instead, so the existing
+        // hunt is not interrupted mid-flight.
+        repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.TakenOver)
+        repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.characterName,
+          slot.durationMinutes, config.queueLimit, RespawnClaim.KindScheduled)
+        RespawnThreads.dm(guild, slot.userId,
+          RespawnEmbeds.dmEmbed("Your slot is taken", RespawnEmbeds.slotOccupied(respawn, holder),
+            imageFor(respawn), RespawnEmbeds.WarnColor))
+        refreshThread(guild, respawn, config)
+      } else if (!repository.reserveStamina(guildId, slot.userId, slot.durationMinutes,
+                   config.staminaMinutes, boundary)) {
+        repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.NoStamina)
+        val tank = repository.stamina(guildId, slot.userId, config.staminaMinutes, boundary)
+        RespawnThreads.dm(guild, slot.userId,
+          RespawnEmbeds.dmEmbed("Slot skipped",
+            RespawnEmbeds.slotNoStamina(respawn, slot, tank, ServerSaveSchedule.nextServerSave(now)),
+            imageFor(respawn), RespawnEmbeds.RedColor))
+        refreshThread(guild, respawn, config)
+      } else {
+        // Runs from now rather than from the booked start, so a sweep landing a
+        // few seconds late doesn't quietly shorten the hunt.
+        repository.startReservation(guildId, slot.id, now, now.plusMinutes(slot.durationMinutes.toLong)) match {
+          case None =>
+            // Something else already started it; hand the stamina straight back.
+            repository.refundStamina(guildId, slot.userId, slot.durationMinutes, boundary)
+          case Some(started) =>
+            refreshThread(guild, respawn, config)
+            RespawnThreads.dm(guild, slot.userId,
+              RespawnEmbeds.dmEmbed("Your slot has started",
+                RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn)))
+        }
+      }
+    }
+  }
 
   /** Offer a spawn that's changing hands to the next person in line, or shut it
    *  down if nobody is waiting.
@@ -804,7 +1017,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // are next — and what makes an offer going out change nothing on the card,
       // so it needs no edit at all.
       val queue = repository.offeredClaim(guildId, respawn.id).toList ++ repository.queueFor(guildId, respawn.id)
-      val card = RespawnEmbeds.claimCard(respawn, active, queue, config, imageFor(respawn))
+      val reservations = repository.reservationsFor(guildId, respawn.id, ZonedDateTime.now())
+      val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config, imageFor(respawn))
       val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
 
       // Re-read after a possible create so the row carries the new thread id;
@@ -832,6 +1046,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  nothing here is ever deleted, only moved to a terminal status. */
   def claimHistory(guildId: String, respawnId: Long, limit: Int = 10): List[RespawnClaim] =
     repository.claimHistory(guildId, respawnId, limit)
+
+  /** Booked slots on a spawn that haven't started yet. */
+  def reservationsFor(guildId: String, respawnId: Long,
+                      now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
+    repository.reservationsFor(guildId, respawnId, now)
 
   /** `/respawn status <spawn>` — one spawn's current state. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =

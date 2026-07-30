@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.{ConnectionProvider, RespawnRepository}
 
 import java.sql.{Connection, ResultSet, Timestamp}
@@ -112,6 +112,32 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate(
         "CREATE INDEX IF NOT EXISTS respawn_claims_by_user ON respawn_claims (user_id, status);")
 
+      statement.executeUpdate(
+        """CREATE TABLE IF NOT EXISTS respawn_schedules (
+          |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          |respawn_id BIGINT NOT NULL,
+          |user_id VARCHAR(255) NOT NULL,
+          |user_name VARCHAR(255) NOT NULL DEFAULT '',
+          |character_name VARCHAR(255) NOT NULL DEFAULT '',
+          |anchor_at TIMESTAMPTZ NOT NULL,
+          |period_minutes INT NOT NULL DEFAULT 1440,
+          |duration_minutes INT NOT NULL,
+          |active BOOLEAN NOT NULL DEFAULT TRUE,
+          |created_at TIMESTAMPTZ NOT NULL
+          |);""".stripMargin)
+      statement.executeUpdate(
+        "CREATE INDEX IF NOT EXISTS respawn_schedules_by_respawn ON respawn_schedules (respawn_id, active);")
+
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS schedule_id BIGINT;")
+      // The materialiser's uniqueness rule, enforced by the database rather than
+      // by a read-then-write: two sweeps racing would otherwise both find a slot
+      // unbooked and both book it.
+      statement.executeUpdate(
+        """CREATE UNIQUE INDEX IF NOT EXISTS respawn_claims_occurrence
+          |ON respawn_claims (schedule_id, starts_at)
+          |WHERE schedule_id IS NOT NULL;""".stripMargin)
+
       // NULL means "follow the guild default", which is why these are nullable
       // rather than zero-defaulted: 0 is a meaningful value for warn_minutes
       // (reminders off) and would be indistinguishable from unset.
@@ -169,7 +195,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       limboUntil = optionalZoned(result, "limbo_until"),
       offerExpiresAt = optionalZoned(result, "offer_expires_at"),
       outcome = Option(result.getString("outcome")).filter(_.nonEmpty),
-      endedAt = optionalZoned(result, "ended_at")
+      endedAt = optionalZoned(result, "ended_at"),
+      scheduleId = { val id = result.getLong("schedule_id"); if (result.wasNull()) None else Some(id) }
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -792,6 +819,182 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit =
     withGuild(guildId) { conn => writeStamina(conn, userId, math.max(0, usedMinutes), resetAt) }
+
+  // --- schedules ----------------------------------------------------------
+
+  private def readSchedule(result: ResultSet): RespawnSchedule =
+    RespawnSchedule(
+      id = result.getLong("id"),
+      respawnId = result.getLong("respawn_id"),
+      userId = result.getString("user_id"),
+      userName = Option(result.getString("user_name")).getOrElse(""),
+      characterName = Option(result.getString("character_name")).getOrElse(""),
+      anchorAt = toZoned(result.getTimestamp("anchor_at")),
+      periodMinutes = result.getInt("period_minutes"),
+      durationMinutes = result.getInt("duration_minutes"),
+      active = result.getBoolean("active"),
+      createdAt = toZoned(result.getTimestamp("created_at"))
+    )
+
+  private def collectSchedules(result: ResultSet): List[RespawnSchedule] = {
+    val out = ListBuffer[RespawnSchedule]()
+    while (result.next()) out += readSchedule(result)
+    out.toList
+  }
+
+  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
+                  characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
+                  durationMinutes: Int): RespawnSchedule = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """INSERT INTO respawn_schedules
+        |(respawn_id, user_id, user_name, character_name, anchor_at, period_minutes,
+        | duration_minutes, active, created_at)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, NOW())
+        |RETURNING *;""".stripMargin)
+    try {
+      statement.setLong(1, respawnId)
+      statement.setString(2, userId)
+      statement.setString(3, userName)
+      statement.setString(4, characterName)
+      statement.setTimestamp(5, Timestamp.from(anchorAt.toInstant))
+      statement.setInt(6, periodMinutes)
+      statement.setInt(7, durationMinutes)
+      val result = statement.executeQuery()
+      result.next()
+      readSchedule(result)
+    } finally statement.close()
+  }
+
+  def findSchedule(guildId: String, scheduleId: Long): Option[RespawnSchedule] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("SELECT * FROM respawn_schedules WHERE id = ?;")
+    try {
+      statement.setLong(1, scheduleId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readSchedule(result)) else None
+    } finally statement.close()
+  }
+
+  def activeSchedules(guildId: String): List[RespawnSchedule] = withGuild(guildId) { conn =>
+    val statement = conn.createStatement()
+    try collectSchedules(statement.executeQuery("SELECT * FROM respawn_schedules WHERE active ORDER BY id;"))
+    finally statement.close()
+  }
+
+  def schedulesForRespawn(guildId: String, respawnId: Long): List[RespawnSchedule] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_schedules WHERE respawn_id = ? AND active ORDER BY anchor_at;")
+    try {
+      statement.setLong(1, respawnId)
+      collectSchedules(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def schedulesForUser(guildId: String, userId: String): List[RespawnSchedule] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_schedules WHERE user_id = ? AND active ORDER BY anchor_at;")
+    try {
+      statement.setString(1, userId)
+      collectSchedules(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def deactivateSchedule(guildId: String, scheduleId: Long): Unit = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("UPDATE respawn_schedules SET active = FALSE WHERE id = ?;")
+    try {
+      statement.setLong(1, scheduleId)
+      statement.executeUpdate()
+    } finally statement.close()
+  }
+
+  // --- reserved occurrences -----------------------------------------------
+
+  def reserveOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
+                        userName: String, characterName: String, startsAt: ZonedDateTime,
+                        durationMinutes: Int): Option[RespawnClaim] = withGuild(guildId) { conn =>
+    // ON CONFLICT against the partial unique index, so booking the same slot
+    // twice is a no-op rather than a duplicate — the materialiser runs on every
+    // sweep and must be idempotent.
+    val statement = conn.prepareStatement(
+      """INSERT INTO respawn_claims
+        |(respawn_id, user_id, user_name, character_name, status, queue_position,
+        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, schedule_id)
+        |VALUES (?, ?, ?, ?, 'reserved', 0, NOW(), ?,
+        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'scheduled', ?)
+        |ON CONFLICT DO NOTHING
+        |RETURNING *;""".stripMargin)
+    try {
+      statement.setLong(1, respawnId)
+      statement.setString(2, userId)
+      statement.setString(3, userName)
+      statement.setString(4, characterName)
+      statement.setTimestamp(5, Timestamp.from(startsAt.toInstant))
+      statement.setTimestamp(6, Timestamp.from(startsAt.toInstant))
+      statement.setInt(7, durationMinutes)
+      statement.setInt(8, durationMinutes)
+      statement.setLong(9, scheduleId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def reservationsFor(guildId: String, respawnId: Long, now: ZonedDateTime): List[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+          |WHERE respawn_id = ? AND status = 'reserved' AND starts_at > ?
+          |ORDER BY starts_at;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setTimestamp(2, Timestamp.from(now.toInstant))
+        collectClaims(statement.executeQuery())
+      } finally statement.close()
+    }
+
+  def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_claims WHERE status = 'reserved' AND starts_at <= ? ORDER BY starts_at;")
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def missedReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      "SELECT * FROM respawn_claims WHERE status = 'reserved' AND ends_at <= ? ORDER BY starts_at;")
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
+                       endsAt: ZonedDateTime): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """UPDATE respawn_claims
+        |SET status = 'active', starts_at = ?, ends_at = ?, warned = FALSE
+        |WHERE id = ? AND status = 'reserved'
+        |RETURNING *;""".stripMargin)
+    try {
+      statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
+      statement.setTimestamp(2, Timestamp.from(endsAt.toInstant))
+      statement.setLong(3, claimId)
+      val result = statement.executeQuery()
+      if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def cancelReservationsOf(guildId: String, scheduleId: Long, outcome: String): Unit =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims SET status = 'cancelled', outcome = ?, ended_at = NOW()
+          |WHERE schedule_id = ? AND status = 'reserved';""".stripMargin)
+      try {
+        statement.setString(1, outcome)
+        statement.setLong(2, scheduleId)
+        statement.executeUpdate()
+      } finally statement.close()
+    }
 
   // --- member preferences -------------------------------------------------
 

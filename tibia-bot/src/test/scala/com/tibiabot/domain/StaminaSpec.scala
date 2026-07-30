@@ -97,7 +97,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
     // queue, or offered away mid-hunt when somebody else was still waiting.
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusQueued, 1, now, None, None,
       120, warned = false, kind = RespawnClaim.KindAdHoc, limboUntil = None,
-      offerExpiresAt = None, outcome = None, endedAt = None)
+      offerExpiresAt = None, outcome = None, endedAt = None, scheduleId = None)
 
     base.leavingAdvancesHandover shouldBe false
     base.copy(status = RespawnClaim.StatusOffered).leavingAdvancesHandover shouldBe true
@@ -108,7 +108,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("only a claim already on its way out may be finished by a handover") {
     val holder = RespawnClaim(1L, 1L, "holder", "H", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc,
-      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None, scheduleId = None)
 
     // Mid-hunt, an hour still to run: a handover must not touch it.
     holder.eligibleForHandover shouldBe false
@@ -119,7 +119,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("a claim knows whether it is being handed over") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now), 120, warned = false, kind = RespawnClaim.KindAdHoc,
-      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None, scheduleId = None)
     base.inLimbo(now) shouldBe false
     base.copy(limboUntil = Some(now.plusMinutes(10))).inLimbo(now) shouldBe true
     // The window having passed is exactly when the claim stops being the holder.
@@ -130,7 +130,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("an offered claim is neither active nor merely queued") {
     val offered = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusOffered, 1, now, None, None,
       120, warned = false, kind = RespawnClaim.KindAdHoc, limboUntil = None,
-      offerExpiresAt = Some(now.plusMinutes(10)), outcome = None, endedAt = None)
+      offerExpiresAt = Some(now.plusMinutes(10)), outcome = None, endedAt = None, scheduleId = None)
     offered.isOffered shouldBe true
     offered.isActive shouldBe false
     offered.isQueued shouldBe false
@@ -139,7 +139,7 @@ class StaminaSpec extends AnyFunSuite with Matchers {
   test("a claim knows which state it is in") {
     val base = RespawnClaim(1L, 1L, "7", "n", "", RespawnClaim.StatusActive, 0, now, Some(now),
       Some(now.plusHours(2)), 120, warned = false, kind = RespawnClaim.KindAdHoc,
-      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None)
+      limboUntil = None, offerExpiresAt = None, outcome = None, endedAt = None, scheduleId = None)
     base.isActive shouldBe true
     base.isQueued shouldBe false
     base.copy(status = RespawnClaim.StatusQueued).isQueued shouldBe true

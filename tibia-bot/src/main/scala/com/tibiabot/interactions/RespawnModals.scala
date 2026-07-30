@@ -30,6 +30,7 @@ object RespawnModals extends StrictLogging {
 
   private val SpawnField = "spawn"
   private val DurationField = "duration"
+  private val StartField = "start"
   private val WarnField = "warn"
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
@@ -181,6 +182,33 @@ object RespawnModals extends StrictLogging {
       .setMaxLength(4)
       .build()
 
+  /** Book a repeating slot.
+   *
+   *  The first start is asked for as a delay from now rather than a clock time,
+   *  because a clock time means nothing without knowing the reader's timezone —
+   *  and the whole scheduling model is deliberately free of them. The reply
+   *  confirms with a Discord timestamp, which each person sees in their own zone,
+   *  so an entry that was a few hours out is obvious immediately. */
+  def scheduleModal(guildId: String, respawn: Respawn): Modal = {
+    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+    Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a repeating slot")
+      .addComponents(
+        label("First slot starts in (minutes from now)",
+          s"${respawn.displayName} — it then repeats every 24 hours. 120 = two hours from now.",
+          TextInput.create(StartField, TextInputStyle.SHORT)
+            .setPlaceholder("120")
+            .setRequired(true)
+            .setMaxLength(5)
+            .build()),
+        label("How long is the slot? (minutes)", s"5 to $maxDuration.",
+          TextInput.create(DurationField, TextInputStyle.SHORT)
+            .setRequired(true)
+            .setMaxLength(4)
+            .build())
+      )
+      .build()
+  }
+
   // --- submissions --------------------------------------------------------
 
   def handle(event: ModalInteractionEvent): Unit = {
@@ -200,6 +228,7 @@ object RespawnModals extends StrictLogging {
     RespawnButtonId.parseSpawnModal(modalId) match {
       case Some(("duration", respawnId)) => submitDuration(event, respawnId, forHolder = false)
       case Some(("holder", respawnId))   => submitDuration(event, respawnId, forHolder = true)
+      case Some(("schedule", respawnId))  => submitSchedule(event, respawnId)
       case _ => modalId match {
         case RespawnButtonId.modalClaim      => submitClaim(event)
         case RespawnButtonId.modalConfig     => submitConfig(event)
@@ -209,6 +238,36 @@ object RespawnModals extends StrictLogging {
           logger.warn(s"Unknown respawn modal '$other'")
           reply(event, s"${Config.noEmoji} I didn't understand that form.")
       }
+    }
+  }
+
+  private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit = {
+    val guild = event.getGuild
+    val service = BotApp.respawnService
+    (Try(value(event, StartField).toInt).toOption, Try(value(event, DurationField).toInt).toOption) match {
+      case (None, _) | (_, None) =>
+        reply(event, s"${Config.noEmoji} Both need to be whole numbers of minutes.")
+      case (Some(startsIn), Some(duration)) =>
+        service.listRespawns(guild.getId).find(_.id == respawnId) match {
+          case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+          case Some(respawn) =>
+            val existing = service.schedulesForUser(guild.getId, event.getUser.getId)
+            if (existing.size >= com.tibiabot.Config.Respawn.maxSchedulesPerUser)
+              reply(event, s"${Config.noEmoji} You already have " +
+                s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} repeating slots — cancel one first.")
+            else {
+              val firstStart = java.time.ZonedDateTime.now().plusMinutes(math.max(0, startsIn).toLong)
+              service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
+                firstStart, duration) match {
+                case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+                case Right(schedule) =>
+                  reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** every day for " +
+                    s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
+                    s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.\n" +
+                    "Check that time reads right — if it doesn't, cancel the booking and try again.")
+              }
+            }
+        }
     }
   }
 

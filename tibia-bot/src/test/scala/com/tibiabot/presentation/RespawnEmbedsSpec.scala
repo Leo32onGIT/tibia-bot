@@ -27,7 +27,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     status = status, queuePosition = position, claimedAt = now, startsAt = Some(now),
     endsAt = Some(now.plusMinutes(minutes.toLong)), durationMinutes = minutes, warned = false,
     kind = RespawnClaim.KindAdHoc, limboUntil = None, offerExpiresAt = None,
-    outcome = None, endedAt = None)
+    outcome = None, endedAt = None, scheduleId = None)
 
   // Passed explicitly rather than read from Config, which cannot initialise in
   // tests (it requires a populated environment) — the same reason UrlsSpec
@@ -46,7 +46,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("a claimed spawn names the holder") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", character = "Galarzaa")), Nil, settings, image(cultOrcs))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", character = "Galarzaa")), Nil, Nil, settings, image(cultOrcs))
     embed.getTitle shouldBe "415 — Cult Orcs"
     embed.getDescription should include("Galarzaa")
     embed.getDescription should include("<@99>")
@@ -54,12 +54,12 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("a claimant with no character is still pingable") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, settings, image(cultOrcs))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, Nil, settings, image(cultOrcs))
     embed.getDescription should include("<@99>")
   }
 
   test("a free spawn is green and says nothing about slash commands") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings, image(cultOrcs))
     embed.getColorRaw shouldBe RespawnEmbeds.FreeColor
     embed.getDescription should include("free")
     // The card carries a Claim button, so telling people to type a command
@@ -70,14 +70,14 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the card carries no settings blurb — duration and queue limit aren't news to the reader") {
-    val free = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs)))
-    val taken = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), Nil, settings, image(cultOrcs)))
+    val free = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings, image(cultOrcs)))
+    val taken = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), Nil, Nil, settings, image(cultOrcs)))
     free.keys should not contain "Options"
     taken.keys should not contain "Options"
   }
 
   test("a claim shows start, end and duration, all as clock times") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", minutes = 90)), Nil, settings, image(cultOrcs))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", minutes = 90)), Nil, Nil, settings, image(cultOrcs))
     // Both as short time — a relative "in 2 hours" says less than the clock time
     // the hunt actually runs to, and it read as "2 minutes ago" mid-handover.
     fields(embed)("Hunt start") should endWith(":t>")
@@ -90,8 +90,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // card at all, the offer going out and being answered would each need one.
     val holding = claim("99", character = "Galarzaa")
     val handingOver = holding.copy(limboUntil = Some(now.plusMinutes(10)))
-    val before = RespawnEmbeds.claimCard(cultOrcs, Some(holding), Nil, settings, image(cultOrcs))
-    val during = RespawnEmbeds.claimCard(cultOrcs, Some(handingOver), Nil, settings, image(cultOrcs))
+    val before = RespawnEmbeds.claimCard(cultOrcs, Some(holding), Nil, Nil, settings, image(cultOrcs))
+    val during = RespawnEmbeds.claimCard(cultOrcs, Some(handingOver), Nil, Nil, settings, image(cultOrcs))
     during.getDescription shouldBe before.getDescription
     during.getColorRaw shouldBe before.getColorRaw
     fields(during) shouldBe fields(before)
@@ -138,11 +138,11 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the queue is only shown when someone is waiting, and is numbered") {
-    fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), Nil, settings, image(cultOrcs))).keys.exists(_.startsWith("Queue")) shouldBe false
+    fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), Nil, Nil, settings, image(cultOrcs))).keys.exists(_.startsWith("Queue")) shouldBe false
 
     val queue = List(claim("2", status = RespawnClaim.StatusQueued, position = 1),
       claim("3", status = RespawnClaim.StatusQueued, position = 2))
-    val shown = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), queue, settings, image(cultOrcs)))("Queue (2/20)")
+    val shown = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), queue, Nil, settings, image(cultOrcs)))("Queue (2/20)")
     shown should include("`1.`")
     shown should include("<@2>")
     shown should include("<@3>")
@@ -150,13 +150,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("a long queue is truncated so the field can't exceed Discord's limit") {
     val queue = (1 to 20).map(i => claim(i.toString, status = RespawnClaim.StatusQueued, position = i)).toList
-    val shown = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("0")), queue, settings, image(cultOrcs)))("Queue (20/20)")
+    val shown = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("0")), queue, Nil, settings, image(cultOrcs)))("Queue (20/20)")
     shown should include("…and 10 more")
     shown.length should be < 1024
   }
 
   test("the image is the main monster via the tibiawiki redirect") {
-    val embed = RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs))
+    val embed = RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings, image(cultOrcs))
     Option(embed.getImage).map(_.getUrl).getOrElse("") should include("tibiawiki.com.br")
     Option(embed.getImage).map(_.getUrl).getOrElse("") should include("Orc_Cult_Fanatic")
   }

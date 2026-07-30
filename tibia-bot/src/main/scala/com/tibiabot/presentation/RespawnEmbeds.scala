@@ -1,6 +1,6 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSettings, RespawnUserPrefs, Stamina}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
@@ -67,7 +67,8 @@ object RespawnEmbeds {
    *  rather than posted anew, so the thread reads as one living card with the
    *  chatter below it. */
   def claimCard(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
-                settings: RespawnSettings, imageUrl: String): MessageEmbed = {
+                reservations: List[RespawnClaim], settings: RespawnSettings,
+                imageUrl: String): MessageEmbed = {
     val embed = new EmbedBuilder()
     embed.setTitle(respawn.displayName)
     embed.setImage(imageUrl)
@@ -98,7 +99,56 @@ object RespawnEmbeds {
       embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", shown.mkString("\n") + overflow, false)
     }
 
+    if (reservations.nonEmpty) {
+      // Booked slots that haven't started. Shown whether or not the spawn is free
+      // right now, because the point of booking ahead is that people can plan
+      // around it — and, from phase 2, ask for it.
+      val shown = reservations.take(3).map { slot =>
+        val when = slot.startsAt.map(dateTime).getOrElse("?")
+        s"$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}"
+      }
+      val overflow = if (reservations.size > 3) s"\n…and ${reservations.size - 3} more" else ""
+      embed.addField("Booked", shown.mkString("\n") + overflow, false)
+    }
+
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
+    embed.build()
+  }
+
+  /** DM'd when a booked slot starts. */
+  def slotStarted(respawn: Respawn, claim: RespawnClaim): String = {
+    val ends = claim.endsAt.map(clockTime).getOrElse("soon")
+    s"Your booked slot on **${respawn.displayName}** has started and runs until $ends."
+  }
+
+  /** DM'd when a booked slot arrives to find somebody already hunting. */
+  def slotOccupied(respawn: Respawn, holder: Option[RespawnClaim]): String = {
+    val who = holder.map(c => s" by <@${c.userId}>").getOrElse("")
+    val until = holder.flatMap(_.endsAt).map(end => s" until ${clockTime(end)}").getOrElse("")
+    s"**${respawn.displayName}** was already being hunted$who$until when your slot came round, " +
+      "so you're first in the queue and I'll offer it to you the moment they finish."
+  }
+
+  /** DM'd when a booked slot can't start because the tank is spent. */
+  def slotNoStamina(respawn: Respawn, slot: RespawnClaim, stamina: Stamina,
+                    resetsAt: ZonedDateTime): String =
+    s"Your booked slot on **${respawn.displayName}** needed " +
+      s"**${humanDuration(slot.durationMinutes)}** but you have " +
+      s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
+      s"Your tank refills at server save ${relative(resetsAt)}."
+
+  /** A member's standing bookings, for the Schedule panel. */
+  def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Your booked slots")
+    if (entries.isEmpty) {
+      embed.setDescription("You have no repeating slots. Use **Schedule** on a respawn's post to book one.")
+    } else {
+      embed.setDescription(truncateLines(entries.map { case (schedule, respawn) =>
+        val next = schedule.nextStartAtOrAfter(now)
+        s"**${respawn.displayName}** — every day, next ${dateTime(next)} " +
+          s"for ${humanDuration(schedule.durationMinutes)}"
+      }))
+    }
     embed.build()
   }
 
@@ -230,8 +280,9 @@ object RespawnEmbeds {
 
   /** `/respawn status <spawn>` and the reply to a successful claim. */
   def statusEmbed(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
-                  settings: RespawnSettings, imageUrl: String, threadMention: Option[String]): MessageEmbed = {
-    val embed = new EmbedBuilder(claimCard(respawn, claim, queue, settings, imageUrl))
+                  reservations: List[RespawnClaim], settings: RespawnSettings, imageUrl: String,
+                  threadMention: Option[String]): MessageEmbed = {
+    val embed = new EmbedBuilder(claimCard(respawn, claim, queue, reservations, settings, imageUrl))
     threadMention.foreach(mention => embed.appendDescription(s"\n\n$mention"))
     embed.build()
   }

@@ -90,8 +90,9 @@ object RespawnCommands {
               case None => reply(event, unknownSpawnText(options.getOrElse("spawn", "")))
               case Some(respawn) =>
                 val (active, queue) = service.status(guild.getId, respawn)
+                val reservations = service.reservationsFor(guild.getId, respawn.id)
                 val link = threadMention(respawn)
-                replyEmbed(event, RespawnEmbeds.statusEmbed(respawn, active, queue, config,
+                replyEmbed(event, RespawnEmbeds.statusEmbed(respawn, active, queue, reservations, config,
                   service.imageFor(respawn), link))
             }
         }

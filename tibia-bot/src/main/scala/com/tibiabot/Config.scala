@@ -189,6 +189,12 @@ object Config {
     /** How often the expiry/promotion sweep runs. Also the worst-case lateness
      *  of a claim ending. */
     val sweepInterval: FiniteDuration = respawn.getDuration("sweep-interval").toScala
+    /** How far ahead recurring slots are booked. Long enough that people can see
+     *  and plan around tonight's slot; short enough that a cancelled schedule
+     *  leaves few bookings to clear. */
+    val scheduleLookAheadMinutes: Int = respawn.getInt("schedule-look-ahead-minutes")
+    /** Most standing bookings one member may hold in a guild. */
+    val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
     /** Shown as the claim embed's image when a spawn has no `creature` set —
      *  most of the seed catalogue starts out that way. */
     val fallbackImage: String = respawn.getString("fallback-image")

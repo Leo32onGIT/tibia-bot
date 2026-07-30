@@ -26,7 +26,15 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     ensureGuildDatabase(provider, guildId)
     val repo = new JdbcRespawnRepository(provider)
     // Creates the tables on first use, then clears anything a previous run left.
+    // dropGuildData deliberately keeps member preferences and stamina — they
+    // belong to the member rather than the setup — so those are cleared here
+    // instead, or a run against a database a previous run touched would see them.
     repo.listRespawns(guildId).foreach(r => repo.removeRespawn(guildId, r.id))
+    repo.activeSchedules(guildId).foreach(schedule => repo.deactivateSchedule(guildId, schedule.id))
+    List("u1", "u2", "u3", "holder").foreach { user =>
+      repo.saveUserPrefs(guildId, RespawnUserPrefs(user, None, None))
+      repo.setStaminaUsed(guildId, user, 0, boundary)
+    }
     (repo, guildId)
   }
 
