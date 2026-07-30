@@ -224,7 +224,11 @@ object RespawnModals extends StrictLogging {
           day.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH),
           day.getValue.toString)
       }.asJava)
-      .setRequiredRange(0, 7)
+      // Not required, rather than required with a minimum of nothing — Discord
+      // rejects that pairing outright, and the two say different things anyway:
+      // this may be skipped entirely, but a pick of no days is not a booking.
+      .setRequired(false)
+      .setMaxValues(7)
       .build()
 
     Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a slot")
