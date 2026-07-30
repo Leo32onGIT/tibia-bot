@@ -995,8 +995,15 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     }
 
   def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    // A slot with an unanswered request waits, even once its start has come and
+    // gone: its owner has until a few minutes into the hunt to say they are
+    // there, and starting it for them in the meantime would answer for them.
+    // Nothing is lost by waiting — the sweep resolves the request first, and a
+    // slot that then starts runs its full length from whenever that is.
     val statement = conn.prepareStatement(
-      "SELECT * FROM respawn_claims WHERE status = 'reserved' AND starts_at <= ? ORDER BY starts_at;")
+      """SELECT * FROM respawn_claims
+        |WHERE status = 'reserved' AND starts_at <= ? AND requester_user_id IS NULL
+        |ORDER BY starts_at;""".stripMargin)
     try {
       statement.setTimestamp(1, Timestamp.from(now.toInstant))
       collectClaims(statement.executeQuery())

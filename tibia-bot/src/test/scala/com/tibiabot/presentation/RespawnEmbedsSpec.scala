@@ -345,17 +345,36 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val slot = reserved("99", now.plusHours(2))
     val deadline = now.plusMinutes(60)
 
-    val pressed = RespawnEmbeds.slotRequest(cultOrcs, slot, "Bubble", deadline, None)
+    val pressed = RespawnEmbeds.slotRequest(cultOrcs, slot, deadline, None)
     pressed should include("would like")
-    pressed should include("Yes, I'm hunting")
 
     // The times have to add up: what they want is their own window, which merely
     // runs across this slot.
-    val booked = RespawnEmbeds.slotRequest(cultOrcs, slot, "Bubble", deadline,
-      Some((now.plusHours(1), 180)))
+    val booked = RespawnEmbeds.slotRequest(cultOrcs, slot, deadline, Some((now.plusHours(1), 180)))
     booked should include("wants to book")
     booked should include("3h")
     booked should include("runs over your slot")
+  }
+
+  test("the asker is never named — the answer shouldn't turn on who is asking") {
+    val slot = reserved("99", now.plusHours(2))
+    List(None, Some((now.plusHours(1), 180))).foreach { wanted =>
+      val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), wanted)
+      text should include("Someone")
+      // DM'd, so a mention would ping as well as name them.
+      text should not include "<@"
+      text should include("the slot goes to them")
+    }
+  }
+
+  test("the slot reminder says when and how long, and stops there") {
+    val text = RespawnEmbeds.slotReminder(cultOrcs, reserved("99", now.plusMinutes(6)))
+    text should include("415 — Cult Orcs")
+    text should include("2h")
+    text should include(":R>")
+    // No instructions to act on: it claims itself, and the one useful action was
+    // buried at the end of a sentence about doing nothing.
+    text should not include "cancel it"
   }
 
   test("a granted slot is the window that was asked for, not the one given up") {

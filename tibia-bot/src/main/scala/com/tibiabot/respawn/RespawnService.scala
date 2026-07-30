@@ -297,6 +297,28 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the claim is refused with an explanation instead. */
   val MinimumClaimMinutes: Int = 5
 
+  /** How far into their own hunt a slot's owner may still answer a request.
+   *
+   *  A deadline landing exactly on the start punishes somebody who is logging in
+   *  on time: they arrive to find the slot already gone. A few minutes past it
+   *  costs the asker very little — the hunt they take over runs its full length
+   *  from whenever it starts — and turns "you were a minute late" into "you never
+   *  turned up", which is the thing the question was actually asking. */
+  val RequestGraceMinutes: Int = 5
+
+  /** When an owner has to answer by: `minutes` from now, but never longer than a
+   *  short grace past the start of the slot in question.
+   *
+   *  Both request paths clamp the same way. The clamp is what stops a request
+   *  made hours ahead from waiting hours, and the grace is what stops one made
+   *  minutes ahead from being no time at all. */
+  private[respawn] def answerDeadline(now: ZonedDateTime, slotStart: ZonedDateTime,
+                                      minutes: Int): ZonedDateTime = {
+    val latest = slotStart.plusMinutes(RequestGraceMinutes.toLong)
+    val wanted = now.plusMinutes(minutes.toLong)
+    if (wanted.isAfter(latest)) latest else wanted
+  }
+
   /** When the next booked slot on a spawn starts, if there is one. */
   def nextReservationStart(guildId: String, respawnId: Long,
                            now: ZonedDateTime = ZonedDateTime.now()): Option[ZonedDateTime] =
@@ -728,11 +750,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         refuse(" It runs over more than one booking, so there's nobody single to ask.")
 
       case ClashVerdict.Ask(slot) =>
-        // Never wait past the slot it is about: an answer that arrives after the
-        // hunt started is no use to anybody.
-        val slotStart = slot.startsAt.getOrElse(now)
-        val wanted = now.plusMinutes(Config.Respawn.bookingRequestResponseMinutes.toLong)
-        val deadline = if (wanted.isAfter(slotStart)) slotStart else wanted
+        val deadline = answerDeadline(now, slot.startsAt.getOrElse(now),
+          Config.Respawn.bookingRequestResponseMinutes)
         val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
 
         repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
@@ -741,7 +760,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(asked) =>
             RespawnThreads.dm(guild, asked.userId,
               RespawnEmbeds.dmEmbed("Are you hunting tonight?",
-                RespawnEmbeds.slotRequest(respawn, asked, candidate.userName, deadline, theirs),
+                RespawnEmbeds.slotRequest(respawn, asked, deadline, theirs),
                 imageFor(respawn), RespawnEmbeds.WarnColor),
               Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
             refreshThread(guild, respawn, config)
@@ -840,11 +859,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(slot) if slot.userId == requesterId => RequestOutcome.OwnSlot(respawn)
 
           case Some(slot) =>
-            // Never wait past the slot it is about: an answer that arrives after
-            // the hunt started is no use to anybody.
-            val slotStart = slot.startsAt.getOrElse(now)
-            val wanted = now.plusMinutes(Config.Respawn.requestResponseMinutes.toLong)
-            val deadline = if (wanted.isAfter(slotStart)) slotStart else wanted
+            val deadline = answerDeadline(now, slot.startsAt.getOrElse(now),
+              Config.Respawn.requestResponseMinutes)
 
             // No wanted window: pressing Request asks for this slot as it stands.
             repository.requestOccurrence(guildId, slot.id, requesterId, requesterName, now,
@@ -853,7 +869,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               case Some(asked) =>
                 RespawnThreads.dm(guild, asked.userId,
                   RespawnEmbeds.dmEmbed("Are you hunting tonight?",
-                    RespawnEmbeds.slotRequest(respawn, asked, requesterName, deadline, None),
+                    RespawnEmbeds.slotRequest(respawn, asked, deadline, None),
                     imageFor(respawn), RespawnEmbeds.WarnColor),
                   Some(RespawnThreads.slotAnswerButtons(guildId, asked.id)))
                 refreshThread(guild, respawn, config)
@@ -982,7 +998,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             repository.markWarned(guildId, slot.id)
             repository.findById(guildId, slot.respawnId).foreach { respawn =>
               RespawnThreads.dm(guild, slot.userId,
-                RespawnEmbeds.dmEmbed("Your slot starts soon",
+                RespawnEmbeds.dmEmbed("Your hunt starts soon",
                   RespawnEmbeds.slotReminder(respawn, slot), imageFor(respawn),
                   RespawnEmbeds.WarnColor))
             }

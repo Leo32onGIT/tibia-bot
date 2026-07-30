@@ -426,6 +426,26 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.findClaimById(g, slot.id).flatMap(_.requestedSlot) should not be empty
   }
 
+  test("a slot with an unanswered request waits past its start rather than claiming itself") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+    val start = now.plusHours(2)
+
+    // The owner has a few minutes past the start to say they are there, so the
+    // slot cannot start on its own in the meantime — that would answer for them,
+    // and would strand the request on a row the sweep no longer looks at.
+    repo.requestOccurrence(g, slot.id, "u2", "Two", now, start.plusMinutes(5), None)
+    repo.dueReservations(g, start) shouldBe empty
+    repo.dueReservations(g, start.plusMinutes(4)) shouldBe empty
+
+    // Once they answer, it starts on the next sweep like any other slot.
+    repo.keepOccurrence(g, slot.id)
+    repo.dueReservations(g, start.plusMinutes(4)).map(_.id) shouldBe List(slot.id)
+  }
+
   test("keeping a slot clears the request but not the fact it was asked") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")

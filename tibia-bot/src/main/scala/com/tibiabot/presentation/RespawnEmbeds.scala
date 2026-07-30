@@ -173,8 +173,8 @@ object RespawnEmbeds {
    *
    *  Says plainly that silence hands the slot over — the deadline is the whole
    *  mechanism, and somebody should not discover it by losing a hunt. */
-  def slotRequest(respawn: Respawn, slot: RespawnClaim, requesterName: String,
-                  deadline: ZonedDateTime, wanted: Option[(ZonedDateTime, Int)] = None): String = {
+  def slotRequest(respawn: Respawn, slot: RespawnClaim, deadline: ZonedDateTime,
+                  wanted: Option[(ZonedDateTime, Int)] = None): String = {
     val window = (slot.startsAt, slot.endsAt) match {
       case (Some(start), Some(end)) => s"${clockTime(start)}–${clockTime(end)}"
       case (Some(start), None)      => clockTime(start)
@@ -184,15 +184,19 @@ object RespawnEmbeds {
     // somebody wanting the slot itself; booking over it is somebody planning a
     // hunt of their own that happens to run across it, and saying so is what
     // makes the times in the message add up.
+    //
+    // The asker is not named either way. Who wants the slot is not something the
+    // answer should turn on — a name invites weighing up who it is rather than
+    // whether you are hunting — and it keeps a request from reading as pressure
+    // from a particular person.
     val opening = wanted match {
       case Some((start, minutes)) =>
-        s"**$requesterName** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
+        s"**Someone** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
           s"for ${humanDuration(minutes)}, which runs over your slot at $window."
       case None =>
-        s"**$requesterName** would like **${respawn.displayName}** at $window."
+        s"**Someone** would like **${respawn.displayName}** at $window."
     }
-    s"$opening\nAre you hunting it? Press **Yes, I'm hunting** to keep it.\n" +
-      s"If you don't answer by ${relative(deadline)} the slot goes to them."
+    s"$opening\nIf you don't answer by ${relative(deadline)} the slot goes to them."
   }
 
   /** DM'd to whoever asked, once the owner says they are hunting after all. */
@@ -224,9 +228,7 @@ object RespawnEmbeds {
   def slotReminder(respawn: Respawn, slot: RespawnClaim): String = {
     val start = slot.startsAt.map(relative).getOrElse("shortly")
     s"Your booked slot on **${respawn.displayName}** starts $start for " +
-      s"${humanDuration(slot.durationMinutes)}.\n" +
-      "It'll claim itself — nothing to do unless you're not coming, in which case " +
-      "cancel it from the respawn's post so somebody else can take it."
+      s"${humanDuration(slot.durationMinutes)}."
   }
 
   /** DM'd when a booked slot starts. */
