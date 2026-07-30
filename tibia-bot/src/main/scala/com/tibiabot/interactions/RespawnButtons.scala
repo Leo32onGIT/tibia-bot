@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId}
+import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.MessageEmbed
@@ -57,8 +57,35 @@ object RespawnButtons extends StrictLogging {
         else if (BotApp.respawnService.settings(guild.getId).isEmpty)
           reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
         else what match {
-          case "claim"  => event.replyModal(RespawnModals.claimModal).queue()
-          case "config" => event.replyModal(RespawnModals.configModal(guild.getId, event.getUser.getId)).queue()
+          case "claim" => event.replyModal(RespawnModals.claimModal).queue()
+
+          case "config" =>
+            // A moderator gets a choice, because there are two things Config could
+            // mean for them. Everybody else goes straight to their own settings —
+            // no extra click for the common case.
+            if (RespawnModals.moderates(guild, event.getMember)) {
+              BotApp.respawnService.settings(guild.getId) match {
+                case None => reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
+                case Some(settings) =>
+                  event.replyEmbeds(RespawnEmbeds.serverSettingsEmbed(settings))
+                    .setComponents(RespawnThreads.boardModeratorButtons)
+                    .setEphemeral(true)
+                    .queue()
+              }
+            } else {
+              event.replyModal(RespawnModals.configModal(guild.getId, event.getUser.getId)).queue()
+            }
+
+          case "mysettings" =>
+            event.replyModal(RespawnModals.configModal(guild.getId, event.getUser.getId)).queue()
+
+          case "claimrules" | "timers" =>
+            // Re-checked here, not trusted from the panel: the panel message
+            // persists and could be clicked after the role was taken away.
+            if (!RespawnModals.moderates(guild, event.getMember)) replyNotModerator(event)
+            else if (what == "claimrules") event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
+            else event.replyModal(RespawnModals.timersModal(guild.getId)).queue()
+
           case other =>
             logger.warn(s"Unknown respawn board button '$other'")
             reply(event, s"${Config.noEmoji} That button doesn't do anything.")
@@ -114,8 +141,43 @@ object RespawnButtons extends StrictLogging {
                 replyClaim(event, outcome)
 
               case "config" =>
-                // Opens a modal, so this branch must not have deferred or replied.
-                event.replyModal(RespawnModals.durationModal(guild.getId, user.getId, respawn)).queue()
+                // Opens a modal or a panel, so this branch must not have deferred.
+                if (!RespawnModals.moderates(guild, event.getMember)) {
+                  event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()
+                } else {
+                  // Moderators get a panel first: the actions here change somebody
+                  // else's hunt, so showing whose before offering them matters.
+                  val holder = service.holderOf(guildId, respawn.id)
+                  val ownClaim = service.openClaimsForUser(guildId, user.getId).exists(_._2.respawnId == respawn.id)
+                  RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim) match {
+                    case None =>
+                      reply(event, s"${Config.noEmoji} Nobody is on **${respawn.displayName}**, " +
+                        "and you have no claim on it either.")
+                    case Some(buttons) =>
+                      val queueSize = service.status(guildId, respawn)._2.size
+                      event.replyEmbeds(RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize))
+                        .setComponents(buttons)
+                        .setEphemeral(true)
+                        .queue()
+                  }
+                }
+
+              case "holdercfg" =>
+                if (!RespawnModals.moderates(guild, event.getMember)) replyNotModerator(event)
+                else event.replyModal(RespawnModals.holderDurationModal(guildId, respawn)).queue()
+
+              case "selfcfg" =>
+                event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()
+
+              case "forceleave" =>
+                if (!RespawnModals.moderates(guild, event.getMember)) replyNotModerator(event)
+                else service.forceLeave(guild, respawn) match {
+                  case None =>
+                    reply(event, s"${Config.noEmoji} Nobody is on **${respawn.displayName}**.")
+                  case Some(holder) =>
+                    reply(event, s"${Config.yesEmoji} Freed **${respawn.displayName}** from <@${holder.userId}>. " +
+                      "They keep their unused stamina, and whoever is next has been offered it.")
+                }
 
               case "leave" | "release" =>
                 val outcome = service.release(guild, user.getId, Some(respawn.code))
@@ -213,6 +275,10 @@ object RespawnButtons extends StrictLogging {
     case ReleaseOutcome.NotConfigured =>
       s"${Config.noEmoji} The respawn claim system isn't set up here."
   }
+
+  private def replyNotModerator(event: ButtonInteractionEvent): Unit =
+    reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+      s"or the **${com.tibiabot.commands.Permissions.ModeratorRoleName}** role.")
 
   private def reply(event: ButtonInteractionEvent, text: String): Unit =
     event.replyEmbeds(Embeds.response(text)).setEphemeral(true).queue()

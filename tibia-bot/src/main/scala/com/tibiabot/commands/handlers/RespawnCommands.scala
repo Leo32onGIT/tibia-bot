@@ -190,24 +190,15 @@ object RespawnCommands {
         }
 
       case "config" =>
-        service.settings(guildId) match {
-          case None => reply(event, notConfiguredText)
-          case Some(current) =>
-            val updated = current.copy(
-              defaultDurationMinutes = options.get("duration").flatMap(toInt).getOrElse(current.defaultDurationMinutes),
-              maxDurationMinutes = options.get("max-duration").flatMap(toInt).getOrElse(current.maxDurationMinutes),
-              queueLimit = options.get("queue-limit").flatMap(toInt).getOrElse(current.queueLimit),
-              staminaMinutes = options.get("stamina").flatMap(toInt).getOrElse(current.staminaMinutes),
-              warnMinutes = options.get("warn").flatMap(toInt).getOrElse(current.warnMinutes),
-              handoverMinutes = options.get("handover").flatMap(toInt).getOrElse(current.handoverMinutes)
-            )
-            if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
-              reply(event, s"${Config.noEmoji} The default claim length can't be longer than the maximum " +
-                s"(${RespawnEmbeds.humanDuration(updated.maxDurationMinutes)}).")
-            else {
-              service.saveSettings(guildId, updated)
-              reply(event, renderConfig(updated))
-            }
+        service.updateSettings(guildId,
+          options.get("duration").flatMap(toInt),
+          options.get("max-duration").flatMap(toInt),
+          options.get("queue-limit").flatMap(toInt),
+          options.get("stamina").flatMap(toInt),
+          options.get("warn").flatMap(toInt),
+          options.get("handover").flatMap(toInt)) match {
+          case Left(problem)  => reply(event, s"${Config.noEmoji} $problem")
+          case Right(updated) => reply(event, renderConfig(updated))
         }
 
       case other =>

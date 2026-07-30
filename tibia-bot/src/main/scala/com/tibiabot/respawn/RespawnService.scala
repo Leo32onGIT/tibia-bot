@@ -107,6 +107,41 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def saveSettings(guildId: String, settings: RespawnSettings): Unit =
     repository.saveSettings(guildId, settings)
 
+  /** Apply a partial change to the guild's rules, validated.
+   *
+   *  Shared by `/respawn admin config` and the board's moderator panel so the two
+   *  can't drift on what counts as a legal combination — a default claim longer
+   *  than the maximum being the one that actually bites, since every later claim
+   *  would be refused for exceeding a ceiling nobody set deliberately. */
+  def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
+                     queueLimit: Option[Int], stamina: Option[Int], warn: Option[Int],
+                     handover: Option[Int]): Either[String, RespawnSettings] =
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(current) =>
+        val updated = current.copy(
+          defaultDurationMinutes = defaultDuration.getOrElse(current.defaultDurationMinutes),
+          maxDurationMinutes = maxDuration.getOrElse(current.maxDurationMinutes),
+          queueLimit = queueLimit.getOrElse(current.queueLimit),
+          staminaMinutes = stamina.getOrElse(current.staminaMinutes),
+          warnMinutes = warn.getOrElse(current.warnMinutes),
+          handoverMinutes = handover.getOrElse(current.handoverMinutes)
+        )
+        if (updated.defaultDurationMinutes < 5 || updated.maxDurationMinutes < 5)
+          Left("A claim has to be at least 5 minutes long.")
+        else if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
+          Left(s"The default claim (${RespawnEmbeds.humanDuration(updated.defaultDurationMinutes)}) can't be " +
+            s"longer than the maximum (${RespawnEmbeds.humanDuration(updated.maxDurationMinutes)}).")
+        else if (updated.queueLimit < 0 || updated.staminaMinutes < 0 || updated.warnMinutes < 0)
+          Left("Queue limit, stamina and reminder time can't be negative.")
+        else if (updated.handoverMinutes < 1)
+          Left("The handover window has to be at least a minute, or nobody could ever accept one.")
+        else {
+          repository.saveSettings(guildId, updated)
+          Right(updated)
+        }
+    }
+
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit =
     repository.updateChannels(guildId, forumChannel, boardThread)
 
@@ -438,6 +473,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             }
         }
     }
+
+  /** End whoever currently holds a spawn, as a moderator.
+   *
+   *  Deliberately the same path as that person pressing Leave themselves — unused
+   *  stamina refunded, the next in line offered their window — rather than the
+   *  blunter `adminClear`, which also wipes the queue. Someone being moved off a
+   *  spawn is no reason to punish everybody waiting behind them.
+   *
+   *  The holder is told, since otherwise the spawn simply vanishes from under
+   *  them with no explanation. */
+  def forceLeave(guild: Guild, respawn: Respawn,
+                 now: ZonedDateTime = ZonedDateTime.now()): Option[RespawnClaim] = {
+    val guildId = guild.getId
+    repository.activeClaim(guildId, respawn.id).map { holder =>
+      release(guild, holder.userId, Some(respawn.code), now)
+      RespawnThreads.dm(guild, holder.userId,
+        RespawnEmbeds.dmEmbed("Claim ended by a moderator",
+          s"A moderator has freed **${respawn.displayName}**, so it's no longer yours.",
+          imageFor(respawn), RespawnEmbeds.RedColor))
+      holder
+    }
+  }
+
+  /** The claim currently holding a spawn, for callers that need to act on its
+   *  owner rather than on themselves. */
+  def holderOf(guildId: String, respawnId: Long): Option[RespawnClaim] =
+    repository.activeClaim(guildId, respawnId)
 
   /** Force a spawn free regardless of who holds it (`/respawn admin clear`).
    *  Refunds the holder like a voluntary release would — an admin clearing a

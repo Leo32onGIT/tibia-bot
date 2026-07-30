@@ -188,6 +188,41 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.staminaEmbed(tank, Nil, now).getDescription should include("disabled")
   }
 
+  test("the server settings panel names every rule a moderator can change") {
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings))
+    fs.keys should contain allOf ("Default claim", "Maximum claim", "Queue limit",
+      "Daily stamina", "Default reminder", "Handover window")
+    fs("Default claim") shouldBe "2h"
+    fs("Queue limit") shouldBe "20"
+  }
+
+  test("the server settings panel spells out the disabled cases rather than showing 0") {
+    val off = settings.copy(staminaMinutes = 0, warnMinutes = 0)
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(off))
+    fs("Daily stamina") shouldBe "unlimited"
+    fs("Default reminder") shouldBe "off"
+  }
+
+  test("the spawn moderator panel names the holder and what force leave will do") {
+    val embed = RespawnEmbeds.spawnModeratorPanel(cultOrcs, Some(claim("99", character = "Galarzaa")), 2)
+    embed.getDescription should include("Galarzaa")
+    embed.getDescription should include("<@99>")
+    fields(embed)("Hunt length") shouldBe "2h"
+    fields(embed)("Waiting") shouldBe "2"
+    // The consequence matters: it hands the spawn on rather than just freeing it.
+    Option(embed.getFooter).map(_.getText).getOrElse("") should include("refunds")
+  }
+
+  test("the spawn moderator panel copes with a spawn nobody is on") {
+    val embed = RespawnEmbeds.spawnModeratorPanel(cultOrcs, None, 0)
+    embed.getDescription should include("Nobody is on this respawn")
+    fields(embed) shouldBe empty
+  }
+
+  test("the spawn moderator panel hides the queue count when nobody is waiting") {
+    fields(RespawnEmbeds.spawnModeratorPanel(cultOrcs, Some(claim("99")), 0)).keys should not contain "Waiting"
+  }
+
   test("the board post explains stamina and the two-spawn case the design allows") {
     val board = RespawnEmbeds.boardPost(settings)
     board.getDescription should include("4h")

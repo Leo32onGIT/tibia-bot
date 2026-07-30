@@ -108,6 +108,42 @@ object RespawnEmbeds {
     embed.build()
   }
 
+  /** The server's rules, shown to a moderator opening Config from the board and
+   *  again after they change something. */
+  def serverSettingsEmbed(settings: RespawnSettings): MessageEmbed =
+    new EmbedBuilder()
+      .setColor(Embeds.BrandColor)
+      .setTitle("Server respawn settings")
+      .setDescription("These apply to everyone here. Members can set their own claim length " +
+        "and reminder time, which override the defaults below.")
+      .addField("Default claim", humanDuration(settings.defaultDurationMinutes), true)
+      .addField("Maximum claim", humanDuration(settings.maxDurationMinutes), true)
+      .addField("Queue limit", settings.queueLimit.toString, true)
+      .addField("Daily stamina",
+        if (settings.staminaMinutes <= 0) "unlimited" else humanDuration(settings.staminaMinutes), true)
+      .addField("Default reminder",
+        if (settings.warnMinutes <= 0) "off" else s"${humanDuration(settings.warnMinutes)} before the end", true)
+      .addField("Handover window", humanDuration(settings.handoverMinutes), true)
+      .build()
+
+  /** The moderator panel for one spawn: who holds it, and what can be done to
+   *  them. Rendered instead of going straight to a duration form, because the
+   *  actions here affect somebody else's hunt. */
+  def spawnModeratorPanel(respawn: Respawn, holder: Option[RespawnClaim], queueSize: Int): MessageEmbed = {
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
+    holder match {
+      case Some(claim) =>
+        val ends = claim.endsAt.map(relative).getOrElse("unknown")
+        embed.setDescription(s"Held by ${claimantLabel(claim)}, ending $ends.")
+        embed.addField("Hunt length", humanDuration(claim.durationMinutes), true)
+        if (queueSize > 0) embed.addField("Waiting", queueSize.toString, true)
+        embed.setFooter("Force leave hands it to whoever is next, and refunds their unused stamina.")
+      case None =>
+        embed.setDescription("Nobody is on this respawn right now.")
+    }
+    embed.build()
+  }
+
   /** Confirmation of a member's own settings, shown after the Config modal. */
   def userPrefsEmbed(prefs: RespawnUserPrefs, settings: RespawnSettings): MessageEmbed = {
     def shown(value: Option[Int], guildValue: Int, off: String): String = value match {

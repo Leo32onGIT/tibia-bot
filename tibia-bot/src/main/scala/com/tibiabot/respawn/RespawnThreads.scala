@@ -65,6 +65,30 @@ object RespawnThreads extends StrictLogging {
       Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
     )
 
+  /** The Config panel a moderator gets from a spawn's card, instead of going
+   *  straight to their own duration. `ownClaim` adds a button for their own claim
+   *  when they have one, since the moderator actions target whoever holds the
+   *  spawn — which may not be them. */
+  def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): Option[ActionRow] = {
+    val buttons = List(
+      if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Hunt duration")) else None,
+      if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Force leave")) else None,
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My duration")) else None
+    ).flatten
+    // The Collection overload, not the varargs one: `: _*` doesn't apply to a
+    // Java method whose first parameter is a single component.
+    if (buttons.isEmpty) None else Some(ActionRow.of(buttons.asJava))
+  }
+
+  /** The Config panel a moderator gets from the board: their own settings, or the
+   *  server's rules. */
+  def boardModeratorButtons: ActionRow =
+    ActionRow.of(
+      Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
+      Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
+      Button.primary(RespawnButtonId.boardTimers, "Timers")
+    )
+
   /** The lone Leave button on a reminder DM, for someone who has already left the
    *  respawn in game. Carries the guild for the same reason the offer buttons do:
    *  a DM interaction has no guild of its own. */
@@ -398,19 +422,40 @@ object RespawnButtonId {
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
 
+  /** Moderator actions reached from a spawn's Config panel. */
+  def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
+  def forceLeave(respawnId: Long): String = s"${Prefix}forceleave:$respawnId"
+  /** The caller's own duration, offered alongside the moderator actions when they
+   *  have a claim of their own on the spawn. */
+  def selfConfig(respawnId: Long): String = s"${Prefix}selfcfg:$respawnId"
+
+  /** Board Config panel choices. */
+  val boardMySettings: String = s"${Prefix}board:mysettings"
+  val boardClaimRules: String = s"${Prefix}board:claimrules"
+  val boardTimers: String = s"${Prefix}board:timers"
+
   /** Modal ids, kept next to the buttons that open them. */
   val ModalPrefix: String = s"${Prefix}modal:"
   val modalClaim: String = s"${ModalPrefix}claim"
   val modalConfig: String = s"${ModalPrefix}config"
-  /** Carries the spawn, since a modal submission arrives with no memory of which
+  /** Carry the spawn, since a modal submission arrives with no memory of which
    *  card opened it. */
   def modalDuration(respawnId: Long): String = s"${ModalPrefix}duration:$respawnId"
+  def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
 
-  /** The spawn id out of a duration modal's id, or None if it isn't one. */
-  def parseDurationModal(modalId: String): Option[Long] = {
-    val marker = s"${ModalPrefix}duration:"
-    if (!modalId.startsWith(marker)) None else Try(modalId.stripPrefix(marker).toLong).toOption
-  }
+  /** Guild-wide settings, split across two modals because Discord caps a modal at
+   *  five inputs and there are six settings. */
+  val modalClaimRules: String = s"${ModalPrefix}claimrules"
+  val modalTimers: String = s"${ModalPrefix}timers"
+
+  /** ("duration", 415L) from "respawn:modal:duration:415" — the kind and the spawn
+   *  it applies to, for the modals that name one. */
+  def parseSpawnModal(modalId: String): Option[(String, Long)] =
+    if (!modalId.startsWith(ModalPrefix)) None
+    else modalId.stripPrefix(ModalPrefix).split(':') match {
+      case Array(kind, id) => Try(id.toLong).toOption.map(kind -> _)
+      case _               => None
+    }
 
   /** Leave, pressed from a DM — so it carries the guild the claim belongs to. */
   def dmLeave(guildId: String, respawnId: Long): String = s"${Prefix}dmleave:$guildId:$respawnId"

@@ -2,11 +2,13 @@ package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
 import com.tibiabot.domain.Respawn
+import com.tibiabot.commands.Permissions
 import com.tibiabot.respawn.RespawnButtonId
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.label.Label
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
+import net.dv8tion.jda.api.entities.{Guild, Member}
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 import net.dv8tion.jda.api.modals.Modal
 
@@ -104,6 +106,67 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
+  /** The current holder's duration, changed by a moderator. Named so it is obvious
+   *  whose hunt is being altered. */
+  def holderDurationModal(guildId: String, respawn: Respawn): Modal = {
+    val holder = BotApp.respawnService.holderOf(guildId, respawn.id)
+    val who = holder.map(c => if (c.characterName.nonEmpty) c.characterName else c.userName).getOrElse("the holder")
+    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+
+    Modal.create(RespawnButtonId.modalHolderDuration(respawn.id), "Change hunt duration")
+      .addComponents(
+        Label.of(s"Total hunt length for $who (minutes)",
+          s"${respawn.displayName} - 5 to $maxDuration, counting from when their hunt started.",
+          TextInput.create(DurationField, TextInputStyle.SHORT)
+            .setValue(holder.map(_.durationMinutes.toString).getOrElse(""))
+            .setRequired(true)
+            .setMaxLength(4)
+            .build())
+      )
+      .build()
+  }
+
+  /** Server-wide claim rules. Split from the timers below because Discord allows a
+   *  modal only five inputs and there are six settings. */
+  def claimRulesModal(guildId: String): Modal = {
+    val settings = BotApp.respawnService.settings(guildId)
+    Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
+      .addComponents(
+        Label.of("Default claim length (minutes)", "Used when a member has not set their own.",
+          numberInput("default", settings.map(_.defaultDurationMinutes))),
+        Label.of("Maximum claim length (minutes)", "The longest any single claim may run.",
+          numberInput("max", settings.map(_.maxDurationMinutes))),
+        Label.of("Queue limit", "How many people may wait behind a claim.",
+          numberInput("queue", settings.map(_.queueLimit)))
+      )
+      .build()
+  }
+
+  /** Server-wide timers: the daily budget, the default reminder, and how long a
+   *  handover offer stays open. */
+  def timersModal(guildId: String): Modal = {
+    val settings = BotApp.respawnService.settings(guildId)
+    Modal.create(RespawnButtonId.modalTimers, "Server timers")
+      .addComponents(
+        Label.of("Daily stamina per member (minutes)", "0 means unlimited claiming.",
+          numberInput("stamina", settings.map(_.staminaMinutes))),
+        Label.of("Default reminder (minutes before the end)",
+          "Members can override this for themselves. 0 turns it off.",
+          numberInput("warn", settings.map(_.warnMinutes))),
+        Label.of("Handover window (minutes)",
+          "How long the next in line has to accept before it passes on.",
+          numberInput("handover", settings.map(_.handoverMinutes)))
+      )
+      .build()
+  }
+
+  private def numberInput(id: String, current: Option[Int]): TextInput =
+    TextInput.create(id, TextInputStyle.SHORT)
+      .setValue(current.map(_.toString).getOrElse(""))
+      .setRequired(true)
+      .setMaxLength(4)
+      .build()
+
   // --- submissions --------------------------------------------------------
 
   def handle(event: ModalInteractionEvent): Unit = {
@@ -113,11 +176,14 @@ object RespawnModals extends StrictLogging {
       return
     }
     val modalId = event.getModalId
-    RespawnButtonId.parseDurationModal(modalId) match {
-      case Some(respawnId) => submitDuration(event, respawnId)
-      case None => modalId match {
-        case RespawnButtonId.modalClaim  => submitClaim(event)
-        case RespawnButtonId.modalConfig => submitConfig(event)
+    RespawnButtonId.parseSpawnModal(modalId) match {
+      case Some(("duration", respawnId)) => submitDuration(event, respawnId, forHolder = false)
+      case Some(("holder", respawnId))   => submitDuration(event, respawnId, forHolder = true)
+      case _ => modalId match {
+        case RespawnButtonId.modalClaim      => submitClaim(event)
+        case RespawnButtonId.modalConfig     => submitConfig(event)
+        case RespawnButtonId.modalClaimRules => submitSettings(event, claimRules = true)
+        case RespawnButtonId.modalTimers     => submitSettings(event, claimRules = false)
         case other =>
           logger.warn(s"Unknown respawn modal '$other'")
           reply(event, s"${Config.noEmoji} I didn't understand that form.")
@@ -125,20 +191,67 @@ object RespawnModals extends StrictLogging {
     }
   }
 
-  private def submitDuration(event: ModalInteractionEvent, respawnId: Long): Unit =
+  /** Manage Server or the guild's moderator role. */
+  private[interactions] def moderates(guild: Guild, member: Member): Boolean =
+    Permissions.isModerator(member, BotApp.moderatorRoleId(guild.getId))
+
+  private def submitSettings(event: ModalInteractionEvent, claimRules: Boolean): Unit = {
+    val guildId = event.getGuild.getId
+    // Re-checked on submit rather than trusted from when the panel opened: a modal
+    // can sit open long after somebody's role was taken away.
+    if (!moderates(event.getGuild, event.getMember)) {
+      reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
+    } else {
+      def field(id: String): Option[Int] = Try(value(event, id).toInt).toOption
+      val ids = if (claimRules) List("default", "max", "queue") else List("stamina", "warn", "handover")
+      if (ids.exists(field(_).isEmpty)) {
+        reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
+      } else {
+        val result =
+          if (claimRules)
+            BotApp.respawnService.updateSettings(guildId, field("default"), field("max"), field("queue"),
+              None, None, None)
+          else
+            BotApp.respawnService.updateSettings(guildId, None, None, None,
+              field("stamina"), field("warn"), field("handover"))
+        result match {
+          case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+          case Right(updated) =>
+            event.replyEmbeds(RespawnEmbeds.serverSettingsEmbed(updated)).setEphemeral(true).queue()
+        }
+      }
+    }
+  }
+
+  private def submitDuration(event: ModalInteractionEvent, respawnId: Long, forHolder: Boolean): Unit =
     Try(value(event, DurationField).toInt).toOption match {
       case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
       case Some(minutes) =>
-        BotApp.respawnService.setClaimDuration(event.getGuild, event.getUser.getId, respawnId, minutes) match {
-          case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
-          case Right((respawn, applied)) =>
-            val note =
-              if (applied != minutes)
-                s"\nYou'd already hunted longer than that, so it's set to " +
-                  s"${RespawnEmbeds.humanDuration(applied)} and ends now."
-              else ""
-            reply(event, s"${Config.yesEmoji} **${respawn.displayName}** is now set to " +
-              s"${RespawnEmbeds.humanDuration(applied)}.$note")
+        // Whose claim changes: the current holder's when a moderator came through
+        // the spawn panel, otherwise the caller's own. Stamina settles against
+        // whoever actually owns the claim either way.
+        val target =
+          if (!forHolder) Some(event.getUser.getId)
+          else if (!moderates(event.getGuild, event.getMember)) None
+          else BotApp.respawnService.holderOf(event.getGuild.getId, respawnId).map(_.userId)
+
+        target match {
+          case None =>
+            reply(event, s"${Config.noEmoji} Nobody is holding that respawn any more.")
+          case Some(userId) =>
+            BotApp.respawnService.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
+              case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+              case Right((respawn, applied)) =>
+                val whose = if (forHolder && userId != event.getUser.getId) s" for <@$userId>" else ""
+                val note =
+                  if (applied != minutes)
+                    s"\nThe hunt had already run longer than that, so it's set to " +
+                      s"${RespawnEmbeds.humanDuration(applied)} and ends now."
+                  else ""
+                reply(event, s"${Config.yesEmoji} **${respawn.displayName}**$whose is now set to " +
+                  s"${RespawnEmbeds.humanDuration(applied)}.$note")
+            }
         }
     }
 
