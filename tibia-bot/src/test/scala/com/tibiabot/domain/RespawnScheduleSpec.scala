@@ -64,4 +64,41 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     schedule(period = 0).nextStartAtOrAfter(from) shouldBe from
     schedule(period = -10).nextStartAtOrAfter(from) shouldBe from
   }
+
+  test("the picker offers whole hours in the guild's own clock") {
+    val berlin = java.time.ZoneId.of("Europe/Berlin")
+    // 20:17 Berlin — the first option is the next whole hour, not 17 past.
+    val from = ZonedDateTime.parse("2026-07-30T18:17:00Z")
+    val starts = RespawnSchedule.upcomingStarts(from, berlin, 3)
+
+    starts.map(_.withZoneSameInstant(berlin).getHour) shouldBe List(21, 22, 23)
+    starts.map(_.withZoneSameInstant(berlin).getMinute) shouldBe List(0, 0, 0)
+    starts.head.isAfter(from) shouldBe true
+  }
+
+  test("hour boundaries follow the zone, not UTC") {
+    // India is half an hour off UTC, so its whole hours are at :30 in UTC terms.
+    // Rounding in UTC would offer times that are not on the hour there at all.
+    val kolkata = java.time.ZoneId.of("Asia/Kolkata")
+    val starts = RespawnSchedule.upcomingStarts(
+      ZonedDateTime.parse("2026-07-30T18:17:00Z"), kolkata, 2)
+    starts.map(_.withZoneSameInstant(kolkata).getMinute) shouldBe List(0, 0)
+    starts.map(_.toInstant.getEpochSecond % 3600) shouldBe List(1800L, 1800L)
+  }
+
+  test("the picker never offers more than Discord allows in a select") {
+    val berlin = java.time.ZoneId.of("Europe/Berlin")
+    RespawnSchedule.upcomingStarts(anchor, berlin, 24) should have size 24
+    RespawnSchedule.upcomingStarts(anchor, berlin, 0) shouldBe empty
+    RespawnSchedule.upcomingStarts(anchor, berlin, -1) shouldBe empty
+  }
+
+  test("a guild's zone falls back to server time when the stored id is nonsense") {
+    // A bad row must not stop the picker rendering, and Berlin is server time.
+    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10, "Not/AZone").zone shouldBe
+      RespawnSettings.DefaultZone
+    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10).zone shouldBe RespawnSettings.DefaultZone
+    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10, "Australia/Perth").zone shouldBe
+      java.time.ZoneId.of("Australia/Perth")
+  }
 }

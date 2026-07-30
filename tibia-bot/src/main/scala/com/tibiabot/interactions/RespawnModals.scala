@@ -6,12 +6,14 @@ import com.tibiabot.commands.Permissions
 import com.tibiabot.respawn.RespawnButtonId
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.components.label.Label
+import net.dv8tion.jda.api.components.label.{Label, LabelChildComponent}
+import net.dv8tion.jda.api.components.selections.{SelectOption, StringSelectMenu}
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
 import net.dv8tion.jda.api.entities.{Guild, Member}
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 import net.dv8tion.jda.api.modals.Modal
 
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 /** The two modals behind the board post's buttons.
@@ -42,8 +44,10 @@ object RespawnModals extends StrictLogging {
   private[interactions] def clamp(text: String, max: Int): String =
     if (text.length <= max) text else text.take(max - 1).trim + "\u2026"
 
-  private def label(text: String, description: String, input: TextInput): Label =
-    Label.of(clamp(text, Label.LABEL_MAX_LENGTH), clamp(description, Label.DESCRIPTION_MAX_LENGTH), input)
+  /** Takes any component a Label may wrap, not just a text box — modals also
+   *  accept select menus, which is what the schedule picker uses. */
+  private def label(text: String, description: String, child: LabelChildComponent): Label =
+    Label.of(clamp(text, Label.LABEL_MAX_LENGTH), clamp(description, Label.DESCRIPTION_MAX_LENGTH), child)
 
 
   // --- opening ------------------------------------------------------------
@@ -170,7 +174,13 @@ object RespawnModals extends StrictLogging {
           numberInput("warn", settings.map(_.warnMinutes))),
         label("Handover window (minutes)",
           "How long the next in line has to accept before it passes on.",
-          numberInput("handover", settings.map(_.handoverMinutes)))
+          numberInput("handover", settings.map(_.handoverMinutes))),
+        label("Timezone", "Labels the schedule picker only. An IANA name, e.g. Europe/Berlin.",
+          TextInput.create("timezone", TextInputStyle.SHORT)
+            .setValue(settings.map(_.timezone).getOrElse(""))
+            .setRequired(true)
+            .setMaxLength(64)
+            .build())
       )
       .build()
   }
@@ -190,23 +200,69 @@ object RespawnModals extends StrictLogging {
    *  confirms with a Discord timestamp, which each person sees in their own zone,
    *  so an entry that was a few hours out is obvious immediately. */
   def scheduleModal(guildId: String, respawn: Respawn): Modal = {
-    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+    val settings = BotApp.respawnService.settings(guildId)
+    val zone = settings.map(_.zone).getOrElse(com.tibiabot.domain.RespawnSettings.DefaultZone)
+    val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
+    val now = java.time.ZonedDateTime.now()
+
+    // Whole hours in the guild's clock. Each option's *value* is an absolute
+    // instant, so what gets stored is still timezone-free — the zone only decides
+    // where the boundaries fall and what the label reads, because Discord won't
+    // render a timestamp inside a select option.
+    val starts = com.tibiabot.domain.RespawnSchedule.upcomingStarts(now, zone, StartOptionCount)
+    val startMenu = StringSelectMenu.create(StartField)
+      .setPlaceholder("Pick a start time")
+      .addOptions(starts.map { start =>
+        SelectOption.of(startLabel(start, now, zone), start.toInstant.getEpochSecond.toString)
+          .withDescription(startHint(start, now))
+      }.asJava)
+      .build()
+
+    val durations = DurationLadder.filter(_ <= maxDuration)
+    val durationMenu = StringSelectMenu.create(DurationField)
+      .setPlaceholder("Pick a length")
+      .addOptions(durations.map { minutes =>
+        SelectOption.of(RespawnEmbeds.humanDuration(minutes), minutes.toString)
+      }.asJava)
+      .build()
+
     Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a repeating slot")
       .addComponents(
-        label("First slot starts in (minutes from now)",
-          s"${respawn.displayName} — it then repeats every 24 hours. 120 = two hours from now.",
-          TextInput.create(StartField, TextInputStyle.SHORT)
-            .setPlaceholder("120")
-            .setRequired(true)
-            .setMaxLength(5)
-            .build()),
-        label("How long is the slot? (minutes)", s"5 to $maxDuration.",
-          TextInput.create(DurationField, TextInputStyle.SHORT)
-            .setRequired(true)
-            .setMaxLength(4)
-            .build())
+        label("First slot starts at", s"${respawn.displayName} — it then repeats every 24 hours.",
+          startMenu),
+        label("How long is the slot?", s"Up to ${RespawnEmbeds.humanDuration(maxDuration)}.",
+          durationMenu)
       )
       .build()
+  }
+
+  /** How many hours ahead the picker offers. Discord caps a select at 25 options,
+   *  so a full day is as much as fits. */
+  private val StartOptionCount = 24
+
+  /** The lengths offered, trimmed to whatever the guild allows. */
+  private val DurationLadder = List(30, 60, 90, 120, 180, 240, 300, 360)
+
+  private val HourFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+  private val DayFormat = java.time.format.DateTimeFormatter.ofPattern("EEE HH:mm")
+
+  /** Names the clock explicitly, since a select option is static text that
+   *  Discord will not localise for the reader. Days ahead carry their weekday, or
+   *  "20:00" twice in one list would be two different days with no way to tell. */
+  private def startLabel(start: java.time.ZonedDateTime, now: java.time.ZonedDateTime,
+                         zone: java.time.ZoneId): String = {
+    val local = start.withZoneSameInstant(zone)
+    val sameDay = local.toLocalDate == now.withZoneSameInstant(zone).toLocalDate
+    val stamp = if (sameDay) local.format(HourFormat) else local.format(DayFormat)
+    s"$stamp ${zone.getId}"
+  }
+
+  /** The relative form as a hint, which is unambiguous however the reader's own
+   *  clock is set. Accurate as of the moment the modal opened. */
+  private def startHint(start: java.time.ZonedDateTime, now: java.time.ZonedDateTime): String = {
+    val minutes = java.time.Duration.between(now, start).toMinutes
+    if (minutes < 60) s"in ${math.max(1, minutes)} minutes"
+    else s"in ${RespawnEmbeds.humanDuration(minutes.toInt)}"
   }
 
   // --- submissions --------------------------------------------------------
@@ -244,10 +300,12 @@ object RespawnModals extends StrictLogging {
   private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit = {
     val guild = event.getGuild
     val service = BotApp.respawnService
-    (Try(value(event, StartField).toInt).toOption, Try(value(event, DurationField).toInt).toOption) match {
+    // Both come back from select menus, so these are the values the bot itself
+    // put there — the start is an absolute epoch second, not an offset.
+    (Try(value(event, StartField).toLong).toOption, Try(value(event, DurationField).toInt).toOption) match {
       case (None, _) | (_, None) =>
-        reply(event, s"${Config.noEmoji} Both need to be whole numbers of minutes.")
-      case (Some(startsIn), Some(duration)) =>
+        reply(event, s"${Config.noEmoji} Pick both a start time and a length.")
+      case (Some(startEpoch), Some(duration)) =>
         service.listRespawns(guild.getId).find(_.id == respawnId) match {
           case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
           case Some(respawn) =>
@@ -256,15 +314,15 @@ object RespawnModals extends StrictLogging {
               reply(event, s"${Config.noEmoji} You already have " +
                 s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} repeating slots — cancel one first.")
             else {
-              val firstStart = java.time.ZonedDateTime.now().plusMinutes(math.max(0, startsIn).toLong)
+              val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
+                .atZone(java.time.ZoneOffset.UTC)
               service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
                 firstStart, duration) match {
                 case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
                 case Right(schedule) =>
                   reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** every day for " +
                     s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
-                    s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.\n" +
-                    "Check that time reads right — if it doesn't, cancel the booking and try again.")
+                    s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
               }
             }
         }
@@ -294,7 +352,8 @@ object RespawnModals extends StrictLogging {
               None, None, None)
           else
             BotApp.respawnService.updateSettings(guildId, None, None, None,
-              field("stamina"), field("warn"), field("handover"))
+              field("stamina"), field("warn"), field("handover"),
+              Some(value(event, "timezone")))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>

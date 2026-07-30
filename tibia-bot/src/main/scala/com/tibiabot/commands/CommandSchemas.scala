@@ -354,7 +354,9 @@ object CommandSchemas {
                 .setMaxValue(120),
               new OptionData(OptionType.INTEGER, "handover", "Minutes to accept a handover before it passes on")
                 .setMinValue(1)
-                .setMaxValue(120)
+                .setMaxValue(120),
+              new OptionData(OptionType.STRING, "timezone",
+                "Clock used to label the schedule picker, e.g. Europe/Berlin")
             )
         )
     )

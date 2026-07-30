@@ -43,7 +43,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |queue_limit INT NOT NULL DEFAULT 20,
           |stamina_minutes INT NOT NULL DEFAULT 240,
           |warn_minutes INT NOT NULL DEFAULT 10,
-          |handover_minutes INT NOT NULL DEFAULT 10
+          |handover_minutes INT NOT NULL DEFAULT 10,
+          |timezone VARCHAR(64) NOT NULL DEFAULT 'Europe/Berlin'
           |);""".stripMargin)
 
       statement.executeUpdate(
@@ -88,6 +89,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       // silently skip them and leave the new columns missing.
       statement.executeUpdate(
         "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS handover_minutes INT NOT NULL DEFAULT 10;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) " +
+          "NOT NULL DEFAULT 'Europe/Berlin';")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS limbo_until TIMESTAMPTZ;")
       statement.executeUpdate(
@@ -247,7 +251,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         queueLimit = result.getInt("queue_limit"),
         staminaMinutes = result.getInt("stamina_minutes"),
         warnMinutes = result.getInt("warn_minutes"),
-        handoverMinutes = result.getInt("handover_minutes")
+        handoverMinutes = result.getInt("handover_minutes"),
+        timezone = Option(result.getString("timezone")).filter(_.nonEmpty)
+          .getOrElse(RespawnSettings.DefaultZone.getId)
       )) else None
     } finally statement.close()
   }
@@ -256,8 +262,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_settings
         |(id, forum_channel, board_thread, default_duration, max_duration, queue_limit, stamina_minutes,
-        | warn_minutes, handover_minutes)
-        |VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+        | warn_minutes, handover_minutes, timezone)
+        |VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         |ON CONFLICT (id) DO UPDATE SET
         |forum_channel = EXCLUDED.forum_channel,
         |board_thread = EXCLUDED.board_thread,
@@ -266,7 +272,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         |queue_limit = EXCLUDED.queue_limit,
         |stamina_minutes = EXCLUDED.stamina_minutes,
         |warn_minutes = EXCLUDED.warn_minutes,
-        |handover_minutes = EXCLUDED.handover_minutes;""".stripMargin)
+        |handover_minutes = EXCLUDED.handover_minutes,
+        |timezone = EXCLUDED.timezone;""".stripMargin)
     try {
       statement.setString(1, settings.forumChannel)
       statement.setString(2, settings.boardThread)
@@ -276,6 +283,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setInt(6, settings.staminaMinutes)
       statement.setInt(7, settings.warnMinutes)
       statement.setInt(8, settings.handoverMinutes)
+      statement.setString(9, settings.timezone)
       statement.executeUpdate()
     } finally statement.close()
   }

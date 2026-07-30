@@ -198,6 +198,9 @@ object Config {
      *  waiting an hour on a request made six hours ahead is pointless, and one
      *  made five minutes ahead cannot wait longer than that. */
     val requestResponseMinutes: Int = respawn.getInt("request-response-minutes")
+    /** The clock a guild starts on, for the few places a label has to name a
+     *  time. Tibia server time by default; each guild can change it. */
+    val timezone: String = respawn.getString("timezone")
     /** How long before a booked slot starts its owner is reminded. 0 turns the
      *  reminder off. Separate from the claim-end reminder members set for
      *  themselves: this one is about a hunt that hasn't begun. */

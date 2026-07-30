@@ -231,6 +231,8 @@ object RespawnEmbeds {
       .addField("Default reminder",
         if (settings.warnMinutes <= 0) "off" else s"${humanDuration(settings.warnMinutes)} before the end", true)
       .addField("Handover window", humanDuration(settings.handoverMinutes), true)
+      .addField("Timezone", settings.timezone, true)
+      .setFooter("The timezone only labels the schedule picker — every time shown is in your own.")
       .build()
 
   /** The moderator panel for one spawn: who holds it, and what can be done to
