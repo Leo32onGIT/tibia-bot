@@ -104,26 +104,6 @@ class BotListener extends ListenerAdapter with StrictLogging {
       interactions.ModalHandler.handle(event)
     }
 
-  /** Feeds the `spawn` option on `/respawn`. Answered straight off the event
-   *  thread: it only ranks the guild's already-loaded catalogue in memory, and
-   *  Discord's autocomplete budget is far tighter than the 3-second interaction
-   *  window, so handing it to the command pool would add latency to the one
-   *  interaction that can least afford it. */
-  override def onCommandAutoCompleteInteraction(event: CommandAutoCompleteInteractionEvent): Unit = {
-    if (event.getName == "respawn" && event.getFocusedOption.getName == "spawn" && event.getGuild != null) {
-      try event.replyChoices(
-        commands.handlers.RespawnCommands.autocompleteChoicesAsJava(event.getGuild.getId, event.getFocusedOption.getValue)
-      ).queue(_ => (), _ => ())
-      catch {
-        case ex: Throwable =>
-          logger.warn("Failed to build respawn autocomplete choices", ex)
-          event.replyChoices(
-            java.util.Collections.emptyList[net.dv8tion.jda.api.interactions.commands.Command.Choice]()
-          ).queue(_ => (), _ => ())
-      }
-    }
-  }
-
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit =
     // Respawn buttons create/edit forum threads through blocking JDA calls, so
     // they go to the same pool as slash commands. Running them inline would

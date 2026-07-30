@@ -10,7 +10,7 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
   test("registered commands have the expected names") {
     CommandSchemas.commands.map(_.getName) should contain theSameElementsAs List(
       "setup", "remove", "hunted", "allies", "neutral", "fullbless",
-      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "respawn")
+      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "stamina")
   }
 
   test("admin command list adds /admin to the normal set") {
@@ -52,19 +52,19 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
     CommandSchemas.commandsFor(111L, hasWorldConfigured = true, respawnEnabled = true) shouldBe CommandSchemas.commands
   }
 
-  // /respawn is in the schema lists unconditionally (so SlashRoutingSpec still
+  // /stamina is in the schema lists unconditionally (so SlashRoutingSpec still
   // covers it), but must not reach Discord while the feature is switched off —
   // prod and DEV run the same image, and a visible command the bot refuses to
   // service is worse than no command.
-  test("commandsFor: /respawn is withheld unless the feature is enabled") {
-    CommandSchemas.commandsFor(111L, hasWorldConfigured = true).map(_.getName) should not contain "respawn"
-    CommandSchemas.commandsFor(867319250708463628L, hasWorldConfigured = true).map(_.getName) should not contain "respawn"
-    CommandSchemas.commandsFor(111L, hasWorldConfigured = true, respawnEnabled = true).map(_.getName) should contain ("respawn")
+  test("commandsFor: /stamina is withheld unless the respawn feature is enabled") {
+    CommandSchemas.commandsFor(111L, hasWorldConfigured = true).map(_.getName) should not contain "stamina"
+    CommandSchemas.commandsFor(867319250708463628L, hasWorldConfigured = true).map(_.getName) should not contain "stamina"
+    CommandSchemas.commandsFor(111L, hasWorldConfigured = true, respawnEnabled = true).map(_.getName) should contain ("stamina")
   }
 
-  test("commandsFor: withholding /respawn leaves every other command untouched") {
+  test("commandsFor: withholding /stamina leaves every other command untouched") {
     CommandSchemas.commandsFor(111L, hasWorldConfigured = true) shouldBe
-      CommandSchemas.commands.filterNot(_.getName == "respawn")
+      CommandSchemas.commands.filterNot(_.getName == "stamina")
   }
 
   test("commandsFor: excludeAll returns an empty list regardless of the guild's own state") {

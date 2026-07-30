@@ -244,120 +244,14 @@ object CommandSchemas {
         )
     )
 
-  /** The respawn claim system. Grouped under one parent command with `admin` as
-   *  a subcommand *group* rather than a flat `admin-add`/`admin-remove` set —
-   *  Discord allows two levels of nesting, and keeping the management verbs in
-   *  their own group leaves the top level free for the planned `schedule`
-   *  subcommand without reshuffling anything users have learned.
+  /** The respawn claim system's only slash command.
    *
-   *  The spawn options are autocompleted (see BotListener's
-   *  onCommandAutoCompleteInteraction): a full catalogue is several hundred
-   *  entries, which is unusable as free text and far past Discord's 25-choice
-   *  limit for static choices. */
-  val respawnCommand: SlashCommandData = Commands.slash("respawn", "Claim a respawn, or queue for one that's taken")
-    .addSubcommands(
-      new SubcommandData("claim", "Claim a respawn, or join its queue if it's taken")
-        .addOptions(
-          new OptionData(OptionType.STRING, "spawn", "The respawn code or name, e.g. 415 or Cult Orcs")
-            .setRequired(true).setAutoComplete(true),
-          new OptionData(OptionType.INTEGER, "duration", "How many minutes to claim it for")
-            .setMinValue(5)
-            .setMaxValue(1440),
-          new OptionData(OptionType.STRING, "character", "Which of your characters is hunting it")
-        ),
-      new SubcommandData("next", "Join the queue for a respawn someone else is on")
-        .addOptions(
-          new OptionData(OptionType.STRING, "spawn", "The respawn code or name")
-            .setRequired(true).setAutoComplete(true)
-        ),
-      new SubcommandData("release", "End your claim early, or leave a queue")
-        .addOptions(
-          new OptionData(OptionType.STRING, "spawn", "Which respawn, if you hold more than one")
-            .setAutoComplete(true)
-        ),
-      new SubcommandData("extend", "Add time to your current claim")
-        .addOptions(
-          new OptionData(OptionType.INTEGER, "minutes", "How many extra minutes").setRequired(true)
-            .setMinValue(5)
-            .setMaxValue(1440)
-        ),
-      new SubcommandData("status", "Show who's on a respawn and who's queued")
-        .addOptions(
-          new OptionData(OptionType.STRING, "spawn", "The respawn code or name")
-            .setRequired(true).setAutoComplete(true)
-        ),
-      new SubcommandData("list", "Show every respawn that's currently claimed"),
-      new SubcommandData("log", "Show a respawn's recent claim history")
-        .addOptions(
-          new OptionData(OptionType.STRING, "spawn", "The respawn code or name")
-            .setRequired(true).setAutoComplete(true),
-          new OptionData(OptionType.INTEGER, "limit", "How many entries to show (default 10)")
-            .setMinValue(1)
-            .setMaxValue(25)
-        ),
-      new SubcommandData("stamina", "Show how much claim time you have left today"),
-      new SubcommandData("schedules", "Show the slots you have booked")
-        .addOptions(
-          new OptionData(OptionType.BOOLEAN, "everyone",
-            "Show every booking on the server (moderators only)")
-        )
-    )
-    .addSubcommandGroups(
-      new SubcommandGroupData("admin", "Manage the respawn catalogue and settings")
-        .addSubcommands(
-          new SubcommandData("setup", "Create the spawns forum channel and its info post"),
-          new SubcommandData("seed", "Import the bundled respawn list (never overwrites your own edits)"),
-          new SubcommandData("add", "Add a respawn to this server's catalogue")
-            .addOptions(
-              new OptionData(OptionType.STRING, "code", "Short code, e.g. 415").setRequired(true),
-              new OptionData(OptionType.STRING, "name", "Display name, e.g. Cult Orcs").setRequired(true),
-              new OptionData(OptionType.STRING, "creature", "Main monster — sets the post's image"),
-              new OptionData(OptionType.STRING, "region", "Region/city this respawn belongs to"),
-              new OptionData(OptionType.STRING, "world", "Restrict this respawn to one world"),
-              new OptionData(OptionType.STRING, "mapper", "Mapper link (stored, not shown yet)")
-            ),
-          new SubcommandData("edit", "Change a respawn's details")
-            .addOptions(
-              new OptionData(OptionType.STRING, "spawn", "The respawn to edit")
-                .setRequired(true).setAutoComplete(true),
-              new OptionData(OptionType.STRING, "name", "New display name"),
-              new OptionData(OptionType.STRING, "creature", "New main monster"),
-              new OptionData(OptionType.STRING, "world", "New world"),
-              new OptionData(OptionType.STRING, "mapper", "New mapper link")
-            ),
-          new SubcommandData("remove", "Delete a respawn from the catalogue")
-            .addOptions(
-              new OptionData(OptionType.STRING, "spawn", "The respawn to delete")
-                .setRequired(true).setAutoComplete(true)
-            ),
-          new SubcommandData("clear", "Force a respawn free, cancelling its claim and queue")
-            .addOptions(
-              new OptionData(OptionType.STRING, "spawn", "The respawn to clear")
-                .setRequired(true).setAutoComplete(true)
-            ),
-          new SubcommandData("config", "Change the claim rules for this server")
-            .addOptions(
-              new OptionData(OptionType.INTEGER, "duration", "Default claim length in minutes")
-                .setMinValue(5)
-                .setMaxValue(1440),
-              new OptionData(OptionType.INTEGER, "max-duration", "Longest a single claim may run, in minutes")
-                .setMinValue(5)
-                .setMaxValue(1440),
-              new OptionData(OptionType.INTEGER, "queue-limit", "How many people may queue per respawn")
-                .setMinValue(0)
-                .setMaxValue(50),
-              new OptionData(OptionType.INTEGER, "stamina", "Daily claim budget per user in minutes (0 = unlimited)")
-                .setMinValue(0)
-                .setMaxValue(1440),
-              new OptionData(OptionType.INTEGER, "warn", "DM the claimer this many minutes before the end (0 = off)")
-                .setMinValue(0)
-                .setMaxValue(120),
-              new OptionData(OptionType.INTEGER, "handover", "Minutes to accept a handover before it passes on")
-                .setMinValue(1)
-                .setMaxValue(120)
-            )
-        )
-    )
+   *  Everything else it does is a button or a modal on the spawns forum, on the
+   *  card for the spawn being acted on. Stamina is the exception: it belongs to
+   *  the member rather than to any one spawn, so there is no card for it to live
+   *  on. */
+  val staminaCommand: SlashCommandData =
+    Commands.slash("stamina", "Show your claim stamina and what's using it")
 
   /** Visible immediately when the bot joins a guild, before any world's been
    *  set up — /setup itself, /help (how do I use this bot, including how to
@@ -369,7 +263,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, respawnCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, staminaCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands
@@ -410,7 +304,7 @@ object CommandSchemas {
    *
    *  `respawnEnabled` is the respawn claim system's rollout gate, decided by
    *  the caller from `Config.Respawn.enabled` (this object deliberately stays
-   *  decoupled from Config). `/respawn` stays in the lists above regardless, so
+   *  decoupled from Config). `/stamina` stays in the lists above regardless, so
    *  the schema is still covered by the routing spec, but it is filtered out of
    *  what actually gets registered while the feature is off — prod and DEV run
    *  the same image, and a command Discord shows but the bot won't service is
@@ -422,6 +316,6 @@ object CommandSchemas {
       else if (supportGuildIds.contains(guildId)) adminCommands
       else if (hasWorldConfigured) commands
       else initialCommands
-    if (respawnEnabled) selected else selected.filterNot(_.getName == respawnCommand.getName)
+    if (respawnEnabled) selected else selected.filterNot(_.getName == staminaCommand.getName)
   }
 }
