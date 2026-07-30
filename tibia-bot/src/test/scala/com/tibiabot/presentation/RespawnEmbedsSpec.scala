@@ -66,7 +66,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // instead would be pointing away from the thing right under the text.
     embed.getDescription should not include "/respawn"
     // Nothing to show for a spawn nobody is on.
-    fields(embed).keys should contain noneOf ("Hunt start", "Hunt end", "Duration")
+    fields(embed).keys should contain noneOf ("Hunt start", "Hunt end", "Duration", "Time left")
   }
 
   test("the card carries no settings blurb — duration and queue limit aren't news to the reader") {
@@ -78,11 +78,20 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("a claim shows start, end and duration, all as clock times") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", minutes = 90)), Nil, Nil, settings, image(cultOrcs))
-    // Both as short time — a relative "in 2 hours" says less than the clock time
-    // the hunt actually runs to, and it read as "2 minutes ago" mid-handover.
+    // Start and end as short time: the clock time a hunt runs to is what someone
+    // deciding whether to queue needs, and it is the same for every reader.
     fields(embed)("Hunt start") should endWith(":t>")
     fields(embed)("Hunt end") should endWith(":t>")
     fields(embed)("Duration") shouldBe "1h 30m"
+  }
+
+  test("a claim shows how long is left, relative, off the same instant as the end") {
+    val active = claim("99", minutes = 90)
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(active), Nil, Nil, settings, image(cultOrcs))
+    // Relative so it counts itself down client-side rather than by card edits.
+    // In limbo it passes the end and reads "5 minutes ago", which is the truth:
+    // their time is up and the spawn is waiting on the next person.
+    fields(embed)("Time left") shouldBe s"<t:${active.endsAt.get.toInstant.getEpochSecond}:R>"
   }
 
   test("a card renders identically whether or not a handover is pending") {
