@@ -54,9 +54,9 @@ object RespawnModals extends StrictLogging {
   def claimModal: Modal =
     Modal.create(RespawnButtonId.modalClaim, "Claim a respawn")
       .addComponents(
-        label("Which respawn?", "Its code or name — for example 415, or Cult Orcs",
+        label("Which respawn?", "Enter its respawn code",
           TextInput.create(SpawnField, TextInputStyle.SHORT)
-            .setPlaceholder("415")
+            .setPlaceholder("310")
             .setRequired(true)
             .setMaxLength(100)
             .build())
