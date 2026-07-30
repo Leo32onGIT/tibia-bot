@@ -313,8 +313,7 @@ object RespawnModals extends StrictLogging {
     // Off means one slot and no more; on with nothing picked means every day,
     // matching what a repeating booking was before weekdays were a choice.
     val repeats = Option(event.getValue(RepeatField)).forall(_.getAsBoolean)
-    val chosenDays = Option(event.getValue(DaysField))
-      .map(_.getAsStringList.asScala.toList).getOrElse(Nil)
+    val chosenDays = selected(event, DaysField)
       .flatMap(day => Try(java.time.DayOfWeek.of(day.toInt)).toOption)
     val daysOfWeek =
       if (!repeats) com.tibiabot.domain.RespawnSchedule.OneOff
@@ -324,7 +323,8 @@ object RespawnModals extends StrictLogging {
     // The start comes back from a select menu, so it is a value the bot itself
     // put there — an absolute epoch second, not an offset. The length is typed,
     // so it is the one that can arrive as anything.
-    (Try(value(event, StartField).toLong).toOption, Try(value(event, DurationField).toInt).toOption) match {
+    val start = selected(event, StartField).headOption.flatMap(epoch => Try(epoch.toLong).toOption)
+    (start, Try(value(event, DurationField).toInt).toOption) match {
       case (None, _) =>
         reply(event, s"${Config.noEmoji} Pick a start time.")
       case (_, None) =>
@@ -460,6 +460,18 @@ object RespawnModals extends StrictLogging {
   /** Modal values are keyed by the text input's own id, not the label's. */
   private def value(event: ModalInteractionEvent, id: String): String =
     Option(event.getValue(id)).map(_.getAsString.trim).getOrElse("")
+
+  /** What was picked in a select.
+   *
+   *  Not interchangeable with [[value]], and the reason is worth spelling out:
+   *  a select's answer refuses `getAsString` outright — only a text input or a
+   *  radio group will answer to that — so reading one the other way throws
+   *  rather than coming back empty. Wrapped in a Try, as the schedule modal had
+   *  it, that surfaces as "you picked nothing" no matter what you picked. */
+  private def selected(event: ModalInteractionEvent, id: String): List[String] =
+    Option(event.getValue(id))
+      .map(_.getAsStringList.asScala.toList).getOrElse(Nil)
+      .map(_.trim).filter(_.nonEmpty)
 
   /** Answers through the interaction hook, since `handle` always defers first. */
   private def reply(event: ModalInteractionEvent, text: String): Unit =
