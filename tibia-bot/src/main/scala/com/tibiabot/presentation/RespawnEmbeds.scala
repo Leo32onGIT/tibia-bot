@@ -85,7 +85,7 @@ object RespawnEmbeds {
         embed.addField("Duration", humanDuration(active.durationMinutes), true)
       case None =>
         embed.setColor(FreeColor)
-        embed.setDescription(s"This respawn is **free**.\nClaim it with `/respawn claim ${respawn.code}`.")
+        embed.setDescription(s"This respawn is **free**.")
     }
 
     if (queue.nonEmpty) {

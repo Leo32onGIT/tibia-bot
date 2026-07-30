@@ -130,7 +130,7 @@ object RespawnModals extends StrictLogging {
         // username can be 32 characters on its own and the label allows 45 in
         // total, so interpolating one there fails the interaction outright.
         label("Total hunt length (minutes)",
-          s"${respawn.displayName}, held by $who. 5 to $maxDuration, from when their hunt started.",
+          s"${respawn.displayName}, choose a new duration. 5 to $maxDuration",
           TextInput.create(DurationField, TextInputStyle.SHORT)
             .setValue(holder.map(_.durationMinutes.toString).getOrElse(""))
             .setRequired(true)
