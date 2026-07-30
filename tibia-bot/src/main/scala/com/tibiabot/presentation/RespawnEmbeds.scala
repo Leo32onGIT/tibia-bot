@@ -293,7 +293,7 @@ object RespawnEmbeds {
           "`/respawn list` shows everything currently claimed, `/respawn status <spawn>` shows one, " +
           "and `/respawn stamina` shows what you have left.")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-      .setFooter("This post is read-only. Use the slash commands or the buttons on each respawn post.")
+      .setFooter("Use the buttons above, or the ones on each respawn post.")
       .build()
   }
 

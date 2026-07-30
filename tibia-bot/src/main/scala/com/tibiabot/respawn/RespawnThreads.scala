@@ -111,13 +111,6 @@ object RespawnThreads extends StrictLogging {
       .filter(id => id.nonEmpty && id != "0")
       .flatMap(id => Option(guild.getForumChannelById(id)))
 
-  /** Create the spawns forum under the bot's admin category and post the pinned,
-   *  locked board thread. Returns (forumChannelId, boardThreadId).
-   *
-   *  @param category the guild's existing "Violent Bot" category — the forum is
-   *                  placed alongside the command-log and notifications channels
-   *                  rather than in its own category.
-   */
   /** Give the guild's moderator role a working set of powers over the spawns
    *  forum: see it, talk in a claim, and manage or delete posts when a thread
    *  needs cleaning up.
@@ -139,6 +132,13 @@ object RespawnThreads extends StrictLogging {
         s"in guild '${forum.getGuild.getId}'", error)
     }
 
+  /** Create the spawns forum under the bot's admin category and post the pinned
+   *  board thread. Returns (forumChannelId, boardThreadId).
+   *
+   *  @param category the guild's existing "Violent Bot" category — the forum is
+   *                  placed alongside the command-log and notifications channels
+   *                  rather than in its own category.
+   */
   def createForum(guild: Guild, category: Category, settings: RespawnSettings,
                   moderatorRole: Option[Role]): (String, String) = {
     val botRole = guild.getBotRole
@@ -183,32 +183,56 @@ object RespawnThreads extends StrictLogging {
   }
 
   /** Post (or repost) the informational board thread, pinned to the top of the
-   *  forum and locked so only the bot can write in it. */
+   *  forum.
+   *
+   *  Deliberately **not** locked, even though it is purely informational.
+   *  Discord greys out message components for anyone who cannot post in the
+   *  channel, and in a locked thread that is everybody without Manage Threads —
+   *  so locking it left the Claim and Config buttons dead for exactly the
+   *  ordinary members they exist for. There are no per-thread permission
+   *  overrides to reach for, so read-only and working buttons cannot both be
+   *  had; the buttons win, and a stray reply here is a moderator's tidy-up.
+   *
+   *  The longest auto-archive Discord offers, for the same reason: an archived
+   *  thread's components are disabled too, and this post generates little
+   *  activity of its own to keep the timer alive. [[refreshBoard]] revives it if
+   *  it slips through anyway. */
   def postBoard(forum: ForumChannel, settings: RespawnSettings): String = {
     val message = new MessageCreateBuilder()
       .setEmbeds(RespawnEmbeds.boardPost(settings))
       .setComponents(boardButtons)
       .build()
-    val post = forum.createForumPost("📖 How respawn claims work", message).complete()
+    val post = forum.createForumPost("📖 How respawn claims work", message)
+      .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
+      .complete()
     val thread = post.getThreadChannel
-    // Locked *after* creation: a locked thread can't receive its own starter
-    // message. Pinned keeps it at the top of the forum even once Discord
-    // auto-archives it for inactivity, which it will, since nobody can post.
-    Try(thread.getManager.setLocked(true).setPinned(true).complete()).failed.foreach { error =>
-      logger.warn(s"Could not lock/pin the respawn board post in guild '${forum.getGuild.getId}'", error)
+    Try(thread.getManager.setPinned(true).complete()).failed.foreach { error =>
+      logger.warn(s"Could not pin the respawn board post in guild '${forum.getGuild.getId}'", error)
     }
     thread.getId
   }
 
-  /** Re-assert the board post's pinned/unlocked-archive state. Called from the
-   *  daily sweep: a locked post has no activity, so Discord eventually archives
-   *  it, and an archived board is easy to miss. Cheap and idempotent. */
+  /** Put the board post back into a state where its buttons work. Called from the
+   *  daily sweep; cheap and idempotent, since it only acts when something is
+   *  actually wrong.
+   *
+   *  Both an archived thread and a locked one have their components greyed out
+   *  for ordinary members, so both are undone here. The unlock also migrates
+   *  boards created before that was understood — they were locked on purpose,
+   *  and would otherwise stay unusable until somebody ran `/repair`. */
   def refreshBoard(guild: Guild, settings: RespawnSettings): Unit =
     findForum(guild, settings).foreach { forum =>
       resolveThread(guild, forum, settings.boardThread).foreach { thread =>
-        if (thread.isArchived) {
-          Try(thread.getManager.setArchived(false).setPinned(true).complete()).failed.foreach { error =>
-            logger.warn(s"Could not un-archive the respawn board post in guild '${guild.getId}'", error)
+        if (thread.isArchived || thread.isLocked) {
+          Try(
+            thread.getManager
+              .setArchived(false)
+              .setLocked(false)
+              .setPinned(true)
+              .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
+              .complete()
+          ).failed.foreach { error =>
+            logger.warn(s"Could not revive the respawn board post in guild '${guild.getId}'", error)
           }
         }
       }

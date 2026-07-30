@@ -58,11 +58,15 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("<@99>")
   }
 
-  test("a free spawn is green and tells you how to take it") {
+  test("a free spawn is green and says nothing about slash commands") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, None, Nil, settings, image(cultOrcs))
     embed.getColorRaw shouldBe RespawnEmbeds.FreeColor
-    embed.getDescription should include("/respawn claim 415")
-    fields(embed).keys should not contain "Hunt end"
+    embed.getDescription should include("free")
+    // The card carries a Claim button, so telling people to type a command
+    // instead would be pointing away from the thing right under the text.
+    embed.getDescription should not include "/respawn"
+    // Nothing to show for a spawn nobody is on.
+    fields(embed).keys should contain noneOf ("Hunt start", "Hunt end", "Duration")
   }
 
   test("the card carries no settings blurb — duration and queue limit aren't news to the reader") {

@@ -252,6 +252,10 @@ final class ChannelService(
           // been created after the forum was, or its override removed by hand.
           ensureModeratorRole(guild).foreach(
             com.tibiabot.respawn.RespawnThreads.grantModeratorAccess(existing, _))
+          // Un-archive and unlock the board so its buttons work — boards created
+          // before that was understood were locked, which greyed them out for
+          // everyone without Manage Threads.
+          com.tibiabot.respawn.RespawnThreads.refreshBoard(guild, settings)
           // The channel survived; the board post may not have.
           val boardMissing = com.tibiabot.respawn.RespawnThreads
             .resolveThread(guild, existing, settings.boardThread).isEmpty
