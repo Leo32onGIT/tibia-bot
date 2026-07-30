@@ -1,7 +1,7 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.domain.{Respawn, RespawnSettings}
-import com.tibiabot.presentation.RespawnEmbeds
+import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -10,7 +10,8 @@ import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, Th
 import net.dv8tion.jda.api.entities.channel.forums.{ForumTag, ForumTagData, ForumTagSnowflake}
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed, Role}
-import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder
+import net.dv8tion.jda.api.utils.FileUpload
+import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -185,12 +186,12 @@ object RespawnThreads extends StrictLogging {
    *                  rather than in its own category.
    */
   def createForum(guild: Guild, category: Category, settings: RespawnSettings,
-                  moderatorRole: Option[Role]): (String, String) = {
+                  moderatorRole: Option[Role], spawns: List[Respawn]): (String, String) = {
     val botRole = guild.getBotRole
     val publicRole = guild.getPublicRole
 
     val forum = guild.createForumChannel(ChannelName, category)
-      .setTopic("Claim a respawn with /respawn claim — one post per respawn, showing who's on it and who's next.")
+      .setTopic("One post per respawn, showing who's on it and who's next. Every code is on the board post.")
       .setAvailableTags(tagSeeds.map { case (name, emoji) =>
         new ForumTagData(name).setEmoji(Emoji.fromUnicode(emoji))
       }.asJava)
@@ -217,7 +218,7 @@ object RespawnThreads extends StrictLogging {
 
     moderatorRole.foreach(grantModeratorAccess(forum, _))
 
-    val boardId = postBoard(forum, settings)
+    val boardId = postBoard(forum, settings, spawns)
     (forum.getId, boardId)
   }
 
@@ -236,20 +237,53 @@ object RespawnThreads extends StrictLogging {
    *  thread's components are disabled too, and this post generates little
    *  activity of its own to keep the timer alive. [[refreshBoard]] revives it if
    *  it slips through anyway. */
-  def postBoard(forum: ForumChannel, settings: RespawnSettings): String = {
-    val message = new MessageCreateBuilder()
-      .setEmbeds(RespawnEmbeds.boardPost(settings))
-      .setComponents(boardButtons)
-      .build()
-    val post = forum.createForumPost("📖 How respawn claims work", message)
+  def postBoard(forum: ForumChannel, settings: RespawnSettings, spawns: List[Respawn]): String = {
+    // The image is the whole post: no embed above it, because everything one
+    // would have said is either on the image or on the buttons under it.
+    val message = new MessageCreateBuilder().setComponents(boardButtons)
+    RespawnBoardImage.render(spawns)
+      .foreach(png => message.setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName)))
+
+    val post = forum.createForumPost("📅 Respawn codes", message.build())
       .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
       .complete()
     val thread = post.getThreadChannel
+
     Try(thread.getManager.setPinned(true).complete()).failed.foreach { error =>
       logger.warn(s"Could not pin the respawn board post in guild '${forum.getGuild.getId}'", error)
     }
     thread.getId
   }
+
+  /** Redraw an existing board in place, for a catalogue that has changed.
+   *
+   *  Edits the post's own opening message rather than replacing the post, so the
+   *  thread keeps its id, its pin and anything said in it. The old attachment has
+   *  to be cleared explicitly — an edit that only adds files keeps the ones
+   *  already there, which would leave two boards stacked in one message.
+   *
+   *  Returns whether it managed to. Nothing here is fatal: a board that fails to
+   *  redraw is out of date, not broken, and the codes it shows still work. */
+  def redrawBoard(guild: Guild, settings: RespawnSettings, spawns: List[Respawn]): Boolean =
+    (for {
+      forum <- findForum(guild, settings)
+      thread <- resolveThread(guild, forum, settings.boardThread)
+      png <- RespawnBoardImage.render(spawns)
+    } yield Try {
+      val start = thread.retrieveStartMessage().complete()
+      start.editMessage(new MessageEditBuilder()
+          // Cleared explicitly: a board posted by an older build carries an embed
+          // above the image, and an edit that only sets the attachment keeps it.
+          .setEmbeds(java.util.Collections.emptyList[MessageEmbed]())
+          .setComponents(boardButtons)
+          .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
+          .build())
+        .complete()
+      true
+    }.recover { case error =>
+      logger.warn(s"Could not redraw the respawn board in guild '${guild.getId}'", error)
+      false
+    }.get).getOrElse(false)
 
   /** Put the board post back into a state where its buttons work. Called from the
    *  daily sweep; cheap and idempotent, since it only acts when something is

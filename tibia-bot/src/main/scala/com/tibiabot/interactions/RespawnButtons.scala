@@ -59,10 +59,11 @@ object RespawnButtons extends StrictLogging {
     parsed match {
       case None =>
         // A button from an older deploy whose id format no longer parses.
-        // Ignoring it beats throwing: the post is long-lived, and the member can
-        // always fall back to the slash command.
+        // Ignoring it beats throwing: the post is long-lived, and the card is
+        // rewritten with working buttons the next time anything happens on it.
         logger.debug(s"Ignoring unparseable respawn button id '${event.getComponentId}'")
-        respond.text(s"${Config.noEmoji} That button is out of date — use `/respawn` instead.")
+        respond.text(s"${Config.noEmoji} That button is out of date — the post's other buttons " +
+          "still work, and this one will once somebody claims or leaves this respawn.")
 
       // Handover offers are answered in a DM, where there is no event guild —
       // the guild id travels in the button id instead (see RespawnButtonId).

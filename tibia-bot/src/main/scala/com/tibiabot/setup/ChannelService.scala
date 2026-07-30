@@ -318,15 +318,30 @@ final class ChannelService(
           // everyone without Manage Threads.
           com.tibiabot.respawn.RespawnThreads.refreshBoard(guild, settings)
           // The channel survived; the board post may not have.
+          // Pick up spawns added to the bundled catalogue since this guild was set
+          // up. importSeed only ever adds codes the guild doesn't have, so a
+          // guild's own edits survive it — and the board is drawn from the result,
+          // which is the only way a new spawn reaches an existing forum now that
+          // there are no catalogue commands.
+          val added = respawnService.importSeed(guild.getId)
+
           val boardMissing = com.tibiabot.respawn.RespawnThreads
             .resolveThread(guild, existing, settings.boardThread).isEmpty
           if (boardMissing) {
-            val boardId = com.tibiabot.respawn.RespawnThreads.postBoard(existing, settings)
+            val boardId = com.tibiabot.respawn.RespawnThreads.postBoard(existing, settings,
+              respawnService.listRespawns(guild.getId))
             respawnService.updateChannels(guild.getId, existing.getId, boardId)
-            s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its info post was missing, " +
-              "so I've recreated it."
+            s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its board post was " +
+              s"missing, so I've recreated it with **$added** new respawns in the catalogue."
           } else {
-            s"${Config.noEmoji} <#${existing.getId}> already exists; nothing to do."
+            val redrawn = com.tibiabot.respawn.RespawnThreads
+              .redrawBoard(guild, settings, respawnService.listRespawns(guild.getId))
+            if (added > 0 && redrawn)
+              s"${Config.yesEmoji} Added **$added** new respawns to <#${existing.getId}> and redrew its board."
+            else if (redrawn)
+              s"${Config.yesEmoji} <#${existing.getId}> is set up already — I've redrawn its board."
+            else
+              s"${Config.noEmoji} <#${existing.getId}> already exists; I couldn't redraw its board."
           }
 
         case None =>
@@ -339,14 +354,15 @@ final class ChannelService(
             adminCategory = newAdminCategory
           }
 
+          // Seeded before the forum is built, not after: the board post *is* the
+          // catalogue now, so a forum created against an empty table would post
+          // an empty board and only fill in if somebody deleted and repaired it.
+          val seeded = respawnService.importSeed(guild.getId)
+
           val (forumId, boardId) =
             com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings,
-              ensureModeratorRole(guild))
+              ensureModeratorRole(guild), respawnService.listRespawns(guild.getId))
           respawnService.updateChannels(guild.getId, forumId, boardId)
-
-          // Seeding here rather than on first claim means the autocomplete has
-          // something to offer the moment the channel appears.
-          val seeded = respawnService.importSeed(guild.getId)
 
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           com.tibiabot.presentation.AdminLog.post(adminChannel,
@@ -354,7 +370,7 @@ final class ChannelService(
             "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 
           s":gear: Created <#$forumId> with **$seeded** respawns in the catalogue.\n" +
-            "Claim one with `/respawn claim`, and manage the list with `/respawn admin`."
+            "Every code is listed on its board post — claim one with the buttons there."
       }
     } catch {
       case e: net.dv8tion.jda.api.exceptions.PermissionException =>

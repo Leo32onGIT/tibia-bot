@@ -200,12 +200,19 @@ object RespawnEmbeds {
     s"$opening\nIf you don't answer by ${relative(deadline)} the slot goes to them."
   }
 
-  /** DM'd to whoever asked, once the owner says they are hunting after all. */
+  /** DM'd to whoever asked, once the owner says they are hunting after all.
+   *
+   *  Both ends of the window, because the useful thing to know about a slot you
+   *  can't have is when it frees up. */
   def slotRequestDeclined(respawn: Respawn, slot: RespawnClaim): String = {
-    val when = slot.startsAt.map(dateTime).getOrElse("their booked slot")
+    val when = (slot.startsAt, slot.bookedEnd) match {
+      case (Some(start), Some(end)) => s" at ${dateTime(start)} until ${dateTime(end)}"
+      case (Some(start), None)      => s" at ${dateTime(start)}"
+      case _                        => ""
+    }
     val booking = if (slot.requestedSlot.isDefined) " Your booking wasn't made." else ""
-    s"<@${slot.userId}> is hunting **${respawn.displayName}** at $when, so it stays theirs.$booking\n" +
-      "You can still queue for it once their hunt starts."
+    s"<@${slot.userId}> has confirmed they are hunting **${respawn.displayName}**$when, " +
+      s"so it stays theirs.$booking"
   }
 
   /** DM'd to whoever asked, once the slot passes to them. The window is passed in
@@ -435,46 +442,6 @@ object RespawnEmbeds {
       }
     }
     embed.build()
-  }
-
-  /** The pinned, locked board post explaining the system. Its content is fixed,
-   *  so `/repair` recreating it produces the same post. */
-  def boardPost(settings: RespawnSettings): MessageEmbed = {
-    val staminaLine =
-      if (settings.staminaMinutes <= 0) "There is no daily limit on this server."
-      else s"You get **${humanDuration(settings.staminaMinutes)}** of claim time per day. " +
-        "It refills at server save (10:00 CET/CEST). Claiming reserves the full duration up front, " +
-        "and releasing early gives the unused time back."
-
-    new EmbedBuilder()
-      .setColor(Embeds.BrandColor)
-      .setTitle("📅 Respawn claims")
-      .setDescription(
-        "Every claimed respawn gets its own post in this channel showing who's on it and when they're done.\n\n" +
-          "**Claiming**\n" +
-          s"`/respawn claim <spawn>` takes a free respawn for ${humanDuration(settings.defaultDurationMinutes)} " +
-          "(or pass your own duration).\n" +
-          "`/respawn release` ends your claim early and hands it to whoever is next.\n" +
-          "`/respawn extend <minutes>` adds time, up to " +
-          s"${humanDuration(settings.maxDurationMinutes)} in total.\n\n" +
-          "**Queueing**\n" +
-          "If a respawn is taken, hit **Next** on its post to line up behind the current hunter. " +
-          s"Up to ${settings.queueLimit} people can wait. When the claim ahead of you ends I'll **DM you** " +
-          s"with a **Claim** button — press it within ${humanDuration(settings.handoverMinutes)} and the " +
-          "respawn is yours. Ignore it or press **Cancel** and you drop out of the queue and it goes to the " +
-          "next person.\nUntil you answer, the respawn stays with its previous hunter, so nobody else can " +
-          "take it out from under you.\n\n" +
-          "**Stamina**\n" + staminaLine + "\n" +
-          "Holding two respawns at once is fine — they just both draw from the same tank.\n\n" +
-          "**Buttons on this post**\n" +
-          "**Claim** takes any respawn by code or name — use it for one that has no post yet.\n" +
-          "**Config** sets your own default claim length and how long before the end you want reminding.\n\n" +
-          "**Finding things**\n" +
-          "`/respawn list` shows everything currently claimed, `/respawn status <spawn>` shows one, " +
-          "and `/respawn stamina` shows what you have left.")
-      .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
-      .setFooter("Use the buttons above, or the ones on each respawn post.")
-      .build()
   }
 
   /** A spawn's recent claim history, for `/respawn log`.

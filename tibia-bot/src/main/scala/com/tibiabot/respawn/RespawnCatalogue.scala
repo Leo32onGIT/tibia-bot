@@ -100,7 +100,7 @@ object RespawnCatalogue extends StrictLogging {
    *  then by the optional letter suffix. Plain string ordering would put
    *  "1010" before "201" and "411c" before "411a" is at least consistent, but
    *  the numeric part is what makes a long list scannable. */
-  private def sortKey(code: String): (Int, String) = {
+  def sortKey(code: String): (Int, String) = {
     val digits = code.takeWhile(_.isDigit)
     val suffix = code.drop(digits.length)
     (Try(digits.toInt).getOrElse(Int.MaxValue), suffix)

@@ -16,6 +16,11 @@ dockerExposedPorts += 443
 // network — never published to the host directly (see docker-compose.yml).
 dockerExposedPorts += 8080
 dockerBaseImage := "eclipse-temurin:8-jre"
+// The respawn board is drawn with Java2D (presentation.RespawnBoardImage). A
+// JVM with no DISPLAY infers this on its own, so this is insurance rather than a
+// fix: it states the intent, and keeps the board rendering if a future base
+// image ever arrives with a display attached.
+Universal / javaOptions += "-Djava.awt.headless=true"
 // Also tag the built image `:latest` so docker-compose.yml can reference a
 // stable tag (otherwise only the version tag is created).
 dockerUpdateLatest := true

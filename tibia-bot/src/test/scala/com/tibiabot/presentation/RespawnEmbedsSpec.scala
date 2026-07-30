@@ -278,25 +278,6 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("No finished claims")
   }
 
-  test("the board post explains stamina and the two-spawn case the design allows") {
-    val board = RespawnEmbeds.boardPost(settings)
-    board.getDescription should include("4h")
-    board.getDescription should include("server save")
-    board.getDescription should include("Holding two respawns at once is fine")
-  }
-
-  test("the board post explains the handover confirmation, including the window") {
-    val board = RespawnEmbeds.boardPost(settings.copy(handoverMinutes = 10))
-    board.getDescription should include("DM you")
-    board.getDescription should include("10m")
-    board.getDescription should include("drop out of the queue")
-  }
-
-  test("the board post drops the stamina rules entirely when stamina is off") {
-    val board = RespawnEmbeds.boardPost(settings.copy(staminaMinutes = 0))
-    board.getDescription should include("no daily limit")
-  }
-
   // --- pressing Schedule on a respawn you have already booked ---------------
 
   private def booking(userId: String = "99", minutes: Int = 120,
@@ -380,6 +361,26 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // No instructions to act on: it claims itself, and the one useful action was
     // buried at the end of a sentence about doing nothing.
     text should not include "cancel it"
+  }
+
+  test("a refused request says when the slot they wanted runs to") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"))
+      .copy(requestedStartsAt = Some(now.plusHours(2)), requestedDurationMinutes = Some(60))
+    val text = RespawnEmbeds.slotRequestDeclined(cultOrcs, slot)
+
+    text should include("has confirmed they are hunting")
+    // Both ends: when a slot you can't have frees up is the useful part.
+    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:f>")
+    text should include(s"until <t:${now.plusHours(4).toInstant.getEpochSecond}:f>")
+    text should include("Your booking wasn't made")
+    // Queueing is not the answer to a hunt that hasn't started yet.
+    text should not include "queue"
+  }
+
+  test("a Request-button refusal says nothing about a booking, having made none") {
+    val text = RespawnEmbeds.slotRequestDeclined(cultOrcs, reserved("99", now.plusHours(2)))
+    text should include("stays theirs")
+    text should not include "booking wasn't made"
   }
 
   test("a granted slot is the window that was asked for, not the one given up") {
