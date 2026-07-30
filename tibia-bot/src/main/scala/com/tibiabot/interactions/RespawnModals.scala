@@ -184,6 +184,13 @@ object RespawnModals extends StrictLogging {
   // --- submissions --------------------------------------------------------
 
   def handle(event: ModalInteractionEvent): Unit = {
+    // Acknowledged before any work: every branch below touches the database, and
+    // the claim and duration ones create or rewrite a forum thread over REST.
+    // Discord drops an interaction that goes three seconds unacknowledged, and
+    // unlike the buttons no branch here opens a further modal, so all of them can
+    // defer. Replies therefore go through the hook — see `reply`.
+    event.deferReply(true).queue()
+
     val guild = event.getGuild
     if (guild == null) {
       reply(event, s"${Config.noEmoji} That only works inside a server.")
@@ -232,7 +239,7 @@ object RespawnModals extends StrictLogging {
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
-            event.replyEmbeds(RespawnEmbeds.serverSettingsEmbed(updated)).setEphemeral(true).queue()
+            replyEmbed(event, RespawnEmbeds.serverSettingsEmbed(updated))
         }
       }
     }
@@ -284,7 +291,7 @@ object RespawnModals extends StrictLogging {
       .map(id => s"\n<#$id>")
       .getOrElse("")
 
-    event.replyEmbeds(RespawnButtons.claimOutcomeEmbed(outcome, threadLink)).setEphemeral(true).queue()
+    replyEmbed(event, RespawnButtons.claimOutcomeEmbed(outcome, threadLink))
   }
 
   private def submitConfig(event: ModalInteractionEvent): Unit = {
@@ -301,7 +308,7 @@ object RespawnModals extends StrictLogging {
           case Right(prefs) =>
             BotApp.respawnService.settings(guild.getId) match {
               case Some(settings) =>
-                event.replyEmbeds(RespawnEmbeds.userPrefsEmbed(prefs, settings)).setEphemeral(true).queue()
+                replyEmbed(event, RespawnEmbeds.userPrefsEmbed(prefs, settings))
               case None => reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
             }
         }
@@ -312,7 +319,11 @@ object RespawnModals extends StrictLogging {
   private def value(event: ModalInteractionEvent, id: String): String =
     Option(event.getValue(id)).map(_.getAsString.trim).getOrElse("")
 
+  /** Answers through the interaction hook, since `handle` always defers first. */
   private def reply(event: ModalInteractionEvent, text: String): Unit =
-    event.replyEmbeds(Embeds.response(text)).setEphemeral(true).queue()
+    replyEmbed(event, Embeds.response(text))
+
+  private def replyEmbed(event: ModalInteractionEvent, embed: net.dv8tion.jda.api.entities.MessageEmbed): Unit =
+    event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
 
 }
