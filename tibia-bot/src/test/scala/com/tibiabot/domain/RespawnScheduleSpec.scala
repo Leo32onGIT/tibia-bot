@@ -92,13 +92,4 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     RespawnSchedule.upcomingStarts(anchor, berlin, 0) shouldBe empty
     RespawnSchedule.upcomingStarts(anchor, berlin, -1) shouldBe empty
   }
-
-  test("a guild's zone falls back to server time when the stored id is nonsense") {
-    // A bad row must not stop the picker rendering, and Berlin is server time.
-    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10, "Not/AZone").zone shouldBe
-      RespawnSettings.DefaultZone
-    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10).zone shouldBe RespawnSettings.DefaultZone
-    RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10, "Australia/Perth").zone shouldBe
-      java.time.ZoneId.of("Australia/Perth")
-  }
 }

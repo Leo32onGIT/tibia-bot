@@ -235,8 +235,7 @@ object RespawnCommands {
           options.get("queue-limit").flatMap(toInt),
           options.get("stamina").flatMap(toInt),
           options.get("warn").flatMap(toInt),
-          options.get("handover").flatMap(toInt),
-          options.get("timezone")) match {
+          options.get("handover").flatMap(toInt)) match {
           case Left(problem)  => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) => reply(event, renderConfig(updated))
         }
@@ -331,8 +330,7 @@ object RespawnCommands {
       s"**Queue limit:** ${settings.queueLimit}\n" +
       s"**Stamina:** $stamina\n" +
       s"**Warning:** $warn\n" +
-      s"**Handover window:** ${RespawnEmbeds.humanDuration(settings.handoverMinutes)}\n" +
-      s"**Timezone:** ${settings.timezone}"
+      s"**Handover window:** ${RespawnEmbeds.humanDuration(settings.handoverMinutes)}"
   }
 
   /** A jump link to the spawn's forum post, once it has one — spawns that have

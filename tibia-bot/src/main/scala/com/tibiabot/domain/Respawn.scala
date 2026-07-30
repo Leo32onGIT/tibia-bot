@@ -293,26 +293,8 @@ final case class RespawnSettings(
   warnMinutes: Int,
   /** How long someone has to accept a handover offer before it's assumed they
    *  walked away and the spawn moves on to the next person. */
-  handoverMinutes: Int,
-  /** The clock this server thinks in, as an IANA zone id.
-   *
-   *  Used only where a *label* has to name a time and Discord won't render one
-   *  for us — the hour options in the schedule picker. Everything the bot
-   *  actually shows is a Discord timestamp in each reader's own zone, and what
-   *  gets stored is always an instant, so this never affects when anything
-   *  happens. Defaults to Europe/Berlin, which is Tibia server time. */
-  timezone: String = "Europe/Berlin"
-) {
-  /** The guild's zone, falling back to server time if the stored id is one Java
-   *  doesn't know — a bad row should not stop a picker from rendering. */
-  def zone: java.time.ZoneId =
-    scala.util.Try(java.time.ZoneId.of(timezone)).getOrElse(RespawnSettings.DefaultZone)
-}
-
-object RespawnSettings {
-  /** Tibia server time, and the zone every guild starts on. */
-  val DefaultZone: java.time.ZoneId = java.time.ZoneId.of("Europe/Berlin")
-}
+  handoverMinutes: Int
+)
 
 /** One member's own preferences, overriding the guild defaults for their own
  *  claims. Set through the Config button on the spawns board.

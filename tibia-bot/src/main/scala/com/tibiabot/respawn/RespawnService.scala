@@ -126,7 +126,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def defaultSettings: RespawnSettings = RespawnSettings(
     forumChannel = "0",
     boardThread = "0",
-    timezone = Config.Respawn.timezone,
     defaultDurationMinutes = Config.Respawn.defaultDurationMinutes,
     maxDurationMinutes = Config.Respawn.maxDurationMinutes,
     queueLimit = Config.Respawn.queueLimit,
@@ -146,8 +145,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  would be refused for exceeding a ceiling nobody set deliberately. */
   def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
                      queueLimit: Option[Int], stamina: Option[Int], warn: Option[Int],
-                     handover: Option[Int],
-                     timezone: Option[String] = None): Either[String, RespawnSettings] =
+                     handover: Option[Int]): Either[String, RespawnSettings] =
     settings(guildId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(current) =>
@@ -157,13 +155,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           queueLimit = queueLimit.getOrElse(current.queueLimit),
           staminaMinutes = stamina.getOrElse(current.staminaMinutes),
           warnMinutes = warn.getOrElse(current.warnMinutes),
-          handoverMinutes = handover.getOrElse(current.handoverMinutes),
-          timezone = timezone.map(_.trim).filter(_.nonEmpty).getOrElse(current.timezone)
+          handoverMinutes = handover.getOrElse(current.handoverMinutes)
         )
-        if (scala.util.Try(java.time.ZoneId.of(updated.timezone)).isFailure)
-          Left(s"`${updated.timezone}` isn't a timezone I know. Use an IANA name like " +
-            "`Europe/Berlin`, `America/Sao_Paulo` or `Australia/Perth`.")
-        else if (updated.defaultDurationMinutes < 5 || updated.maxDurationMinutes < 5)
+        if (updated.defaultDurationMinutes < 5 || updated.maxDurationMinutes < 5)
           Left("A claim has to be at least 5 minutes long.")
         else if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
           Left(s"The default claim (${RespawnEmbeds.humanDuration(updated.defaultDurationMinutes)}) can't be " +
@@ -1225,10 +1219,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  nothing here is ever deleted, only moved to a terminal status. */
   def claimHistory(guildId: String, respawnId: Long, limit: Int = 10): List[RespawnClaim] =
     repository.claimHistory(guildId, respawnId, limit)
-
-  /** The guild's clock, for the few labels that have to name a time. */
-  def zoneOf(guildId: String): java.time.ZoneId =
-    settings(guildId).map(_.zone).getOrElse(RespawnSettings.DefaultZone)
 
   /** Booked slots on a spawn that haven't started yet. */
   def reservationsFor(guildId: String, respawnId: Long,

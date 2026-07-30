@@ -30,6 +30,22 @@ object ServerSaveSchedule {
     if (berlin.isBefore(todaysSave)) todaysSave.minusDays(1) else todaysSave
   }
 
+  /** A time expressed the way Tibia players talk about it: hours either side of
+   *  server save. 10:00 Berlin is `SS+0`, 11:00 is `SS+1`, and the late hours
+   *  count down to the next save instead — 06:00 is `SS-4`, not `SS+20`.
+   *
+   *  The switch happens at the halfway point, which is where the shorter of the
+   *  two readings changes over. Nobody says "SS+20" when "SS-4" means the same
+   *  evening.
+   *
+   *  Clamped to a day's worth of hours because a daylight-saving day is 23 or 25
+   *  hours long, and an `SS+24` would be nonsense on the long one. */
+  def serverSaveOffsetLabel(when: ZonedDateTime): String = {
+    val sinceSave = Duration.between(lastServerSave(when), when).toHours
+    val hours = math.max(0L, math.min(23L, sinceSave)).toInt
+    if (hours <= 12) s"SS+$hours" else s"SS-${24 - hours}"
+  }
+
   /** The next server save strictly after `now` — when a spent stamina tank
    *  refills. Rendered as a Discord relative timestamp in the "out of stamina"
    *  replies. */

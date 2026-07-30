@@ -174,13 +174,7 @@ object RespawnModals extends StrictLogging {
           numberInput("warn", settings.map(_.warnMinutes))),
         label("Handover window (minutes)",
           "How long the next in line has to accept before it passes on.",
-          numberInput("handover", settings.map(_.handoverMinutes))),
-        label("Timezone", "Labels the schedule picker only. An IANA name, e.g. Europe/Berlin.",
-          TextInput.create("timezone", TextInputStyle.SHORT)
-            .setValue(settings.map(_.timezone).getOrElse(""))
-            .setRequired(true)
-            .setMaxLength(64)
-            .build())
+          numberInput("handover", settings.map(_.handoverMinutes)))
       )
       .build()
   }
@@ -194,14 +188,15 @@ object RespawnModals extends StrictLogging {
 
   /** Book a repeating slot.
    *
-   *  The first start is asked for as a delay from now rather than a clock time,
-   *  because a clock time means nothing without knowing the reader's timezone —
-   *  and the whole scheduling model is deliberately free of them. The reply
-   *  confirms with a Discord timestamp, which each person sees in their own zone,
-   *  so an entry that was a few hours out is obvious immediately. */
+   *  Picked from menus rather than typed. Each start option's *value* is an
+   *  absolute instant, so what gets stored stays free of any timezone and the
+   *  recurrence arithmetic is untouched — server time only decides where the hour
+   *  boundaries fall and what the label reads, since Discord will not render a
+   *  timestamp inside a select option. The confirmation is a Discord timestamp,
+   *  so each person sees the booking in their own zone. */
   def scheduleModal(guildId: String, respawn: Respawn): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
-    val zone = settings.map(_.zone).getOrElse(com.tibiabot.domain.RespawnSettings.DefaultZone)
+    val zone = com.tibiabot.domain.time.Clock.Berlin
     val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
     val now = java.time.ZonedDateTime.now()
 
@@ -244,17 +239,17 @@ object RespawnModals extends StrictLogging {
   private val DurationLadder = List(30, 60, 90, 120, 180, 240, 300, 360)
 
   private val HourFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-  private val DayFormat = java.time.format.DateTimeFormatter.ofPattern("EEE HH:mm")
 
-  /** Names the clock explicitly, since a select option is static text that
-   *  Discord will not localise for the reader. Days ahead carry their weekday, or
-   *  "20:00" twice in one list would be two different days with no way to tell. */
+  /** Hours either side of server save — SS+2, SS-4 — which is how Tibia players
+   *  talk about times, with the server-time clock alongside.
+   *
+   *  A select option is static text that Discord will not localise, so this is
+   *  the one place the bot has to name a clock. SS notation carries the meaning
+   *  and the clock time settles any doubt. */
   private def startLabel(start: java.time.ZonedDateTime, now: java.time.ZonedDateTime,
                          zone: java.time.ZoneId): String = {
-    val local = start.withZoneSameInstant(zone)
-    val sameDay = local.toLocalDate == now.withZoneSameInstant(zone).toLocalDate
-    val stamp = if (sameDay) local.format(HourFormat) else local.format(DayFormat)
-    s"$stamp ${zone.getId}"
+    val offset = com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)
+    s"$offset — ${start.withZoneSameInstant(zone).format(HourFormat)} server time"
   }
 
   /** The relative form as a hint, which is unambiguous however the reader's own
@@ -352,8 +347,7 @@ object RespawnModals extends StrictLogging {
               None, None, None)
           else
             BotApp.respawnService.updateSettings(guildId, None, None, None,
-              field("stamina"), field("warn"), field("handover"),
-              Some(value(event, "timezone")))
+              field("stamina"), field("warn"), field("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
