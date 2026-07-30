@@ -111,14 +111,35 @@ object RespawnThreads extends StrictLogging {
       .filter(id => id.nonEmpty && id != "0")
       .flatMap(id => Option(guild.getForumChannelById(id)))
 
+  /** Drop any @everyone override on the forum so it inherits from the parent
+   *  category.
+   *
+   *  Called on create (a no-op on a fresh channel) and on repair, where it
+   *  migrates forums that were built with an explicit override before this was
+   *  the intent — an override left in place would keep winning over whatever the
+   *  category says, which is exactly what inheriting is meant to avoid.
+   *
+   *  Note this also drops the old deny on creating posts, so members can open
+   *  their own posts here if the category or server default allows it. The bot
+   *  only ever manages posts it created, so a stray one is inert rather than
+   *  harmful. */
+  def inheritPublicPermissions(forum: ForumChannel, publicRole: Role): Unit =
+    Option(forum.getPermissionOverride(publicRole)).foreach { existing =>
+      Try(existing.delete().complete()).failed.foreach { error =>
+        logger.warn(s"Could not clear the @everyone override on the respawn forum " +
+          s"in guild '${forum.getGuild.getId}'", error)
+      }
+    }
+
   /** Give the guild's moderator role a working set of powers over the spawns
    *  forum: see it, talk in a claim, and manage or delete posts when a thread
    *  needs cleaning up.
    *
-   *  Creating posts is deliberately left denied — every post here has to
-   *  correspond to a catalogue entry the bot tracks, and the bot makes them
-   *  itself. Applied separately from [[createForum]] so `/repair` can hand the
-   *  powers to a forum that already exists. */
+   *  The only override the forum carries. @everyone is left to inherit from the
+   *  bot's category (see [[inheritPublicPermissions]]), so this is what a
+   *  moderator gets *on top* of whatever ordinary members have. Applied
+   *  separately from [[createForum]] so `/repair` can hand the powers to a forum
+   *  that already exists. */
   def grantModeratorAccess(forum: ForumChannel, moderatorRole: Role): Unit =
     Try(
       forum.upsertPermissionOverride(moderatorRole)
@@ -165,16 +186,10 @@ object RespawnThreads extends StrictLogging {
       .grant(Permission.MANAGE_CHANNEL)
       .complete()
 
-    // Members may talk inside a claim (coordinating a hunt is the point) but
-    // may not open posts of their own — every post here has to correspond to a
-    // catalogue entry the bot is tracking, or the channel stops meaning
-    // anything.
-    forum.upsertPermissionOverride(publicRole)
-      .grant(Permission.VIEW_CHANNEL)
-      .grant(Permission.MESSAGE_SEND_IN_THREADS)
-      .grant(Permission.MESSAGE_HISTORY)
-      .deny(Permission.CREATE_PUBLIC_THREADS)
-      .complete()
+    // No @everyone override at all: the forum inherits whatever the bot's
+    // category grants ordinary members, so a server that adjusts access there
+    // has it apply here too instead of being silently overridden per channel.
+    inheritPublicPermissions(forum, publicRole)
 
     moderatorRole.foreach(grantModeratorAccess(forum, _))
 
