@@ -188,36 +188,27 @@ object RespawnModals extends StrictLogging {
 
   /** Book a repeating slot.
    *
-   *  Picked from menus rather than typed. Each start option's *value* is an
-   *  absolute instant, so what gets stored stays free of any timezone and the
-   *  recurrence arithmetic is untouched — server time only decides where the hour
-   *  boundaries fall and what the label reads, since Discord will not render a
-   *  timestamp inside a select option. The confirmation is a Discord timestamp,
-   *  so each person sees the booking in their own zone. */
+   *  The start is picked from a menu rather than typed, since there is no way to
+   *  type an hour that means the same thing to everyone reading it. Each option's
+   *  *value* is an absolute instant, so what gets stored stays free of any
+   *  timezone and the recurrence arithmetic is untouched — server time only
+   *  decides where the hour boundaries fall. The confirmation is a Discord
+   *  timestamp, so each person sees the booking in their own zone. */
   def scheduleModal(guildId: String, respawn: Respawn): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     val zone = com.tibiabot.domain.time.Clock.Berlin
     val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
     val now = java.time.ZonedDateTime.now()
 
-    // Whole hours in the guild's clock. Each option's *value* is an absolute
-    // instant, so what gets stored is still timezone-free — the zone only decides
-    // where the boundaries fall and what the label reads, because Discord won't
-    // render a timestamp inside a select option.
+    // Whole hours in server time. Each option's *value* is an absolute instant,
+    // so what gets stored is still timezone-free — the zone only decides where
+    // the boundaries fall.
     val starts = com.tibiabot.domain.RespawnSchedule.upcomingStarts(now, zone, StartOptionCount)
     val startMenu = StringSelectMenu.create(StartField)
       .setPlaceholder("Pick a start time")
       .addOptions(starts.map { start =>
-        SelectOption.of(startLabel(start, now, zone), start.toInstant.getEpochSecond.toString)
+        SelectOption.of(startLabel(start), start.toInstant.getEpochSecond.toString)
           .withDescription(startHint(start, now))
-      }.asJava)
-      .build()
-
-    val durations = DurationLadder.filter(_ <= maxDuration)
-    val durationMenu = StringSelectMenu.create(DurationField)
-      .setPlaceholder("Pick a length")
-      .addOptions(durations.map { minutes =>
-        SelectOption.of(RespawnEmbeds.humanDuration(minutes), minutes.toString)
       }.asJava)
       .build()
 
@@ -225,8 +216,14 @@ object RespawnModals extends StrictLogging {
       .addComponents(
         label("First slot starts at", s"${respawn.displayName} — it then repeats every 24 hours.",
           startMenu),
-        label("How long is the slot?", s"Up to ${RespawnEmbeds.humanDuration(maxDuration)}.",
-          durationMenu)
+        // A typed length, the same as every other duration prompt — there is no
+        // reason for this one to work differently from the Config and Hunt
+        // duration modals.
+        label("How long is the slot? (minutes)", s"5 to $maxDuration.",
+          TextInput.create(DurationField, TextInputStyle.SHORT)
+            .setRequired(true)
+            .setMaxLength(4)
+            .build())
       )
       .build()
   }
@@ -235,22 +232,15 @@ object RespawnModals extends StrictLogging {
    *  so a full day is as much as fits. */
   private val StartOptionCount = 24
 
-  /** The lengths offered, trimmed to whatever the guild allows. */
-  private val DurationLadder = List(30, 60, 90, 120, 180, 240, 300, 360)
-
-  private val HourFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-
   /** Hours either side of server save — SS+2, SS-4 — which is how Tibia players
-   *  talk about times, with the server-time clock alongside.
+   *  talk about times, and all a player needs. The wall-clock time is
+   *  deliberately absent: it would be server time, which is not the reader's, so
+   *  it adds a number to translate rather than removing one.
    *
-   *  A select option is static text that Discord will not localise, so this is
-   *  the one place the bot has to name a clock. SS notation carries the meaning
-   *  and the clock time settles any doubt. */
-  private def startLabel(start: java.time.ZonedDateTime, now: java.time.ZonedDateTime,
-                         zone: java.time.ZoneId): String = {
-    val offset = com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)
-    s"$offset — ${start.withZoneSameInstant(zone).format(HourFormat)} server time"
-  }
+   *  All 24 offsets over a day are distinct, so the list needs nothing else to
+   *  tell its entries apart. */
+  private def startLabel(start: java.time.ZonedDateTime): String =
+    com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)
 
   /** The relative form as a hint, which is unambiguous however the reader's own
    *  clock is set. Accurate as of the moment the modal opened. */
@@ -295,11 +285,14 @@ object RespawnModals extends StrictLogging {
   private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit = {
     val guild = event.getGuild
     val service = BotApp.respawnService
-    // Both come back from select menus, so these are the values the bot itself
-    // put there — the start is an absolute epoch second, not an offset.
+    // The start comes back from a select menu, so it is a value the bot itself
+    // put there — an absolute epoch second, not an offset. The length is typed,
+    // so it is the one that can arrive as anything.
     (Try(value(event, StartField).toLong).toOption, Try(value(event, DurationField).toInt).toOption) match {
-      case (None, _) | (_, None) =>
-        reply(event, s"${Config.noEmoji} Pick both a start time and a length.")
+      case (None, _) =>
+        reply(event, s"${Config.noEmoji} Pick a start time.")
+      case (_, None) =>
+        reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
       case (Some(startEpoch), Some(duration)) =>
         service.listRespawns(guild.getId).find(_.id == respawnId) match {
           case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
