@@ -38,13 +38,21 @@ object ServerSaveSchedule {
    *  two readings changes over. Nobody says "SS+20" when "SS-4" means the same
    *  evening.
    *
-   *  Clamped to a day's worth of hours because a daylight-saving day is 23 or 25
-   *  hours long, and an `SS+24` would be nonsense on the long one. */
+   *  Resolved to the half hour — `SS+1.5` — since that is the granularity the
+   *  schedule picker offers. Anything finer rounds down to the half below it.
+   *
+   *  Clamped to a day's worth because a daylight-saving day is 23 or 25 hours
+   *  long, and an `SS+24` would be nonsense on the long one. */
   def serverSaveOffsetLabel(when: ZonedDateTime): String = {
-    val sinceSave = Duration.between(lastServerSave(when), when).toHours
-    val hours = math.max(0L, math.min(23L, sinceSave)).toInt
-    if (hours <= 12) s"SS+$hours" else s"SS-${24 - hours}"
+    val sinceSave = Duration.between(lastServerSave(when), when).toMinutes / 30
+    val halves = math.max(0L, math.min(47L, sinceSave)).toInt
+    if (halves <= 24) s"SS+${halfHours(halves)}" else s"SS-${halfHours(48 - halves)}"
   }
+
+  /** Half hours as players write them: whole where it is whole, `.5` where it is
+   *  not. `SS+1` rather than `SS+1.0`. */
+  private def halfHours(halves: Int): String =
+    if (halves % 2 == 0) (halves / 2).toString else s"${halves / 2}.5"
 
   /** The next server save strictly after `now` — when a spent stamina tank
    *  refills. Rendered as a Discord relative timestamp in the "out of stamina"

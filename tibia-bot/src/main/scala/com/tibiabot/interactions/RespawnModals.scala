@@ -200,7 +200,7 @@ object RespawnModals extends StrictLogging {
     val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
     val now = java.time.ZonedDateTime.now()
 
-    // Whole hours in server time. Each option's *value* is an absolute instant,
+    // Half hours in server time. Each option's *value* is an absolute instant,
     // so what gets stored is still timezone-free — the zone only decides where
     // the boundaries fall.
     val starts = com.tibiabot.domain.RespawnSchedule.upcomingStarts(now, zone, StartOptionCount)
@@ -228,16 +228,16 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** How many hours ahead the picker offers. Discord caps a select at 25 options,
-   *  so a full day is as much as fits. */
-  private val StartOptionCount = 24
+  /** How many half hours ahead the picker offers. Discord caps a select at 25
+   *  options, which at this granularity reaches about half a day out. */
+  private val StartOptionCount = 25
 
-  /** Hours either side of server save — SS+2, SS-4 — which is how Tibia players
-   *  talk about times, and all a player needs. The wall-clock time is
+  /** Hours either side of server save — SS+2, SS-4, SS+1.5 — which is how Tibia
+   *  players talk about times, and all a player needs. The wall-clock time is
    *  deliberately absent: it would be server time, which is not the reader's, so
    *  it adds a number to translate rather than removing one.
    *
-   *  All 24 offsets over a day are distinct, so the list needs nothing else to
+   *  Every offset within a day is distinct, so the list needs nothing else to
    *  tell its entries apart. */
   private def startLabel(start: java.time.ZonedDateTime): String =
     com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)

@@ -263,20 +263,25 @@ object RespawnSchedule {
   /** The only period phase 1 offers. */
   val Daily: Int = 24 * 60
 
-  /** The next `count` whole hours in `zone`, for the schedule picker.
+  /** The next `count` half hours in `zone`, for the schedule picker.
    *
-   *  Rounded on the hour *in that zone* rather than in UTC, which matters for the
-   *  zones offset by half or three-quarters of an hour — India, Nepal, Chatham —
-   *  where hour boundaries don't line up with UTC's.
+   *  Half hours rather than whole ones because plenty of hunts start on the
+   *  half — the picker reads SS+1, SS+1.5, SS+2.
+   *
+   *  Rounded *in that zone* rather than in UTC, which matters for the zones
+   *  offset by three quarters of an hour — Nepal, Chatham — where the boundaries
+   *  don't line up with UTC's.
    *
    *  Returns instants. The zone is only used to decide where the boundaries fall
    *  and to label them; what a booking stores is still an absolute instant, so
    *  the recurrence itself stays free of any timezone. */
   def upcomingStarts(from: ZonedDateTime, zone: java.time.ZoneId, count: Int): List[ZonedDateTime] = {
-    val nextHour = from.withZoneSameInstant(zone)
-      .truncatedTo(java.time.temporal.ChronoUnit.HOURS)
-      .plusHours(1)
-    (0 until math.max(0, count)).map(step => nextHour.plusHours(step.toLong)).toList
+    val local = from.withZoneSameInstant(zone)
+    val hour = local.truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+    // Strictly after `from`, so a picker opened at exactly half past does not
+    // offer the half hour that is already here.
+    val first = if (local.getMinute < 30) hour.plusMinutes(30) else hour.plusHours(1)
+    (0 until math.max(0, count)).map(step => first.plusMinutes(30L * step)).toList
   }
 }
 

@@ -62,6 +62,14 @@ class ServerSaveResetSpec extends AnyFunSuite with Matchers {
     ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-30T22:00:00")) shouldBe "SS+12"
   }
 
+  test("half hours read as .5, since that is what the schedule picker offers") {
+    ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-30T11:30:00")) shouldBe "SS+1.5"
+    ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-30T22:30:00")) shouldBe "SS-11.5"
+    // Anything finer belongs to the half below it rather than rounding up.
+    ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-30T11:59:00")) shouldBe "SS+1.5"
+    ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-30T10:29:00")) shouldBe "SS+0"
+  }
+
   test("the late hours count down to the next save rather than up from the last") {
     // Nobody says "SS+20" for 06:00 — it's SS-4, four hours before the next save.
     ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-07-31T06:00:00")) shouldBe "SS-4"
@@ -76,10 +84,15 @@ class ServerSaveResetSpec extends AnyFunSuite with Matchers {
 
   test("a daylight-saving day can't produce an SS+24") {
     // Europe/Berlin leaves CEST on 25 Oct 2026, making that day 25 hours long.
-    val labels = (0 to 25).map(h =>
-      ServerSaveSchedule.serverSaveOffsetLabel(berlin("2026-10-25T10:00:00").plusHours(h.toLong)))
+    val labels = (0 to 51).map(halves =>
+      ServerSaveSchedule.serverSaveOffsetLabel(
+        berlin("2026-10-25T10:00:00").plusMinutes(halves.toLong * 30)))
     labels should not contain "SS+24"
     labels should not contain "SS+25"
+    labels should not contain "SS-0"
+    // The 25th and 25.5th hour still precede that day's next save; both clamp
+    // onto the last half hour before it rather than running off the end.
+    labels should contain ("SS-0.5")
   }
 
   test("consecutive boundaries are always exactly one day apart in local time") {

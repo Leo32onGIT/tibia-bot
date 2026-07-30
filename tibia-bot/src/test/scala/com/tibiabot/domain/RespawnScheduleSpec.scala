@@ -65,30 +65,42 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     schedule(period = -10).nextStartAtOrAfter(from) shouldBe from
   }
 
-  test("the picker offers whole hours in the guild's own clock") {
+  test("the picker offers half hours in the guild's own clock") {
     val berlin = java.time.ZoneId.of("Europe/Berlin")
-    // 20:17 Berlin — the first option is the next whole hour, not 17 past.
+    // 20:17 Berlin — the first option is the next half hour, not 17 past.
     val from = ZonedDateTime.parse("2026-07-30T18:17:00Z")
-    val starts = RespawnSchedule.upcomingStarts(from, berlin, 3)
+    val starts = RespawnSchedule.upcomingStarts(from, berlin, 4)
 
-    starts.map(_.withZoneSameInstant(berlin).getHour) shouldBe List(21, 22, 23)
-    starts.map(_.withZoneSameInstant(berlin).getMinute) shouldBe List(0, 0, 0)
+    starts.map(_.withZoneSameInstant(berlin).getHour) shouldBe List(20, 21, 21, 22)
+    starts.map(_.withZoneSameInstant(berlin).getMinute) shouldBe List(30, 0, 30, 0)
     starts.head.isAfter(from) shouldBe true
   }
 
-  test("hour boundaries follow the zone, not UTC") {
-    // India is half an hour off UTC, so its whole hours are at :30 in UTC terms.
-    // Rounding in UTC would offer times that are not on the hour there at all.
-    val kolkata = java.time.ZoneId.of("Asia/Kolkata")
+  test("a picker opened on the half hour offers the next one, not this one") {
+    // Otherwise the first option is a start time that has already arrived.
+    val berlin = java.time.ZoneId.of("Europe/Berlin")
+    val onTheHalf = ZonedDateTime.parse("2026-07-30T18:30:00Z")
+    RespawnSchedule.upcomingStarts(onTheHalf, berlin, 1).head shouldBe
+      ZonedDateTime.parse("2026-07-30T19:00:00Z").withZoneSameInstant(berlin)
+
+    val onTheHour = ZonedDateTime.parse("2026-07-30T18:00:00Z")
+    RespawnSchedule.upcomingStarts(onTheHour, berlin, 1).head shouldBe
+      ZonedDateTime.parse("2026-07-30T18:30:00Z").withZoneSameInstant(berlin)
+  }
+
+  test("boundaries follow the zone, not UTC") {
+    // Nepal is 5:45 off UTC, so its half hours land at :15 and :45 in UTC terms.
+    // Rounding in UTC would offer times that are not on the half hour there.
+    val kathmandu = java.time.ZoneId.of("Asia/Kathmandu")
     val starts = RespawnSchedule.upcomingStarts(
-      ZonedDateTime.parse("2026-07-30T18:17:00Z"), kolkata, 2)
-    starts.map(_.withZoneSameInstant(kolkata).getMinute) shouldBe List(0, 0)
-    starts.map(_.toInstant.getEpochSecond % 3600) shouldBe List(1800L, 1800L)
+      ZonedDateTime.parse("2026-07-30T18:17:00Z"), kathmandu, 2)
+    starts.map(_.withZoneSameInstant(kathmandu).getMinute) shouldBe List(30, 0)
+    starts.map(_.toInstant.getEpochSecond % 1800) shouldBe List(900L, 900L)
   }
 
   test("the picker never offers more than Discord allows in a select") {
     val berlin = java.time.ZoneId.of("Europe/Berlin")
-    RespawnSchedule.upcomingStarts(anchor, berlin, 24) should have size 24
+    RespawnSchedule.upcomingStarts(anchor, berlin, 25) should have size 25
     RespawnSchedule.upcomingStarts(anchor, berlin, 0) shouldBe empty
     RespawnSchedule.upcomingStarts(anchor, berlin, -1) shouldBe empty
   }
