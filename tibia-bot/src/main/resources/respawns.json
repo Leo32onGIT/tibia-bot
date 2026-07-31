@@ -59,11 +59,11 @@
     { "code": "412",  "region": "Edron",       "name": "Grimvale",                               "creature": "Wereboar" },
     { "code": "413",  "region": "Edron",       "name": "Lycantrope Grounds",                     "creature": "Shadowpelt" },
     { "code": "414",  "region": "Edron",       "name": "Edron Vampire Crypt",                    "creature": "Vampire Viscount" },
-    { "code": "415",  "region": "Edron",       "name": "Cult Orcs",                              "creature": "Orc Cult Fanatic" },
-    { "code": "416",  "region": "Edron",       "name": "Bounac - Surface East",                  "creature": "Usurpur Knight" },
-    { "code": "417",  "region": "Edron",       "name": "Bounac - Surface West",                  "creature": "Usurpur Archer" },
-    { "code": "418",  "region": "Edron",       "name": "Bounac - Crypt Warriors",                "creature": "Crypt Warrior" },
-    { "code": "419",  "region": "Edron",       "name": "Bounac - Carnasylvans",                  "creature": "Hulking Carnisylvan" },
+    { "code": "415",  "region": "Edron",       "name": "Orc Cults",                              "creature": "Orc Cult Fanatic" },
+    { "code": "416",  "region": "Edron",       "name": "Bounac East",                  "creature": "Usurpur Knight" },
+    { "code": "417",  "region": "Edron",       "name": "Bounac West",                  "creature": "Usurpur Archer" },
+    { "code": "418",  "region": "Edron",       "name": "Bounac Crypt Warriors",                "creature": "Crypt Warrior" },
+    { "code": "419",  "region": "Edron",       "name": "Bounac Carnasylvans",                  "creature": "Hulking Carnisylvan" },
     { "code": "420",  "region": "Edron",       "name": "Gnomprona - Monster Graveyard",          "creature": "Undertaker" },
     { "code": "421",  "region": "Edron",       "name": "Gnomprona - Sparkling Pools",            "creature": "Prehemoth" },
     { "code": "422",  "region": "Edron",       "name": "Gnomprona - Crystal Enigma",             "creature": "Mantosaurus" },
@@ -78,7 +78,7 @@
 
     { "code": "501",  "region": "Venore",      "name": "Pits of Inferno - Infernatil",           "creature": "Hellfire Fighter" },
     { "code": "502",  "region": "Venore",      "name": "Pits of Inferno - Pumin",                "creature": "Betrayed Wraith" },
-    { "code": "503",  "region": "Venore",      "name": "Pits of Inferno - Verminor",             "creature": "Blightwalker" },
+    { "code": "503",  "region": "Venore",      "name": "Pits of Inferno - Verminor",             "creature": "Defiler" },
     { "code": "504",  "region": "Venore",      "name": "Pits of Inferno - Tafariel",             "creature": "Dark Torturer" },
     { "code": "505",  "region": "Venore",      "name": "Pits of Inferno - Apocalypse",           "creature": "Juggernaut" },
     { "code": "506",  "region": "Venore",      "name": "Pits of Inferno - Bazir",                "creature": "Nightmare" },
@@ -256,8 +256,8 @@
     { "code": "1416", "region": "Rathleton",   "name": "Oramond Hydras",                         "creature": "Hydra" },
     { "code": "1417", "region": "Rathleton",   "name": "Krailos Ruins - Nightmares",             "creature": "Nightmare" },
     { "code": "1418", "region": "Rathleton",   "name": "Krailos Spider Cave",                    "creature": "Brimstone Bug" },
-    { "code": "1419", "region": "Rathleton",   "name": "Podzilla (Rootthings) -1",               "creature": "Rootthing Bug Tracker" },
-    { "code": "1420", "region": "Rathleton",   "name": "Podzilla (Rootthings) -2",               "creature": "Rootthing Nutshell" },
+    { "code": "1419", "region": "Rathleton",   "name": "Rootthings -1",                          "creature": "Rootthing Bug Tracker" },
+    { "code": "1420", "region": "Rathleton",   "name": "Rootthings -2",                          "creature": "Rootthing Nutshell" },
     { "code": "1421", "region": "Rathleton",   "name": "Quaras (Podzilla)",                      "creature": "Quara Raider" },
 
     { "code": "1501", "region": "Roshamuul",   "name": "Dark Grounds",                           "creature": "Sight of Surrender" },
@@ -313,8 +313,8 @@
     { "code": "1901", "region": "Marapur",     "name": "Great Pearl Fan Reef",                   "creature": "Two-Headed Turtle" },
     { "code": "1902", "region": "Marapur",     "name": "Temple of the Moon Goddess",             "creature": "Naga Warrior" },
 
-    { "code": "2001", "region": "Otherworld",  "name": "HoD - Ankrahmun",                        "creature": "Dread Intruder" },
-    { "code": "2002", "region": "Otherworld",  "name": "HoD - Svargrond",                        "creature": "Reality Reaver" },
-    { "code": "2003", "region": "Otherworld",  "name": "HoD - Zao",                              "creature": "Sparkion" }
+    { "code": "2001", "region": "Otherworld",  "name": "Heart of Destruction - Ankrahmun",                        "creature": "Dread Intruder" },
+    { "code": "2002", "region": "Otherworld",  "name": "Heart of Destruction - Svargrond",                        "creature": "Reality Reaver" },
+    { "code": "2003", "region": "Otherworld",  "name": "Heart of Destruction - Zao",                              "creature": "Sparkion" }
   ]
 }
