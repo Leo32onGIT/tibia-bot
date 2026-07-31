@@ -60,10 +60,10 @@
     { "code": "413",  "region": "Edron",       "name": "Lycantrope Grounds",                     "creature": "Shadowpelt" },
     { "code": "414",  "region": "Edron",       "name": "Edron Vampire Crypt",                    "creature": "Vampire Viscount" },
     { "code": "415",  "region": "Edron",       "name": "Orc Cults",                              "creature": "Orc Cult Fanatic" },
-    { "code": "416",  "region": "Edron",       "name": "Bounac East",                  "creature": "Usurpur Knight" },
-    { "code": "417",  "region": "Edron",       "name": "Bounac West",                  "creature": "Usurpur Archer" },
-    { "code": "418",  "region": "Edron",       "name": "Bounac Crypt Warriors",                "creature": "Crypt Warrior" },
-    { "code": "419",  "region": "Edron",       "name": "Bounac Carnasylvans",                  "creature": "Hulking Carnisylvan" },
+    { "code": "416",  "region": "Edron",       "name": "Bounac East",                            "creature": "Usurpur Knight" },
+    { "code": "417",  "region": "Edron",       "name": "Bounac West",                            "creature": "Usurpur Archer" },
+    { "code": "418",  "region": "Edron",       "name": "Bounac Crypt Warriors",                  "creature": "Crypt Warrior" },
+    { "code": "419",  "region": "Edron",       "name": "Bounac Carnasylvans",                    "creature": "Hulking Carnisylvan" },
     { "code": "420",  "region": "Edron",       "name": "Gnomprona - Monster Graveyard",          "creature": "Undertaker" },
     { "code": "421",  "region": "Edron",       "name": "Gnomprona - Sparkling Pools",            "creature": "Prehemoth" },
     { "code": "422",  "region": "Edron",       "name": "Gnomprona - Crystal Enigma",             "creature": "Mantosaurus" },
@@ -98,7 +98,7 @@
     { "code": "604",  "region": "Darashia",    "name": "Ferumbras Entrance",                     "creature": "Demon" },
     { "code": "605",  "region": "Darashia",    "name": "Grounds of Fire (Fire Seal)",            "creature": "Hellhound" },
     { "code": "606a", "region": "Darashia",    "name": "Grounds of Damnation (DT Seal -1)",      "creature": "Vexclaw" },
-    { "code": "606b", "region": "Darashia",    "name": "Grounds of Damnation (DT Seal Boss Floor -2)", "creature": "Dark Torturer" },
+    { "code": "606b", "region": "Darashia",    "name": "Grounds of Damnation (DT Seal -2)",      "creature": "Dark Torturer" },
     { "code": "607",  "region": "Darashia",    "name": "Grounds of Deceit (Phantasm Seal)",      "creature": "Phantasm" },
     { "code": "608",  "region": "Darashia",    "name": "Grounds of Destruction (Jugg Seal)",     "creature": "Juggernaut" },
     { "code": "609a", "region": "Darashia",    "name": "Grounds of Despair (Pumin -1 & -2)",     "creature": "Grimeleech" },
@@ -112,9 +112,9 @@
     { "code": "615a", "region": "Darashia",    "name": "Werehyaena Lair -1",                     "creature": "Werehyaena Shaman" },
     { "code": "615b", "region": "Darashia",    "name": "Werehyaena Lair -2 North",               "creature": "Werehyaena" },
     { "code": "615c", "region": "Darashia",    "name": "Werehyaena Lair -2 South",               "creature": "Werehyaena" },
-    { "code": "616",  "region": "Darashia",    "name": "Burster Spectres",                           "creature": "Burster Spectre" },
+    { "code": "616",  "region": "Darashia",    "name": "Burster Spectres",                       "creature": "Burster Spectre" },
     { "code": "617a", "region": "Darashia",    "name": "Grounds of Plague (Verminor -1)",        "creature": "Defiler" },
-    { "code": "617b", "region": "Darashia",    "name": "Grounds of Plague (Verminor-Boss Floor -2)", "creature": "Plaguesmith" },
+    { "code": "617b", "region": "Darashia",    "name": "Grounds of Plague (Verminor -2)",        "creature": "Plaguesmith" },
     { "code": "618",  "region": "Darashia",    "name": "Jaded Roots",                            "creature": "Bloated Man-Maggot" },
     { "code": "619",  "region": "Darashia",    "name": "Putrefactory",                           "creature": "Sopping Carcass" },
     { "code": "620",  "region": "Darashia",    "name": "Gloom Pillars",                          "creature": "Converter" },
@@ -312,9 +312,16 @@
 
     { "code": "1901", "region": "Marapur",     "name": "Great Pearl Fan Reef",                   "creature": "Two-Headed Turtle" },
     { "code": "1902", "region": "Marapur",     "name": "Temple of the Moon Goddess",             "creature": "Naga Warrior" },
+    { "code": "1904", "region": "Marapur",     "name": "Asura Citadel -1",                       "creature": "Winged Jaracal" },
+    { "code": "1904", "region": "Marapur",     "name": "Asura Citadel -2",                       "creature": "Silverfrost Sentinel" },
 
-    { "code": "2001", "region": "Otherworld",  "name": "Heart of Destruction - Ankrahmun",                        "creature": "Dread Intruder" },
-    { "code": "2002", "region": "Otherworld",  "name": "Heart of Destruction - Svargrond",                        "creature": "Reality Reaver" },
-    { "code": "2003", "region": "Otherworld",  "name": "Heart of Destruction - Zao",                              "creature": "Sparkion" }
+    { "code": "2001", "region": "Otherworld",  "name": "Heart of Destruction - Ankrahmun",       "creature": "Dread Intruder" },
+    { "code": "2002", "region": "Otherworld",  "name": "Heart of Destruction - Svargrond",       "creature": "Reality Reaver" },
+    { "code": "2003", "region": "Otherworld",  "name": "Heart of Destruction - Zao",             "creature": "Sparkion" },
+
+    { "code": "2101", "region": "Thalassara",     "name": "Thalassara Surroundings",             "creature": "Moonspawn Oozecrown" },
+    { "code": "2102", "region": "Thalassara",     "name": "Radiant Ascendancy",                  "creature": "Radiant Zealot" },
+    { "code": "2103", "region": "Thalassara",     "name": "Radiant Skyhold",                     "creature": "Radiant Warden" }
+
   ]
 }
