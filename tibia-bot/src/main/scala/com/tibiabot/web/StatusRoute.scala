@@ -240,8 +240,9 @@ final class StatusRoute(
    *  happens once, in PatreonAdminRoute, when a seat is actually assigned.
    *
    *  Additively merges in patreonMemberRepository's synced snapshot (see
-   *  patreonapi.PatreonApiClient) — purely informational, never affects
-   *  paywallService's own Discord-role gate:
+   *  patreonapi.PatreonApiClient) — the same snapshot the paywall gate reads,
+   *  so a supporter's patronStatus here and their ability to `/setup` come
+   *  from one source and can't disagree:
    *   - a seat-holding supporter whose Discord id matches a synced member
    *     gets that member's patronStatus/pledgeCents spliced on, and their
    *     Patreon fullName supersedes the seat's own one-time stored name;
@@ -268,6 +269,12 @@ final class StatusRoute(
     // this stays one query instead of N.
     val extraSeatsByUser = paywallService.allExtraSeats()
     def seatLimitFor(userId: String): Int = math.max(0, Config.Patreon.seatsPerUser + extraSeatsByUser.getOrElse(userId, 0))
+    // Same bulk-read reasoning as extraSeatsByUser. `active` alone can't tell
+    // the panel a subscription has lapsed any more: a lapsed seat stays fully
+    // active through its grace period (see PaywallService.worldsInGrace), so
+    // the dashboard would otherwise show it as fine right up until the pause
+    // landed a week later.
+    val inGrace = paywallService.worldsInGrace()
 
     val seatSupporters = bySupporter.toList.map { case (userId, seats) =>
       val seatsJson = seats.map { seat =>
@@ -278,7 +285,8 @@ final class StatusRoute(
           "guildName" -> JsString(guildName),
           "world" -> JsString(seat.world),
           "created" -> JsString(seat.created.toString),
-          "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world))
+          "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world)),
+          "inGrace" -> JsBoolean(inGrace.contains((seat.guildId, seat.world)))
         ): JsValue
       }
       // A confirmed Patreon cross-reference's fullName supersedes the seat's

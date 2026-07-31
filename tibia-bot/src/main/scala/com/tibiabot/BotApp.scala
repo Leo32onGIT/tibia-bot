@@ -142,6 +142,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
   private val patreonSeatOverrideRepository: persistence.PatreonSeatOverrideRepository =
     new persistence.jdbc.JdbcPatreonSeatOverrideRepository(connectionProvider)
+  private val patreonGraceRepository: persistence.PatreonGraceRepository =
+    new persistence.jdbc.JdbcPatreonGraceRepository(connectionProvider)
   val guildActivityRepository: persistence.GuildActivityRepository =
     new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
   private val renameCooldownRepository: persistence.RenameCooldownRepository =
@@ -190,14 +192,20 @@ object BotApp extends App with StrictLogging {
   // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
   // their seats to that (guild, world) pair; that pair's activity keeps
-  // posting only while its seat's owner still holds the support-guild role.
-  // Seat count is Config.Patreon.seatsPerUser plus any per-user adjustment
-  // granted through the dashboard (see PaywallService.effectiveSeatLimit).
-  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
+  // posting only while Patreon still reports that seat's owner an active
+  // patron (read from patreonMemberRepository's synced snapshot below — the
+  // support Discord's role plays no part in this any more), and a world that
+  // stops checking out (including one that was never seated at all) gets
+  // Config.Patreon.graceDays to sort it out before anything is actually
+  // paused. Seat count is Config.Patreon.seatsPerUser plus any per-user
+  // adjustment granted through the dashboard (see
+  // PaywallService.effectiveSeatLimit).
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, patreonGraceRepository, patreonMemberRepository, Config.Patreon.supportGuildId, Config.Patreon.seatsPerUser, Config.Patreon.graceDays, discordGateway.applicationOwnerId)
 
-  // Direct Patreon API access, purely additive to the dashboard's supporters
-  // panel — see Config.PatreonApi and syncPatreonMembers below. Never touches
-  // paywallService's own Discord-role gate.
+  // Direct Patreon API access — see Config.PatreonApi and syncPatreonMembers
+  // below. What this syncs is the source of truth for who's subscribed, so
+  // the paywall above depends on it running; it also feeds the dashboard's
+  // supporters panel.
   private val patreonApiClient = new patreonapi.PatreonApiClient()(actorSystem, ex)
 
   // Per-guild hunted/allied player and guild list CRUD
@@ -521,14 +529,22 @@ object BotApp extends App with StrictLogging {
     } else {
       updateOnOdd += 1
     }
-    // Patreon paywall: recheck every assigned seat's owner against the
-    // support guild every ~30 minutes (60 ticks at the 30s tick interval) —
-    // see paywall.PaywallService. A much lower-urgency check than
-    // updateOnOdd's ~5-minute cache cleanup, so it gets its own, longer cadence.
+    // Patreon paywall: recheck every configured world against the support
+    // guild every ~30 minutes (60 ticks at the 30s tick interval) — see
+    // paywall.PaywallService. A much lower-urgency check than updateOnOdd's
+    // ~5-minute cache cleanup, so it gets its own, longer cadence.
+    //
+    // worldsData rather than the seat table is the list of worlds to sweep:
+    // the seat table only knows the worlds that have a seat, and the grace
+    // period has to apply to the ones that don't (legacy setups) just as
+    // much. It's also the same per-guild world config the streams run off,
+    // maintained by /setup, /remove and guild-leave alike, so a world that
+    // isn't there is one nothing is being posted for anyway.
     if (paywallCheckCounter >= 60) {
       paywallCheckCounter = 0
       try {
-        paywallService.refreshAll { (guild, world, userId, userName) =>
+        val configuredSetups = worldsData.toList.flatMap { case (guildId, worlds) => worlds.map(w => (guildId, w.name)) }
+        paywallService.refreshAll(configuredSetups) { (guild, world, userId, userName) =>
           val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
           // Not routed through AdminLog.post — that helper's title ("a command
           // was run") is shared/fixed across every other caller, and this
@@ -542,9 +558,16 @@ object BotApp extends App with StrictLogging {
             // always current regardless of username staleness.
             val mention = s"<@$userId>"
             val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
+            // An empty userId means this world never had a seat at all (a
+            // legacy setup whose grace period ran out) — there's no
+            // subscription to describe as lapsed and nobody to name, so say
+            // what's actually true instead of pointing at a `<@>` nobody.
+            val cause =
+              if (userId.isEmpty) s"This world isn't tied to an active **Patreon** subscription."
+              else s"The Patreon subscription tied to $subscriber is no longer active or *cannot be verified*."
             val pausedEmbed = new EmbedBuilder()
             pausedEmbed.setTitle(s":warning: Violent Bot paused for $world")
-            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active or *cannot be verified*. [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
+            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\n$cause [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
             pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
             adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
               postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
@@ -554,14 +577,17 @@ object BotApp extends App with StrictLogging {
           // Low priority (rare, one DM per lapse) — goes through the shared
           // background lane so it can't compete with deaths/boosted-channel
           // posts for REST slots. Mirrors the boosted-DM notification pattern.
-          outboundSender.enqueue("paywall-lapse-dm") { () =>
+          // Skipped entirely for a never-seated world: no seat, no owner, so
+          // there is no personal inbox this belongs in — the admin-channel
+          // notice above is the whole story for those.
+          if (userId.nonEmpty) outboundSender.enqueue("paywall-lapse-dm") { () =>
             val user = discordGateway.retrieveUser(userId)
             if (user != null) {
               try {
                 user.openPrivateChannel().queue { pc =>
                   val dmEmbed = new EmbedBuilder()
                   dmEmbed.setTitle(s":warning: Violent Bot has been paused")
-                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the [Violent Bot Discord](https://discord.gg/qjSzsbjZx6), so the subscription check can't find you. If this was unintentional, simply rejoin the discord to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
+                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or your Discord account is no longer connected to Patreon, so the subscription check can't match you. If this was unintentional, [resubscribe](https://www.patreon.com/violentbot) or reconnect Discord on Patreon and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
                   dmEmbed.setColor(presentation.Embeds.NemesisPurple)
                   pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
                     List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
@@ -802,7 +828,11 @@ object BotApp extends App with StrictLogging {
 
   // Own independent schedule (same reasoning as the prune sweep above) —
   // guarded by Config.PatreonApi.enabled so this is a no-op until real
-  // Patreon API credentials are configured.
+  // Patreon API credentials are configured. That "no-op" is louder than it
+  // used to be: this sync is now the only thing that answers who's
+  // subscribed, so running without credentials means an empty snapshot and
+  // nobody able to /setup. Said plainly in the log rather than left to be
+  // deduced from a paywall that quietly refuses everyone.
   if (Config.PatreonApi.enabled) {
     logger.info(s"Patreon API sync enabled, campaign '${Config.PatreonApi.campaignId}', every ${Config.PatreonApi.syncInterval}")
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
@@ -810,7 +840,7 @@ object BotApp extends App with StrictLogging {
       catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
     })(ex)
   } else {
-    logger.info("Patreon API sync disabled (no access token configured)")
+    logger.warn("Patreon API sync disabled (no access token configured) — the paywall reads this sync, so nobody will pass the /setup subscription check")
   }
 
   /** Patreon's own API only gives us a linked patron's Discord *id*, not a
@@ -840,9 +870,11 @@ object BotApp extends App with StrictLogging {
     }
 
   /** Best-effort periodic snapshot of the Patreon campaign's member list
-   *  (see patreonapi.PatreonApiClient), purely for the dashboard's
-   *  supporters panel — never affects paywallService's own Discord-role
-   *  gate directly. It does reclaim a dashboard-granted seat override for
+   *  (see patreonapi.PatreonApiClient), backing both the dashboard's
+   *  supporters panel and the paywall gate itself — this snapshot is what
+   *  PaywallService.callerIsSubscribed reads, so the guards below on what
+   *  gets written are load-bearing, not tidiness. It also reclaims a
+   *  dashboard-granted seat override for
    *  someone Patreon has *just now* confirmed a Discord link for (see
    *  PaywallService.reclaimOverridesFromPatreon): a one-time hand-off from
    *  the admin's manual bridge to Patreon as the ongoing source of truth,
@@ -854,20 +886,34 @@ object BotApp extends App with StrictLogging {
    *  fetch just leaves the last snapshot in place until the next tick, same
    *  degrade-gracefully shape as everything else here. */
   private def syncPatreonMembers(): Unit =
-    patreonApiClient.fetchAllMembers().foreach { members =>
-      // Read once, before anything is overwritten, and used for two things: the
-      // names already resolved, and which accounts were already linked.
-      val previous = patreonMemberRepository.snapshot()
-      val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
-      val enriched = members.map(resolveDiscordUsername(_, knownNames))
-      logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account)")
-      val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
-      try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
-      catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
+    patreonApiClient.fetchAllMembers().foreach {
+      // A failed fetch must never reach replaceSnapshot: that call prunes
+      // every row the sync didn't carry, so an empty list wouldn't leave the
+      // snapshot stale, it would erase it — and with it every supporter's
+      // access, since callerIsSubscribed reads this table.
+      case None =>
+        logger.warn("Patreon member sync failed; keeping the previous snapshot rather than replacing it")
+      // A *successful* empty response is refused for the same reason. A live
+      // campaign never legitimately drops to zero members, so this reads as a
+      // misconfigured campaign id or a Patreon-side oddity answering 200 with
+      // no data — and a campaign that really had no members would have
+      // nobody to gate anyway, so declining to wipe costs nothing.
+      case Some(members) if members.isEmpty =>
+        logger.warn("Patreon member sync returned no members at all; keeping the previous snapshot rather than emptying it")
+      case Some(members) =>
+        // Read once, before anything is overwritten, and used for two things: the
+        // names already resolved, and which accounts were already linked.
+        val previous = patreonMemberRepository.snapshot()
+        val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
+        val enriched = members.map(resolveDiscordUsername(_, knownNames))
+        logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account, ${enriched.count(m => m.patronStatus.contains("active_patron") && m.discordUserId.isDefined)} of those active)")
+        val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
+        try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
+        catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
 
-      val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
-      val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
-      if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
+        val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
+        val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
+        if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
     }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {

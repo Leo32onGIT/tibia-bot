@@ -477,7 +477,10 @@ final class ChannelService(
     // would otherwise hang with no reply — so report it cleanly and point at /repair.
     val embedText = try {
       if (!paywallService.callerIsSubscribed(event.getUser.getId)) {
-        s"${Config.noEmoji} `/setup` requires an active **Patreon** subscription. Join the Violent Bot support Discord and subscribe there, then run `/setup` again."
+        // Both halves matter and neither is guessable: an active pledge alone
+        // isn't enough, because Patreon only tells us who a patron is on
+        // Discord once they've connected the two accounts themselves.
+        s"${Config.noEmoji} `/setup` requires an active **Patreon** subscription. [Subscribe](https://www.patreon.com/violentbot), connect your Discord account to Patreon, then run `/setup` again."
       } else if (Config.worldList.contains(world)) {
       val guild = event.getGuild
 
@@ -649,7 +652,13 @@ final class ChannelService(
             Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
             Button.secondary("paywall_reassign_no", "Cancel")
           )
-          s":warning: Tracking for **$world** is currently paused — the Patreon subscription tied to it lapsed.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
+          // A paused world with no seat is a legacy setup that ran out its
+          // grace period, not a lapsed subscription — there was never one to
+          // lapse, so don't claim there was.
+          val reason =
+            if (paywallService.hasSeat(guild.getId, world)) "the Patreon subscription tied to it lapsed"
+            else "it isn't tied to a Patreon subscription"
+          s":warning: Tracking for **$world** is currently paused — $reason.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
         } else {
           s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
         }

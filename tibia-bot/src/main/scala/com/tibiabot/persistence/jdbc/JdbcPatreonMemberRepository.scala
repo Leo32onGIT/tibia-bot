@@ -95,4 +95,17 @@ final class JdbcPatreonMemberRepository(connectionProvider: ConnectionProvider) 
       statement.close()
       members.toList
     }
+
+  def isActivePatron(discordUserId: String): Boolean =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      ensureTable(conn)
+      val statement = conn.prepareStatement(
+        "SELECT 1 FROM patreon_members WHERE discord_user_id = ? AND patron_status = 'active_patron' LIMIT 1"
+      )
+      statement.setString(1, discordUserId)
+      val result = statement.executeQuery()
+      val active = result.next()
+      statement.close()
+      active
+    }
 }

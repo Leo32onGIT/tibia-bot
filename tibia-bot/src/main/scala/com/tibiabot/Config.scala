@@ -114,18 +114,27 @@ object Config {
     val statusPort: Int = web.getInt("status-port")
   }
 
-  /** Patreon paywall: the support Discord + role Patreon assigns to active
-   *  subscribers, and how many (guild, world) seats each subscriber gets. */
+  /** Patreon paywall: how many (guild, world) seats each subscriber gets, and
+   *  the support Discord — which no longer gates anything, and is kept only
+   *  for the dashboard's username -> Discord id lookup (see
+   *  paywall.PaywallService.findUserIdByUsername). Who counts as subscribed
+   *  comes from the Patreon API instead; see [[PatreonApi]]. */
   object Patreon {
     private val patreon = discord.getConfig("patreon")
     val supportGuildId: String = patreon.getString("support-guild-id")
-    val roleId: String = patreon.getString("role-id")
     val seatsPerUser: Int = patreon.getInt("seats-per-user")
+    /** How long a configured world keeps running after the subscription
+     *  behind it stops checking out, before activity is actually paused —
+     *  see paywall.PaywallService's grace period. 0 pauses on the first
+     *  sweep that notices, i.e. the behaviour from before grace existed. */
+    val graceDays: Int = patreon.getInt("grace-days")
   }
 
   /** Direct Patreon API access (patreonapi.PatreonApiClient) — periodically
    *  syncs the campaign's member list for the dashboard's supporters panel.
-   *  Purely additive: does not affect the paywall's own Discord-role check.
+   *  Load-bearing: this snapshot is what the paywall's subscription check
+   *  reads (see paywall.PaywallService.callerIsSubscribed), so leaving it
+   *  unconfigured means nobody passes `/setup`.
    *  `enabled` mirrors `redisEnabled`'s shape — everything downstream no-ops
    *  cleanly while this is unconfigured. */
   object PatreonApi {

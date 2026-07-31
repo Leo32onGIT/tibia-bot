@@ -1,8 +1,8 @@
 package com.tibiabot.paywall
 
 import com.tibiabot.discord.DiscordGateway
-import com.tibiabot.domain.PatreonSeat
-import com.tibiabot.persistence.{PatreonSeatOverrideRepository, PatreonSeatRepository}
+import com.tibiabot.domain.{PatreonGrace, PatreonMember, PatreonSeat}
+import com.tibiabot.persistence.{PatreonGraceRepository, PatreonMemberRepository, PatreonSeatOverrideRepository, PatreonSeatRepository}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -39,40 +39,85 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def allExtraSeats(): Map[String, Int] = overrides
   }
 
-  private def service(seatLimit: Int = 3, ownerId: String = "owner-id", overrides: Map[String, Int] = Map.empty, existingSeats: Int = 0) =
-    new PaywallService(new FakeGateway, new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), "support-guild", "patreon-role", seatLimit, ownerId)
+  private class FakeGraceRepository(initial: List[PatreonGrace] = Nil) extends PatreonGraceRepository {
+    private var timers = initial.map(g => (g.guildId, g.world) -> g).toMap
+    def beginGrace(guildId: String, world: String, started: ZonedDateTime): Unit =
+      if (!timers.contains((guildId, world))) timers += (guildId, world) -> PatreonGrace(guildId, world, started, notified = false)
+    def markNotified(guildId: String, world: String): Unit =
+      timers.get((guildId, world)).foreach(g => timers += (guildId, world) -> g.copy(notified = true))
+    def clearGrace(guildId: String, world: String): Unit = timers -= ((guildId, world))
+    def allGrace(): List[PatreonGrace] = timers.values.toList
+  }
+
+  /** Stands in for the synced Patreon campaign snapshot — `activePatrons` are
+   *  the Discord ids Patreon reports as active_patron. */
+  private class FakeMemberRepository(activePatrons: Set[String] = Set.empty, failing: Boolean = false) extends PatreonMemberRepository {
+    def replaceSnapshot(members: List[PatreonMember], syncedAt: ZonedDateTime): Unit = ()
+    def snapshot(): List[PatreonMember] = Nil
+    def isActivePatron(discordUserId: String): Boolean =
+      if (failing) throw new RuntimeException("database unreachable") else activePatrons.contains(discordUserId)
+  }
+
+  private val now = ZonedDateTime.parse("2026-08-01T12:00:00Z")
+
+  private def service(
+    seatLimit: Int = 3,
+    ownerId: String = "owner-id",
+    overrides: Map[String, Int] = Map.empty,
+    existingSeats: Int = 0,
+    graceDays: Int = 7,
+    grace: FakeGraceRepository = new FakeGraceRepository(),
+    activePatrons: Set[String] = Set.empty,
+    memberLookupFails: Boolean = false
+  ) =
+    new PaywallService(
+      new FakeGateway, new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), grace,
+      new FakeMemberRepository(activePatrons, memberLookupFails), "support-guild", seatLimit, graceDays, ownerId
+    )
 
   test("isActive defaults true for a (guild, world) pair that's never been checked") {
     service().isActive("unknown-guild", "Antica") shouldBe true
   }
 
-  test("hasPatreonRole matches on the configured role id") {
-    val svc = service()
-    svc.hasPatreonRole(List("other-role", "patreon-role")) shouldBe true
-    svc.hasPatreonRole(List("other-role")) shouldBe false
-  }
-
-  test("callerIsSubscribed always passes for the configured owner, bypassing the role check entirely") {
-    val svc = service(ownerId = "owner-id")
-    svc.callerIsSubscribed("owner-id") shouldBe true
-  }
-
-  test("callerIsSubscribed still runs the normal role check for everyone else") {
-    val svc = service(ownerId = "owner-id")
-    // FakeGateway.guildById always returns null, so a non-owner reads as
-    // "not subscribed" (the real not-a-member-of-the-support-guild path).
-    svc.callerIsSubscribed("someone-else") shouldBe false
-  }
-
-  test("callerIsSubscribed: a positive seat adjustment bypasses the role check entirely") {
-    val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 1))
-    // FakeGateway.guildById returning null would normally fail this for a
-    // non-owner (see the previous test) - the positive override bypasses
-    // that path before it's even reached.
+  test("callerIsSubscribed passes an account Patreon reports as an active patron") {
+    val svc = service(activePatrons = Set("user-1"))
     svc.callerIsSubscribed("user-1") shouldBe true
   }
 
-  test("callerIsSubscribed: a zero or negative seat adjustment does not bypass the role check") {
+  test("callerIsSubscribed fails an account Patreon doesn't report as an active patron") {
+    // Covers all of: never subscribed, subscription lapsed or declined, and
+    // subscribed but Discord not connected on Patreon's side — the snapshot
+    // simply has no active row for this id in every one of those cases.
+    val svc = service(activePatrons = Set("someone-else"))
+    svc.callerIsSubscribed("user-1") shouldBe false
+  }
+
+  test("callerIsSubscribed does not consult the support guild at all") {
+    // FakeGateway.guildById always returns null; a Patreon-backed pass has to
+    // survive that, since the support guild no longer gates anything.
+    service(activePatrons = Set("user-1")).callerIsSubscribed("user-1") shouldBe true
+  }
+
+  test("callerIsSubscribed: a failed snapshot lookup reads as not subscribed rather than throwing") {
+    // Which starts the grace period rather than cutting anyone off — see
+    // applyRefresh; a database blip costs headroom, not anyone's tracking.
+    val svc = service(memberLookupFails = true)
+    svc.callerIsSubscribed("user-1") shouldBe false
+  }
+
+  test("callerIsSubscribed always passes for the configured owner, bypassing the Patreon check entirely") {
+    val svc = service(ownerId = "owner-id", memberLookupFails = true)
+    svc.callerIsSubscribed("owner-id") shouldBe true
+  }
+
+  test("callerIsSubscribed: a positive seat adjustment bypasses the Patreon check entirely") {
+    // memberLookupFails would fail this for anyone else (see above) — the
+    // positive override short-circuits before Patreon is ever consulted.
+    val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 1), memberLookupFails = true)
+    svc.callerIsSubscribed("user-1") shouldBe true
+  }
+
+  test("callerIsSubscribed: a zero or negative seat adjustment does not bypass the Patreon check") {
     val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 0, "user-2" -> -1))
     svc.callerIsSubscribed("user-1") shouldBe false
     svc.callerIsSubscribed("user-2") shouldBe false
@@ -166,39 +211,99 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     svc.allExtraSeats() shouldBe Map("user-1" -> 0, "user-2" -> 2)
   }
 
-  test("a (guild, world) pair whose owner fails the check becomes inactive and is reported as lapsed") {
-    val svc = service()
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => false) shouldBe List(("guild-1", "Antica"))
+  test("a (guild, world) pair whose owner passes the check stays active and starts no timer") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => true, now) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    grace.allGrace() shouldBe empty
+  }
+
+  test("a (guild, world) pair whose owner fails the check keeps running, and only starts the clock") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    grace.allGrace() shouldBe List(PatreonGrace("guild-1", "Antica", now, notified = false))
+  }
+
+  test("a world with no seat at all is treated exactly like a lapsed one — grace, then pause") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", None)), _ => true, now) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    svc.applyRefresh(List(("guild-1", "Antica", None)), _ => true, now.plusDays(7)) shouldBe List(("guild-1", "Antica"))
     svc.isActive("guild-1", "Antica") shouldBe false
   }
 
-  test("a (guild, world) pair whose owner passes the check stays active") {
-    val svc = service()
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => true) shouldBe empty
+  test("the pause lands once the grace period is up, and is reported then") {
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Antica", now, notified = false)))
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(7).minusMinutes(1)) shouldBe empty
     svc.isActive("guild-1", "Antica") shouldBe true
-  }
-
-  test("a pair that was already inactive is not reported as lapsed again") {
-    val svc = service()
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => false) shouldBe List(("guild-1", "Antica"))
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => false) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(7)) shouldBe List(("guild-1", "Antica"))
     svc.isActive("guild-1", "Antica") shouldBe false
   }
 
-  test("a pair that recovers (subscription renewed) becomes active again, not reported as lapsed") {
+  test("later sweeps never push the deadline forward — the clock runs from the first sweep that noticed") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(5)) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(7)) shouldBe List(("guild-1", "Antica"))
+  }
+
+  test("an already-paused pair is not reported again on later sweeps") {
     val svc = service()
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => false) shouldBe List(("guild-1", "Antica"))
-    svc.applyRefresh(List(("guild-1", "Antica", "user-1")), _ => true) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(7)) shouldBe List(("guild-1", "Antica"))
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(8)) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe false
+  }
+
+  test("an already-notified pause is not re-announced after a restart, when nothing is active-status cached") {
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Antica", now, notified = true)))
+    val svc = service(grace = grace)
+    svc.isActive("guild-1", "Antica") shouldBe true // fail-open, nothing swept yet
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(30)) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe false
+  }
+
+  test("sorting the subscription out mid-grace stops the clock and leaves no trace") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => true, now.plusDays(3)) shouldBe empty
+    grace.allGrace() shouldBe empty
     svc.isActive("guild-1", "Antica") shouldBe true
+  }
+
+  test("a pair that recovers after being paused becomes active again and gets a fresh window on a later lapse") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(7)) shouldBe List(("guild-1", "Antica"))
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => true, now.plusDays(8)) shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    // lapses again: a full new grace period, and its own notice
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(9)) shouldBe empty
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now.plusDays(16)) shouldBe List(("guild-1", "Antica"))
+  }
+
+  test("a zero-day grace period pauses on the first sweep that notices") {
+    val svc = service(graceDays = 0)
+    svc.applyRefresh(List(("guild-1", "Antica", Some("user-1"))), _ => false, now) shouldBe List(("guild-1", "Antica"))
+    svc.isActive("guild-1", "Antica") shouldBe false
   }
 
   test("different (guild, world) pairs are evaluated independently, even in the same guild") {
-    val svc = service()
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Secura", now.minusDays(30), notified = false)))
+    val svc = service(grace = grace)
     val checker: String => Boolean = {
       case "good-user" => true
       case _ => false
     }
-    svc.applyRefresh(List(("guild-1", "Antica", "good-user"), ("guild-1", "Secura", "bad-user")), checker) shouldBe List(("guild-1", "Secura"))
+    svc.applyRefresh(List(("guild-1", "Antica", Some("good-user")), ("guild-1", "Secura", Some("bad-user"))), checker, now) shouldBe List(("guild-1", "Secura"))
     svc.isActive("guild-1", "Antica") shouldBe true
     svc.isActive("guild-1", "Secura") shouldBe false
   }

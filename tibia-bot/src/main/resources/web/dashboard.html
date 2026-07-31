@@ -720,13 +720,16 @@ function buildSupporterCard(supporter) {
   // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
   // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
   const hasPatreonInfo = supporter.patronStatus !== undefined;
-  // Seat-holders' confirmed/unconfirmed status is untouched by the Patreon
-  // sync — still driven purely by the per-seat "active" flag from the
-  // existing Discord-role recheck (see PaywallService.refreshAll). Only a
-  // seatless, Patreon-sourced entry falls back to patronStatus, since it
-  // has no seats to check at all.
+  // Seat-holders' confirmed/unconfirmed status comes from the per-seat flags
+  // set by the periodic subscription recheck (see PaywallService.refreshAll),
+  // which reads the same synced Patreon snapshot patronStatus comes from. A
+  // seat in its grace period is still "active" (nothing is paused yet) but
+  // has already failed that recheck, so it counts as unconfirmed here —
+  // otherwise a lapse wouldn't show up on this panel until the pause landed
+  // days later. Only a seatless, Patreon-sourced entry falls back to
+  // patronStatus directly, since it has no seats to check at all.
   const confirmed = supporter.seats.length > 0
-    ? supporter.seats.every(s => s.active)
+    ? supporter.seats.every(s => s.active && !s.inGrace)
     : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
 
   const key = supporterKey(supporter);
