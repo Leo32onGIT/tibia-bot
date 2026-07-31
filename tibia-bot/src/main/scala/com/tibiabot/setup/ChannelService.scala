@@ -480,7 +480,8 @@ final class ChannelService(
         // Both halves matter and neither is guessable: an active pledge alone
         // isn't enough, because Patreon only tells us who a patron is on
         // Discord once they've connected the two accounts themselves.
-        s"${Config.noEmoji} `/setup` requires an active **Patreon** subscription. [Subscribe](https://www.patreon.com/violentbot), connect your Discord account to Patreon, then run `/setup` again."
+        s"${Config.noEmoji} `/setup` requires an active **Patreon** subscription.\nJoin as a paid member on [Patreon](https://patreon.com/violentbot) and [connect your Discord account](https://www.patreon.com/settings/apps/discord) to `/setup` and use the bot.\n\n" +
+        "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)"
       } else if (Config.worldList.contains(world)) {
       val guild = event.getGuild
 
