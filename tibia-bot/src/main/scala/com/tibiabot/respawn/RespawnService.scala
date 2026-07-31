@@ -26,6 +26,8 @@ object ClaimOutcome {
    *  and `reservedFrom` is when the booking takes over. */
   final case class Shortened(respawn: Respawn, claim: RespawnClaim, requested: Int,
                              reservedFrom: Option[ZonedDateTime]) extends ClaimOutcome
+  /** Lost a race: somebody else's claim landed first. */
+  final case class JustTaken(respawn: Respawn) extends ClaimOutcome
   /** Refused because a booked slot leaves too little time to be worth granting. */
   final case class Reserved(respawn: Respawn, from: ZonedDateTime) extends ClaimOutcome
   /** The caller already holds or is queued for this spawn. */
@@ -220,15 +222,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
-  def addRespawn(guildId: String, code: String, name: String, creature: String, region: String,
-                 world: String, mapperLink: String, addedBy: String): Respawn =
-    repository.addRespawn(guildId, code, name, creature, region, world, mapperLink,
-      Respawn.SourceCustom, addedBy)
-
-  def editRespawn(guildId: String, respawnId: Long, name: Option[String], creature: Option[String],
-                  world: Option[String], mapperLink: Option[String]): Unit =
-    repository.updateRespawn(guildId, respawnId, name, creature, world, mapperLink)
-
   def removeRespawn(guildId: String, respawnId: Long): Unit = repository.removeRespawn(guildId, respawnId)
 
   /** Push improvements to the bundled list's creature choices out to a guild that
@@ -292,12 +285,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     repository.setStaminaUsed(guildId, userId, settings.staminaMinutes - wanted, boundary)
     repository.stamina(guildId, userId, settings.staminaMinutes, boundary)
   }
-
-  def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int,
-                     now: ZonedDateTime = ZonedDateTime.now()): Unit =
-    repository.setStaminaUsed(guildId, userId, usedMinutes, resetBoundary(now))
-
-  // --- claiming -----------------------------------------------------------
 
   /** When a claim starting at `startsAt` for `minutes` should end.
    *
@@ -423,13 +410,22 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
       ClaimOutcome.NoStamina(respawn, granted, tank, ServerSaveSchedule.nextServerSave(now))
     } else {
-      val claim = repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
-        now, end, granted, kind)
-      refreshThread(guild, respawn, config)
-      // The caller is told when the hunt was shortened, rather than quietly
-      // getting less than they asked for.
-      if (granted < minutes) ClaimOutcome.Shortened(respawn, claim, minutes, reservation)
-      else ClaimOutcome.Claimed(respawn, claim)
+      repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
+        now, end, granted, kind) match {
+        case None =>
+          // Somebody claimed it between the check above and this insert. Hand the
+          // stamina straight back rather than stranding it until server save, and
+          // say so — silently queueing them would be answering a question they
+          // did not ask.
+          repository.refundStamina(guildId, userId, granted, boundary)
+          ClaimOutcome.JustTaken(respawn)
+        case Some(claim) =>
+          refreshThread(guild, respawn, config)
+          // The caller is told when the hunt was shortened, rather than quietly
+          // getting less than they asked for.
+          if (granted < minutes) ClaimOutcome.Shortened(respawn, claim, minutes, reservation)
+          else ClaimOutcome.Claimed(respawn, claim)
+      }
     }
   }
 
@@ -702,30 +698,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  owner rather than on themselves. */
   def holderOf(guildId: String, respawnId: Long): Option[RespawnClaim] =
     repository.activeClaim(guildId, respawnId)
-
-  /** Force a spawn free regardless of who holds it (`/respawn admin clear`).
-   *  Refunds the holder like a voluntary release would — an admin clearing a
-   *  spawn isn't a penalty. */
-  def adminClear(guild: Guild, respawn: Respawn, now: ZonedDateTime = ZonedDateTime.now()): Boolean =
-    settings(guild.getId).exists { config =>
-      val guildId = guild.getId
-      val active = repository.activeClaim(guildId, respawn.id)
-      active.foreach { claim =>
-        val refunded = refundFor(claim, now)
-        repository.cancelClaim(guildId, claim.id, RespawnClaim.Outcome.Cleared)
-        if (refunded > 0) repository.refundStamina(guildId, claim.userId, refunded, resetBoundary(now))
-      }
-      // The pending handover offer goes too — otherwise accepting it would
-      // resurrect a claim on a spawn an admin just forced free.
-      repository.offeredClaim(guildId, respawn.id)
-        .foreach(offer => repository.cancelClaim(guildId, offer.id, RespawnClaim.Outcome.Cleared))
-      repository.queueFor(guildId, respawn.id)
-        .foreach(entry => repository.cancelClaim(guildId, entry.id, RespawnClaim.Outcome.Cleared))
-      refreshThread(guild, respawn, config)
-      active.isDefined
-    }
-
-  // --- schedules ----------------------------------------------------------
 
   def schedulesForRespawn(guildId: String, respawnId: Long): List[RespawnSchedule] =
     repository.schedulesForRespawn(guildId, respawnId)
@@ -1479,21 +1451,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       thread
     }
 
-  /** `/respawn list` — every claimed spawn with its queue depth. */
-  def activeClaims(guildId: String): List[(Respawn, RespawnClaim, Int)] =
-    repository.allActiveClaims(guildId).flatMap { claim =>
-      repository.findById(guildId, claim.respawnId).map { respawn =>
-        (respawn, claim, repository.queueFor(guildId, claim.respawnId).size)
-      }
-    }
-
-  /** A spawn's recent claim history, newest first, for `/respawn log`.
-   *
-   *  Reads the claim rows that already exist rather than a separate audit store —
-   *  nothing here is ever deleted, only moved to a terminal status. */
-  def claimHistory(guildId: String, respawnId: Long, limit: Int = 10): List[RespawnClaim] =
-    repository.claimHistory(guildId, respawnId, limit)
-
   /** Booked slots on a spawn that haven't started yet. */
   def reservationsFor(guildId: String, respawnId: Long,
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
@@ -1514,13 +1471,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  that is now just an archive.
    */
   def teardown(guildId: String): Unit = repository.dropGuildData(guildId)
-
-  /** The spawn threads currently open, so a caller retiring the forum can close
-   *  them before it stops tracking them. */
-  def openThreadIds(guildId: String): List[String] =
-    repository.listRespawns(guildId).map(_.threadId).filter(id => id.nonEmpty && id != "0")
-
-  // --- member preferences -------------------------------------------------
 
   def userPrefs(guildId: String, userId: String): RespawnUserPrefs =
     repository.userPrefs(guildId, userId)
@@ -1557,10 +1507,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  mappings and fallback. */
   def imageFor(respawn: Respawn): String =
     RespawnEmbeds.imageFor(respawn, Config.creatureUrlMappings, Config.Respawn.fallbackImage)
-
-  /** Autocomplete source: (code, name) for every spawn the guild knows. */
-  def autocompleteCandidates(guildId: String): List[(String, String)] =
-    repository.listRespawns(guildId).map(r => (r.code, r.name))
 
   /** Look up the guild's forum channel, for callers that need to link to it. */
   def forumChannel(guild: Guild): Option[ForumChannel] =

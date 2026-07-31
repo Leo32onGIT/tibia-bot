@@ -59,43 +59,6 @@ object RespawnCatalogue extends StrictLogging {
     }
   }
 
-  /** Rank `candidates` against a user's partial input for slash-command
-   *  autocomplete.
-   *
-   *  Kept pure and independent of JDA (it takes and returns plain tuples) so
-   *  the ordering rules are unit-testable. Matching is on code *and* name
-   *  because people find a spawn both ways — "415" and "cult" should each
-   *  surface Cult Orcs — and the ordering puts the most literal interpretation
-   *  of what was typed first:
-   *
-   *    1. exact code match  ("415" -> 415 before 1415a)
-   *    2. code prefix       ("14"  -> 1401, 1402, ...)
-   *    3. name prefix       ("cult" -> "Cult Orcs" before "Carlin Cults")
-   *    4. name substring
-   *
-   *  Ties break on code so the list is stable between keystrokes rather than
-   *  reshuffling under the user's cursor.
-   */
-  def rankMatches(candidates: List[(String, String)], input: String, limit: Int): List[(String, String)] = {
-    val needle = input.trim.toLowerCase
-    if (needle.isEmpty) candidates.sortBy { case (code, _) => sortKey(code) }.take(limit)
-    else {
-      candidates.flatMap { case entry @ (code, name) =>
-        val lowerCode = code.toLowerCase
-        val lowerName = name.toLowerCase
-        val tier =
-          if (lowerCode == needle) 0
-          else if (lowerCode.startsWith(needle)) 1
-          else if (lowerName.startsWith(needle)) 2
-          else if (lowerName.contains(needle)) 3
-          else -1
-        if (tier >= 0) Some((tier, sortKey(code), entry)) else None
-      }.sortBy { case (tier, key, _) => (tier, key) }
-        .map { case (_, _, entry) => entry }
-        .take(limit)
-    }
-  }
-
   /** Sort codes the way a person reads them: numerically by the leading digits,
    *  then by the optional letter suffix. Plain string ordering would put
    *  "1010" before "201" and "411c" before "411a" is at least consistent, but

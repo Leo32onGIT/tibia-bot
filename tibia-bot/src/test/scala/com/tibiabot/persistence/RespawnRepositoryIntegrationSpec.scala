@@ -152,7 +152,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
 
     // 415 is gone from the file, but ending somebody's hunt to tidy a catalogue
     // is the wrong trade — it is reported instead.
@@ -229,7 +229,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     repo.activeClaim(g, spawn.id) shouldBe None
     val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Char", now, now.plusMinutes(120), 120,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
     claim.status shouldBe RespawnClaim.StatusActive
     claim.endsAt.map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
 
@@ -241,7 +241,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("queueing assigns increasing positions and refuses duplicates and a full queue") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.insertActiveClaim(g, spawn.id, "holder", "H", "", now, now.plusMinutes(60), 60, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "holder", "H", "", now, now.plusMinutes(60), 60, RespawnClaim.KindAdHoc).get
 
     repo.enqueueClaim(g, spawn.id, "u1", "One", "", 120, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(1)
     repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(2)
@@ -315,7 +315,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(2), now, 120,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
 
     // Its time is up, so without limbo it's expired work.
     repo.expiredClaims(g, now).map(_.id) shouldBe List(claim.id)
@@ -337,7 +337,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     // Released early: two hours still on the clock.
     val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
     repo.setLimbo(g, claim.id, now.plusMinutes(10))
 
     val held = repo.activeClaim(g, spawn.id)
@@ -369,9 +369,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val soon = repo.addRespawn(g, "2", "Soon", "", "R", "", "", Respawn.SourceSeed, "seed")
     val later = repo.addRespawn(g, "3", "Later", "", "R", "", "", Respawn.SourceSeed, "seed")
 
-    repo.insertActiveClaim(g, past.id, "u1", "1", "", now.minusHours(3), now.minusMinutes(5), 175, RespawnClaim.KindAdHoc)
-    val soonClaim = repo.insertActiveClaim(g, soon.id, "u2", "2", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc)
-    repo.insertActiveClaim(g, later.id, "u3", "3", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, past.id, "u1", "1", "", now.minusHours(3), now.minusMinutes(5), 175, RespawnClaim.KindAdHoc).get
+    val soonClaim = repo.insertActiveClaim(g, soon.id, "u2", "2", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, later.id, "u3", "3", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
 
     repo.expiredClaims(g, now).map(_.userId) shouldBe List("u1")
 
@@ -389,7 +389,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
     repo.unwarnedActiveClaims(g, now).map(_.id) shouldBe List(claim.id)
 
     repo.setLimbo(g, claim.id, now.plusMinutes(10))
@@ -400,7 +400,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val active = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(120), 120,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
     repo.markWarned(g, active.id)
 
     repo.setClaimDuration(g, active.id, 180, Some(now.plusMinutes(180)))
@@ -427,10 +427,10 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // Nothing is deleted, so history is simply the rows that already exist —
     // which is why this needs no separate audit table.
     val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(4),
-      now.minusHours(2), 120, RespawnClaim.KindAdHoc)
+      now.minusHours(2), 120, RespawnClaim.KindAdHoc).get
     repo.finishClaim(g, first.id, RespawnClaim.Outcome.Completed)
     val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now.minusHours(2),
-      now, 120, RespawnClaim.KindAdHoc)
+      now, 120, RespawnClaim.KindAdHoc).get
     repo.cancelClaim(g, second.id, RespawnClaim.Outcome.Forced)
 
     val history = repo.claimHistory(g, spawn.id, 10)
@@ -443,7 +443,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // A claim still running is not history.
     repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", now, now.plusHours(1), 60,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
     repo.claimHistory(g, spawn.id, 10).map(_.userId) shouldBe List("u2", "u1")
 
     repo.claimHistory(g, spawn.id, 1).map(_.userId) shouldBe List("u2")
@@ -453,7 +453,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60,
-      RespawnClaim.KindAdHoc)
+      RespawnClaim.KindAdHoc).get
 
     repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
     // A late second call — the sweep and a release racing, say — must not relabel
@@ -700,7 +700,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("extending moves the deadline and re-arms the warning") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc)
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
     repo.markWarned(g, claim.id)
 
     repo.extendClaim(g, claim.id, now.plusMinutes(65), 65)
@@ -710,12 +710,45 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     extended.map(_.warned) shouldBe Some(false)
   }
 
+  test("two people claiming one free spawn cannot both end up holding it") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+
+    // Both callers checked "is it free" and both got yes — which is exactly what
+    // happens when two people press Claim on a free spawn at the same moment.
+    // The second insert has to come back empty rather than making a second
+    // holder, whoever wins the race.
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc)
+    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc)
+
+    first should not be empty
+    second shouldBe None
+    repo.activeClaim(g, spawn.id).map(_.userId) shouldBe Some("u1")
+    repo.allActiveClaims(g) should have size 1
+  }
+
+  test("a spawn can be claimed again once the hunt before it has ended") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc).get
+
+    // The guard is on *active* claims only, so it must not outlive the hunt —
+    // otherwise a spawn could be claimed exactly once, ever.
+    repo.finishClaim(g, first.id, RespawnClaim.Outcome.Completed)
+    repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc) should not be empty
+    repo.activeClaim(g, spawn.id).map(_.userId) shouldBe Some("u2")
+  }
+
   test("finished and cancelled claims stop counting as held") {
     val (repo, g) = freshRepo()
     val a = repo.addRespawn(g, "1", "A", "", "R", "", "", Respawn.SourceSeed, "seed")
     val b = repo.addRespawn(g, "2", "B", "", "R", "", "", Respawn.SourceSeed, "seed")
-    val finished = repo.insertActiveClaim(g, a.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
-    val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    val finished = repo.insertActiveClaim(g, a.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
+    val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
 
     repo.openClaimsForUser(g, "u1") should have size 2
     repo.finishClaim(g, finished.id, RespawnClaim.Outcome.Completed)
@@ -782,7 +815,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("removing a respawn takes its claims with it") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
     repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
 
     repo.removeRespawn(g, spawn.id)
@@ -806,7 +839,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // Deliberately not UTC: the column is TIMESTAMPTZ, so what comes back must
     // be the same instant regardless of the zone it went in as.
     val inTokyo = now.withZoneSameInstant(ZoneOffset.ofHours(9))
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", inTokyo, inTokyo.plusMinutes(120), 120, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", inTokyo, inTokyo.plusMinutes(120), 120, RespawnClaim.KindAdHoc).get
     repo.activeClaim(g, spawn.id).flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
   }
 
@@ -815,7 +848,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.saveSettings(g, RespawnSettings("111", "222", 120, 240, 20, 240, 10, 10))
     val spawn = repo.addRespawn(g, "415", "My Own Name", "Orc Cult Fanatic", "Edron", "", "", Respawn.SourceCustom, "admin")
     repo.setThreadId(g, spawn.id, "5551234")
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
     repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
 
     repo.dropGuildData(g)

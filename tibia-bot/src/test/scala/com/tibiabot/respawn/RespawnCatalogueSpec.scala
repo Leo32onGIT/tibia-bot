@@ -22,59 +22,24 @@ class RespawnCatalogueSpec extends AnyFunSuite with Matchers {
     RespawnCatalogue.seed.filter(s => s.code.isEmpty || s.region.isEmpty || s.name.isEmpty) shouldBe empty
   }
 
-  test("the reference spawn from the design is present and mapped to a creature") {
-    val cultOrcs = RespawnCatalogue.seed.find(_.code == "415")
-    cultOrcs.map(_.name) shouldBe Some("Cult Orcs")
-    cultOrcs.map(_.region) shouldBe Some("Edron")
-    cultOrcs.map(_.creature).exists(_.nonEmpty) shouldBe true
+  test("a known code keeps its city and a creature to draw it with") {
+    // Deliberately says nothing about the spawn's *name*. Curating the list is an
+    // ongoing job — 415 has already been renamed once — and a test that pins the
+    // wording fails every time somebody improves it, which teaches people that a
+    // red build is normal. The code, the city and having a creature are what the
+    // rest of the system actually depends on.
+    val known = RespawnCatalogue.seed.find(_.code == "415")
+    known.map(_.region) shouldBe Some("Edron")
+    known.map(_.name).exists(_.nonEmpty) shouldBe true
+    known.map(_.creature).exists(_.nonEmpty) shouldBe true
   }
 
-  private val candidates = List(
-    ("415", "Cult Orcs"),
-    ("205", "Carlin Cults"),
-    ("1415a", "Fury dungeon"),
-    ("1401", "Oramond Marshes (Entrance/South)"),
-    ("1402", "Oramond Camps (Northeast)"),
-    ("806", "Hydra Mountain")
-  )
-
-  test("an exact code match outranks a code that merely contains it") {
-    // "415" must not be buried under "1415a" — the person typing a code knows
-    // exactly which spawn they mean.
-    RespawnCatalogue.rankMatches(candidates, "415", 10).head shouldBe ("415", "Cult Orcs")
-  }
-
-  test("a code prefix matches every spawn beginning with it") {
-    RespawnCatalogue.rankMatches(candidates, "14", 10).map(_._1) should contain allOf ("1401", "1402", "1415a")
-  }
-
-  test("a name prefix outranks a name substring") {
-    // "Cult Orcs" starts with the input; "Carlin Cults" only contains it.
-    RespawnCatalogue.rankMatches(candidates, "cult", 10).map(_._2) shouldBe
-      List("Cult Orcs", "Carlin Cults")
-  }
-
-  test("matching is case-insensitive on both code and name") {
-    RespawnCatalogue.rankMatches(candidates, "HYDRA", 10).map(_._1) shouldBe List("806")
-    RespawnCatalogue.rankMatches(candidates, "1415A", 10).map(_._1) shouldBe List("1415a")
-  }
-
-  test("no match returns nothing rather than the whole catalogue") {
-    RespawnCatalogue.rankMatches(candidates, "zzzz", 10) shouldBe empty
-  }
-
-  test("empty input lists everything in code order, so the first keystroke isn't a jumble") {
-    RespawnCatalogue.rankMatches(candidates, "", 10).map(_._1) shouldBe
-      List("205", "415", "806", "1401", "1402", "1415a")
-  }
-
-  test("results are capped at the requested limit — Discord rejects more than 25 choices") {
-    RespawnCatalogue.rankMatches(candidates, "", 2) should have size 2
-  }
-
-  test("codes sort numerically, not lexically") {
-    // Plain string ordering would put "1401" before "205".
-    val ordered = RespawnCatalogue.rankMatches(candidates, "", 10).map(_._1)
-    ordered.indexOf("205") should be < ordered.indexOf("1401")
+  test("no seed entry is left without a creature to draw it with") {
+    // The board and every claim card fall back to a signpost image without one,
+    // which is why this is worth knowing before a release rather than after.
+    val unmapped = RespawnCatalogue.seed.filter(_.creature.trim.isEmpty).map(_.code)
+    withClue(s"seed entries with no creature: ${unmapped.take(20).mkString(", ")} ") {
+      unmapped should have size 0
+    }
   }
 }

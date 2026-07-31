@@ -182,17 +182,6 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     image(unmapped) shouldBe fallback
   }
 
-  test("the claimed list summarises holder, deadline and queue depth") {
-    val embed = RespawnEmbeds.activeClaimsList(List((cultOrcs, claim("7"), 3)))
-    embed.getDescription should include("415 — Cult Orcs")
-    embed.getDescription should include("<@7>")
-    embed.getDescription should include("queue: 3")
-  }
-
-  test("an empty claimed list says so instead of rendering blank") {
-    RespawnEmbeds.activeClaimsList(Nil).getDescription should include("No respawns are claimed")
-  }
-
   test("a card lists ten booked slots before it starts summarising") {
     val slots = (1 to 14).toList.map(n =>
       claim(s"user$n", 60, RespawnClaim.StatusReserved).copy(startsAt = Some(now.plusHours(n.toLong))))
@@ -285,47 +274,6 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("the spawn moderator panel hides the queue count when nobody is waiting") {
     fields(RespawnEmbeds.spawnModeratorPanel(cultOrcs, Some(claim("99")), 0)).keys should not contain "Waiting"
-  }
-
-  test("the claim log shows each hunt's span, length and reason") {
-    val held = claim("99", minutes = 120, character = "Galarzaa").copy(
-      startsAt = Some(now.minusHours(3)),
-      endedAt = Some(now.minusHours(2)),
-      outcome = Some(RespawnClaim.Outcome.Released))
-    val text = RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(held)).getDescription
-    text should include("Galarzaa")
-    // Short date AND time: log entries span days, so a bare clock time would be
-    // ambiguous.
-    text should include(s"<t:${now.minusHours(3).toInstant.getEpochSecond}:f>")
-    text should include(s"<t:${now.minusHours(2).toInstant.getEpochSecond}:f>")
-    // Held against booked is usually the thing being questioned.
-    text should include("held 1h of 2h")
-    text should include("left early")
-  }
-
-  test("the claim log distinguishes a queue entry that never started") {
-    val neverStarted = claim("7", minutes = 60).copy(
-      startsAt = None, endsAt = None,
-      endedAt = Some(now),
-      outcome = Some(RespawnClaim.Outcome.LeftQueue))
-    val text = RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(neverStarted)).getDescription
-    text should include("never started")
-    // "held 0m of 1h" would read as though they took it and did nothing.
-    text should include("booked 1h")
-    text should not include "held"
-    text should include("left the queue")
-  }
-
-  test("a claim log entry with no recorded reason still renders") {
-    // Claims that ended before the outcome column existed.
-    val old = claim("7").copy(startsAt = Some(now.minusHours(1)), endedAt = Some(now), outcome = None)
-    RespawnEmbeds.claimHistoryEmbed(cultOrcs, List(old)).getDescription should include("ended")
-  }
-
-  test("an empty claim log says so rather than rendering blank") {
-    val embed = RespawnEmbeds.claimHistoryEmbed(cultOrcs, Nil)
-    embed.getTitle should include("415 — Cult Orcs")
-    embed.getDescription should include("No finished claims")
   }
 
   test("the bookings list reads as a timetable, soonest first") {

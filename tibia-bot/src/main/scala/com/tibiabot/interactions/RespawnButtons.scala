@@ -443,6 +443,10 @@ object RespawnButtons extends StrictLogging {
           s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
           "starting a hunt now. Press **Next** to line up for it instead."
 
+      case ClaimOutcome.JustTaken(respawn) =>
+        s"${Config.noEmoji} Somebody claimed **${respawn.displayName}** a moment before you. " +
+          "Press **Next** to line up behind them."
+
       case ClaimOutcome.QueueFull(respawn, limit) =>
         s"${Config.noEmoji} The queue for **${respawn.displayName}** is full ($limit waiting)."
 

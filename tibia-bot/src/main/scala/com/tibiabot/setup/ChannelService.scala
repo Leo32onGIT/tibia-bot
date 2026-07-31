@@ -281,6 +281,32 @@ final class ChannelService(
     else s"Catalogue: ${parts.mkString(", ")}.$held"
   }
 
+  /** What the respawn system needs that this bot was not given.
+   *
+   *  Checked up front rather than discovered halfway through: the system is a
+   *  forum, a set of channel overrides, and threads it archives and un-archives.
+   *  Finding out at the third step leaves a guild holding a channel the bot
+   *  cannot manage.
+   *
+   *  Bots added before this feature existed were invited with a narrower set, so
+   *  this is the ordinary case for an existing server rather than an error — the
+   *  answer is a fresh invite, not a retry.
+   */
+  private[setup] def missingRespawnPermissions(guild: Guild): List[Permission] =
+    List(Permission.MANAGE_CHANNEL, Permission.MANAGE_ROLES, Permission.MANAGE_THREADS)
+      .filterNot(permission => guild.getSelfMember.hasPermission(permission))
+
+  /** Said the same way wherever it is needed: what is missing, and that the fix
+   *  is re-inviting the bot rather than trying again. */
+  private[setup] def respawnPermissionHelp(missing: List[Permission]): String = {
+    val named = missing.map(permission => s"**${permission.getName}**").mkString(", ")
+    s"${Config.noEmoji} I can't set up the respawn claim system here — I'm missing $named.\n" +
+      "That's normal for a server that added me before the feature existed: the invite " +
+      "didn't ask for these. Grab a fresh invite from the " +
+      "[Violent Bot support Discord](https://discord.gg/SWMq9Pz8ud) and re-add me, then run " +
+      "`/repair` to finish the job. Everything else keeps working in the meantime."
+  }
+
   /** Create the respawn system's `📅・sᴘᴀᴡɴs` forum and its pinned board post in
    *  the guild's admin category, seeding the catalogue on the way.
    *
@@ -296,6 +322,13 @@ final class ChannelService(
   def createSpawnsForum(guild: Guild): String = {
     if (!Config.Respawn.enabled) {
       return s"${Config.noEmoji} The respawn claim system isn't enabled on this bot."
+    }
+    // Checked before anything is created, so a guild is never left holding a
+    // half-built forum it cannot manage.
+    val missing = missingRespawnPermissions(guild)
+    if (missing.nonEmpty) {
+      logger.info(s"Skipping respawn setup on guild '${guild.getId}' — missing ${missing.mkString(", ")}")
+      return respawnPermissionHelp(missing)
     }
     val discordConfig = discordRetrieveConfig(guild)
     if (discordConfig.isEmpty) {
@@ -576,27 +609,37 @@ final class ChannelService(
 
         // The delegation role, so hunted/allies/respawn management can be handed
         // out without granting Manage Server. Idempotent — adopts an existing
-        // role of the same name rather than making a second one.
+        // role of the same name rather than making a second one. Deliberately not
+        // tied to the respawn system below: the same role gates /hunted and
+        // /allies, so a guild that cannot have the forum still wants it.
         ensureModeratorRole(guild)
 
         // Respawn forum, when the feature is switched on for this deployment.
         // Self-guarding and idempotent, so it's safe to call on every /setup:
         // a guild's second world doesn't get a second forum.
-        if (Config.Respawn.enabled) {
-          try createSpawnsForum(guild)
-          catch {
-            case ex: Throwable =>
-              // Never fail a /setup over this — the world's channels are the
-              // point, and `/respawn admin setup` can create the forum later.
-              logger.warn(s"Could not create the respawn forum during /setup on guild '${guild.getId}'", ex)
+        val respawnNote =
+          if (!Config.Respawn.enabled) ""
+          else missingRespawnPermissions(guild) match {
+            // Said out loud rather than only logged. From the server's side the
+            // forum is simply absent, and nothing else would explain why — or
+            // that re-inviting the bot is what fixes it.
+            case missing if missing.nonEmpty => s"\n\n${respawnPermissionHelp(missing)}"
+            case _ =>
+              try { createSpawnsForum(guild); "" }
+              catch {
+                case ex: Throwable =>
+                  // Never fail a /setup over this — the world's channels are the
+                  // point, and `/repair` can finish the forum later.
+                  logger.warn(s"Could not create the respawn forum during /setup on guild '${guild.getId}'", ex)
+                  ""
+              }
           }
-        }
 
         // matches the audit pattern used by /repair and /remove
         val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 
-        s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*"
+        s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*$respawnNote"
         }
       } else if (!paywallService.isActive(guild.getId, world)) {
         // channels already exist, but tracking is paused — offer to hand the
@@ -1106,16 +1149,27 @@ final class ChannelService(
         com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
-      // Recreate the moderator role if it was deleted, and re-store its id.
+      // Recreate the moderator role if it was deleted, and re-store its id. Not
+      // conditional on the respawn system: it gates /hunted and /allies too.
       ensureModeratorRole(guild)
       // Recreate the respawn forum/board if either has been deleted. Outside
       // the block above because that one only runs when a *world* channel is
       // missing, and the forum is guild-level — it can be deleted on its own.
       if (Config.Respawn.enabled) {
-        try createSpawnsForum(guild)
-        catch {
-          case ex: Throwable =>
-            logger.warn(s"Could not repair the respawn forum on guild '${guild.getId}'", ex)
+        // A repair is exactly when somebody is asking why the forum isn't there,
+        // so the answer goes in the reply rather than only in the log.
+        val missing = missingRespawnPermissions(guild)
+        if (missing.nonEmpty) {
+          logger.info(s"Skipping respawn repair on guild '${guild.getId}' — missing ${missing.mkString(", ")}")
+          embedBuild.setDescription(
+            s"${Option(embedBuild.getDescriptionBuilder.toString).filter(_.nonEmpty).map(_ + "\n\n").getOrElse("")}" +
+              respawnPermissionHelp(missing))
+        } else {
+          try createSpawnsForum(guild)
+          catch {
+            case ex: Throwable =>
+              logger.warn(s"Could not repair the respawn forum on guild '${guild.getId}'", ex)
+          }
         }
       }
     } else {

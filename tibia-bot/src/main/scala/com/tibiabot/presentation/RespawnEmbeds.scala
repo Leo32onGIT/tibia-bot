@@ -451,31 +451,6 @@ object RespawnEmbeds {
   def claimEnded(respawn: Respawn): String =
     s"Your claim on **${respawn.displayName}** has ended."
 
-  /** `/respawn list` — everything currently held, most-urgent first. */
-  def activeClaimsList(claims: List[(Respawn, RespawnClaim, Int)]): MessageEmbed = {
-    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Claimed respawns")
-    if (claims.isEmpty) {
-      embed.setDescription("No respawns are claimed right now.")
-    } else {
-      val lines = claims.map { case (respawn, claim, queueSize) =>
-        val ends = claim.endsAt.map(relative).getOrElse("unknown")
-        val queueNote = if (queueSize > 0) s" · queue: $queueSize" else ""
-        s"**${respawn.displayName}** — ${claimantLabel(claim)}, ends $ends$queueNote"
-      }
-      embed.setDescription(truncateLines(lines))
-    }
-    embed.build()
-  }
-
-  /** `/respawn status <spawn>` and the reply to a successful claim. */
-  def statusEmbed(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
-                  reservations: List[RespawnClaim], settings: RespawnSettings, imageUrl: String,
-                  threadMention: Option[String]): MessageEmbed = {
-    val embed = new EmbedBuilder(claimCard(respawn, claim, queue, reservations, settings, imageUrl))
-    threadMention.foreach(mention => embed.appendDescription(s"\n\n$mention"))
-    embed.build()
-  }
-
   /** How full a tank is, drawn.
    *
    *  Block characters rather than coloured squares: an emoji is about twice the
@@ -517,50 +492,6 @@ object RespawnEmbeds {
         }
         embed.addField("Reserved by", truncateLines(lines), false)
       }
-    }
-    embed.build()
-  }
-
-  /** A spawn's recent claim history, for `/respawn log`.
-   *
-   *  Absolute dates rather than relative ones: an audit is read to work out what
-   *  happened at a particular time, and "3 days ago" is the wrong shape for that.
-   *  Held time is shown alongside the booked length, since the gap between them
-   *  is usually the thing being questioned. */
-  def claimHistoryEmbed(respawn: Respawn, history: List[RespawnClaim]): MessageEmbed = {
-    val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
-      .setTitle(s"Claim history — ${respawn.displayName}")
-    if (history.isEmpty) {
-      embed.setDescription("No finished claims on this respawn yet.")
-    } else {
-      val lines = history.map { claim =>
-        val who = if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
-                  else s"<@${claim.userId}>"
-        // The end shown is when the hunt actually stopped, not when it was booked
-        // to — a claim released early or taken over ends before its deadline, and
-        // the real one is what an audit is looking for.
-        val span = (claim.startsAt, claim.endedAt) match {
-          case (Some(start), Some(end)) => s"${dateTime(start)} \u2192 ${dateTime(end)}"
-          case (Some(start), None)      => s"${dateTime(start)} \u2192 ?"
-          // A queue entry that never reached the front has no hunt at all.
-          case (None, Some(end))        => s"never started, ended ${dateTime(end)}"
-          case (None, None)             => s"queued ${dateTime(claim.claimedAt)}, never started"
-        }
-        val held = for {
-          start <- claim.startsAt
-          end <- claim.endedAt
-        } yield java.time.Duration.between(start, end).toMinutes.toInt
-        // Saying "0m of 2h" for something that never started would read as though
-        // they took it and did nothing.
-        val length = held match {
-          case Some(minutes) => s"held ${humanDuration(math.max(0, minutes))} of ${humanDuration(claim.durationMinutes)}"
-          case None          => s"booked ${humanDuration(claim.durationMinutes)}"
-        }
-        val why = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
-        s"$who\n\u2003$span\n\u2003$length \u00b7 $why"
-      }
-      embed.setDescription(truncateLines(lines))
-      embed.setFooter(s"${history.size} most recent")
     }
     embed.build()
   }

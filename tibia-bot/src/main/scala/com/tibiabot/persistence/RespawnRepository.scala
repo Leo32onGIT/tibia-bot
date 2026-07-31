@@ -118,10 +118,15 @@ trait RespawnRepository {
    *  at once, so filtering the rest in Scala is cheap. */
   def unwarnedActiveClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Start a claim immediately. Returns the stored row. */
+  /** Start a claim immediately.
+   *
+   *  None when somebody already holds the spawn — the caller's earlier "is it
+   *  free" read is not enough on its own, since two people pressing Claim at once
+   *  both pass it. Whoever loses is told the spawn was taken rather than ending up
+   *  with a second claim on the same hunt. */
   def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
-                        durationMinutes: Int, kind: String): RespawnClaim
+                        durationMinutes: Int, kind: String): Option[RespawnClaim]
 
   /** Append to a spawn's queue, taking the next free position. Returns the
    *  stored row, or None if the queue is already at `queueLimit` or the user is

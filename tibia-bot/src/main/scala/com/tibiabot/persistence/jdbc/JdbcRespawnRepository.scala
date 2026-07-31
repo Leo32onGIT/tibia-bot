@@ -154,6 +154,28 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_starts_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_duration_minutes INT;")
+      // One holder per spawn, enforced by the database.
+      //
+      // The service checks "is anyone on it" and then inserts, and those are two
+      // statements: two people pressing Claim on a free spawn both pass the check
+      // and both insert. The row lock below serialises the writes but not the
+      // decision, so it cannot help. Every path that makes a claim active goes
+      // through this index instead — the insert, a handover promotion, and a
+      // booked slot starting.
+      //
+      // Any duplicates a live database already collected are closed first, oldest
+      // kept, or creating the index would fail and take the guild's whole
+      // migration with it.
+      statement.executeUpdate(
+        """UPDATE respawn_claims SET status = 'finished', outcome = 'taken-over', ended_at = NOW()
+          |WHERE status = 'active' AND id NOT IN (
+          |  SELECT MIN(id) FROM respawn_claims WHERE status = 'active' GROUP BY respawn_id
+          |);""".stripMargin)
+      statement.executeUpdate(
+        """CREATE UNIQUE INDEX IF NOT EXISTS respawn_claims_one_holder
+          |ON respawn_claims (respawn_id)
+          |WHERE status = 'active';""".stripMargin)
+
       // The materialiser's uniqueness rule, enforced by the database rather than
       // by a read-then-write: two sweeps racing would otherwise both find a slot
       // unbooked and both book it.
@@ -592,14 +614,20 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
-                        durationMinutes: Int, kind: String): RespawnClaim =
+                        durationMinutes: Int, kind: String): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
       lockRespawn(conn, respawnId)
+      // Re-checked here rather than trusted from the caller's earlier read, under
+      // the lock taken above: whoever loses the race gets no row back and is told
+      // the spawn was taken, instead of a second claim on somebody else's hunt.
       val statement = conn.prepareStatement(
         """INSERT INTO respawn_claims
           |(respawn_id, user_id, user_name, character_name, status, queue_position,
           | claimed_at, starts_at, ends_at, duration_minutes, warned, kind)
-          |VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, FALSE, ?)
+          |SELECT ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, FALSE, ?
+          |WHERE NOT EXISTS (
+          |  SELECT 1 FROM respawn_claims WHERE respawn_id = ? AND status = 'active'
+          |)
           |RETURNING *;""".stripMargin)
       try {
         statement.setLong(1, respawnId)
@@ -611,9 +639,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(7, Timestamp.from(endsAt.toInstant))
         statement.setInt(8, durationMinutes)
         statement.setString(9, kind)
+        statement.setLong(10, respawnId)
         val result = statement.executeQuery()
-        result.next()
-        readClaim(result)
+        if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
     }
 
