@@ -36,21 +36,18 @@ object RespawnThreads extends StrictLogging {
   val TagFree: String = "Free"
   val TagClaimed: String = "Claimed"
 
+  /** What every Claim button wears. A custom emoji, so it is parsed from the
+   *  configured `<:name:id>` form rather than built from a code point. */
+  private def claimEmoji: Emoji = Emoji.fromFormatted(com.tibiabot.Config.dailyEmoji)
+
   private val tagSeeds: List[(String, String)] =
     List(TagFree -> "🟢", TagClaimed -> "🔴")
 
   /** Buttons under a spawn's claim card. The respawn id is encoded into the id
    *  so a click needs no lookup of which post it came from — see
    *  [[RespawnButtonId]]. */
-  def claimButtons(respawnId: Long, claimed: Boolean, requestable: Boolean): ActionRow = {
-    val request =
-      if (requestable) List(Button.secondary(RespawnButtonId.requestSlot(respawnId), "Request claim"))
-      else Nil
-    ActionRow.of((baseClaimButtons(respawnId, claimed) ++ request).asJava)
-  }
-
-  private def baseClaimButtons(respawnId: Long, claimed: Boolean): List[Button] =
-    claimRow(respawnId, claimed)
+  def claimButtons(respawnId: Long, claimed: Boolean): ActionRow =
+    ActionRow.of(claimRow(respawnId, claimed).asJava)
 
   private def claimRow(respawnId: Long, claimed: Boolean): List[Button] =
     if (claimed)
@@ -59,14 +56,14 @@ object RespawnThreads extends StrictLogging {
       // making the member pick the right word for their own state was needless.
       List(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
       List(
-        Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(Emoji.fromUnicode("🏹")),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Schedule").withEmoji(Emoji.fromUnicode("📅"))
+        Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(claimEmoji),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅"))
       )
 
   /** The buttons on the pinned board post, which is what makes the whole system
@@ -74,7 +71,7 @@ object RespawnThreads extends StrictLogging {
    *  have a Claim button of its own, so the board carries one. */
   def boardButtons: ActionRow =
     ActionRow.of(
-      Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(Emoji.fromUnicode("🏹")),
+      Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(claimEmoji),
       Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
     )
 
@@ -84,9 +81,9 @@ object RespawnThreads extends StrictLogging {
    *  spawn — which may not be them. */
   def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): Option[ActionRow] = {
     val buttons = List(
-      if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Hunt duration")) else None,
-      if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Force leave")) else None,
-      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My duration")) else None
+      if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
+      if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -117,30 +114,54 @@ object RespawnThreads extends StrictLogging {
    *  near-identical red buttons that had to be read to tell apart. */
   def scheduleButtons(schedules: List[RespawnSchedule], respawnId: Long): ActionRow =
     ActionRow.of(
-      Button.success(RespawnButtonId.bookAnother(respawnId), "Book another time")
+      Button.success(RespawnButtonId.bookAnother(respawnId), "Book Another")
         .withEmoji(Emoji.fromUnicode("📅")),
       Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
-        if (schedules.size == 1) "Cancel booking" else s"Cancel all ${schedules.size} bookings")
+        if (schedules.size == 1) "Cancel Booking" else s"Cancel All ${schedules.size} Bookings")
     )
 
-  /** A cancel per booking, for a moderator looking at bookings that are not
-   *  theirs — "all mine" means nothing there, and which one they are removing is
-   *  the whole question. */
-  def moderatorScheduleButtons(schedules: List[RespawnSchedule],
-                               now: java.time.ZonedDateTime): ActionRow =
-    ActionRow.of(schedules.take(5).map { schedule =>
-      val label = schedule.nextStartAtOrAfter(now)
-        .map(start => s"Cancel ${com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)}")
-        .getOrElse("Cancel booking")
-      Button.danger(RespawnButtonId.cancelSchedule(schedule.id), label)
-    }.asJava)
+  /** Under a moderator's /stamina. Everybody sees their own tank; a moderator
+   *  also gets the one thing they might want to do about somebody else's. */
+  def staminaButtons: ActionRow =
+    ActionRow.of(Button.secondary(RespawnButtonId.giveStamina, "Give Stamina")
+      .withEmoji(Emoji.fromUnicode("⚡")))
+
+  /** Under a member's own /bookings list: the one button that clears the lot. */
+  def bookingsButtons(count: Int): ActionRow =
+    ActionRow.of(Button.danger(RespawnButtonId.cancelAllBookings,
+      if (count == 1) "Cancel booking" else s"Cancel all $count bookings"))
+
+  /** Under the whole-server list a moderator gets from /bookings. No cancel here:
+   *  "cancel all" against everybody's bookings is not something anyone means to
+   *  press, and cancelling one of somebody else's belongs on that spawn's own
+   *  panel where the spawn is named. */
+  def moderatorBookingsButtons: ActionRow =
+    ActionRow.of(Button.secondary(RespawnButtonId.myBookings, "My bookings")
+      .withEmoji(Emoji.fromUnicode("📅")))
+
+  /** What a moderator gets under the same panel: a way to book for themselves,
+   *  and a way to clear the spawn.
+   *
+   *  The panel itself is identical to a member's — same title, same state, same
+   *  list of who has what — because a moderator looking at a spawn is asking the
+   *  same question as anybody else, and two layouts for one question is one to
+   *  learn twice. Only the buttons differ, which is the only part that actually
+   *  does differ. */
+  def moderatorSpawnBookingButtons(respawnId: Long, bookings: Int): ActionRow = {
+    val clear =
+      if (bookings <= 0) Nil
+      else List(Button.danger(RespawnButtonId.cancelSpawnAll(respawnId),
+        if (bookings == 1) "Cancel Booking" else s"Cancel All $bookings Bookings"))
+    ActionRow.of((Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
+      .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
+  }
 
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
    *  exactly like leaving it. */
   def offerButtons(guildId: String, claimId: Long): ActionRow =
     ActionRow.of(
-      Button.success(RespawnButtonId.accept(guildId, claimId), "Claim").withEmoji(Emoji.fromUnicode("🏹")),
+      Button.success(RespawnButtonId.accept(guildId, claimId), "Claim").withEmoji(claimEmoji),
       Button.danger(RespawnButtonId.decline(guildId, claimId), "Cancel")
     )
 
@@ -535,7 +556,6 @@ object RespawnButtonId {
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
 
   /** Ask the owner of a booked slot whether they are actually hunting it. */
-  def requestSlot(respawnId: Long): String = s"${Prefix}request:$respawnId"
   /** The owner's answer, pressed in a DM — so it carries the guild. */
   def keepSlot(guildId: String, claimId: Long): String = s"${Prefix}keepslot:$guildId:$claimId"
   def passSlot(guildId: String, claimId: Long): String = s"${Prefix}passslot:$guildId:$claimId"
@@ -550,6 +570,9 @@ object RespawnButtonId {
   /** Drop every booking the presser has on one spawn — so this one carries the
    *  *respawn* id, unlike `cancelSchedule` above. */
   def cancelSpawnBookings(respawnId: Long): String = s"${Prefix}unschedules:$respawnId"
+  /** Clear *everybody's* bookings on one spawn — a moderator action, so it is a
+   *  different id from the one that clears only the presser's. */
+  def cancelSpawnAll(respawnId: Long): String = s"${Prefix}unschedulesall:$respawnId"
 
   /** Moderator actions reached from a spawn's Config panel. */
   def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
@@ -560,6 +583,13 @@ object RespawnButtonId {
 
   /** Board Config panel choices. */
   val boardMySettings: String = s"${Prefix}board:mysettings"
+  /** Clear every booking the presser has in the guild — pressed from /bookings,
+   *  which names no spawn, so the id carries nothing either. */
+  val cancelAllBookings: String = s"${Prefix}board:cancelall"
+  /** A moderator stepping from the whole-server list to their own. */
+  val myBookings: String = s"${Prefix}board:mybookings"
+  /** A moderator handing stamina to somebody, from /stamina. */
+  val giveStamina: String = s"${Prefix}board:givestamina"
   val boardClaimRules: String = s"${Prefix}board:claimrules"
   val boardTimers: String = s"${Prefix}board:timers"
 
@@ -577,6 +607,7 @@ object RespawnButtonId {
    *  five inputs and there are six settings. */
   val modalClaimRules: String = s"${ModalPrefix}claimrules"
   val modalTimers: String = s"${ModalPrefix}timers"
+  val modalGiveStamina: String = s"${ModalPrefix}givestamina"
 
   /** ("duration", 415L) from "respawn:modal:duration:415" — the kind and the spawn
    *  it applies to, for the modals that name one. */

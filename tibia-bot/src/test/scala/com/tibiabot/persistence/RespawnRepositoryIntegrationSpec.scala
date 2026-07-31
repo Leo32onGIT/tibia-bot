@@ -470,8 +470,6 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
       now.plusHours(2), 120).get
 
-    repo.requestableSlot(g, spawn.id, now).map(_.id) shouldBe Some(slot.id)
-
     val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
     asked.flatMap(_.requesterUserId) shouldBe Some("u2")
     asked.flatMap(_.askedAt) should not be empty
@@ -479,7 +477,6 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // The rule: once asked, never again — and two people pressing Request at the
     // same moment cannot both get in.
     repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60), None) shouldBe None
-    repo.requestableSlot(g, spawn.id, now) shouldBe None
   }
 
   test("a request raised by booking over a slot remembers the window that was booked") {
@@ -540,7 +537,6 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // Still asked, so nobody else may ask about this slot either.
     kept.flatMap(_.askedAt) should not be empty
     kept.map(_.isReserved) shouldBe Some(true)
-    repo.requestableSlot(g, spawn.id, now) shouldBe None
     repo.expiredRequests(g, now.plusHours(1)) shouldBe empty
   }
 

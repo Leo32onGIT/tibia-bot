@@ -72,20 +72,19 @@ final case class RespawnClaim(
    *  `scheduled`. Empty for an ordinary claim. */
   scheduleId: Option[Long] = None,
   /** When the slot's owner was asked whether they are actually hunting it. Set
-   *  once and never cleared, which is what makes "asked once per slot" hold: the
-   *  Request button is gone from then on, whatever the answer was. */
+   *  once and never cleared, which is what makes "asked once per slot" hold:
+   *  nobody may ask again from then on, whatever the answer was. */
   askedAt: Option[ZonedDateTime] = None,
   /** How long the owner has to answer before the slot passes to whoever asked. */
   requestDeadline: Option[ZonedDateTime] = None,
   requesterUserId: Option[String] = None,
   requesterUserName: Option[String] = None,
-  /** The slot the requester actually wants, when the request came from them
-   *  trying to book over this one rather than from the Request button.
+  /** The window the asker actually booked, which merely overlaps this slot
+   *  rather than matching it — so granting the request has to create their
+   *  window, not hand over this one.
    *
-   *  Both empty for a Request-button ask, which is what tells [[requestedSlot]]
-   *  apart from it: that flow hands over this slot as it stands, while a booking
-   *  request is for a window of the asker's own choosing that merely overlaps
-   *  this one. */
+   *  Empty only on a row from before booking over a slot became the one way to
+   *  ask; those hand over the slot as it stands. */
   requestedStartsAt: Option[ZonedDateTime] = None,
   requestedDurationMinutes: Option[Int] = None
 ) {

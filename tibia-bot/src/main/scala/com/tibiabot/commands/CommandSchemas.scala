@@ -253,6 +253,12 @@ object CommandSchemas {
   val staminaCommand: SlashCommandData =
     Commands.slash("stamina", "Show your claim stamina and what's using it")
 
+  /** A member's own bookings, across every spawn. The Book button on a spawn's
+   *  card only ever shows that spawn's, so there is nowhere else to see them all
+   *  — and nowhere else to clear them in one go. */
+  val bookingsCommand: SlashCommandData =
+    Commands.slash("bookings", "Show the respawn slots you have booked")
+
   /** Visible immediately when the bot joins a guild, before any world's been
    *  set up — /setup itself, /help (how do I use this bot, including how to
    *  run /setup in the first place), and galthen/boosted/patreon (personal,
@@ -263,7 +269,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, staminaCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, staminaCommand, bookingsCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands
@@ -309,6 +315,9 @@ object CommandSchemas {
    *  what actually gets registered while the feature is off — prod and DEV run
    *  the same image, and a command Discord shows but the bot won't service is
    *  worse than no command at all. */
+  private def respawnCommandNames(command: SlashCommandData): Boolean =
+    command.getName == staminaCommand.getName || command.getName == bookingsCommand.getName
+
   def commandsFor(guildId: Long, hasWorldConfigured: Boolean, excludeAll: Boolean = false,
                   respawnEnabled: Boolean = false): List[SlashCommandData] = {
     val selected =
@@ -316,6 +325,6 @@ object CommandSchemas {
       else if (supportGuildIds.contains(guildId)) adminCommands
       else if (hasWorldConfigured) commands
       else initialCommands
-    if (respawnEnabled) selected else selected.filterNot(_.getName == staminaCommand.getName)
+    if (respawnEnabled) selected else selected.filterNot(respawnCommandNames)
   }
 }

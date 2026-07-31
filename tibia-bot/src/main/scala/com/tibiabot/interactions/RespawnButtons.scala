@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RequestOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
+import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -37,7 +37,8 @@ object RespawnButtons extends StrictLogging {
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
-    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew")
+    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew",
+        "givestamina")
 
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
@@ -152,6 +153,18 @@ object RespawnButtons extends StrictLogging {
             }
         }
 
+      // Every booking on one spawn, whoever owns it — the moderator's Cancel All.
+      case Some(RespawnButtonId.SpawnButton("unschedulesall", respawnId)) =>
+        val guild = event.getGuild
+        if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+        else if (!RespawnModals.moderates(guild, event.getMember))
+          respond.text(notModeratorText)
+        else BotApp.respawnService.cancelAllBookingsOn(guild, respawnId) match {
+          case 0 => respond.text(s"${Config.noEmoji} There are no bookings on that respawn.")
+          case many => respond.text(s"${Config.yesEmoji} Cleared **$many** booking(s) from that " +
+            "respawn. Slots that hadn't started yet have been released.")
+        }
+
       // Every booking the presser has on one spawn, so this one carries a
       // *respawn* id where the case above carries a schedule id.
       case Some(RespawnButtonId.SpawnButton("unschedules", respawnId)) =>
@@ -170,7 +183,42 @@ object RespawnButtons extends StrictLogging {
     }
   }
 
+  /** A moderator stepping from the whole-server list to their own, which is the
+   *  list an ordinary member gets from /bookings — cancel button and all. */
+  private def ownBookings(event: ButtonInteractionEvent, respond: Responder): Unit = {
+    val guild = event.getGuild
+    if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+    else {
+      val entries = BotApp.respawnService.scheduleListing(guild.getId, Some(event.getUser.getId))
+      val embed = RespawnEmbeds.schedulesEmbed(entries, java.time.ZonedDateTime.now())
+      respond.embed(embed, if (entries.isEmpty) None else Some(RespawnThreads.bookingsButtons(entries.size)))
+    }
+  }
+
+  /** Clear every booking the presser has anywhere in the guild, from /bookings.
+   *  Board-shaped because it names no spawn — there is nothing for the id to
+   *  carry. */
+  private def cancelAllBookings(event: ButtonInteractionEvent, respond: Responder): Unit = {
+    val guild = event.getGuild
+    if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+    else BotApp.respawnService.cancelAllBookings(guild, event.getUser.getId) match {
+      case 0 => respond.text(s"${Config.noEmoji} You have no bookings to cancel.")
+      case 1 => respond.text(s"${Config.yesEmoji} Booking cancelled. " +
+        "Slots that hadn't started yet have been released.")
+      case many => respond.text(s"${Config.yesEmoji} All **$many** of your bookings are cancelled. " +
+        "Slots that hadn't started yet have been released.")
+    }
+  }
+
   private def handleBoardButton(event: ButtonInteractionEvent, respond: Responder, what: String): Unit = {
+    if (what == "cancelall") { cancelAllBookings(event, respond); return }
+    if (what == "mybookings") { ownBookings(event, respond); return }
+    if (what == "givestamina") {
+      if (event.getGuild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+      else if (!RespawnModals.moderates(event.getGuild, event.getMember)) respond.text(notModeratorText)
+      else event.replyModal(RespawnModals.giveStaminaModal(event.getGuild.getId)).queue()
+      return
+    }
     val guild = event.getGuild
     if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
     else if (BotApp.respawnService.settings(guild.getId).isEmpty)
@@ -261,37 +309,31 @@ object RespawnButtons extends StrictLogging {
                 }
 
               case "schedule" =>
-                // Not deferred — this opens a modal, unless they already have a
-                // booking here, in which case there is nothing to create.
-                service.schedulesForUser(guildId, user.getId).filter(_.respawnId == respawn.id) match {
-                  case existing if existing.nonEmpty =>
-                    // Deferred, unlike the modal branch below: showing the spawn's
-                    // whole evening costs two more reads, and a modal is the only
-                    // thing that can't follow a defer.
-                    event.deferReply(true).queue()
-                    val deferredRespond = new Responder(event, deferred = true)
-                    val now = java.time.ZonedDateTime.now()
-                    deferredRespond.embed(
-                      RespawnEmbeds.bookingPanel(respawn, existing, user.getId,
-                        service.reservationsFor(guildId, respawn.id, now),
-                        service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
-                      Some(RespawnThreads.scheduleButtons(existing, respawn.id)))
-                  case _ =>
-                    // A moderator with no booking of their own sees the ones that
-                    // exist here, so they can act on somebody else's rather than
-                    // being offered only the create form.
-                    val others = service.schedulesForRespawn(guildId, respawn.id)
-                    if (others.nonEmpty && RespawnModals.moderates(guild, event.getMember)) {
-                      event.deferReply(true).queue()
-                      val deferredRespond = new Responder(event, deferred = true)
-                      deferredRespond.embed(
-                        RespawnEmbeds.schedulesEmbed(others.map(_ -> respawn),
-                          java.time.ZonedDateTime.now(), everyones = true),
-                        Some(RespawnThreads.moderatorScheduleButtons(others,
-                          java.time.ZonedDateTime.now())))
-                    } else {
-                      event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
-                    }
+                // One panel for everybody — same title, same state, same list of
+                // who has what. A moderator looking at a spawn is asking the same
+                // question as anybody else; only the buttons under it differ.
+                //
+                // Not deferred only in the one case that opens a modal: a member
+                // with nothing booked here, who wants the form rather than a
+                // panel telling them so.
+                val mine = service.schedulesForUser(guildId, user.getId).filter(_.respawnId == respawn.id)
+                val moderator = RespawnModals.moderates(guild, event.getMember)
+                if (mine.isEmpty && !moderator) {
+                  event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
+                } else {
+                  event.deferReply(true).queue()
+                  val deferredRespond = new Responder(event, deferred = true)
+                  val now = java.time.ZonedDateTime.now()
+                  val buttons =
+                    if (moderator)
+                      RespawnThreads.moderatorSpawnBookingButtons(respawn.id,
+                        service.schedulesForRespawn(guildId, respawn.id).size)
+                    else RespawnThreads.scheduleButtons(mine, respawn.id)
+                  deferredRespond.embed(
+                    RespawnEmbeds.bookingPanel(respawn, mine, user.getId,
+                      service.reservationsFor(guildId, respawn.id, now),
+                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
+                    Some(buttons))
                 }
 
               case "booknew" =>
@@ -299,10 +341,6 @@ object RespawnButtons extends StrictLogging {
                 // listed what they already have, so there is nothing to show
                 // them first.
                 event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
-
-              case "request" =>
-                respond.embed(Embeds.response(renderRequest(
-                  service.requestSlot(guild, respawn, user.getId, user.getName))))
 
               case "holdercfg" =>
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
@@ -425,22 +463,6 @@ object RespawnButtons extends StrictLogging {
         s"${Config.noEmoji} The respawn claim system isn't set up here."
     }
     Embeds.response(text + extra)
-  }
-
-  private def renderRequest(outcome: RequestOutcome): String = outcome match {
-    case RequestOutcome.Sent(respawn, _, deadline) =>
-      s"${Config.yesEmoji} Asked the owner of the next booked slot on **${respawn.displayName}** " +
-        s"whether they're hunting it.\nIf they don't answer by " +
-        s"<t:${deadline.toInstant.getEpochSecond}:t>, the slot is yours."
-    case RequestOutcome.NothingBooked(respawn) =>
-      s"${Config.noEmoji} Nobody has booked **${respawn.displayName}**, so there's nothing to ask for."
-    case RequestOutcome.AlreadyAsked(respawn) =>
-      s"${Config.noEmoji} The next booked slot on **${respawn.displayName}** has already been asked " +
-        "about — its owner is only asked once. Queue for it instead once their hunt starts."
-    case RequestOutcome.OwnSlot(respawn) =>
-      s"${Config.noEmoji} That's your own booking on **${respawn.displayName}**."
-    case RequestOutcome.NotConfigured =>
-      s"${Config.noEmoji} The respawn claim system isn't set up here."
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {

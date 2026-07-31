@@ -106,11 +106,11 @@ object RespawnEmbeds {
     if (reservations.nonEmpty) {
       // Booked slots that haven't started. Shown whether or not the spawn is free
       // right now, because the point of booking ahead is that people can plan
-      // around it — and, from phase 2, ask for it.
+      // around it.
       val shown = reservations.take(3).map { slot =>
         val when = slot.startsAt.map(dateTime).getOrElse("?")
-        // Somebody is waiting on an answer — worth showing, or a second person
-        // finds the Request button gone with no explanation.
+        // Somebody is waiting on an answer — worth showing, since until it is
+        // given the slot may or may not still belong to the name beside it.
         val pending = if (slot.requestPending) " · *asked*" else ""
         s"$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
       }
@@ -123,14 +123,14 @@ object RespawnEmbeds {
   }
 
   /** What somebody already holding a booking on a spawn sees when they press
-   *  Schedule on it.
+   *  Book on it.
    *
-   *  The whole spawn rather than just their own row: the reason they can't book
-   *  again is that the times around theirs belong to other people, and a list of
-   *  one booking says nothing about that. Their own line is marked rather than
-   *  filtered out, so the ordering still reads as the evening it is.
+   *  The whole spawn rather than just their own rows: they are deciding whether
+   *  to book another time, and what decides that is which times are already
+   *  spoken for. Their own lines are marked rather than filtered out, so the
+   *  ordering still reads as the evening it is.
    *
-   *  `mine` is the schedule behind their booking, which is what carries the
+   *  `mine` is the schedules behind their bookings, which is what carries the
    *  repeat — the occurrence rows know only their own start.
    */
   def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
@@ -147,7 +147,10 @@ object RespawnEmbeds {
     }
     val booked = mine.flatMap(schedule => schedule.nextStartAtOrAfter(now).map(schedule -> _))
     val yours =
-      if (booked.isEmpty) "Your booking on this respawn has been and gone."
+      // A moderator opens this panel with nothing of their own booked here, so
+      // "your booking has been and gone" would be a lie rather than an absence.
+      if (mine.isEmpty) "You have nothing booked here."
+      else if (booked.isEmpty) "Your booking on this respawn has been and gone."
       else if (booked.size == 1) {
         val (schedule, start) = booked.head
         s"Your booking is ${schedule.repeatLabel} at ${clockTime(start)} " +
@@ -167,9 +170,14 @@ object RespawnEmbeds {
       val lines = reservations.map { slot =>
         val when = slot.startsAt.map(dateTime).getOrElse("?")
         val pending = if (slot.requestPending) " · *asked*" else ""
-        // An arrow rather than a highlight — an embed has no way to shade a line,
+        // A marker rather than a highlight — an embed has no way to shade a line,
         // and bolding alone doesn't survive a list where every name is bold.
-        val marker = if (slot.userId == viewerId) "➤ " else ""
+        // Filled for yours, hollow for everybody else's: one glyph pair from one
+        // Unicode block, so both rows are the same width and the dates line up
+        // with no spacing to tune. Padding a mismatched pair does not work here —
+        // Discord collapses a run of ordinary spaces to one. The small triangles
+        // rather than U+25B6/7, which some clients render as the emoji.
+        val marker = if (slot.userId == viewerId) "▸ " else "▹ "
         s"$marker$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
       }
       embed.addField("Booked", truncateLines(lines, 1000), false)
@@ -190,10 +198,11 @@ object RespawnEmbeds {
       case (Some(start), None)      => clockTime(start)
       case _                        => "your booked slot"
     }
-    // Two ways to be asked, and they read differently. Pressing Request is
-    // somebody wanting the slot itself; booking over it is somebody planning a
-    // hunt of their own that happens to run across it, and saying so is what
-    // makes the times in the message add up.
+    // `wanted` is the window the asker booked, which runs across this slot
+    // without necessarily matching it — saying so is what makes the times in the
+    // message add up. It is always set now that booking over a slot is the only
+    // way to ask; the plainer opening survives for a request that was already in
+    // flight when the Request button was removed, and for nothing else.
     //
     // The asker is a mention rather than a name: Discord resolves it by id, so it
     // reads as their current display name in a DM they are not part of, and it
@@ -252,7 +261,7 @@ object RespawnEmbeds {
   /** DM'd when a booked slot starts. */
   def slotStarted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(clockTime).getOrElse("soon")
-    s"Your booked slot on **${respawn.displayName}** has started and runs until $ends."
+    s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends."
   }
 
   /** DM'd when a booking comes round to find its own owner already on the spawn:
@@ -285,20 +294,34 @@ object RespawnEmbeds {
   def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime,
                      everyones: Boolean = false): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
-      .setTitle(if (everyones) "Booked slots on this server" else "Your booked slots")
+      .setTitle(if (everyones) "Booked slots on this server" else "Your bookings")
     if (entries.isEmpty) {
       embed.setDescription(
         if (everyones) "Nobody has booked a slot yet."
-        else "You have no booked slots. Use **Schedule** on a respawn's post to book one.")
+        else "You have no bookings. Use **Book** on a respawn's post to make one.")
     } else {
-      embed.setDescription(truncateLines(entries.map { case (schedule, respawn) =>
-        val who = if (everyones) s" — <@${schedule.userId}>" else ""
-        // A spent one-off can still be listed for the moment between its slot
-        // passing and the sweep retiring it, so there may be no next slot.
-        val next = schedule.nextStartAtOrAfter(now)
-          .map(start => s", next ${dateTime(start)}").getOrElse(", done")
-        s"**${respawn.displayName}**$who\n\u2003${schedule.repeatLabel}$next " +
-          s"for ${humanDuration(schedule.durationMinutes)}"
+      // Reads as a timetable: when first, then what. Sorted by the next time each
+      // one runs rather than grouped by spawn, because somebody checking their
+      // bookings is asking what is coming up, not which respawns they favour.
+      // A spent one-off has no next time, and sits at the end.
+      val dated = entries.map { case (schedule, respawn) =>
+        (schedule.nextStartAtOrAfter(now), schedule, respawn)
+      }.sortBy { case (start, _, _) => start.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue) }
+
+      embed.setDescription(truncateLines(dated.map { case (start, schedule, respawn) =>
+        val who = if (everyones) s" · <@${schedule.userId}>" else ""
+        start match {
+          case Some(from) =>
+            // A repeat says which days and needs no date. A one-off is one
+            // evening, so its date is the whole point of the line.
+            val when =
+              if (schedule.repeats) s"${clockTime(from)}–${clockTime(schedule.endOf(from))}"
+              else s"${dateTime(from)}–${clockTime(schedule.endOf(from))}"
+            val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+            s"**$when** · `${respawn.code}` ${respawn.name}$who$repeat"
+          case None =>
+            s"`${respawn.code}` ${respawn.name}$who · *finished*"
+        }
       }))
     }
     embed.build()
@@ -407,6 +430,19 @@ object RespawnEmbeds {
     s"Your claim on **${respawn.displayName}** ends $ends."
   }
 
+  /** DM'd to somebody a moderator has taken a hunt from. Says who has it now, so
+   *  the answer to "why did my hunt stop" is in the message rather than in a
+   *  card they would have to go and read. */
+  def claimReassignedFrom(respawn: Respawn, toUserId: String): String =
+    s"A moderator has given your hunt on **${respawn.displayName}** to <@$toUserId>.\n" +
+      "Any stamina you had left on it has gone back to your tank."
+
+  /** DM'd to whoever a moderator has given a hunt to. */
+  def claimReassignedTo(respawn: Respawn, claim: RespawnClaim): String = {
+    val ends = claim.endsAt.map(relative).getOrElse("soon")
+    s"A moderator has put you on **${respawn.displayName}** — it's yours until $ends."
+  }
+
   /** Sent by DM once a claim has actually run out, so its holder knows the spawn
    *  isn't theirs any more without going to look. */
   def claimEnded(respawn: Respawn): String =
@@ -437,15 +473,39 @@ object RespawnEmbeds {
     embed.build()
   }
 
-  /** `/respawn stamina` — the fuel gauge, plus what's currently draining it. */
+  /** How full a tank is, drawn.
+   *
+   *  Block characters rather than coloured squares: an emoji is about twice the
+   *  width of a text glyph, so a bar mixing the two comes out lopsided, and one
+   *  made purely of emoji is wider than the line it captions. These take the
+   *  embed's own text colour and line up exactly.
+   *
+   *  A tank with anything left always shows at least one block, and one not quite
+   *  full always shows at least one gap — rounding that reported "empty" to
+   *  somebody with minutes left, or "full" to somebody without, would make the
+   *  picture disagree with the number beside it. */
+  private[presentation] def staminaBar(remaining: Int, budget: Int, width: Int = 12): String = {
+    if (budget <= 0) ""
+    else {
+      val exact = width.toDouble * math.max(0, math.min(budget, remaining)) / budget
+      val filled =
+        if (remaining <= 0) 0
+        else if (remaining >= budget) width
+        else math.max(1, math.min(width - 1, math.round(exact).toInt))
+      "█" * filled + "░" * (width - filled)
+    }
+  }
+
+  /** `/stamina` — the fuel gauge, plus what's currently draining it. */
   def staminaEmbed(stamina: Stamina, openClaims: List[(Respawn, RespawnClaim)],
                    nextReset: ZonedDateTime): MessageEmbed = {
-    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Claim stamina")
+    val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle("Stamina")
     if (stamina.unlimited) {
       embed.setDescription("Stamina is **disabled** on this server — claim as much as you like.")
     } else {
       embed.setDescription(
-        s"**${humanDuration(stamina.remainingMinutes)}** left of " +
+        s"${staminaBar(stamina.remainingMinutes, stamina.budgetMinutes)}\n" +
+          s"**${humanDuration(stamina.remainingMinutes)}** left of " +
           s"${humanDuration(stamina.budgetMinutes)}.\nRefills at server save ${relative(nextReset)}.")
       if (openClaims.nonEmpty) {
         val lines = openClaims.map { case (respawn, claim) =>

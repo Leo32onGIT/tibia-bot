@@ -181,6 +181,11 @@ trait RespawnRepository {
 
   def cancelClaim(guildId: String, claimId: Long, outcome: String): Unit
 
+  /** Move a running claim to a different member, keeping its start, end and
+   *  everything else. Returns the stored row, or None if it is no longer active
+   *  — which is what stops a moderator reassigning a hunt that just ended. */
+  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String): Option[RespawnClaim]
+
   def markWarned(guildId: String, claimId: Long): Unit
 
   def extendClaim(guildId: String, claimId: Long, newEndsAt: ZonedDateTime, newDurationMinutes: Int): Unit
@@ -277,16 +282,13 @@ trait RespawnRepository {
    *  Returns None if the slot is gone or has already been asked about — which is
    *  what enforces "asked once per slot", and stops two people racing to ask.
    *
-   *  `wanted` is the window the asker actually booked for, when the ask came from
-   *  them trying to book over this slot; None when they pressed Request, where
-   *  what they want is this slot exactly as it stands. */
+   *  `wanted` is the window the asker booked, which overlaps this slot without
+   *  necessarily matching it. None only for a request raised before booking over
+   *  a slot became the one way to ask. */
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
                         requesterUserName: String, askedAt: ZonedDateTime,
                         deadline: ZonedDateTime,
                         wanted: Option[(ZonedDateTime, Int)] = None): Option[RespawnClaim]
-
-  /** The soonest booked slot on a spawn nobody has asked about yet. */
-  def requestableSlot(guildId: String, respawnId: Long, now: ZonedDateTime): Option[RespawnClaim]
 
   /** Booked slots starting within `leadMinutes` whose owner hasn't been nudged.
    *

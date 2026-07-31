@@ -34,6 +34,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   // supplies its own mappings.
   private val mappings = Map.empty[String, String]
   private val fallback = "https://example.invalid/fallback.gif"
+  private val indent = "▹"
   private def image(respawn: Respawn) = RespawnEmbeds.imageFor(respawn, mappings, fallback)
 
   private def fields(embed: net.dv8tion.jda.api.entities.MessageEmbed): Map[String, String] =
@@ -192,6 +193,22 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.activeClaimsList(Nil).getDescription should include("No respawns are claimed")
   }
 
+  test("the stamina bar never disagrees with the number beside it") {
+    // Full and empty are the two the eye checks against the words, so they are
+    // exact; everything between is proportional.
+    RespawnEmbeds.staminaBar(240, 240, 12) shouldBe "█" * 12
+    RespawnEmbeds.staminaBar(0, 240, 12) shouldBe "░" * 12
+    RespawnEmbeds.staminaBar(120, 240, 12) shouldBe "█" * 6 + "░" * 6
+
+    // A tank with minutes left must not read as empty, nor an all-but-full one
+    // as full — that is the picture contradicting the caption.
+    RespawnEmbeds.staminaBar(1, 240, 12) shouldBe "█" + "░" * 11
+    RespawnEmbeds.staminaBar(239, 240, 12) shouldBe "█" * 11 + "░"
+
+    // Unlimited has nothing to draw.
+    RespawnEmbeds.staminaBar(0, 0, 12) shouldBe ""
+  }
+
   test("the stamina gauge shows what's left and when it refills") {
     val tank = Stamina("7", usedMinutes = 90, budgetMinutes = 240, resetAt = now)
     val embed = RespawnEmbeds.staminaEmbed(tank, List((cultOrcs, claim("7"))), now.plusHours(6))
@@ -281,6 +298,45 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("No finished claims")
   }
 
+  test("the bookings list reads as a timetable, soonest first") {
+    val evening = RespawnSchedule(1L, 1L, "99", "someone", "", now.plusHours(9),
+      RespawnSchedule.Daily, 120, active = true, createdAt = now)
+    val morning = evening.copy(id = 2L, anchorAt = now.plusHours(2), durationMinutes = 60,
+      daysOfWeek = RespawnSchedule.OneOff)
+    val embed = RespawnEmbeds.schedulesEmbed(List(evening -> cultOrcs, morning -> unmapped), now)
+
+    val text = embed.getDescription
+    // Sorted by when, not by the order they were handed over.
+    text.indexOf(unmapped.code) should be < text.indexOf(cultOrcs.code)
+    // Start and end both shown, so the length needs no arithmetic.
+    text should include(s"<t:${now.plusHours(9).toInstant.getEpochSecond}:t>")
+    text should include(s"<t:${now.plusHours(11).toInstant.getEpochSecond}:t>")
+    // A repeat says which days; a one-off carries its date instead.
+    text should include("every day")
+    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:f>")
+    // "next" was noise — the time is obviously the next one.
+    text should not include "next"
+  }
+
+  test("a moderator's booking list names the owner of each line") {
+    val schedule = RespawnSchedule(1L, 1L, "77", "someone", "", now.plusHours(2),
+      RespawnSchedule.Daily, 120, active = true, createdAt = now)
+    val embed = RespawnEmbeds.schedulesEmbed(List(schedule -> cultOrcs), now, everyones = true)
+    embed.getDescription should include("<@77>")
+  }
+
+  test("an empty bookings list points at the button that makes one") {
+    val embed = RespawnEmbeds.schedulesEmbed(Nil, now)
+    embed.getDescription should include("**Book**")
+  }
+
+  test("a hunt taken away says who has it and that the stamina came back") {
+    val text = RespawnEmbeds.claimReassignedFrom(cultOrcs, "42")
+    text should include("<@42>")
+    text should include("stamina")
+    RespawnEmbeds.claimReassignedTo(cultOrcs, claim("42")) should include(":R>")
+  }
+
   // --- pressing Schedule on a respawn you have already booked ---------------
 
   private def booking(userId: String = "99", minutes: Int = 120,
@@ -305,10 +361,31 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val booked = fields(embed)("Booked")
     // Yours is marked rather than filtered out, so the order still reads as the
     // evening it is.
-    booked should include("➤")
+    booked should include("▸")
     booked should include("<@99>")
     booked should include("<@77>")
-    booked.linesIterator.count(_.startsWith("➤")) shouldBe 1
+    booked.linesIterator.count(_.startsWith("▸")) shouldBe 1
+    // Somebody else's row is indented rather than left bare, so the two kinds of
+    // line begin at the same place.
+    booked.linesIterator.count(_.startsWith(indent)) shouldBe 1
+  }
+
+  test("the panel a moderator sees is the same panel, minus any bookings of their own") {
+    // Same builder, same shape — only the buttons under it differ, which is the
+    // only part that actually differs.
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55",
+      List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4))),
+      holder = None, now, image(cultOrcs))
+
+    embed.getTitle shouldBe "415 — Cult Orcs"
+    embed.getDescription should include("nothing booked here")
+    // Everyone else's bookings are still listed, and none is marked as theirs.
+    val booked = fields(embed)("Booked")
+    booked should include("<@99>")
+    booked should include("<@77>")
+    booked should not include "▸"
+    // Every line still starts with something, so the times share a left edge.
+    booked.linesIterator.foreach(_ should startWith(indent))
   }
 
   test("the booking panel says who is on the respawn now, which is a different question") {

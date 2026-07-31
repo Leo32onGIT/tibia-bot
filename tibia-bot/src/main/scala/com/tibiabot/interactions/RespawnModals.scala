@@ -8,7 +8,7 @@ import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.checkbox.Checkbox
 import net.dv8tion.jda.api.components.label.{Label, LabelChildComponent}
-import net.dv8tion.jda.api.components.selections.{SelectOption, StringSelectMenu}
+import net.dv8tion.jda.api.components.selections.{EntitySelectMenu, SelectOption, StringSelectMenu}
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
 import net.dv8tion.jda.api.entities.{Guild, Member}
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
@@ -37,6 +37,8 @@ object RespawnModals extends StrictLogging {
   private val RepeatField = "repeat"
   private val DaysField = "days"
   private val WarnField = "warn"
+  private val HolderField = "holder"
+  private val MinutesField = "minutes"
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
 
@@ -125,14 +127,18 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** The current holder's duration, changed by a moderator. Named so it is obvious
-   *  whose hunt is being altered. */
+  /** A moderator editing the claim on a spawn: how long it runs, and who is on
+   *  it.
+   *
+   *  The holder is a user picker rather than a typed name, so a moderator can
+   *  hand a hunt to anybody in the server without knowing an id. Left empty it
+   *  changes nothing — the common edit is the duration, and a picker that had to
+   *  be re-answered every time would make the usual case the fiddly one. */
   def holderDurationModal(guildId: String, respawn: Respawn): Modal = {
     val holder = BotApp.respawnService.holderOf(guildId, respawn.id)
-    val who = holder.map(c => if (c.characterName.nonEmpty) c.characterName else c.userName).getOrElse("the holder")
     val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
 
-    Modal.create(RespawnButtonId.modalHolderDuration(respawn.id), "Change hunt duration")
+    Modal.create(RespawnButtonId.modalHolderDuration(respawn.id), "Edit claim")
       .addComponents(
         // Whose hunt it is goes in the description, not the label: a Discord
         // username can be 32 characters on its own and the label allows 45 in
@@ -143,6 +149,36 @@ object RespawnModals extends StrictLogging {
             .setValue(holder.map(_.durationMinutes.toString).getOrElse(""))
             .setRequired(true)
             .setMaxLength(4)
+            .build()),
+        label("Give the hunt to somebody else",
+          "Leave empty to keep whoever is on it now.",
+          EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
+            .setRequiredRange(0, 1)
+            .build())
+      )
+      .build()
+  }
+
+  /** A moderator handing somebody stamina, from /stamina.
+   *
+   *  Minutes to *give* rather than a new total: a moderator does this because
+   *  somebody lost time to something that wasn't their fault, and what they know
+   *  is how much was lost — not what the tank should read afterwards. A negative
+   *  number takes some back, for when it was given in error. */
+  def giveStaminaModal(guildId: String): Modal = {
+    val budget = BotApp.respawnService.settings(guildId).map(_.staminaMinutes).getOrElse(240)
+    Modal.create(RespawnButtonId.modalGiveStamina, "Give stamina")
+      .addComponents(
+        label("Who to give it to", "Anybody in this server.",
+          EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
+            .setRequiredRange(1, 1)
+            .build()),
+        label("How many minutes?",
+          s"Negative takes it back. Nobody can go above the daily $budget.",
+          TextInput.create(MinutesField, TextInputStyle.SHORT)
+            .setPlaceholder("60")
+            .setRequired(true)
+            .setMaxLength(5)
             .build())
       )
       .build()
@@ -308,6 +344,7 @@ object RespawnModals extends StrictLogging {
         case RespawnButtonId.modalConfig     => submitConfig(event)
         case RespawnButtonId.modalClaimRules => submitSettings(event, claimRules = true)
         case RespawnButtonId.modalTimers     => submitSettings(event, claimRules = false)
+        case RespawnButtonId.modalGiveStamina => submitGiveStamina(event)
         case other =>
           logger.warn(s"Unknown respawn modal '$other'")
           reply(event, s"${Config.noEmoji} I didn't understand that form.")
@@ -408,33 +445,85 @@ object RespawnModals extends StrictLogging {
   private def submitDuration(event: ModalInteractionEvent, respawnId: Long, forHolder: Boolean): Unit =
     Try(value(event, DurationField).toInt).toOption match {
       case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
+      case Some(minutes) if forHolder && !moderates(event.getGuild, event.getMember) =>
+        // Re-checked on submit rather than trusted from when the panel opened: a
+        // modal can sit open long after somebody's role was taken away.
+        reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+          s"or the **${Permissions.ModeratorRoleName}** role.")
       case Some(minutes) =>
-        // Whose claim changes: the current holder's when a moderator came through
-        // the spawn panel, otherwise the caller's own. Stamina settles against
-        // whoever actually owns the claim either way.
-        val target =
-          if (!forHolder) Some(event.getUser.getId)
-          else if (!moderates(event.getGuild, event.getMember)) None
-          else BotApp.respawnService.holderOf(event.getGuild.getId, respawnId).map(_.userId)
+        val service = BotApp.respawnService
+        // A moderator may also be handing the hunt to somebody else. Done first,
+        // so the duration below lands on whoever ends up holding it — the other
+        // order sets the length on the outgoing holder and then moves a hunt of
+        // the wrong length.
+        val giveTo =
+          if (!forHolder) None
+          else Option(event.getValue(HolderField))
+            .map(_.getAsMentions.getUsers.asScala.toList).getOrElse(Nil).headOption
 
-        target match {
-          case None =>
-            reply(event, s"${Config.noEmoji} Nobody is holding that respawn any more.")
-          case Some(userId) =>
-            BotApp.respawnService.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
-              case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
-              case Right((respawn, applied)) =>
-                val whose = if (forHolder && userId != event.getUser.getId) s" for <@$userId>" else ""
-                val note =
-                  if (applied != minutes)
-                    s"\nThe hunt had already run longer than that, so it's set to " +
-                      s"${RespawnEmbeds.humanDuration(applied)} and ends now."
-                  else ""
-                reply(event, s"${Config.yesEmoji} **${respawn.displayName}**$whose is now set to " +
-                  s"${RespawnEmbeds.humanDuration(applied)}.$note")
+        val reassigned = giveTo match {
+          case None       => Right(None)
+          case Some(user) => service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName)
+                               .map(_ => Some(user.getId))
+        }
+
+        reassigned match {
+          case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+          case Right(movedTo) =>
+            // Whose claim the length applies to: whoever now holds it after any
+            // handover, or the caller when they came through their own Config.
+            val target =
+              if (!forHolder) Some(event.getUser.getId)
+              else movedTo.orElse(service.holderOf(event.getGuild.getId, respawnId).map(_.userId))
+
+            target match {
+              case None =>
+                reply(event, s"${Config.noEmoji} Nobody is holding that respawn any more.")
+              case Some(userId) =>
+                service.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
+                  case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+                  case Right((respawn, applied)) =>
+                    val whose = if (forHolder && userId != event.getUser.getId) s" for <@$userId>" else ""
+                    val moved = movedTo.map(id => s"\nIt's <@$id>'s hunt now.").getOrElse("")
+                    val note =
+                      if (applied != minutes)
+                        s"\nThe hunt had already run longer than that, so it's set to " +
+                          s"${RespawnEmbeds.humanDuration(applied)} and ends now."
+                      else ""
+                    reply(event, s"${Config.yesEmoji} **${respawn.displayName}**$whose is now set to " +
+                      s"${RespawnEmbeds.humanDuration(applied)}.$moved$note")
+                }
             }
         }
     }
+
+  private def submitGiveStamina(event: ModalInteractionEvent): Unit = {
+    val guild = event.getGuild
+    // Re-checked on submit, like every other moderator form: a modal can sit
+    // open long after a role was taken away.
+    if (guild == null) reply(event, s"${Config.noEmoji} That only works inside a server.")
+    else if (!moderates(guild, event.getMember))
+      reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
+    else Try(value(event, MinutesField).toInt).toOption match {
+      case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
+      case Some(0) => reply(event, s"${Config.noEmoji} That would change nothing.")
+      case Some(minutes) =>
+        val who = Option(event.getValue(HolderField))
+          .map(_.getAsMentions.getUsers.asScala.toList).getOrElse(Nil).headOption
+        (who, BotApp.respawnService.settings(guild.getId)) match {
+          case (None, _) => reply(event, s"${Config.noEmoji} Pick somebody to give it to.")
+          case (_, None) => reply(event, s"${Config.noEmoji} The respawn claim system isn't set up here.")
+          case (Some(user), Some(config)) =>
+            val tank = BotApp.respawnService.grantStamina(guild.getId, user.getId, minutes, config)
+            val verb = if (minutes > 0) "Gave" else "Took"
+            reply(event, s"${Config.yesEmoji} $verb **${RespawnEmbeds.humanDuration(math.abs(minutes))}** " +
+              s"${if (minutes > 0) "to" else "from"} <@${user.getId}> — they now have " +
+              s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
+              s"${RespawnEmbeds.humanDuration(config.staminaMinutes)} left.")
+        }
+    }
+  }
 
   private def submitClaim(event: ModalInteractionEvent): Unit = {
     val guild = event.getGuild

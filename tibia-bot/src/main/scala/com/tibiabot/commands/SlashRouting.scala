@@ -28,6 +28,7 @@ object SlashRouting {
     "online"       -> (OnlineListCommands.handle _),
     "boosted"      -> (BoostedCommands.handle _),
     "patreon"      -> (PatreonCommands.handle _),
-    "stamina"      -> (RespawnCommands.handle _)
+    "stamina"      -> (RespawnCommands.handle _),
+    "bookings"     -> (RespawnCommands.bookings _)
   )
 }
