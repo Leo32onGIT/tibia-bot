@@ -155,12 +155,12 @@ Using a local instance of TibiaData gives you quicker server save notifications.
 
 1. Edit the `.env` file
 ```env
-TIBIADATA_HOST=http://tibiadata-api:8080
+TIBIADATA_HOST=http://tibiadata-api:8081
 ```
 2. Run it on the same docker network so violent bot can access it:
 
 ```bash
-docker run -d -p XXXXXXXX:80:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
+docker run -d -p XXXXXXXX:8081:8080 --name tibiadata-api --network violentbot --rm -it ghcr.io/tibiadata/tibiadata-api-go:latest
 ```
 
 ## Pre-requisites:
