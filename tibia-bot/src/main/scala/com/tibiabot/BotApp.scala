@@ -53,11 +53,18 @@ object BotApp extends App with StrictLogging {
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
 
-  /** Build a RateLimitedSender ticking every `delayMs`, plus a periodic
-   *  monitoring log tagged `[rate-limit:name]`: queue depth (and its trend
-   *  since the last log) shows whether the lane is keeping up or backing up;
-   *  the per-label breakdown shows which traffic is consuming the lane's
-   *  budget and how long it's waiting. */
+  /** Build a RateLimitedSender ticking every `delayMs`.
+   *
+   *  The five-minute tick no longer logs — the `[rate-limit:name]` line was a
+   *  steady drip of two entries every five minutes forever, and the same figures
+   *  are on the dashboard whenever somebody actually wants them.
+   *
+   *  It still runs, because [[discord.RateLimitedSender.snapshotAndReset]] is the
+   *  only thing that rolls the per-label window, and the dashboard reads that
+   *  window (see web.StatusRoute). Dropping the tick with the log would quietly
+   *  turn "avg wait" from the last five minutes into an average since boot, which
+   *  stops moving when a lane starts struggling — the opposite of what it is for.
+   */
   private def makeMonitoredSender(name: String, delayMs: Int, perGroupMinGapMs: Long = 0): discord.RateLimitedSender = {
     val sender = new discord.RateLimitedSender(drain => {
       val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
@@ -66,22 +73,9 @@ object BotApp extends App with StrictLogging {
       )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
       () => cancellable.cancel()
     }, perGroupMinGapMs = perGroupMinGapMs)
-    var lastLoggedQueueDepth = 0
     actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
-      val depth = sender.queueDepth
-      val delta = depth - lastLoggedQueueDepth
-      lastLoggedQueueDepth = depth
-      val trend =
-        if (delta > 0) s"+$delta, growing"
-        else if (delta < 0) s"$delta, draining"
-        else "unchanged"
-      val perLabel = sender.snapshotAndReset()
-      val breakdown =
-        if (perLabel.isEmpty) "no traffic"
-        else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
-          s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
-        }.mkString(" | ")
-      logger.info(s"[rate-limit:$name] depth: $depth ($trend vs 5m ago) | dropped total: ${sender.totalDropped} | superseded total: ${sender.totalSuperseded} | last 5m -- $breakdown")
+      sender.snapshotAndReset()
+      ()
     })(ex)
     sender
   }
@@ -824,17 +818,24 @@ object BotApp extends App with StrictLogging {
    *  dashboard's 10s poll), via the same blocking JDA lookup PatreonAdminRoute
    *  uses for a single user. A failed lookup just leaves that member's
    *  username unresolved for this pass; it's retried on the next sync. */
-  private def resolveDiscordUsername(member: domain.PatreonMember): domain.PatreonMember =
+  private def resolveDiscordUsername(member: domain.PatreonMember,
+                                     known: Map[String, String]): domain.PatreonMember =
     member.discordUserId match {
       case None => member
       case Some(discordId) =>
+        // Whatever was resolved last time, for when this lookup can't answer.
+        // The snapshot is replaced wholesale, so without this a Discord timeout
+        // blanks a supporter's name on the dashboard until some later sync
+        // happens to succeed — losing a name we already knew, over a hiccup that
+        // had nothing to do with them.
+        def lastKnown = member.copy(discordUsername = known.get(discordId))
         try {
           val user = discordGateway.retrieveUser(discordId)
-          if (user != null) member.copy(discordUsername = Some(user.getName)) else member
+          if (user != null) member.copy(discordUsername = Some(user.getName)) else lastKnown
         } catch {
           case ex: Throwable =>
             logger.warn(s"Failed to resolve Discord username for linked Patreon member '${member.patreonMemberId}' (Discord id '$discordId')", ex)
-            member
+            lastKnown
         }
     }
 
@@ -854,9 +855,13 @@ object BotApp extends App with StrictLogging {
    *  degrade-gracefully shape as everything else here. */
   private def syncPatreonMembers(): Unit =
     patreonApiClient.fetchAllMembers().foreach { members =>
-      val enriched = members.map(resolveDiscordUsername)
+      // Read once, before anything is overwritten, and used for two things: the
+      // names already resolved, and which accounts were already linked.
+      val previous = patreonMemberRepository.snapshot()
+      val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
+      val enriched = members.map(resolveDiscordUsername(_, knownNames))
       logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account)")
-      val previouslyLinkedIds = patreonMemberRepository.snapshot().flatMap(_.discordUserId).toSet
+      val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
       try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
       catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
 
