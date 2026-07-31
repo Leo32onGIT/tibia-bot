@@ -133,8 +133,9 @@ object RespawnEmbeds {
    *  `mine` is the schedule behind their booking, which is what carries the
    *  repeat — the occurrence rows know only their own start.
    */
-  def bookingPanel(respawn: Respawn, mine: RespawnSchedule, reservations: List[RespawnClaim],
-                   holder: Option[RespawnClaim], now: ZonedDateTime, imageUrl: String): MessageEmbed = {
+  def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
+                   reservations: List[RespawnClaim], holder: Option[RespawnClaim],
+                   now: ZonedDateTime, imageUrl: String): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
@@ -144,10 +145,19 @@ object RespawnEmbeds {
         s"Being hunted by ${claimantLabel(active)}$until."
       case None => "Free right now."
     }
-    val yours = mine.nextStartAtOrAfter(now)
-      .map(start => s"Your booking is ${mine.repeatLabel} at ${clockTime(start)} " +
-        s"for ${humanDuration(mine.durationMinutes)}.")
-      .getOrElse(s"Your booking on this respawn has been and gone.")
+    val booked = mine.flatMap(schedule => schedule.nextStartAtOrAfter(now).map(schedule -> _))
+    val yours =
+      if (booked.isEmpty) "Your booking on this respawn has been and gone."
+      else if (booked.size == 1) {
+        val (schedule, start) = booked.head
+        s"Your booking is ${schedule.repeatLabel} at ${clockTime(start)} " +
+          s"for ${humanDuration(schedule.durationMinutes)}."
+      } else {
+        val each = booked.sortBy(_._2.toInstant).map { case (schedule, start) =>
+          s"${clockTime(start)} ${schedule.repeatLabel} for ${humanDuration(schedule.durationMinutes)}"
+        }
+        s"You have ${booked.size} bookings here: ${each.mkString("; ")}."
+      }
     embed.setDescription(s"$state $yours")
 
     if (reservations.nonEmpty) {
@@ -159,13 +169,13 @@ object RespawnEmbeds {
         val pending = if (slot.requestPending) " · *asked*" else ""
         // An arrow rather than a highlight — an embed has no way to shade a line,
         // and bolding alone doesn't survive a list where every name is bold.
-        val marker = if (slot.userId == mine.userId) "➤ " else ""
+        val marker = if (slot.userId == viewerId) "➤ " else ""
         s"$marker$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
       }
       embed.addField("Booked", truncateLines(lines, 1000), false)
     }
 
-    embed.setFooter("Cancel yours to free it up. Only one booking per respawn each.")
+    embed.setFooter("Book another time for a slot that doesn't overlap one already here.")
     embed.build()
   }
 
@@ -371,7 +381,6 @@ object RespawnEmbeds {
   def handoverOffer(respawn: Respawn, claim: RespawnClaim, guildName: String,
                     expiresAt: ZonedDateTime): String =
     s"**${respawn.displayName}** is ready for you in **$guildName**.\n" +
-      s"Press **Claim** to take it for ${humanDuration(claim.durationMinutes)}.\n" +
       s"This offer expires ${relative(expiresAt)} — if you don't answer you lose your place in the queue."
 
   /** Sent by DM once someone accepts their handover offer. */
@@ -395,8 +404,7 @@ object RespawnEmbeds {
    *  that is the one that gets a button. */
   def expiryWarning(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(relative).getOrElse("shortly")
-    s"Your claim on **${respawn.displayName}** ends $ends.\n" +
-      "Click the leave button below if you have left the respawn already."
+    s"Your claim on **${respawn.displayName}** ends $ends."
   }
 
   /** Sent by DM once a claim has actually run out, so its holder knows the spawn

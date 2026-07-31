@@ -1,6 +1,6 @@
 package com.tibiabot.respawn
 
-import com.tibiabot.domain.{Respawn, RespawnSettings}
+import com.tibiabot.domain.{Respawn, RespawnSchedule, RespawnSettings}
 import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.Permission
@@ -109,16 +109,31 @@ object RespawnThreads extends StrictLogging {
       Button.danger(RespawnButtonId.passSlot(guildId, claimId), "Not tonight")
     )
 
-  /** Shown when somebody already has a booking on this spawn — cancelling it is
-   *  the only thing left to offer them. */
-  def scheduleButtons(scheduleId: Long): ActionRow =
-    ActionRow.of(Button.danger(RespawnButtonId.cancelSchedule(scheduleId), "Cancel booking"))
+  /** What somebody with bookings on a spawn can do: add another slot, or drop
+   *  the ones they have.
+   *
+   *  One cancel, not one per booking. A member's bookings on a single spawn are
+   *  one decision to them, and a button each turned the panel into a row of
+   *  near-identical red buttons that had to be read to tell apart. */
+  def scheduleButtons(schedules: List[RespawnSchedule], respawnId: Long): ActionRow =
+    ActionRow.of(
+      Button.success(RespawnButtonId.bookAnother(respawnId), "Book another time")
+        .withEmoji(Emoji.fromUnicode("📅")),
+      Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
+        if (schedules.size == 1) "Cancel booking" else s"Cancel all ${schedules.size} bookings")
+    )
 
-  /** The lone Leave button on a reminder DM, for someone who has already left the
-   *  respawn in game. Carries the guild for the same reason the offer buttons do:
-   *  a DM interaction has no guild of its own. */
-  def reminderButtons(guildId: String, respawnId: Long): ActionRow =
-    ActionRow.of(Button.danger(RespawnButtonId.dmLeave(guildId, respawnId), "Leave"))
+  /** A cancel per booking, for a moderator looking at bookings that are not
+   *  theirs — "all mine" means nothing there, and which one they are removing is
+   *  the whole question. */
+  def moderatorScheduleButtons(schedules: List[RespawnSchedule],
+                               now: java.time.ZonedDateTime): ActionRow =
+    ActionRow.of(schedules.take(5).map { schedule =>
+      val label = schedule.nextStartAtOrAfter(now)
+        .map(start => s"Cancel ${com.tibiabot.scheduler.ServerSaveSchedule.serverSaveOffsetLabel(start)}")
+        .getOrElse("Cancel booking")
+      Button.danger(RespawnButtonId.cancelSchedule(schedule.id), label)
+    }.asJava)
 
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
@@ -527,7 +542,14 @@ object RespawnButtonId {
 
   /** Book, or cancel, a repeating slot on this spawn. */
   def spawnSchedule(respawnId: Long): String = s"${Prefix}schedule:$respawnId"
+  /** Book a *further* slot on a spawn you already have one on. A separate id
+   *  from `schedule` because that one now opens the panel — pressing it again
+   *  would only reopen what you are looking at. */
+  def bookAnother(respawnId: Long): String = s"${Prefix}booknew:$respawnId"
   def cancelSchedule(scheduleId: Long): String = s"${Prefix}unschedule:$scheduleId"
+  /** Drop every booking the presser has on one spawn — so this one carries the
+   *  *respawn* id, unlike `cancelSchedule` above. */
+  def cancelSpawnBookings(respawnId: Long): String = s"${Prefix}unschedules:$respawnId"
 
   /** Moderator actions reached from a spawn's Config panel. */
   def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
@@ -565,7 +587,12 @@ object RespawnButtonId {
       case _               => None
     }
 
-  /** Leave, pressed from a DM — so it carries the guild the claim belongs to. */
+  /** Leave, pressed from a DM — so it carries the guild the claim belongs to.
+   *
+   *  Nothing builds this any more: the claim-ending reminder used to carry it and
+   *  no longer does. The id and its handler stay because reminders already sent
+   *  are still sitting in inboxes, and a button that still works beats one that
+   *  errors months later. */
   def dmLeave(guildId: String, respawnId: Long): String = s"${Prefix}dmleave:$guildId:$respawnId"
 
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"

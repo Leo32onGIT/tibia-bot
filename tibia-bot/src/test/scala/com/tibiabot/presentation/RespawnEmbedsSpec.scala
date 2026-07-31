@@ -113,7 +113,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val text = RespawnEmbeds.handoverOffer(cultOrcs, offer, "Violent Bot Dev", now.plusMinutes(10))
     text should include("415 — Cult Orcs")
     text should include("Violent Bot Dev")
-    text should include("1h 30m")
+    // The length is deliberately absent: it is on the card they are being offered,
+    // and the question here is only whether they still want it.
+    text should not include "1h 30m"
     // Silence costing the queue place is the whole point of confirming, so it
     // must be stated rather than discovered.
     text should include("lose your place")
@@ -129,7 +131,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // A relative timestamp keeps counting down on its own; a baked-in "8m" is
     // wrong the moment it's read.
     text should include(":R>")
-    text should include("leave button")
+    // The reminder carries no buttons any more, so nothing may point at one.
+    text should not include "leave button"
     // Extending is deliberately not suggested — it encourages holding spawns
     // longer than needed.
     text should not include "/respawn extend"
@@ -292,7 +295,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       requesterUserId = requester)
 
   test("the booking panel shows the whole evening, not just your own slot") {
-    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4))),
       holder = None, now, image(cultOrcs))
 
@@ -309,17 +312,32 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the booking panel says who is on the respawn now, which is a different question") {
-    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
     embed.getDescription should include("<@55>")
     embed.getDescription should include("Your booking is every day")
   }
 
   test("a slot somebody is waiting on an answer for says so") {
-    val embed = RespawnEmbeds.bookingPanel(cultOrcs, booking(),
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4), requester = Some("12"))),
       holder = None, now, image(cultOrcs))
     fields(embed)("Booked") should include("asked")
+  }
+
+  test("two bookings on one spawn are both described, earliest first") {
+    val evening = booking(minutes = 60)
+    val morning = evening.copy(id = 6L, anchorAt = now.plusHours(1))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(evening, morning), "99",
+      List(reserved("99", now.plusHours(1), 60), reserved("99", now.plusHours(2), 60)),
+      holder = None, now, image(cultOrcs))
+
+    embed.getDescription should include("2 bookings")
+    val morningAt = s"<t:${now.plusHours(1).toInstant.getEpochSecond}:t>"
+    val eveningAt = s"<t:${now.plusHours(2).toInstant.getEpochSecond}:t>"
+    embed.getDescription.indexOf(morningAt) should be < embed.getDescription.indexOf(eveningAt)
+    // The old rule is gone, so the footer must not still be claiming it.
+    embed.getFooter.getText should not include "one booking"
   }
 
   test("being asked for a slot reads differently from being asked about a booking over it") {

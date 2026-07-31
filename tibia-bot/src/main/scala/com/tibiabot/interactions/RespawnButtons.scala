@@ -37,7 +37,7 @@ object RespawnButtons extends StrictLogging {
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
-    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule")
+    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew")
 
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
@@ -152,6 +152,19 @@ object RespawnButtons extends StrictLogging {
             }
         }
 
+      // Every booking the presser has on one spawn, so this one carries a
+      // *respawn* id where the case above carries a schedule id.
+      case Some(RespawnButtonId.SpawnButton("unschedules", respawnId)) =>
+        val guild = event.getGuild
+        if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
+        else BotApp.respawnService.cancelBookingsOn(guild, respawnId, event.getUser.getId) match {
+          case 0 => respond.text(s"${Config.noEmoji} You have no bookings on that respawn.")
+          case 1 => respond.text(s"${Config.yesEmoji} Booking cancelled. " +
+            "Slots that hadn't started yet have been released.")
+          case many => respond.text(s"${Config.yesEmoji} All **$many** of your bookings on that " +
+            "respawn are cancelled. Slots that hadn't started yet have been released.")
+        }
+
       case Some(RespawnButtonId.SpawnButton(action, respawnId)) =>
         handleSpawnButton(event, respond, action, respawnId)
     }
@@ -250,8 +263,8 @@ object RespawnButtons extends StrictLogging {
               case "schedule" =>
                 // Not deferred — this opens a modal, unless they already have a
                 // booking here, in which case there is nothing to create.
-                service.schedulesForUser(guildId, user.getId).find(_.respawnId == respawn.id) match {
-                  case Some(existing) =>
+                service.schedulesForUser(guildId, user.getId).filter(_.respawnId == respawn.id) match {
+                  case existing if existing.nonEmpty =>
                     // Deferred, unlike the modal branch below: showing the spawn's
                     // whole evening costs two more reads, and a modal is the only
                     // thing that can't follow a defer.
@@ -259,11 +272,11 @@ object RespawnButtons extends StrictLogging {
                     val deferredRespond = new Responder(event, deferred = true)
                     val now = java.time.ZonedDateTime.now()
                     deferredRespond.embed(
-                      RespawnEmbeds.bookingPanel(respawn, existing,
+                      RespawnEmbeds.bookingPanel(respawn, existing, user.getId,
                         service.reservationsFor(guildId, respawn.id, now),
                         service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
-                      Some(RespawnThreads.scheduleButtons(existing.id)))
-                  case None =>
+                      Some(RespawnThreads.scheduleButtons(existing, respawn.id)))
+                  case _ =>
                     // A moderator with no booking of their own sees the ones that
                     // exist here, so they can act on somebody else's rather than
                     // being offered only the create form.
@@ -274,11 +287,18 @@ object RespawnButtons extends StrictLogging {
                       deferredRespond.embed(
                         RespawnEmbeds.schedulesEmbed(others.map(_ -> respawn),
                           java.time.ZonedDateTime.now(), everyones = true),
-                        Some(RespawnThreads.scheduleButtons(others.head.id)))
+                        Some(RespawnThreads.moderatorScheduleButtons(others,
+                          java.time.ZonedDateTime.now())))
                     } else {
                       event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
                     }
                 }
+
+              case "booknew" =>
+                // Straight to the form: they are looking at the panel that
+                // listed what they already have, so there is nothing to show
+                // them first.
+                event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
 
               case "request" =>
                 respond.embed(Embeds.response(renderRequest(

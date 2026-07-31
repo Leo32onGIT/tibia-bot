@@ -827,6 +827,28 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     RespawnSchedule.clash(a, b)
 
   /** Retire a schedule and drop the slots it had booked but not yet started. */
+  /** Drop every booking one member holds on one spawn.
+   *
+   *  All of them together rather than one at a time: a member's bookings on a
+   *  spawn are one decision to them, and a button per booking made the panel a
+   *  row of near-identical red buttons. Returns how many went, and rewrites the
+   *  spawn's card once at the end rather than once per booking. */
+  def cancelBookingsOn(guild: Guild, respawnId: Long, userId: String): Int = {
+    val guildId = guild.getId
+    val mine = repository.schedulesForUser(guildId, userId).filter(_.respawnId == respawnId)
+    mine.foreach { schedule =>
+      repository.deactivateSchedule(guildId, schedule.id)
+      repository.cancelReservationsOf(guildId, schedule.id, RespawnClaim.Outcome.ScheduleCancelled)
+    }
+    if (mine.nonEmpty) {
+      for {
+        config <- settings(guildId)
+        respawn <- repository.findById(guildId, respawnId)
+      } refreshThread(guild, respawn, config)
+    }
+    mine.size
+  }
+
   def cancelSchedule(guild: Guild, scheduleId: Long): Option[RespawnSchedule] = {
     val guildId = guild.getId
     repository.findSchedule(guildId, scheduleId).map { schedule =>
@@ -1114,8 +1136,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // nothing — the claim ends the same way either way.
               RespawnThreads.dm(guild, claim.userId,
                 RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
-                  imageFor(respawn), RespawnEmbeds.WarnColor),
-                Some(RespawnThreads.reminderButtons(guildId, respawn.id)))
+                  imageFor(respawn), RespawnEmbeds.WarnColor))
             }
           }
         }.failed.foreach { error =>
@@ -1179,7 +1200,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             repository.extendClaim(guildId, current.id, bookedEnd, current.durationMinutes + extra)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your booking has started",
-                RespawnEmbeds.slotMerged(respawn, bookedEnd), imageFor(respawn)))
+                RespawnEmbeds.slotMerged(respawn, bookedEnd), imageFor(respawn),
+                RespawnEmbeds.FreeColor))
           }
         }
         refreshThread(guild, respawn, config)
@@ -1213,7 +1235,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your slot has started",
-                RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn)))
+                RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn),
+                RespawnEmbeds.FreeColor))
         }
       }
     }
@@ -1274,7 +1297,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // byte-identical. Skipping it keeps a handover to zero Discord edits.
           val delivered = RespawnThreads.dm(guild, offer.userId,
             RespawnEmbeds.dmEmbed("Your turn on a respawn",
-              RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt), imageFor(respawn)),
+              RespawnEmbeds.handoverOffer(respawn, offer, guild.getName, expiresAt), imageFor(respawn),
+              RespawnEmbeds.FreeColor),
             Some(RespawnThreads.offerButtons(guildId, offer.id)))
           if (!delivered) {
             // Nothing is posted in the thread as a fallback — spawn threads stay
