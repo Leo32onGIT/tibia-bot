@@ -94,28 +94,27 @@ object RespawnEmbeds {
     }
 
     if (queue.nonEmpty) {
-      // Only the first few, so a full 20-deep queue can't blow the 1024-char
-      // field limit and drop the whole field silently.
-      val shown = queue.take(10).zipWithIndex.map { case (entry, index) =>
+      val shown = queue.take(RowsPerField).zipWithIndex.map { case (entry, index) =>
         s"`${index + 1}.` ${claimantLabel(entry)} — ${humanDuration(entry.durationMinutes)}"
       }
-      val overflow = if (queue.size > 10) s"\n…and ${queue.size - 10} more" else ""
-      embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", shown.mkString("\n") + overflow, false)
+      embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", cappedField(shown, queue.size), false)
     }
 
     if (reservations.nonEmpty) {
       // Booked slots that haven't started. Shown whether or not the spawn is free
       // right now, because the point of booking ahead is that people can plan
       // around it.
-      val shown = reservations.take(3).map { slot =>
+      val shown = reservations.take(RowsPerField).map { slot =>
         val when = slot.startsAt.map(dateTime).getOrElse("?")
         // Somebody is waiting on an answer — worth showing, since until it is
         // given the slot may or may not still belong to the name beside it.
         val pending = if (slot.requestPending) " · *asked*" else ""
-        s"$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+        // The same hollow marker the Book panel uses, and always hollow here: a
+        // card is one shared post rather than a reply to somebody, so it has no
+        // reader whose rows could be filled in.
+        s"▹ $when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
       }
-      val overflow = if (reservations.size > 3) s"\n…and ${reservations.size - 3} more" else ""
-      embed.addField("Booked", shown.mkString("\n") + overflow, false)
+      embed.addField("Booked", cappedField(shown, reservations.size), false)
     }
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
@@ -156,12 +155,16 @@ object RespawnEmbeds {
         s"Your booking is ${schedule.repeatLabel} at ${clockTime(start)} " +
           s"for ${humanDuration(schedule.durationMinutes)}."
       } else {
+        // One per line rather than semicolons: four bookings run to a paragraph
+        // that has to be read to be counted, where a list is counted at a glance.
         val each = booked.sortBy(_._2.toInstant).map { case (schedule, start) =>
-          s"${clockTime(start)} ${schedule.repeatLabel} for ${humanDuration(schedule.durationMinutes)}"
+          s"▸ ${clockTime(start)} ${schedule.repeatLabel} for ${humanDuration(schedule.durationMinutes)}"
         }
-        s"You have ${booked.size} bookings here: ${each.mkString("; ")}."
+        s"You have ${booked.size} bookings here:\n${each.mkString("\n")}"
       }
-    embed.setDescription(s"$state $yours")
+    // The spawn's state and the reader's own bookings are two different facts,
+    // so they get a line each rather than running together as one sentence.
+    embed.setDescription(s"$state\n$yours")
 
     if (reservations.nonEmpty) {
       // No cap: this is somebody looking at one spawn's evening on purpose, so
@@ -560,6 +563,33 @@ object RespawnEmbeds {
       embed.setFooter(s"${history.size} most recent")
     }
     embed.build()
+  }
+
+  /** Discord's ceiling on one field's value. The binding limit for these lists
+   *  — the 4096 everyone remembers is the *description*, and a field past 1024 is
+   *  rejected outright rather than trimmed, taking the whole card edit with it. */
+  private val FieldLimit: Int = 1024
+
+  /** How many rows a card's list shows before it says "and N more". Ten rather
+   *  than three: a spawn's evening is what people open the card to read, and
+   *  three lines hid most of it. */
+  private val RowsPerField: Int = 10
+
+  /** A field value holding as many of `lines` as fit, with a single note for
+   *  everything not shown.
+   *
+   *  `total` is how many there were before any cap, so one note covers both
+   *  reasons a row can be missing — the row cap and the character limit.
+   *  Counting them separately is how a field ends up owning up to "3 more" on one
+   *  line and "5 more" on the next. */
+  private def cappedField(lines: List[String], total: Int): String = {
+    val room = FieldLimit - 24 // leaves space for the note itself
+    val kept = lines.foldLeft((List.empty[String], 0)) { case ((acc, length), line) =>
+      if (length + line.length + 1 > room) (acc, length)
+      else (line :: acc, length + line.length + 1)
+    }._1.reverse
+    val hidden = total - kept.size
+    if (hidden > 0) (kept :+ s"…and $hidden more").mkString("\n") else kept.mkString("\n")
   }
 
   /** Keep a rendered list inside Discord's 4096-character description limit,

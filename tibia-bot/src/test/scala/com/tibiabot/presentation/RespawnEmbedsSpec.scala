@@ -193,6 +193,36 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.activeClaimsList(Nil).getDescription should include("No respawns are claimed")
   }
 
+  test("a card lists ten booked slots before it starts summarising") {
+    val slots = (1 to 14).toList.map(n =>
+      claim(s"user$n", 60, RespawnClaim.StatusReserved).copy(startsAt = Some(now.plusHours(n.toLong))))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, slots, settings, image(cultOrcs)))("Booked")
+
+    booked.linesIterator.count(_.contains("<@user")) shouldBe 10
+    // Same marker the Book panel uses, so the two lists read as one system.
+    booked.linesIterator.filter(_.contains("<@user")).foreach(_ should startWith("▹"))
+    booked should include("and 4 more")
+    booked.length should be <= 1024
+  }
+
+  test("a long list is cut to fit the field, and owns up to it once") {
+    // Ten rows of very long names would run past Discord's 1024, which is
+    // rejected outright rather than trimmed — it would take the whole card edit
+    // with it. One note has to cover both the row cap and the character cut,
+    // or the field admits to "3 more" on one line and "5 more" on the next.
+    val wordy = "A Very Long Character Name Indeed That Goes On" * 2
+    val slots = (1 to 14).toList.map(n =>
+      claim(s"user$n", 60, RespawnClaim.StatusReserved, character = wordy)
+        .copy(startsAt = Some(now.plusHours(n.toLong))))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, slots, settings, image(cultOrcs)))("Booked")
+
+    booked.length should be <= 1024
+    booked.linesIterator.count(_.contains("more")) shouldBe 1
+    // The count covers everything missing, not just what the row cap dropped.
+    val shown = booked.linesIterator.count(_.contains("<@user"))
+    booked should include(s"and ${14 - shown} more")
+  }
+
   test("the stamina bar never disagrees with the number beside it") {
     // Full and empty are the two the eye checks against the words, so they are
     // exact; everything between is proportional.
@@ -393,6 +423,10 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
     embed.getDescription should include("<@55>")
     embed.getDescription should include("Your booking is every day")
+    // The spawn's state and the reader's own bookings are separate facts, so
+    // they sit on separate lines.
+    embed.getDescription.linesIterator.next() should endWith(".")
+    embed.getDescription.linesIterator.size should be >= 2
   }
 
   test("a slot somebody is waiting on an answer for says so") {
@@ -410,6 +444,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs))
 
     embed.getDescription should include("2 bookings")
+    // One per line, not a semicolon-joined paragraph.
+    embed.getDescription should not include ";"
+    embed.getDescription.linesIterator.count(_.startsWith("▸")) shouldBe 2
     val morningAt = s"<t:${now.plusHours(1).toInstant.getEpochSecond}:t>"
     val eveningAt = s"<t:${now.plusHours(2).toInstant.getEpochSecond}:t>"
     embed.getDescription.indexOf(morningAt) should be < embed.getDescription.indexOf(eveningAt)
