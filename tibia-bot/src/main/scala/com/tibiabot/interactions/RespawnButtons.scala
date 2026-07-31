@@ -369,6 +369,22 @@ object RespawnButtons extends StrictLogging {
         else s"${Config.noEmoji} You're already queued for **${respawn.displayName}** " +
           s"at **#${claim.queuePosition}**."
 
+      case ClaimOutcome.Shortened(respawn, claim, _, reservedFrom) =>
+        // Deliberately not "38m rather than the 2h you asked for": what they now
+        // have is the useful part, and the booking below explains it without
+        // making the reply about what they didn't get.
+        val ends = claim.endsAt.map(e => s"<t:${e.toInstant.getEpochSecond}:R>").getOrElse("soon")
+        val starts = reservedFrom
+          .map(from => s"at <t:${from.toInstant.getEpochSecond}:t>")
+          .getOrElse("then")
+        s"${Config.yesEmoji} **${respawn.displayName}** is yours until $ends.\n" +
+          s"A booked slot starts $starts, so that's all you are able to claim."
+
+      case ClaimOutcome.Reserved(respawn, from) =>
+        s"${Config.noEmoji} **${respawn.displayName}** is booked from " +
+          s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
+          "starting a hunt now. Press **Next** to line up for it instead."
+
       case ClaimOutcome.QueueFull(respawn, limit) =>
         s"${Config.noEmoji} The queue for **${respawn.displayName}** is full ($limit waiting)."
 

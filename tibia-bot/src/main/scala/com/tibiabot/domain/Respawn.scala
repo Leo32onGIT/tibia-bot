@@ -202,6 +202,9 @@ object RespawnClaim {
     val Missed: String = "missed"
     /** The schedule behind a reserved slot was cancelled before it started. */
     val ScheduleCancelled: String = "schedule-cancelled"
+    /** The slot's owner was already hunting the spawn when it came round, so it
+     *  folded into that hunt instead of starting one of its own. */
+    val Merged: String = "merged"
     /** The slot's owner said they weren't hunting it, so it went to whoever asked. */
     val GivenUp: String = "given-up"
     /** The slot's owner never answered, so it went to whoever asked. */
@@ -222,6 +225,7 @@ object RespawnClaim {
       case NoStamina   => "dropped, out of stamina"
       case Missed      => "scheduled slot missed"
       case ScheduleCancelled => "schedule cancelled"
+      case Merged      => "folded into a hunt already running"
       case GivenUp     => "given up for the night"
       case NoAnswer    => "no answer, passed on"
       case other       => other

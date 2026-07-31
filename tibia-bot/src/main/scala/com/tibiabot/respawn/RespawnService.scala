@@ -1151,9 +1151,41 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // reaches here — the sweep closes those as missed first.
       val remaining = slot.minutesLeftAt(now)
 
-      if (holder.isDefined) {
-        // Cancel the booking and take a queue place instead, so the existing
-        // hunt is not interrupted mid-flight.
+      if (holder.exists(_.userId == slot.userId)) {
+        // They are already on it themselves — they claimed it ahead of their own
+        // booking, and an ad-hoc claim is cut short at the booking's start, so a
+        // sweep at exactly that moment finds both. Queueing them behind
+        // themselves and DMing "your slot is taken by you" is the nonsense that
+        // falls out of treating this as a collision. The booking's job is done;
+        // it folds into the hunt they are having and carries its end forward.
+        val current = holder.get
+        val extra = current.endsAt
+          .map(end => math.max(0, java.time.Duration.between(end, bookedEnd).toMinutes).toInt)
+          .getOrElse(remaining)
+
+        if (extra > 0 && !repository.reserveStamina(guildId, slot.userId, extra,
+              config.staminaMinutes, boundary)) {
+          // Their tank won't cover the extension, so the hunt they already have
+          // stands as it is and the slot is closed rather than half-applied.
+          repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.NoStamina)
+          val tank = repository.stamina(guildId, slot.userId, config.staminaMinutes, boundary)
+          RespawnThreads.dm(guild, slot.userId,
+            RespawnEmbeds.dmEmbed("Slot skipped",
+              RespawnEmbeds.slotNoStamina(respawn, extra, tank, ServerSaveSchedule.nextServerSave(now)),
+              imageFor(respawn), RespawnEmbeds.RedColor))
+        } else {
+          repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.Merged)
+          if (extra > 0) {
+            repository.extendClaim(guildId, current.id, bookedEnd, current.durationMinutes + extra)
+            RespawnThreads.dm(guild, slot.userId,
+              RespawnEmbeds.dmEmbed("Your booking has started",
+                RespawnEmbeds.slotMerged(respawn, bookedEnd), imageFor(respawn)))
+          }
+        }
+        refreshThread(guild, respawn, config)
+      } else if (holder.isDefined) {
+        // Somebody else is on it. Cancel the booking and take a queue place
+        // instead, so the existing hunt is not interrupted mid-flight.
         repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.TakenOver)
         repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.characterName,
           slot.durationMinutes, config.queueLimit, RespawnClaim.KindScheduled)

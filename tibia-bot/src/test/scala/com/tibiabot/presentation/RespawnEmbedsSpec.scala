@@ -383,6 +383,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     text should not include "booking wasn't made"
   }
 
+  test("a booking that folds into a hunt already running says what changed") {
+    val text = RespawnEmbeds.slotMerged(cultOrcs, now.plusHours(2))
+    text should include("already on")
+    text should include("runs until")
+    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:t>")
+  }
+
   test("a granted slot is the window that was asked for, not the one given up") {
     val granted = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180)
     granted should include("3h")

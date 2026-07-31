@@ -241,6 +241,14 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     RespawnSchedule.upcomingStarts(anchor, berlin, -1) shouldBe empty
   }
 
+  test("every claim outcome reads as something, including ones added later") {
+    // The label map is what an audit shows. An outcome with no case falls through
+    // to itself rather than blanking the row — which is how "merged" behaved
+    // before it had a label, and why this is checked rather than assumed.
+    RespawnClaim.Outcome.label(RespawnClaim.Outcome.Merged) should include("folded into")
+    RespawnClaim.Outcome.label("something-new-later") shouldBe "something-new-later"
+  }
+
   // --- clashing with slots somebody has already booked ---------------------
 
   private val window = (anchor.minusDays(1), anchor.plusDays(2))

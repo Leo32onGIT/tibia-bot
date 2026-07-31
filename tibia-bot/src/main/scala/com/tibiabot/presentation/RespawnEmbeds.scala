@@ -245,6 +245,12 @@ object RespawnEmbeds {
     s"Your booked slot on **${respawn.displayName}** has started and runs until $ends."
   }
 
+  /** DM'd when a booking comes round to find its own owner already on the spawn:
+   *  the hunt simply carries on to the booked end. */
+  def slotMerged(respawn: Respawn, until: ZonedDateTime): String =
+    s"You were already on **${respawn.displayName}** when your booking came round, " +
+      s"so it's carried straight on — your hunt now runs until ${clockTime(until)}."
+
   /** DM'd when a booked slot arrives to find somebody already hunting. */
   def slotOccupied(respawn: Respawn, holder: Option[RespawnClaim]): String = {
     val who = holder.map(c => s" by <@${c.userId}>").getOrElse("")
