@@ -913,6 +913,11 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       writeStamina(conn, userId, math.max(0, current.usedMinutes - minutes), resetAt)
     }
 
+  def clearStamina(guildId: String): Int = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("DELETE FROM respawn_stamina;")
+    try statement.executeUpdate() finally statement.close()
+  }
+
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit =
     withGuild(guildId) { conn => writeStamina(conn, userId, math.max(0, usedMinutes), resetAt) }
 

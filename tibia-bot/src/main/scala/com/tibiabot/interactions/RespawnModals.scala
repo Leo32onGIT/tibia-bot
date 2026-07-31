@@ -148,8 +148,13 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** Server-wide claim rules. Split from the timers below because Discord allows a
-   *  modal only five inputs and there are six settings. */
+  /** Server-wide claim rules: how long a hunt runs, how many may wait for one,
+   *  and how much hunting a member gets in a day.
+   *
+   *  Split from the timers below because a modal takes five inputs
+   *  ([[Modal.MAX_COMPONENTS]]) and there are six settings. The split is by what
+   *  a setting *is* rather than by what fits: these four are the rules of who may
+   *  claim what, and the two below are how long the bot waits before acting. */
   def claimRulesModal(guildId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
@@ -159,19 +164,22 @@ object RespawnModals extends StrictLogging {
         label("Maximum claim length (minutes)", "The longest any single claim may run.",
           numberInput("max", settings.map(_.maxDurationMinutes))),
         label("Queue limit", "How many people may wait behind a claim.",
-          numberInput("queue", settings.map(_.queueLimit)))
+          numberInput("queue", settings.map(_.queueLimit))),
+        label("Daily stamina per member (minutes)",
+          "0 means unlimited. Turning a limit on refills everyone.",
+          numberInput("stamina", settings.map(_.staminaMinutes)))
       )
       .build()
   }
 
-  /** Server-wide timers: the daily budget, the default reminder, and how long a
-   *  handover offer stays open. */
+  /** Server-wide timers: the default reminder, and how long a handover offer
+   *  stays open. The daily budget used to live here and now sits with the claim
+   *  rules, which is what it is — nobody looking for stamina looked under
+   *  "timers". */
   def timersModal(guildId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalTimers, "Server timers")
       .addComponents(
-        label("Daily stamina per member (minutes)", "0 means unlimited claiming.",
-          numberInput("stamina", settings.map(_.staminaMinutes))),
         label("Default reminder (minutes before the end)",
           "Members can override this for themselves. 0 turns it off.",
           numberInput("warn", settings.map(_.warnMinutes))),
@@ -377,17 +385,17 @@ object RespawnModals extends StrictLogging {
         s"or the **${Permissions.ModeratorRoleName}** role.")
     } else {
       def field(id: String): Option[Int] = Try(value(event, id).toInt).toOption
-      val ids = if (claimRules) List("default", "max", "queue") else List("stamina", "warn", "handover")
+      val ids = if (claimRules) List("default", "max", "queue", "stamina") else List("warn", "handover")
       if (ids.exists(field(_).isEmpty)) {
         reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
       } else {
         val result =
           if (claimRules)
             BotApp.respawnService.updateSettings(guildId, field("default"), field("max"), field("queue"),
-              None, None, None)
+              field("stamina"), None, None)
           else
             BotApp.respawnService.updateSettings(guildId, None, None, None,
-              field("stamina"), field("warn"), field("handover"))
+              None, field("warn"), field("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>

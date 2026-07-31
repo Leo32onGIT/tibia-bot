@@ -748,6 +748,22 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.stamina(g, "u1", 240, boundary).usedMinutes shouldBe 0
   }
 
+  test("clearing stamina hands everybody a full tank again") {
+    val (repo, g) = freshRepo()
+    repo.reserveStamina(g, "u1", 180, 240, boundary) shouldBe true
+    repo.reserveStamina(g, "u2", 240, 240, boundary) shouldBe true
+    repo.stamina(g, "u1", 240, boundary).remainingMinutes shouldBe 60
+    repo.stamina(g, "u2", 240, boundary).remainingMinutes shouldBe 0
+
+    repo.clearStamina(g) should be >= 2
+
+    // Deleted rather than zeroed, so a fresh read is a full tank on whatever day
+    // it is asked about — not one pinned to the day it was written.
+    repo.stamina(g, "u1", 240, boundary).remainingMinutes shouldBe 240
+    repo.stamina(g, "u2", 240, boundary).remainingMinutes shouldBe 240
+    repo.stamina(g, "u1", 240, boundary.plusDays(1)).remainingMinutes shouldBe 240
+  }
+
   test("a zero budget means unlimited, not that every claim is refused") {
     val (repo, g) = freshRepo()
     repo.setStaminaUsed(g, "u2", 0, boundary)

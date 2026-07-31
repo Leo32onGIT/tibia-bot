@@ -189,6 +189,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           Left("The handover window has to be at least a minute, or nobody could ever accept one.")
         else {
           repository.saveSettings(guildId, updated)
+          // Turning a limit on for the first time hands everybody a full tank.
+          // While stamina was off nothing was being spent against a budget, so
+          // whatever the rows say is an artefact of some earlier setting — and
+          // starting people mid-day already in debt would refuse claims for a
+          // rule that wasn't in force when they hunted. The other direction needs
+          // nothing: switching stamina off ignores the numbers anyway.
+          if (current.staminaMinutes <= 0 && updated.staminaMinutes > 0) {
+            val cleared = repository.clearStamina(guildId)
+            if (cleared > 0)
+              logger.info(s"Stamina switched on in guild '$guildId' — refilled $cleared tanks")
+          }
           Right(updated)
         }
     }

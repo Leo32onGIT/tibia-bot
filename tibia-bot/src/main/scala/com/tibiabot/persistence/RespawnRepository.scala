@@ -209,6 +209,13 @@ trait RespawnRepository {
   /** Give back unused minutes when a claim ends early. Never drops below zero. */
   def refundStamina(guildId: String, userId: String, minutes: Int, resetAt: ZonedDateTime): Unit
 
+  /** Empty every tank in the guild, so everybody starts the day full again.
+   *
+   *  Rows are deleted rather than zeroed: a missing row already reads as a full
+   *  tank, and leaving one behind would pin it to whichever server-save day it
+   *  was written on. Returns how many were cleared. */
+  def clearStamina(guildId: String): Int
+
   /** Admin override — set a user's consumed minutes directly. */
   def setStaminaUsed(guildId: String, userId: String, usedMinutes: Int, resetAt: ZonedDateTime): Unit
 
