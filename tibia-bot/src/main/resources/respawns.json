@@ -84,7 +84,7 @@
     { "code": "506",  "region": "Venore",      "name": "Pits of Inferno - Bazir",                "creature": "Nightmare" },
     { "code": "507",  "region": "Venore",      "name": "Pits of Inferno - Ashfalor",             "creature": "Undead Dragon" },
     { "code": "508",  "region": "Venore",      "name": "Pits of Inferno - Dragon Lord Lair",     "creature": "Dragon Lord" },
-    { "code": "509",  "region": "Venore",      "name": "Flimsies",                               "creature": "Flimsy Lost Soul" },
+    { "code": "509",  "region": "Venore",      "name": "Venore Flimsies",                        "creature": "Flimsy Lost Soul" },
 
     { "code": "510",  "region": "Venore",      "name": "Ripper Spectres",                        "creature": "Ripper Spectre" },
     { "code": "511a", "region": "Venore",      "name": "Buried Cathedral -1 & -2",               "creature": "Arachnophobica" },
@@ -313,7 +313,7 @@
     { "code": "1901", "region": "Marapur",     "name": "Great Pearl Fan Reef",                   "creature": "Two-Headed Turtle" },
     { "code": "1902", "region": "Marapur",     "name": "Temple of the Moon Goddess",             "creature": "Naga Warrior" },
     { "code": "1904", "region": "Marapur",     "name": "Asura Citadel -1",                       "creature": "Winged Jaracal" },
-    { "code": "1904", "region": "Marapur",     "name": "Asura Citadel -2",                       "creature": "Silverfrost Sentinel" },
+    { "code": "1905", "region": "Marapur",     "name": "Asura Citadel -2",                       "creature": "Silverfrost Sentinel" },
 
     { "code": "2001", "region": "Otherworld",  "name": "Heart of Destruction - Ankrahmun",       "creature": "Dread Intruder" },
     { "code": "2002", "region": "Otherworld",  "name": "Heart of Destruction - Svargrond",       "creature": "Reality Reaver" },
