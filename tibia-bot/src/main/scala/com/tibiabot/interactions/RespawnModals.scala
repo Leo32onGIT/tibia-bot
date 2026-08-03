@@ -153,7 +153,12 @@ object RespawnModals extends StrictLogging {
         label("Give the hunt to somebody else",
           "Leave empty to keep whoever is on it now.",
           EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
-            .setRequiredRange(0, 1)
+            // Not required, rather than required with a minimum of nothing —
+            // Discord rejects that pairing outright (COMPONENT_REQUIRED_ZERO_MIN_VALUES)
+            // and the whole modal fails to open. Same reasoning as the day
+            // picker in scheduleModal below: skipping this is meaningful (keep
+            // whoever is on it), but picking nobody is not a handover.
+            .setRequired(false)
             .build())
       )
       .build()
