@@ -33,24 +33,12 @@ object RespawnButtons extends StrictLogging {
 
   def handles(componentId: String): Boolean = RespawnButtonId.handles(componentId)
 
-  /** Actions that always end in a modal, and so must not be deferred. The two
-   *  Config buttons are absent deliberately: what they open depends on whether
-   *  the presser is a moderator, so they decide after a single role lookup. */
-  private val ModalActions: Set[String] =
-    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew",
-        "givestamina")
-
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
 
-    // Whether this press can be acknowledged up front, decided before any work.
-    val opensModal = parsed match {
-      case Some(RespawnButtonId.BoardButton(what))         => what == "config" || ModalActions.contains(what)
-      case Some(RespawnButtonId.SpawnButton(action, _))     => action == "config" || ModalActions.contains(action)
-      case _                                                => false
-    }
-    if (!opensModal) event.deferReply(true).queue()
-    val respond = new Responder(event, deferred = !opensModal)
+    // Already acknowledged by BotListener, on the event thread, unless this
+    // press opens a modal — the Responder just has to answer the same way.
+    val respond = new Responder(event, deferred = !RespawnButtonId.opensModal(event.getComponentId))
 
     if (!Config.Respawn.enabled) {
       respond.text(s"${Config.noEmoji} The respawn claim system isn't enabled on this bot.")

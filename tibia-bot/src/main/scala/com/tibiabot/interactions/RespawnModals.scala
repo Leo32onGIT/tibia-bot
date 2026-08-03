@@ -327,13 +327,14 @@ object RespawnModals extends StrictLogging {
   // --- submissions --------------------------------------------------------
 
   def handle(event: ModalInteractionEvent): Unit = {
-    // Acknowledged before any work: every branch below touches the database, and
-    // the claim and duration ones create or rewrite a forum thread over REST.
-    // Discord drops an interaction that goes three seconds unacknowledged, and
-    // unlike the buttons no branch here opens a further modal, so all of them can
-    // defer. Replies therefore go through the hook — see `reply`.
-    event.deferReply(true).queue()
-
+    // Already acknowledged by BotListener, on JDA's event thread, before this
+    // was ever queued: every branch below touches the database, and the claim
+    // and duration ones create or rewrite a forum thread over REST, so none
+    // could answer inside Discord's three-second window on its own. Deferring
+    // here instead — as this used to — still left the acknowledgement waiting
+    // for a free worker. Unlike the buttons, no branch here opens a further
+    // modal, so the listener defers every one of them unconditionally. Replies
+    // therefore go through the hook — see `reply`.
     val guild = event.getGuild
     if (guild == null) {
       reply(event, s"${Config.noEmoji} That only works inside a server.")

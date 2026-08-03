@@ -640,6 +640,32 @@ object RespawnButtonId {
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
 
+  /** Actions that always end in a modal, and so must not be deferred. The two
+   *  Config buttons are absent deliberately: what they open depends on whether
+   *  the presser is a moderator, so they decide after a single role lookup. */
+  private val ModalActions: Set[String] =
+    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew",
+        "givestamina")
+
+  /** Whether this press has to answer with a modal, and so cannot be
+   *  acknowledged up front — `replyModal` must be an interaction's first
+   *  response. An unparseable id reads as "no", which is what lets the
+   *  out-of-date-button reply be sent through the hook.
+   *
+   *  Lives here, beside [[parse]], because it is pure id classification — no
+   *  Config, no database, no JDA. That is what lets BotListener call it on
+   *  JDA's event thread and defer there, so a press is acknowledged before it
+   *  ever queues for a worker. Acknowledging inside the handler instead left
+   *  it waiting on a free thread in a pool shared with `/setup`, so a press
+   *  could blow Discord's three-second window without any of its own work
+   *  being slow. */
+  def opensModal(componentId: String): Boolean =
+    parse(componentId) match {
+      case Some(BoardButton(what))      => what == "config" || ModalActions.contains(what)
+      case Some(SpawnButton(action, _)) => action == "config" || ModalActions.contains(action)
+      case _                            => false
+    }
+
   /** None for anything malformed, so a button left over from an older deploy is
    *  ignored rather than throwing. */
   def parse(componentId: String): Option[Action] =
