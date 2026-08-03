@@ -186,6 +186,11 @@ object BotApp extends App with StrictLogging {
   // registration, channel creation and the sweep below instead.
   val respawnService = new respawn.RespawnService(respawnRepository)
 
+  // Which guilds' respawn systems are this bot identity's to run. Several bots
+  // can share a guild and all sweep the same per-guild database; this is what
+  // stops them answering each other's claims (see respawn.RespawnOwnership).
+  private val respawnOwnership = new respawn.RespawnOwnership(discordGateway.selfUserId)
+
   // Per-user boosted boss/creature notification subscriptions
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
 
@@ -453,10 +458,12 @@ object BotApp extends App with StrictLogging {
     // on every boot rather than needing to be remembered as a command.
     discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
       try {
-        if (respawnService.settings(guild.getId).isDefined) {
-          val changed = respawnService.syncSeedCreatures(guild.getId)
-          if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
-        }
+        respawnService.settings(guild.getId)
+          .filter(respawnOwnership.ownsRespawns(guild, _))
+          .foreach { _ =>
+            val changed = respawnService.syncSeedCreatures(guild.getId)
+            if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
+          }
       } catch {
         case ex: Throwable =>
           logger.warn(s"Could not sync respawn creature images for guild '${guild.getId}'", ex)
@@ -482,11 +489,18 @@ object BotApp extends App with StrictLogging {
         // first, so this filter loses nothing.
         discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
           try {
-            respawnService.sweep(guild)
-            if (refreshBoards) {
-              respawnService.settings(guild.getId)
-                .foreach(respawn.RespawnThreads.refreshBoard(guild, _))
-            }
+            // Only the identity that built this guild's forum sweeps it. Several
+            // bots can share a guild and each runs this same loop against the one
+            // shared per-guild database, so without this they race over every
+            // claim — whichever got there first would send the hunt reminder,
+            // start the due slot and DM the handover offer, regardless of which
+            // bot the spawn was actually claimed through. See RespawnOwnership.
+            respawnService.settings(guild.getId)
+              .filter(respawnOwnership.ownsRespawns(guild, _))
+              .foreach { config =>
+                respawnService.sweep(guild)
+                if (refreshBoards) respawn.RespawnThreads.refreshBoard(guild, config)
+              }
           } catch {
             // One guild's bad state (deleted channel, revoked permission) must
             // not stop every other guild's claims from being resolved.
