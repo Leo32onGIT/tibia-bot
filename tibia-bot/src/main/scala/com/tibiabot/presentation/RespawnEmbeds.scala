@@ -587,8 +587,7 @@ object RespawnEmbeds {
    *  the answer to "why did my hunt stop" is in the message rather than in a
    *  card they would have to go and read. */
   def claimReassignedFrom(respawn: Respawn, toUserId: String): String =
-    s"A moderator has given your hunt on **${respawn.displayName}** to <@$toUserId>.\n" +
-      "Any stamina you had left on it has gone back to your tank."
+    s"A moderator has given your hunt on **${respawn.displayName}** to <@$toUserId>."
 
   /** DM'd to whoever a moderator has given a hunt to. */
   def claimReassignedTo(respawn: Respawn, claim: RespawnClaim): String = {
