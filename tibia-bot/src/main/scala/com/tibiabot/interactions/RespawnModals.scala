@@ -111,18 +111,22 @@ object RespawnModals extends StrictLogging {
     val current = BotApp.respawnService.openClaimsForUser(guildId, userId)
       .find(_._2.respawnId == respawn.id)
       .map(_._2.durationMinutes.toString)
-      .getOrElse("")
     val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+
+    val duration = TextInput.create(DurationField, TextInputStyle.SHORT)
+      .setRequired(true)
+      .setMaxLength(4)
+    // Only pre-filled when there is something to pre-fill with. Discord rejects
+    // a blank value outright — not as an empty box but as a refused modal — so
+    // a caller with no claim here has to leave the field alone rather than set
+    // it to nothing.
+    current.foreach(duration.setValue)
 
     Modal.create(RespawnButtonId.modalDuration(respawn.id), "Hunt duration")
       .addComponents(
         label("How long for, in total? (minutes)",
           s"${respawn.displayName} — 5 to $maxDuration. Counts from when the hunt started.",
-          TextInput.create(DurationField, TextInputStyle.SHORT)
-            .setValue(current)
-            .setRequired(true)
-            .setMaxLength(4)
-            .build())
+          duration.build())
       )
       .build()
   }

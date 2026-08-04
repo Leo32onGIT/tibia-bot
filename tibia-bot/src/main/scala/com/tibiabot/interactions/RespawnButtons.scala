@@ -330,7 +330,15 @@ object RespawnButtons extends StrictLogging {
               case "config" =>
                 // Not deferred yet — see ModalActions.
                 if (!RespawnModals.moderates(guild, event.getMember)) {
-                  event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()
+                  // The length of their hunt here when they have one; otherwise
+                  // their own defaults, which is what Config means on the board.
+                  // Offering the hunt-length form to somebody with no hunt is a
+                  // dead end — there is nothing to pre-fill it with and nothing
+                  // for a submitted answer to land on.
+                  if (service.openClaimsForUser(guildId, user.getId).exists(_._2.respawnId == respawn.id))
+                    event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()
+                  else
+                    event.replyModal(RespawnModals.configModal(guildId, user.getId)).queue()
                 } else {
                   // Moderators get a panel first: these actions change somebody
                   // else's hunt, so showing whose before offering them matters.

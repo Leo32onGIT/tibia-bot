@@ -308,10 +308,12 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("**Book**")
   }
 
-  test("a hunt taken away says who has it and that the stamina came back") {
+  test("a hunt taken away names who has it now") {
+    // The refund itself is unchanged — the notice simply no longer spells it
+    // out, so there is nothing about stamina to assert here.
     val text = RespawnEmbeds.claimReassignedFrom(cultOrcs, "42")
     text should include("<@42>")
-    text should include("stamina")
+    text should include(cultOrcs.displayName)
     RespawnEmbeds.claimReassignedTo(cultOrcs, claim("42")) should include(":R>")
   }
 
