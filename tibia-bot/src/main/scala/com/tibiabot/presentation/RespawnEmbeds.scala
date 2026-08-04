@@ -416,28 +416,38 @@ object RespawnEmbeds {
     s"$name · ${humanDuration(claim.durationMinutes)} · $how"
   }
 
-  /** The board's log folded by spawn: named once, with its hunts beneath it,
-   *  rather than repeating the name on every line.
+  /** A run of hunts on one spawn: named once, with its hunts beneath it, rather
+   *  than repeating the name on every line.
    *
-   *  Groups are ordered by their most recent hunt, so the top of the page is
-   *  still the most recent thing that happened — but below that the order is by
-   *  spawn rather than by time, which is the trade folding makes. The count is
-   *  of the hunts shown here: a spawn's run can continue onto the next page, so
-   *  it is not a total for that spawn. */
+   *  The count is of the hunts in this run, which is not a total for the spawn —
+   *  the same spawn appears again further down if somebody else's hunt came
+   *  between, and a run can continue onto the next page. */
   private[presentation] def logGroup(name: String, claims: List[RespawnClaim]): String = {
     val hunts = if (claims.size == 1) "1 hunt" else s"${claims.size} hunts"
     val lines = claims.map(c => s"$LogIndent${logTime(c)} · ${logWho(c)}")
     s"**$name · $hunts**\n${lines.mkString("\n")}"
   }
 
-  /** Claims folded by spawn, most recently active spawn first. Pure, so the
-   *  ordering rule is testable without an embed. Within a group the claims keep
-   *  the order they arrived in, which is already newest-first. */
-  private[presentation] def groupedByRespawn(claims: List[RespawnClaim]): List[(Long, List[RespawnClaim])] = {
-    def latest(group: List[RespawnClaim]): Long =
-      group.flatMap(_.endedAt).map(_.toInstant.getEpochSecond).foldLeft(Long.MinValue)(math.max)
-    claims.groupBy(_.respawnId).toList.sortBy { case (_, group) => latest(group) }(Ordering[Long].reverse)
-  }
+  /** Consecutive claims on the same spawn, folded into one run. Pure, so the
+   *  rule is testable without an embed.
+   *
+   *  Only *adjacent* claims fold. Gathering every claim for a spawn regardless
+   *  of where it sat would pull its older hunts up under its newest one, so a
+   *  16:00 hunt would print above a different spawn's 20:05 — the page would
+   *  stop being newest-first, which is the whole reason it is read top-down.
+   *  Folding runs condenses exactly the repetition worth condensing, somebody
+   *  hunting the same spawn back to back, and leaves everything else in the
+   *  order it happened. A page with no repeats folds nothing. */
+  private[presentation] def collapsedRuns(claims: List[RespawnClaim]): List[(Long, List[RespawnClaim])] =
+    claims
+      .foldLeft(List.empty[(Long, List[RespawnClaim])]) { (runs, claim) =>
+        runs match {
+          case (respawnId, group) :: rest if respawnId == claim.respawnId =>
+            (respawnId, group :+ claim) :: rest
+          case _ => (claim.respawnId, List(claim)) :: runs
+        }
+      }
+      .reverse
 
   /** One entry of a spawn's own claim log, deliberately over two lines: when on
    *  the first, who and how it went on the second. One line per entry wrapped at
@@ -506,7 +516,7 @@ object RespawnEmbeds {
       // name was being repeated down the page.
       val blocks =
         if (scope.isDefined) page.entries.map(logEntry(_, None))
-        else groupedByRespawn(page.entries).map { case (respawnId, claims) =>
+        else collapsedRuns(page.entries).map { case (respawnId, claims) =>
           logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
         }
       embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
