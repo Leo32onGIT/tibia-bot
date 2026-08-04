@@ -397,35 +397,35 @@ object RespawnEmbeds {
   private def logTime(claim: RespawnClaim): String =
     claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:$LogTimeStyle>").getOrElse("*unknown time*")
 
-  /** Who held it and how it went — the part that reads the same wherever an
-   *  entry is rendered. */
-  private def logWho(claim: RespawnClaim): String = {
-    // The stored username rather than a mention. It is stamped on the row at
-    // claim time from the same getName a lookup would return, so showing it
-    // costs nothing where retrieving each entry's user would be a REST call per
-    // person per render. The trade is that it does not follow a later rename and
-    // cannot be clicked; the mention is kept only as a last resort, for old rows
-    // that predate the column and have no name to show at all.
-    val name = (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
+  /** Who held it.
+   *
+   *  The stored username rather than a mention. It is stamped on the row at
+   *  claim time from the same getName a lookup would return, so showing it costs
+   *  nothing where retrieving each entry's user would be a REST call per person
+   *  per render. The trade is that it does not follow a later rename and cannot
+   *  be clicked; the mention is kept only as a last resort, for old rows that
+   *  predate the column and have no name to show at all. */
+  private def logName(claim: RespawnClaim): String =
+    (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)   => s"${claim.characterName} (${claim.userName})"
       case (true, false)  => claim.characterName
       case (false, true)  => claim.userName
       case (false, false) => s"<@${claim.userId}>"
     }
+
+  /** Who held it and how it went — the part that reads the same wherever an
+   *  entry is rendered. The name is bold: it is what the eye is looking for
+   *  when scanning a log, and the duration and outcome after it are detail. */
+  private def logWho(claim: RespawnClaim): String = {
     val how = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
-    s"$name · ${humanDuration(claim.durationMinutes)} · $how"
+    s"**${logName(claim)}** · ${humanDuration(claim.durationMinutes)} · $how"
   }
 
   /** A run of hunts on one spawn: named once, with its hunts beneath it, rather
-   *  than repeating the name on every line.
-   *
-   *  The count is of the hunts in this run, which is not a total for the spawn —
-   *  the same spawn appears again further down if somebody else's hunt came
-   *  between, and a run can continue onto the next page. */
+   *  than repeating the name on every line. */
   private[presentation] def logGroup(name: String, claims: List[RespawnClaim]): String = {
-    val hunts = if (claims.size == 1) "1 hunt" else s"${claims.size} hunts"
     val lines = claims.map(c => s"$LogIndent${logTime(c)} · ${logWho(c)}")
-    s"**$name · $hunts**\n${lines.mkString("\n")}"
+    s"**$name**\n${lines.mkString("\n")}"
   }
 
   /** Consecutive claims on the same spawn, folded into one run. Pure, so the

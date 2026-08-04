@@ -38,7 +38,7 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     // A mention would need a REST lookup per entry to say anything a stored
     // row does not already, and renders as a pill rather than a name.
     val second = RespawnEmbeds.logEntry(claim(), None).split("\n")(1)
-    second should include("Bobinho (bob)")
+    second should include("**Bobinho (bob)**")
     second should not include "<@"
   }
 
@@ -142,17 +142,20 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     RespawnEmbeds.collapsedRuns(claims).map(_._2.size) shouldBe List(1, 1, 1)
   }
 
-  test("a run names the spawn once and counts what it holds") {
+  test("a run names the spawn once, on its own header line") {
     val block = RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now), onSpawn(1L, now.minusHours(2))))
     val lines = block.split("\n")
-    lines(0) shouldBe "**415 Cult Orcs · 2 hunts**"
+    lines(0) shouldBe "**415 Cult Orcs**"
     lines should have size 3
     lines.tail.foreach(line => line should not include "415 Cult Orcs")
   }
 
-  test("a run of one says hunt, not hunts") {
-    RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now))).split("\n")(0) shouldBe
-      "**415 Cult Orcs · 1 hunt**"
+  test("the person is bold on every line, so a scan lands on the name") {
+    val lines = RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now))).split("\n")
+    lines(1) should include("**Bobinho (bob)**")
+    // The duration and outcome after it stay plain — bolding those would leave
+    // nothing for the eye to catch on.
+    lines(1) should include("· 2h · ran its full time")
   }
 
   test("an empty page folds to nothing rather than an empty run") {
