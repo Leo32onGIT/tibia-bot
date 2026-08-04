@@ -377,7 +377,15 @@ object RespawnEmbeds {
     embed.build()
   }
 
-  /** One line of the claim log. Pure, so the shape is testable without JDA.
+  /** Indent for the second line of a log entry. Non-breaking spaces rather than
+   *  ordinary ones: Discord collapses leading whitespace in an embed
+   *  description, and these survive it. */
+  private val LogIndent = "   "
+
+  /** One entry of the claim log, deliberately over two lines: when and where on
+   *  the first, who and how it went on the second. One line per entry wrapped at
+   *  a different point on every row once a phone got hold of it; breaking it on
+   *  purpose means the break is always in the same place.
    *
    *  The time is a Discord timestamp rather than formatted text, so each
    *  moderator reads it in their own timezone — the alternative is picking one
@@ -385,23 +393,47 @@ object RespawnEmbeds {
    *  early or taken over stopped when it stopped, and an audit that showed the
    *  deadline instead would quietly disagree with what people remember.
    *
-   *  `spawnName` is set only for the board's guild-wide log, where a line is
-   *  meaningless without saying which spawn it belongs to. */
-  private[presentation] def logLine(claim: RespawnClaim, spawnName: Option[String]): String = {
+   *  `spawnName` is set only for the board's guild-wide log. On a spawn's own
+   *  log it would be the same name ten times over, so the first line is just
+   *  the time there. */
+  private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
     val when = claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:f>").getOrElse("*unknown time*")
+    val where = spawnName.map(name => s" · **$name**").getOrElse("")
     val who = if (claim.characterName.nonEmpty) s"${claim.characterName} (<@${claim.userId}>)" else s"<@${claim.userId}>"
-    val where = spawnName.map(name => s" **$name** ·").getOrElse("")
     val how = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
-    s"$when ·$where $who · ${humanDuration(claim.durationMinutes)} · $how"
+    s"$when$where\n$LogIndent$who · ${humanDuration(claim.durationMinutes)} · $how"
   }
+
+  /** Discord refuses an embed whose description runs past this, and refusing is
+   *  the whole interaction failing rather than a truncated log. Ten entries come
+   *  to roughly a quarter of it even with long names, so this is a backstop
+   *  against something unforeseen — a wall of very long character names — not a
+   *  limit anybody should meet in normal use. */
+  private val DescriptionLimit = 4096
+
+  /** As many entries as fit under `limit`, in order. Dropping the oldest rows of
+   *  a page beats failing to render it: the page is reverse-chronological, so
+   *  what survives is the part being read. */
+  private[presentation] def entriesWithinLimit(entries: List[String], limit: Int): List[String] =
+    entries
+      .foldLeft((List.empty[String], 0)) { case ((kept, used), entry) =>
+        val cost = entry.length + 1
+        if (used + cost <= limit) (entry :: kept, used + cost) else (kept, used)
+      }
+      ._1
+      .reverse
 
   /** The moderator claim log, for one spawn or for the whole guild.
    *
-   *  Reverse-chronological and paged rather than exhaustive: the trail goes
-   *  back as far as the guild has existed, and every question a moderator
-   *  actually brings to it — who had this last night, is somebody sitting on
-   *  it, did they turn up — is answered by the recent end of it. The footer
-   *  says where the page sits so nobody has to guess how deep they are. */
+   *  Reverse-chronological and paged rather than exhaustive: the trail goes back
+   *  as far as the guild has existed, and every question a moderator actually
+   *  brings to it — who had this last night, is somebody sitting on it, did they
+   *  turn up — is answered by the recent end of it.
+   *
+   *  The summary sits in inline fields rather than a sentence: three short
+   *  numbers side by side is the one thing Discord's field layout genuinely does
+   *  better than prose, and it keeps the feed below starting at a predictable
+   *  place. */
   def claimLog(scope: Option[Respawn], page: com.tibiabot.respawn.LogPage,
                summary: com.tibiabot.respawn.LogSummary,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
@@ -411,23 +443,22 @@ object RespawnEmbeds {
 
     // The summary covers the whole guild either way: on a spawn's own log it is
     // the context the single-spawn feed below cannot give.
-    val busiest = summary.busiest
-      .map { case (respawn, hunts) => s" · busiest **${respawn.displayName}** ($hunts)" }
-      .getOrElse("")
-    val headline =
-      if (summary.total == 0) s"No hunts finished in the last ${summary.days} days."
-      else s"**${summary.total}** hunt${if (summary.total == 1) "" else "s"} " +
-        s"in the last ${summary.days} days$busiest"
+    embed.addField(s"Last ${summary.days} days",
+      if (summary.total == 0) "nothing yet" else s"${summary.total} hunts", true)
+    embed.addField("Busiest",
+      summary.busiest.map { case (respawn, hunts) => s"${respawn.displayName} ($hunts)" }.getOrElse("—"), true)
+    embed.addField("Showing",
+      if (!page.hasOlder && !page.hasNewer) "all of it" else s"page ${page.page + 1}", true)
 
     if (page.isEmpty) {
-      embed.setDescription(s"$headline\n\nNothing finished here yet.")
+      embed.setDescription("Nothing has finished here yet.")
     } else {
-      val lines = page.entries.map(claim =>
-        logLine(claim, if (scope.isDefined) None else names.get(claim.respawnId)))
-      embed.setDescription(s"$headline\n\n${lines.mkString("\n")}")
-      embed.setFooter(
-        if (page.hasOlder || page.hasNewer) s"Page ${page.page + 1} of at most $maxPages"
-        else "That's everything.")
+      val entries = page.entries.map(claim =>
+        logEntry(claim, if (scope.isDefined) None else names.get(claim.respawnId)))
+      embed.setDescription(entriesWithinLimit(entries, DescriptionLimit).mkString("\n"))
+      // Only said at the bottom of the reachable trail, where an absent Older
+      // button would otherwise look like the history simply stopped.
+      if (page.page + 1 >= maxPages) embed.setFooter(s"That's as far back as this goes ($maxPages pages).")
     }
     embed.build()
   }
