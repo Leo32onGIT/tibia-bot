@@ -86,10 +86,7 @@ object RespawnThreads extends StrictLogging {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
-      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
-      // Always offered, unlike the rest: the log is most worth reading about a
-      // spawn nobody is on, which is exactly when there is nothing else here.
-      Some(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log").withEmoji(Emoji.fromUnicode("📜")))
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -169,8 +166,14 @@ object RespawnThreads extends StrictLogging {
       if (bookings <= 0) Nil
       else List(Button.danger(RespawnButtonId.cancelSpawnAll(respawnId),
         if (bookings == 1) "Cancel Booking" else s"Cancel All $bookings Bookings"))
+    // Log lives here rather than on the Config panel because Book is on a
+    // spawn's card whether or not anybody holds it, while Config appears only
+    // once it is claimed — so behind Config the log was unreachable on a free
+    // spawn, which is exactly when somebody asks who has been on it.
+    val log = List(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log")
+      .withEmoji(Emoji.fromUnicode("📜")))
     ActionRow.of((Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
-      .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
+      .withEmoji(Emoji.fromUnicode("📆")) :: clear ::: log).asJava)
   }
 
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
