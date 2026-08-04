@@ -136,8 +136,13 @@ class BotListener extends ListenerAdapter with StrictLogging {
       // /setup was running and show as "Violent Bot did not respond".
       // A press that opens a modal cannot be deferred at all (replyModal has
       // to be the first response), so those are left for the handler to answer
-      // directly — see RespawnButtons.opensModal.
-      if (!respawn.RespawnButtonId.opensModal(event.getComponentId)) event.deferReply(true).queue()
+      // directly. A log page rewrites the message it was pressed on, so it
+      // defers an edit rather than a reply — see RespawnButtonId.ackFor.
+      respawn.RespawnButtonId.ackFor(event.getComponentId) match {
+        case respawn.RespawnButtonId.Ack.OpensModal   => ()
+        case respawn.RespawnButtonId.Ack.EditsMessage => event.deferEdit().queue()
+        case respawn.RespawnButtonId.Ack.Replies      => event.deferReply(true).queue()
+      }
       interactionExecutor.execute(() => {
         try interactions.RespawnButtons.handle(event)
         catch {

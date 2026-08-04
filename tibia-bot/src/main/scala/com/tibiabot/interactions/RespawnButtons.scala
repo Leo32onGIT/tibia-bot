@@ -73,6 +73,9 @@ object RespawnButtons extends StrictLogging {
       case Some(RespawnButtonId.BoardButton(what)) =>
         handleBoardButton(event, respond, what)
 
+      case Some(RespawnButtonId.LogButton(respawnId, page)) =>
+        handleLogButton(event, respawnId, page)
+
       // A spawn button pressed from a DM: no event guild, so it names its own.
       case Some(RespawnButtonId.DmSpawnButton(action, guildId, respawnId)) =>
         Option(event.getJDA.getGuildById(guildId)) match {
@@ -198,6 +201,50 @@ object RespawnButtons extends StrictLogging {
     }
   }
 
+  /** A page of the claim log, opened from a moderator panel or turned by its own
+   *  Newer/Older buttons.
+   *
+   *  Rewrites the message it was pressed on rather than sending a new one, so
+   *  paging turns the page instead of stacking a fresh ephemeral log per click
+   *  — which is why BotListener acknowledges these with `deferEdit` (see
+   *  RespawnButtonId.ackFor) and why every answer here goes through
+   *  `editOriginal`, including the refusals.
+   *
+   *  Moderator-only, re-checked here rather than trusted from the panel that
+   *  offered it: an ephemeral message persists, and the role can be taken away
+   *  while it sits open. */
+  private def handleLogButton(event: ButtonInteractionEvent, respawnId: Option[Long], page: Int): Unit = {
+    val guild = event.getGuild
+    def refuse(text: String): Unit =
+      event.getHook.editOriginalEmbeds(com.tibiabot.presentation.Embeds.response(text))
+        .setComponents().queue()
+
+    if (guild == null) refuse(s"${Config.noEmoji} That only works inside a server.")
+    else if (!RespawnModals.moderates(guild, event.getMember)) refuse(notModeratorText)
+    else {
+      val service = BotApp.respawnService
+      val guildId = guild.getId
+      val scope = respawnId.flatMap(id => service.listRespawns(guildId).find(_.id == id))
+      if (respawnId.isDefined && scope.isEmpty) {
+        refuse(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+      } else {
+        val logPage = service.claimLog(guildId, respawnId, page)
+        // Only the guild-wide log needs spawn names, and only for the rows on
+        // this page — the catalogue runs to several hundred entries.
+        val names =
+          if (respawnId.isDefined) Map.empty[Long, String]
+          else service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
+        val embed = RespawnEmbeds.claimLog(scope, logPage, service.logSummary(guildId), names,
+          service.LogMaxPages)
+        val action = event.getHook.editOriginalEmbeds(embed)
+        RespawnThreads.logButtons(respawnId, logPage) match {
+          case Some(row) => action.setComponents(row).queue()
+          case None      => action.setComponents().queue()
+        }
+      }
+    }
+  }
+
   private def handleBoardButton(event: ButtonInteractionEvent, respond: Responder, what: String): Unit = {
     if (what == "cancelall") { cancelAllBookings(event, respond); return }
     if (what == "mybookings") { ownBookings(event, respond); return }
@@ -291,15 +338,15 @@ object RespawnButtons extends StrictLogging {
                   val deferredRespond = new Responder(event, deferred = true)
                   val holder = service.holderOf(guildId, respawn.id)
                   val ownClaim = service.openClaimsForUser(guildId, user.getId).exists(_._2.respawnId == respawn.id)
-                  RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim) match {
-                    case None =>
-                      deferredRespond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**, " +
-                        "and you have no claim on it either.")
-                    case Some(buttons) =>
-                      val queueSize = service.status(guildId, respawn)._2.size
-                      deferredRespond.embed(
-                        RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize), Some(buttons))
-                  }
+                  // The panel is always shown now, where an idle spawn with no
+                  // claim of the moderator's own used to get a bare "nobody is
+                  // on this" and no buttons at all. Log is offered on every
+                  // spawn, and that is the state it is most worth reading in —
+                  // the panel's own embed already says the spawn is idle.
+                  val queueSize = service.status(guildId, respawn)._2.size
+                  deferredRespond.embed(
+                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize),
+                    RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim))
                 }
 
               case "schedule" =>

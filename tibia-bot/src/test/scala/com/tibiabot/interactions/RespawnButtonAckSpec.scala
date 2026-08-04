@@ -53,6 +53,26 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.opensModal(s"${RespawnButtonId.Prefix}claim:not-a-number") shouldBe false
   }
 
+  test("log pages edit the message they were pressed on, rather than replying") {
+    // Deferring these as a reply would stack a fresh ephemeral log on every
+    // click instead of turning the page.
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(None, 0)) shouldBe RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(Some(415L), 3)) shouldBe RespawnButtonId.Ack.EditsMessage
+  }
+
+  test("a log id round-trips through the parser, for the board and for one spawn") {
+    RespawnButtonId.parse(RespawnButtonId.logPage(None, 2)) shouldBe
+      Some(RespawnButtonId.LogButton(None, 2))
+    RespawnButtonId.parse(RespawnButtonId.logPage(Some(415L), 0)) shouldBe
+      Some(RespawnButtonId.LogButton(Some(415L), 0))
+  }
+
+  test("the three acknowledgement kinds stay distinct") {
+    RespawnButtonId.ackFor(RespawnButtonId.boardClaim) shouldBe RespawnButtonId.Ack.OpensModal
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(None, 0)) shouldBe RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.leave(1L)) shouldBe RespawnButtonId.Ack.Replies
+  }
+
   test("every press the listener acknowledges is also one it routes") {
     // A press BotListener deferred but never handed to RespawnButtons would
     // hang until Discord gave up on it, so the two predicates have to agree on

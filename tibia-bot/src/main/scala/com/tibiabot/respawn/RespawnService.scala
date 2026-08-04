@@ -71,6 +71,20 @@ object ScheduleResult {
     extends ScheduleResult
 }
 
+/** One page of the moderator claim log, and whether there is more behind it.
+ *
+ *  `hasOlder` is answered by fetching one row past the page rather than by
+ *  counting the whole trail, so an Older button is only ever offered when
+ *  pressing it actually shows something. */
+final case class LogPage(entries: List[RespawnClaim], page: Int, hasOlder: Boolean) {
+  def isEmpty: Boolean = entries.isEmpty
+  def hasNewer: Boolean = page > 0
+}
+
+/** The Log panel's summary line: how much hunting happened recently, and where
+ *  most of it happened. */
+final case class LogSummary(total: Int, busiest: Option[(Respawn, Int)], days: Int)
+
 /** The result of a slot owner answering "are you hunting tonight?". */
 sealed trait SlotAnswer
 object SlotAnswer {
@@ -698,6 +712,48 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  owner rather than on themselves. */
   def holderOf(guildId: String, respawnId: Long): Option[RespawnClaim] =
     repository.activeClaim(guildId, respawnId)
+
+  // --- claim log ------------------------------------------------------------
+
+  /** Entries shown on one page of the Log panel. */
+  val LogPageSize: Int = 10
+
+  /** How far back the Log panel will page. Beyond this a paged embed is the
+   *  wrong tool — the rows are all still there, but walking years of them ten
+   *  at a time is not something to invite people to do. */
+  val LogMaxPages: Int = 10
+
+  /** The window the Log panel's summary line covers. */
+  val LogSummaryDays: Int = 7
+
+  /** One page of the claim log, newest first. `respawnId` empty reads the whole
+   *  guild — the board's Log — and set reads one spawn's.
+   *
+   *  Asks for one row more than a page so the caller can tell "there is more"
+   *  from "this is the end" without a second count query; [[LogPage.hasOlder]]
+   *  consumes that and hands back only the page itself. */
+  def claimLog(guildId: String, respawnId: Option[Long], page: Int): LogPage = {
+    val safePage = math.max(0, math.min(page, LogMaxPages - 1))
+    val fetched = repository.claimHistory(guildId, respawnId, LogPageSize + 1, safePage * LogPageSize)
+    LogPage(
+      entries = fetched.take(LogPageSize),
+      page = safePage,
+      hasOlder = fetched.size > LogPageSize && safePage < LogMaxPages - 1
+    )
+  }
+
+  /** Hunts finished in the last [[LogSummaryDays]] days, and the spawn that saw
+   *  the most of them — the Log panel's one-line summary. `None` for the busiest
+   *  when nothing finished in the window, which is also when `total` is 0. */
+  def logSummary(guildId: String, now: ZonedDateTime = ZonedDateTime.now()): LogSummary = {
+    val counts = repository.claimCountsSince(guildId, now.minusDays(LogSummaryDays.toLong))
+    val byId = listRespawns(guildId).map(r => r.id -> r).toMap
+    LogSummary(
+      total = counts.map(_._2).sum,
+      busiest = counts.sortBy(-_._2).headOption.flatMap { case (id, n) => byId.get(id).map(_ -> n) },
+      days = LogSummaryDays
+    )
+  }
 
   def schedulesForRespawn(guildId: String, respawnId: Long): List[RespawnSchedule] =
     repository.schedulesForRespawn(guildId, respawnId)

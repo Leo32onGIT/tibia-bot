@@ -172,13 +172,23 @@ trait RespawnRepository {
    *  them stuck at the head blocking everyone behind them. */
   def cancelQueued(guildId: String, respawnId: Long, userIds: Set[String], outcome: String): Unit
 
-  /** The most recent finished claims on a spawn, newest first — the audit trail
-   *  behind `/respawn log`.
+  /** The most recent finished claims, newest first — the audit trail behind the
+   *  moderator Log panel. `respawnId` empty reads the whole guild, which is what
+   *  the board's Log shows; a spawn's own Log passes its id.
    *
    *  No separate history table: claim rows are never deleted, only moved to a
    *  terminal status, so the trail is simply the rows that already exist. At a
-   *  few thousand claims a year per guild there is nothing to prune. */
-  def claimHistory(guildId: String, respawnId: Long, limit: Int): List[RespawnClaim]
+   *  few thousand claims a year per guild there is nothing to prune.
+   *
+   *  `offset` pages backwards through it. Callers keep that bounded (see
+   *  RespawnService.LogMaxPages) rather than letting somebody walk years of
+   *  history one page at a time. */
+  def claimHistory(guildId: String, respawnId: Option[Long], limit: Int, offset: Int): List[RespawnClaim]
+
+  /** How many finished claims each spawn saw since `since`, for the Log panel's
+   *  summary line. One grouped query rather than counting rows in Scala, since
+   *  the window can cover far more claims than a page ever shows. */
+  def claimCountsSince(guildId: String, since: ZonedDateTime): List[(Long, Int)]
 
   /** Close a claim that ran to its end. `outcome` records why, for the audit log
    *  (see RespawnClaim.Outcome); `ended_at` is stamped by the database. */

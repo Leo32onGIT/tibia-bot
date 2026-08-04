@@ -86,7 +86,10 @@ object RespawnThreads extends StrictLogging {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
-      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
+      // Always offered, unlike the rest: the log is most worth reading about a
+      // spawn nobody is on, which is exactly when there is nothing else here.
+      Some(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log").withEmoji(Emoji.fromUnicode("📜")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -99,8 +102,19 @@ object RespawnThreads extends StrictLogging {
     ActionRow.of(
       Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
-      Button.primary(RespawnButtonId.boardTimers, "Timers")
+      Button.primary(RespawnButtonId.boardTimers, "Timers"),
+      Button.secondary(RespawnButtonId.logPage(None, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
     )
+
+  /** Newer/Older under a page of the claim log. Only the directions that lead
+   *  somewhere are offered, so neither button ever answers with the same page. */
+  def logButtons(respawnId: Option[Long], page: LogPage): Option[ActionRow] = {
+    val buttons = List(
+      if (page.hasNewer) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page - 1), "Newer")) else None,
+      if (page.hasOlder) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page + 1), "Older")) else None
+    ).flatten
+    if (buttons.isEmpty) None else Some(ActionRow.of(buttons.asJava))
+  }
 
   /** The Yes/No pair on a "are you hunting tonight?" DM. */
   def slotAnswerButtons(guildId: String, claimId: Long): ActionRow =
@@ -531,6 +545,18 @@ object RespawnThreads extends StrictLogging {
 object RespawnButtonId {
   val Prefix: String = "respawn:"
 
+  /** How BotListener must acknowledge a press before queueing it. */
+  sealed trait Ack
+  object Ack {
+    /** Cannot be acknowledged early at all — `replyModal` has to be the
+     *  interaction's first response. */
+    case object OpensModal extends Ack
+    /** Rewrites the message it was pressed on, so it defers an edit. */
+    case object EditsMessage extends Ack
+    /** Answers with a new ephemeral message. */
+    case object Replies extends Ack
+  }
+
   def claim(respawnId: Long): String = s"${Prefix}claim:$respawnId"
   def next(respawnId: Long): String = s"${Prefix}next:$respawnId"
   def leave(respawnId: Long): String = s"${Prefix}leave:$respawnId"
@@ -549,6 +575,12 @@ object RespawnButtonId {
   /** Book from the board rather than from a spawn's own post — the form asks
    *  which spawn instead of knowing it. */
   val boardBook: String = s"${Prefix}board:book"
+
+  /** A page of the claim log. Opening it and paging through it are the same id
+   *  shape, so a press is handled one way wherever it came from: `all` reads
+   *  the whole guild, a spawn id reads that spawn. */
+  def logPage(respawnId: Option[Long], page: Int): String =
+    s"${Prefix}log:${respawnId.map(_.toString).getOrElse("all")}:$page"
 
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
@@ -648,6 +680,8 @@ object RespawnButtonId {
   final case class SlotAnswerButton(keep: Boolean, guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
+  /** A page of the claim log — `respawnId` empty for the board's guild-wide view. */
+  final case class LogButton(respawnId: Option[Long], page: Int) extends Action
 
   /** Actions that always end in a modal, and so must not be deferred. The two
    *  Config buttons are absent deliberately: what they open depends on whether
@@ -668,11 +702,20 @@ object RespawnButtonId {
    *  it waiting on a free thread in a pool shared with `/setup`, so a press
    *  could blow Discord's three-second window without any of its own work
    *  being slow. */
-  def opensModal(componentId: String): Boolean =
+  def opensModal(componentId: String): Boolean = ackFor(componentId) == Ack.OpensModal
+
+  /** How a press must be acknowledged, decided from its id alone.
+   *
+   *  Three answers rather than two, because the log's pages rewrite the message
+   *  they were pressed on instead of sending a new one — acknowledging those
+   *  with `deferReply` would stack a fresh ephemeral log per click rather than
+   *  turning the page. */
+  def ackFor(componentId: String): Ack =
     parse(componentId) match {
-      case Some(BoardButton(what))      => what == "config" || ModalActions.contains(what)
-      case Some(SpawnButton(action, _)) => action == "config" || ModalActions.contains(action)
-      case _                            => false
+      case Some(BoardButton(what)) if what == "config" || ModalActions.contains(what) => Ack.OpensModal
+      case Some(SpawnButton(action, _)) if action == "config" || ModalActions.contains(action) => Ack.OpensModal
+      case Some(LogButton(_, _)) => Ack.EditsMessage
+      case _                     => Ack.Replies
     }
 
   /** None for anything malformed, so a button left over from an older deploy is
@@ -690,6 +733,11 @@ object RespawnButtonId {
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = false, guildId, _))
+      case Array("log", target, page) =>
+        Try(page.toInt).toOption.flatMap { p =>
+          if (target == "all") Some(LogButton(None, p))
+          else Try(target.toLong).toOption.map(id => LogButton(Some(id), p))
+        }
       case Array(action, id) =>
         Try(id.toLong).toOption.map(SpawnButton(action, _))
       case _ => None

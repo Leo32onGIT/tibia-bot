@@ -433,7 +433,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
       now, 120, RespawnClaim.KindAdHoc).get
     repo.cancelClaim(g, second.id, RespawnClaim.Outcome.Forced)
 
-    val history = repo.claimHistory(g, spawn.id, 10)
+    val history = repo.claimHistory(g, Some(spawn.id), 10, 0)
     history.map(_.userId) shouldBe List("u2", "u1")
     history.map(_.outcome) shouldBe List(Some(RespawnClaim.Outcome.Forced),
       Some(RespawnClaim.Outcome.Completed))
@@ -444,9 +444,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // A claim still running is not history.
     repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", now, now.plusHours(1), 60,
       RespawnClaim.KindAdHoc).get
-    repo.claimHistory(g, spawn.id, 10).map(_.userId) shouldBe List("u2", "u1")
+    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.userId) shouldBe List("u2", "u1")
 
-    repo.claimHistory(g, spawn.id, 1).map(_.userId) shouldBe List("u2")
+    repo.claimHistory(g, Some(spawn.id), 1, 0).map(_.userId) shouldBe List("u2")
   }
 
   test("an already-ended claim keeps its original outcome") {
@@ -459,7 +459,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // A late second call — the sweep and a release racing, say — must not relabel
     // why it ended, or the audit trail would depend on ordering.
     repo.cancelClaim(g, claim.id, RespawnClaim.Outcome.Forced)
-    repo.claimHistory(g, spawn.id, 10).map(_.outcome) shouldBe
+    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.outcome) shouldBe
       List(Some(RespawnClaim.Outcome.Completed))
   }
 
@@ -569,7 +569,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.reservationsFor(g, spawn.id, now).map(_.userId) shouldBe List("u2")
     // The due-slot path keys off the status, so it activates like any other.
     repo.dueReservations(g, now.plusHours(2)).map(_.id) shouldBe List(handed.id)
-    repo.claimHistory(g, spawn.id, 10).map(_.outcome) shouldBe
+    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.outcome) shouldBe
       List(Some(RespawnClaim.Outcome.GivenUp))
   }
 

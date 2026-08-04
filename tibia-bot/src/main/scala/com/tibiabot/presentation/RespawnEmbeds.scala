@@ -377,6 +377,61 @@ object RespawnEmbeds {
     embed.build()
   }
 
+  /** One line of the claim log. Pure, so the shape is testable without JDA.
+   *
+   *  The time is a Discord timestamp rather than formatted text, so each
+   *  moderator reads it in their own timezone — the alternative is picking one
+   *  zone and explaining it. `endedAt` rather than `endsAt`: a hunt released
+   *  early or taken over stopped when it stopped, and an audit that showed the
+   *  deadline instead would quietly disagree with what people remember.
+   *
+   *  `spawnName` is set only for the board's guild-wide log, where a line is
+   *  meaningless without saying which spawn it belongs to. */
+  private[presentation] def logLine(claim: RespawnClaim, spawnName: Option[String]): String = {
+    val when = claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:f>").getOrElse("*unknown time*")
+    val who = if (claim.characterName.nonEmpty) s"${claim.characterName} (<@${claim.userId}>)" else s"<@${claim.userId}>"
+    val where = spawnName.map(name => s" **$name** ·").getOrElse("")
+    val how = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
+    s"$when ·$where $who · ${humanDuration(claim.durationMinutes)} · $how"
+  }
+
+  /** The moderator claim log, for one spawn or for the whole guild.
+   *
+   *  Reverse-chronological and paged rather than exhaustive: the trail goes
+   *  back as far as the guild has existed, and every question a moderator
+   *  actually brings to it — who had this last night, is somebody sitting on
+   *  it, did they turn up — is answered by the recent end of it. The footer
+   *  says where the page sits so nobody has to guess how deep they are. */
+  def claimLog(scope: Option[Respawn], page: com.tibiabot.respawn.LogPage,
+               summary: com.tibiabot.respawn.LogSummary,
+               names: Map[Long, String], maxPages: Int): MessageEmbed = {
+    val embed = new EmbedBuilder()
+      .setColor(Embeds.BrandColor)
+      .setTitle(scope.map(r => s"Claim log — ${r.displayName}").getOrElse("Claim log"))
+
+    // The summary covers the whole guild either way: on a spawn's own log it is
+    // the context the single-spawn feed below cannot give.
+    val busiest = summary.busiest
+      .map { case (respawn, hunts) => s" · busiest **${respawn.displayName}** ($hunts)" }
+      .getOrElse("")
+    val headline =
+      if (summary.total == 0) s"No hunts finished in the last ${summary.days} days."
+      else s"**${summary.total}** hunt${if (summary.total == 1) "" else "s"} " +
+        s"in the last ${summary.days} days$busiest"
+
+    if (page.isEmpty) {
+      embed.setDescription(s"$headline\n\nNothing finished here yet.")
+    } else {
+      val lines = page.entries.map(claim =>
+        logLine(claim, if (scope.isDefined) None else names.get(claim.respawnId)))
+      embed.setDescription(s"$headline\n\n${lines.mkString("\n")}")
+      embed.setFooter(
+        if (page.hasOlder || page.hasNewer) s"Page ${page.page + 1} of at most $maxPages"
+        else "That's everything.")
+    }
+    embed.build()
+  }
+
   /** Confirmation of a member's own settings, shown after the Config modal. */
   def userPrefsEmbed(prefs: RespawnUserPrefs, settings: RespawnSettings): MessageEmbed = {
     def shown(value: Option[Int], guildValue: Int, off: String): String = value match {
