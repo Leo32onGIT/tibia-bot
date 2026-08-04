@@ -102,4 +102,53 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
   test("a budget too small for even one entry yields nothing rather than a partial row") {
     RespawnEmbeds.entriesWithinLimit(List("a" * 40), 10) shouldBe empty
   }
+
+  private def onSpawn(respawnId: Long, endedAt: ZonedDateTime) =
+    claim().copy(respawnId = respawnId, endedAt = Some(endedAt))
+
+  test("groups are ordered by their most recent hunt, not by how many they hold") {
+    // Spawn 2 has more hunts, but spawn 1 has the most recent one — so the top
+    // of the page is still the last thing that happened.
+    val claims = List(
+      onSpawn(1L, now),
+      onSpawn(2L, now.minusHours(1)),
+      onSpawn(2L, now.minusHours(2)),
+      onSpawn(2L, now.minusHours(3)))
+    RespawnEmbeds.groupedByRespawn(claims).map(_._1) shouldBe List(1L, 2L)
+  }
+
+  test("a spawn's hunts stay newest-first within its group") {
+    val claims = List(onSpawn(1L, now), onSpawn(1L, now.minusHours(4)), onSpawn(1L, now.minusHours(9)))
+    val group = RespawnEmbeds.groupedByRespawn(claims).head._2
+    group.flatMap(_.endedAt) shouldBe List(now, now.minusHours(4), now.minusHours(9))
+  }
+
+  test("a spawn appearing twice on a page folds into one group, not two") {
+    // The feed arrives newest-first, so a spawn's hunts can be split by another
+    // spawn's in between — folding has to gather both.
+    val claims = List(onSpawn(1L, now), onSpawn(2L, now.minusHours(1)), onSpawn(1L, now.minusHours(2)))
+    val grouped = RespawnEmbeds.groupedByRespawn(claims)
+    grouped should have size 2
+    grouped.head._1 shouldBe 1L
+    grouped.head._2 should have size 2
+  }
+
+  test("a group names the spawn once and counts what it is showing") {
+    val block = RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now), onSpawn(1L, now.minusHours(2))))
+    val lines = block.split("\n")
+    lines(0) shouldBe "**415 Cult Orcs · 2 hunts**"
+    lines should have size 3
+    lines.tail.foreach(line => line should not include "415 Cult Orcs")
+  }
+
+  test("a group of one says hunt, not hunts") {
+    RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now))).split("\n")(0) shouldBe
+      "**415 Cult Orcs · 1 hunt**"
+  }
+
+  test("a claim with no recorded end still sorts, rather than throwing the group order") {
+    val claims = List(claim(ended = None).copy(respawnId = 3L), onSpawn(1L, now))
+    // The dated group wins the top; the undated one is simply last.
+    RespawnEmbeds.groupedByRespawn(claims).map(_._1) shouldBe List(1L, 3L)
+  }
 }

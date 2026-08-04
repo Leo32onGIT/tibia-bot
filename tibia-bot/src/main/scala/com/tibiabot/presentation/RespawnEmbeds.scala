@@ -389,39 +389,67 @@ object RespawnEmbeds {
    *  description, and these survive it. */
   private val LogIndent = "   "
 
-  /** One entry of the claim log, deliberately over two lines: when and where on
-   *  the first, who and how it went on the second. One line per entry wrapped at
-   *  a different point on every row once a phone got hold of it; breaking it on
-   *  purpose means the break is always in the same place.
-   *
-   *  The time is a Discord timestamp rather than formatted text, so each
-   *  moderator reads it in their own timezone — the alternative is picking one
-   *  zone and explaining it. `endedAt` rather than `endsAt`: a hunt released
-   *  early or taken over stopped when it stopped, and an audit that showed the
-   *  deadline instead would quietly disagree with what people remember.
-   *
-   *  `spawnName` is set only for the board's guild-wide log. On a spawn's own
-   *  log it would be the same name ten times over, so the first line is just
-   *  the time there. */
-  private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
-    val when = claim.endedAt
-      .map(t => s"<t:${t.toInstant.getEpochSecond}:$LogTimeStyle>")
-      .getOrElse("*unknown time*")
-    val where = spawnName.map(name => s" · **$name**").getOrElse("")
+  /** When a hunt ended, as a Discord timestamp so each moderator reads it in
+   *  their own timezone — the alternative is picking one zone and explaining it.
+   *  `endedAt` rather than `endsAt`: a hunt released early or taken over stopped
+   *  when it stopped, and an audit showing the deadline instead would quietly
+   *  disagree with what people remember. */
+  private def logTime(claim: RespawnClaim): String =
+    claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:$LogTimeStyle>").getOrElse("*unknown time*")
+
+  /** Who held it and how it went — the part that reads the same wherever an
+   *  entry is rendered. */
+  private def logWho(claim: RespawnClaim): String = {
     // The stored username rather than a mention. It is stamped on the row at
     // claim time from the same getName a lookup would return, so showing it
     // costs nothing where retrieving each entry's user would be a REST call per
     // person per render. The trade is that it does not follow a later rename and
     // cannot be clicked; the mention is kept only as a last resort, for old rows
     // that predate the column and have no name to show at all.
-    val who = (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
+    val name = (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)   => s"${claim.characterName} (${claim.userName})"
       case (true, false)  => claim.characterName
       case (false, true)  => claim.userName
       case (false, false) => s"<@${claim.userId}>"
     }
     val how = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
-    s"$when$where\n$LogIndent$who · ${humanDuration(claim.durationMinutes)} · $how"
+    s"$name · ${humanDuration(claim.durationMinutes)} · $how"
+  }
+
+  /** The board's log folded by spawn: named once, with its hunts beneath it,
+   *  rather than repeating the name on every line.
+   *
+   *  Groups are ordered by their most recent hunt, so the top of the page is
+   *  still the most recent thing that happened — but below that the order is by
+   *  spawn rather than by time, which is the trade folding makes. The count is
+   *  of the hunts shown here: a spawn's run can continue onto the next page, so
+   *  it is not a total for that spawn. */
+  private[presentation] def logGroup(name: String, claims: List[RespawnClaim]): String = {
+    val hunts = if (claims.size == 1) "1 hunt" else s"${claims.size} hunts"
+    val lines = claims.map(c => s"$LogIndent${logTime(c)} · ${logWho(c)}")
+    s"**$name · $hunts**\n${lines.mkString("\n")}"
+  }
+
+  /** Claims folded by spawn, most recently active spawn first. Pure, so the
+   *  ordering rule is testable without an embed. Within a group the claims keep
+   *  the order they arrived in, which is already newest-first. */
+  private[presentation] def groupedByRespawn(claims: List[RespawnClaim]): List[(Long, List[RespawnClaim])] = {
+    def latest(group: List[RespawnClaim]): Long =
+      group.flatMap(_.endedAt).map(_.toInstant.getEpochSecond).foldLeft(Long.MinValue)(math.max)
+    claims.groupBy(_.respawnId).toList.sortBy { case (_, group) => latest(group) }(Ordering[Long].reverse)
+  }
+
+  /** One entry of a spawn's own claim log, deliberately over two lines: when on
+   *  the first, who and how it went on the second. One line per entry wrapped at
+   *  a different point on every row once a phone got hold of it; breaking it on
+   *  purpose means the break is always in the same place.
+   *
+   *  `spawnName` is set only where a line has to say which spawn it belongs to.
+   *  A spawn's own log passes None — it would be the same name ten times over,
+   *  and the board's log names it on the group header instead. */
+  private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
+    val where = spawnName.map(name => s" · **$name**").getOrElse("")
+    s"${logTime(claim)}$where\n$LogIndent${logWho(claim)}"
   }
 
   /** Discord refuses an embed whose description runs past this, and refusing is
@@ -473,9 +501,15 @@ object RespawnEmbeds {
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")
     } else {
-      val entries = page.entries.map(claim =>
-        logEntry(claim, if (scope.isDefined) None else names.get(claim.respawnId)))
-      embed.setDescription(entriesWithinLimit(entries, DescriptionLimit).mkString("\n"))
+      // A spawn's own log has one code and nothing to fold, so it keeps the
+      // two-line entry. The board's is folded by spawn — that is where the same
+      // name was being repeated down the page.
+      val blocks =
+        if (scope.isDefined) page.entries.map(logEntry(_, None))
+        else groupedByRespawn(page.entries).map { case (respawnId, claims) =>
+          logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
+        }
+      embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
       // Only said at the bottom of the reachable trail, where an absent Older
       // button would otherwise look like the history simply stopped.
       if (page.page + 1 >= maxPages) embed.setFooter(s"That's as far back as this goes ($maxPages pages).")
