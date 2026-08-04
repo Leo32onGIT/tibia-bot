@@ -30,8 +30,16 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     lines(0) should include("<t:")
     lines(0) should include("415 Cult Orcs")
     lines(1) should include("Bobinho")
-    lines(1) should include("<@123456789012345678>")
+    lines(1) should include("bob")
     lines(1) should include("ran its full time")
+  }
+
+  test("the person is named in plain text, not as a mention") {
+    // A mention would need a REST lookup per entry to say anything a stored
+    // row does not already, and renders as a pill rather than a name.
+    val second = RespawnEmbeds.logEntry(claim(), None).split("\n")(1)
+    second should include("Bobinho (bob)")
+    second should not include "<@"
   }
 
   test("a spawn's own log leaves the name off, rather than repeating it every entry") {
@@ -49,10 +57,24 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     second should startWith(" ")
   }
 
-  test("someone with no character name still gets a mentionable line") {
+  test("someone with no character name is named by their username alone") {
     val second = RespawnEmbeds.logEntry(claim(character = ""), None).split("\n")(1)
-    second should include("<@123456789012345678>")
+    second should include("bob")
     second should not include "()"
+  }
+
+  test("a row too old to carry a username falls back to a mention rather than naming nobody") {
+    // user_name arrived with a DEFAULT '' , so the earliest rows have none.
+    val second = RespawnEmbeds
+      .logEntry(claim(character = "").copy(userName = ""), None).split("\n")(1)
+    second should include("<@123456789012345678>")
+  }
+
+  test("a character name survives a row with no username") {
+    val second = RespawnEmbeds
+      .logEntry(claim().copy(userName = ""), None).split("\n")(1)
+    second should include("Bobinho")
+    second should not include "("
   }
 
   test("a claim that never recorded an end says so rather than rendering a broken timestamp") {

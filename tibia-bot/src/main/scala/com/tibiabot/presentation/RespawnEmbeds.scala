@@ -377,6 +377,13 @@ object RespawnEmbeds {
     embed.build()
   }
 
+  /** The Discord timestamp style the log renders its times in. Kept in one place
+   *  because which style reads best is a matter of taste and worth being able to
+   *  change in a word. An unrecognised style is not an error to Discord — it
+   *  falls back to the default render — so trying one is safe and judged on
+   *  sight. */
+  private val LogTimeStyle = "S"
+
   /** Indent for the second line of a log entry. Non-breaking spaces rather than
    *  ordinary ones: Discord collapses leading whitespace in an embed
    *  description, and these survive it. */
@@ -397,9 +404,22 @@ object RespawnEmbeds {
    *  log it would be the same name ten times over, so the first line is just
    *  the time there. */
   private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
-    val when = claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:f>").getOrElse("*unknown time*")
+    val when = claim.endedAt
+      .map(t => s"<t:${t.toInstant.getEpochSecond}:$LogTimeStyle>")
+      .getOrElse("*unknown time*")
     val where = spawnName.map(name => s" · **$name**").getOrElse("")
-    val who = if (claim.characterName.nonEmpty) s"${claim.characterName} (<@${claim.userId}>)" else s"<@${claim.userId}>"
+    // The stored username rather than a mention. It is stamped on the row at
+    // claim time from the same getName a lookup would return, so showing it
+    // costs nothing where retrieving each entry's user would be a REST call per
+    // person per render. The trade is that it does not follow a later rename and
+    // cannot be clicked; the mention is kept only as a last resort, for old rows
+    // that predate the column and have no name to show at all.
+    val who = (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
+      case (true, true)   => s"${claim.characterName} (${claim.userName})"
+      case (true, false)  => claim.characterName
+      case (false, true)  => claim.userName
+      case (false, false) => s"<@${claim.userId}>"
+    }
     val how = claim.outcome.map(RespawnClaim.Outcome.label).getOrElse("ended")
     s"$when$where\n$LogIndent$who · ${humanDuration(claim.durationMinutes)} · $how"
   }
