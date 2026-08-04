@@ -338,15 +338,12 @@ object RespawnButtons extends StrictLogging {
                   val deferredRespond = new Responder(event, deferred = true)
                   val holder = service.holderOf(guildId, respawn.id)
                   val ownClaim = service.openClaimsForUser(guildId, user.getId).exists(_._2.respawnId == respawn.id)
-                  RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim) match {
-                    case None =>
-                      deferredRespond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**, " +
-                        "and you have no claim on it either.")
-                    case Some(buttons) =>
-                      val queueSize = service.status(guildId, respawn)._2.size
-                      deferredRespond.embed(
-                        RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize), Some(buttons))
-                  }
+                  // Always a panel now: Config reaches this on a free spawn too,
+                  // and the panel's own embed says whether anybody is on it.
+                  val queueSize = service.status(guildId, respawn)._2.size
+                  deferredRespond.embed(
+                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize),
+                    Some(RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim)))
                 }
 
               case "schedule" =>

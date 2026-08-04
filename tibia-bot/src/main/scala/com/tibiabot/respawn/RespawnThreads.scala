@@ -61,9 +61,14 @@ object RespawnThreads extends StrictLogging {
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
     else
+      // Config is here as well as on a claimed spawn. It means the same thing to
+      // a member either way — their own claim defaults — and for a moderator it
+      // is the way to the claim log, which is most worth reading about a spawn
+      // nobody is on.
       List(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(claimEmoji),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅"))
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️"))
       )
 
   /** The buttons on the pinned board post, which is what makes the whole system
@@ -81,16 +86,21 @@ object RespawnThreads extends StrictLogging {
   /** The Config panel a moderator gets from a spawn's card, instead of going
    *  straight to their own duration. `ownClaim` adds a button for their own claim
    *  when they have one, since the moderator actions target whoever holds the
-   *  spawn — which may not be them. */
-  def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): Option[ActionRow] = {
+   *  spawn — which may not be them.
+   *
+   *  Never empty: Log is offered whatever state the spawn is in, so a moderator
+   *  opening this on a spawn nobody holds still has the one thing worth asking
+   *  about an idle spawn. */
+  def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): ActionRow = {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
-      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
+      Some(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log").withEmoji(Emoji.fromUnicode("📜")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
-    if (buttons.isEmpty) None else Some(ActionRow.of(buttons.asJava))
+    ActionRow.of(buttons.asJava)
   }
 
   /** The Config panel a moderator gets from the board: their own settings, or the
@@ -166,14 +176,8 @@ object RespawnThreads extends StrictLogging {
       if (bookings <= 0) Nil
       else List(Button.danger(RespawnButtonId.cancelSpawnAll(respawnId),
         if (bookings == 1) "Cancel Booking" else s"Cancel All $bookings Bookings"))
-    // Log lives here rather than on the Config panel because Book is on a
-    // spawn's card whether or not anybody holds it, while Config appears only
-    // once it is claimed — so behind Config the log was unreachable on a free
-    // spawn, which is exactly when somebody asks who has been on it.
-    val log = List(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log")
-      .withEmoji(Emoji.fromUnicode("📜")))
     ActionRow.of((Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
-      .withEmoji(Emoji.fromUnicode("📆")) :: clear ::: log).asJava)
+      .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
   }
 
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
