@@ -214,6 +214,12 @@ object RespawnButtons extends StrictLogging {
     else what match {
       case "claim" => event.replyModal(RespawnModals.claimModal).queue()
 
+      // Straight to the form rather than a panel first, matching Claim beside
+      // it: there is no spawn yet to list this member's bookings for. Managing
+      // existing bookings stays on the spawn's own post, where the Book button
+      // opens that panel.
+      case "book" => event.replyModal(RespawnModals.boardScheduleModal(guild.getId)).queue()
+
       case "config" =>
         // A moderator gets a choice, because Config could mean two things for
         // them. Everybody else goes straight to their own settings — no extra

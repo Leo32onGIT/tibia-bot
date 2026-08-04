@@ -246,7 +246,42 @@ object RespawnModals extends StrictLogging {
    *  timezone and the recurrence arithmetic is untouched — server time only
    *  decides where the hour boundaries fall. The confirmation is a Discord
    *  timestamp, so each person sees the booking in their own zone. */
-  def scheduleModal(guildId: String, respawn: Respawn): Modal = {
+  def scheduleModal(guildId: String, respawn: Respawn): Modal =
+    Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a slot")
+      .addComponents(scheduleFields(guildId, s"${respawn.displayName} — $StartHelpSuffix"): _*)
+      .build()
+
+  /** The board's Book button: the same form, with the spawn asked for rather
+   *  than known.
+   *
+   *  Free text for the spawn, for the same reason [[claimModal]] uses it — the
+   *  catalogue runs to several hundred entries and Discord caps a select at 25
+   *  — and it goes through the same resolver, so a code, a name or a unique
+   *  fragment all work.
+   *
+   *  This is five components, which is Discord's per-modal maximum
+   *  ([[Modal.MAX_COMPONENTS]]). Anything booking gains later has to split
+   *  across two modals the way the server settings already do. */
+  def boardScheduleModal(guildId: String): Modal = {
+    val whichSpawn = label("Which respawn?", "Enter its respawn code",
+      TextInput.create(SpawnField, TextInputStyle.SHORT)
+        .setPlaceholder("310")
+        .setRequired(true)
+        .setMaxLength(100)
+        .build())
+    Modal.create(RespawnButtonId.modalBoardSchedule, "Book a slot")
+      .addComponents((whichSpawn +: scheduleFields(guildId, StartHelpSuffix.capitalize)): _*)
+      .build()
+  }
+
+  /** The tail of the start picker's help line. A spawn's own form puts its name
+   *  in front of this; the board's form has no name to put there, since which
+   *  spawn is not known until the form comes back. */
+  private val StartHelpSuffix = "server time, so SS+1 is an hour after save."
+
+  /** Everything a booking form asks apart from which spawn it is for — shared
+   *  so the board's form and a spawn's own cannot drift apart. */
+  private def scheduleFields(guildId: String, startHelp: String): Seq[Label] = {
     val settings = BotApp.respawnService.settings(guildId)
     val zone = com.tibiabot.domain.time.Clock.Berlin
     val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
@@ -280,26 +315,23 @@ object RespawnModals extends StrictLogging {
       .setMaxValues(7)
       .build()
 
-    Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a slot")
-      .addComponents(
-        label("Slot starts at", s"${respawn.displayName} — server time, so SS+1 is an hour after save.",
-          startMenu),
-        // A typed length, the same as every other duration prompt — there is no
-        // reason for this one to work differently from the Config and Hunt
-        // duration modals.
-        label("How long is the slot? (minutes)", s"5 to $maxDuration.",
-          TextInput.create(DurationField, TextInputStyle.SHORT)
-            .setRequired(true)
-            .setMaxLength(4)
-            .build()),
-        // Default on, because a standing booking is what most people are here
-        // for. Turning it off books the one slot and nothing after it, which is
-        // how you hold a spawn for a particular night.
-        label("Repeat this booking", "Turn off to book the one slot only.",
-          Checkbox.of(RepeatField, true)),
-        label("Repeat on", "Leave empty for every day. Ignored when repeat is off.", dayMenu)
-      )
-      .build()
+    Seq(
+      label("Slot starts at", startHelp, startMenu),
+      // A typed length, the same as every other duration prompt — there is no
+      // reason for this one to work differently from the Config and Hunt
+      // duration modals.
+      label("How long is the slot? (minutes)", s"5 to $maxDuration.",
+        TextInput.create(DurationField, TextInputStyle.SHORT)
+          .setRequired(true)
+          .setMaxLength(4)
+          .build()),
+      // Default on, because a standing booking is what most people are here
+      // for. Turning it off books the one slot and nothing after it, which is
+      // how you hold a spawn for a particular night.
+      label("Repeat this booking", "Turn off to book the one slot only.",
+        Checkbox.of(RepeatField, true)),
+      label("Repeat on", "Leave empty for every day. Ignored when repeat is off.", dayMenu)
+    )
   }
 
   /** How many half hours ahead the picker offers. Discord caps a select at 25
@@ -346,6 +378,7 @@ object RespawnModals extends StrictLogging {
       case Some(("holder", respawnId))   => submitDuration(event, respawnId, forHolder = true)
       case Some(("schedule", respawnId))  => submitSchedule(event, respawnId)
       case _ => modalId match {
+        case RespawnButtonId.modalBoardSchedule => submitBoardSchedule(event)
         case RespawnButtonId.modalClaim      => submitClaim(event)
         case RespawnButtonId.modalConfig     => submitConfig(event)
         case RespawnButtonId.modalClaimRules => submitSettings(event, claimRules = true)
@@ -358,7 +391,28 @@ object RespawnModals extends StrictLogging {
     }
   }
 
-  private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit = {
+  /** A spawn's own booking form, which knows which spawn it is for. */
+  private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit =
+    BotApp.respawnService.listRespawns(event.getGuild.getId).find(_.id == respawnId) match {
+      case None          => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+      case Some(respawn) => submitSchedule(event, respawn)
+    }
+
+  /** The board's booking form, which asks. Resolved through the same resolver
+   *  `/respawn claim` and the board's own Claim button use, so a code, a name
+   *  or a unique fragment all work — and, like those, an unknown code and an
+   *  ambiguous one are indistinguishable from here, so the reply covers both. */
+  private def submitBoardSchedule(event: ModalInteractionEvent): Unit = {
+    val query = value(event, SpawnField)
+    BotApp.respawnService.resolve(event.getGuild.getId, query) match {
+      case None =>
+        reply(event, s"${Config.noEmoji} I couldn't find a respawn matching **$query**. " +
+          "Use its code from the board above, or enough of its name to be unique.")
+      case Some(respawn) => submitSchedule(event, respawn)
+    }
+  }
+
+  private def submitSchedule(event: ModalInteractionEvent, respawn: Respawn): Unit = {
     val guild = event.getGuild
     val service = BotApp.respawnService
     // Off means one slot and no more; on with nothing picked means every day,
@@ -381,36 +435,32 @@ object RespawnModals extends StrictLogging {
       case (_, None) =>
         reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
       case (Some(startEpoch), Some(duration)) =>
-        service.listRespawns(guild.getId).find(_.id == respawnId) match {
-          case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-          case Some(respawn) =>
-            val existing = service.schedulesForUser(guild.getId, event.getUser.getId)
-            if (existing.size >= com.tibiabot.Config.Respawn.maxSchedulesPerUser)
-              reply(event, s"${Config.noEmoji} You already have " +
-                s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} bookings — cancel one first.")
-            else {
-              val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
-                .atZone(java.time.ZoneOffset.UTC)
-              service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
-                firstStart, duration, daysOfWeek) match {
-                case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
-                case Right(ScheduleResult.Booked(schedule)) =>
-                  reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
-                    s"${schedule.repeatLabel} for " +
-                    s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
-                    s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
-                // Deliberately not phrased as a booking. Nothing has been written
-                // for them, and telling somebody they have a slot they may not get
-                // is worse than making them wait for the answer.
-                case Right(ScheduleResult.Requested(_, slot, deadline)) =>
-                  reply(event, s"${Config.yesEmoji} That time is <@${slot.userId}>'s, so I've asked " +
-                    "whether they're actually hunting it.\nIf they say no, or don't answer by " +
-                    s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
-                    s"booked for you from <t:$startEpoch:t> for " +
-                    s"${RespawnEmbeds.humanDuration(duration)} and I'll DM you. " +
-                    "Nothing is held for you until then.")
-              }
-            }
+        val existing = service.schedulesForUser(guild.getId, event.getUser.getId)
+        if (existing.size >= com.tibiabot.Config.Respawn.maxSchedulesPerUser)
+          reply(event, s"${Config.noEmoji} You already have " +
+            s"${com.tibiabot.Config.Respawn.maxSchedulesPerUser} bookings — cancel one first.")
+        else {
+          val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
+            .atZone(java.time.ZoneOffset.UTC)
+          service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
+            firstStart, duration, daysOfWeek) match {
+            case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+            case Right(ScheduleResult.Booked(schedule)) =>
+              reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
+                s"${schedule.repeatLabel} for " +
+                s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
+                s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
+            // Deliberately not phrased as a booking. Nothing has been written
+            // for them, and telling somebody they have a slot they may not get
+            // is worse than making them wait for the answer.
+            case Right(ScheduleResult.Requested(_, slot, deadline)) =>
+              reply(event, s"${Config.yesEmoji} That time is <@${slot.userId}>'s, so I've asked " +
+                "whether they're actually hunting it.\nIf they say no, or don't answer by " +
+                s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
+                s"booked for you from <t:$startEpoch:t> for " +
+                s"${RespawnEmbeds.humanDuration(duration)} and I'll DM you. " +
+                "Nothing is held for you until then.")
+          }
         }
     }
   }

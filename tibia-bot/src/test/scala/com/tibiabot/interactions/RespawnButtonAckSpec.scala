@@ -23,6 +23,7 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
 
   test("board buttons that open a modal are not deferred") {
     RespawnButtonId.opensModal(RespawnButtonId.boardClaim) shouldBe true
+    RespawnButtonId.opensModal(RespawnButtonId.boardBook) shouldBe true
     // Config decides between a modal and a deferred panel only after a role
     // lookup, so it has to keep its own first response free.
     RespawnButtonId.opensModal(RespawnButtonId.boardConfig) shouldBe true
@@ -57,7 +58,7 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
     // hang until Discord gave up on it, so the two predicates have to agree on
     // what counts as ours.
     val ids = List(
-      RespawnButtonId.boardClaim, RespawnButtonId.boardConfig,
+      RespawnButtonId.boardClaim, RespawnButtonId.boardBook, RespawnButtonId.boardConfig,
       RespawnButtonId.claim(1L), RespawnButtonId.leave(1L), RespawnButtonId.next(1L),
       RespawnButtonId.release(1L), RespawnButtonId.spawnConfig(1L), RespawnButtonId.spawnSchedule(1L),
       acceptOffer, RespawnButtonId.keepSlot("1", 2L))

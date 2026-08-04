@@ -68,10 +68,13 @@ object RespawnThreads extends StrictLogging {
 
   /** The buttons on the pinned board post, which is what makes the whole system
    *  usable without touching a slash command: a spawn with no post yet can't
-   *  have a Claim button of its own, so the board carries one. */
+   *  have a Claim button of its own, so the board carries one. Book is here for
+   *  the same reason — booking a spawn nobody has claimed yet would otherwise
+   *  mean finding a post that does not exist. */
   def boardButtons: ActionRow =
     ActionRow.of(
       Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(claimEmoji),
+      Button.secondary(RespawnButtonId.boardBook, "Book").withEmoji(Emoji.fromUnicode("📅")),
       Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
     )
 
@@ -543,6 +546,9 @@ object RespawnButtonId {
    *  board per guild, and the guild comes from the interaction. */
   val boardClaim: String = s"${Prefix}board:claim"
   val boardConfig: String = s"${Prefix}board:config"
+  /** Book from the board rather than from a spawn's own post — the form asks
+   *  which spawn instead of knowing it. */
+  val boardBook: String = s"${Prefix}board:book"
 
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
@@ -593,6 +599,9 @@ object RespawnButtonId {
    *  card opened it. */
   def modalDuration(respawnId: Long): String = s"${ModalPrefix}duration:$respawnId"
   def modalSchedule(respawnId: Long): String = s"${ModalPrefix}schedule:$respawnId"
+  /** The board's booking form. Carries no spawn id — which spawn is a field in
+   *  the form itself, so it cannot be known when the modal is built. */
+  val modalBoardSchedule: String = s"${ModalPrefix}boardschedule"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
 
   /** Guild-wide settings, split across two modals because Discord caps a modal at
@@ -644,8 +653,8 @@ object RespawnButtonId {
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
-    Set("claim", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule", "booknew",
-        "givestamina")
+    Set("claim", "book", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule",
+        "booknew", "givestamina")
 
   /** Whether this press has to answer with a modal, and so cannot be
    *  acknowledged up front — `replyModal` must be an interaction's first
