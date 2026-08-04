@@ -9,7 +9,7 @@ import java.time.ZonedDateTime
  *  guild's own database any more than the seat it's waiting on is). One row
  *  per (guildId, world) setup currently running without an active
  *  subscription behind it; see [[com.tibiabot.domain.PatreonGrace]] and
- *  [[com.tibiabot.paywall.PaywallService.applyRefresh]]. */
+ *  `PaywallService.applyRefresh`. */
 trait PatreonGraceRepository {
   /** Start the clock for this setup, if it isn't already running — an
    *  existing row is left exactly as it is, `started` and `notified`

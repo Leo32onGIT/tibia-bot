@@ -12,7 +12,7 @@ import scala.concurrent.duration.FiniteDuration
  *  this holds cross-world killers and anyone who logged in since that table
  *  was last rebuilt.
  *
- *  Failed lookups are cached too, as [[NoLevel]]. Without that, a killer the
+ *  Failed lookups are cached too, as `NoLevel`. Without that, a killer the
  *  API has no answer for (deleted character, transfer in progress, a summon
  *  name that got past the parser) is re-fetched on every death they appear in
  *  — and `getKillerFallback` deliberately bypasses the Date-header character

@@ -38,7 +38,7 @@ object AdaptiveRefreshInterval {
    *
    *  Asymmetric on purpose: a slower tier is adopted the moment the depth calls
    *  for it (the lane is congested, back off now), while a faster one is only
-   *  adopted once the depth is [[ReleaseMargin]] clear of that tier's ceiling.
+   *  adopted once the depth is `ReleaseMargin` clear of that tier's ceiling.
    *  Pass 0 (or any value at least as fast as every tier) to opt out — the
    *  natural tier is then returned, which is what the first call wants. */
   def intervalSeconds(queueDepth: Int, currentSeconds: Int): Int = {

@@ -724,7 +724,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  rules can resolve, and silently letting the second win would take a slot from
    *  somebody who had it first — so a clash is never simply allowed. What it does
    *  instead depends on the clash: a one-off over a single booked slot nobody has
-   *  asked about becomes a question for that slot's owner (see [[askForClash]]),
+   *  asked about becomes a question for that slot's owner (see `askForClash`),
    *  and anything else is still refused outright. */
   def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
                   characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
@@ -1485,7 +1485,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Validation lives here rather than in the modal handler so the bounds are
    *  the same wherever the preference is set from. A duration longer than the
    *  guild's maximum would be refused at claim time anyway, and a reminder lead
-   *  beyond [[RespawnUserPrefs.MaxWarnMinutes]] would fire the instant a claim
+   *  beyond `RespawnUserPrefs.MaxWarnMinutes` would fire the instant a claim
    *  started. */
   def saveUserPrefs(guildId: String, userId: String, defaultDuration: Option[Int],
                     warnMinutes: Option[Int]): Either[String, RespawnUserPrefs] =

@@ -9,7 +9,7 @@ import scala.collection.mutable
  *  by OnlineTrackerSpec.
  *
  *  Thread-safe. The world stream writes it (from the poll response), while the
- *  online-list refresh reads [[snapshot]] on its own schedule from a different
+ *  online-list refresh reads `snapshot` on its own schedule from a different
  *  thread — an unsynchronised mutable map can return a corrupt view, or throw,
  *  when read during a structural update.
  */

@@ -20,7 +20,7 @@ object ServerSaveSchedule {
    *  measured against: a stamina row stamped with an older boundary than this
    *  is stale and resets to a full tank on next read.
    *
-   *  Resolved in [[Clock.Berlin]], so the boundary follows the game's clock
+   *  Resolved in `Clock.Berlin`, so the boundary follows the game's clock
    *  through daylight-saving changes rather than drifting an hour twice a year.
    *  Between midnight and 10:00 the current day's save hasn't happened yet, so
    *  the boundary is still yesterday's. */

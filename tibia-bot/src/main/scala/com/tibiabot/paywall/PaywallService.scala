@@ -31,7 +31,7 @@ import scala.jdk.CollectionConverters._
  *  `PatreonGraceRepository` so it survives restarts, and keeps running
  *  untouched until that runs out. Resolving the subscription at any point
  *  before the deadline stops the clock and nothing ever happens. See
- *  [[applyRefresh]] — that one rule covers both cases, so an orphaned setup
+ *  `applyRefresh` — that one rule covers both cases, so an orphaned setup
  *  and a cancelled one are on identical footing. */
 final class PaywallService(
   discordGateway: DiscordGateway,
@@ -52,7 +52,7 @@ final class PaywallService(
    *  off. That default also covers the window between startup and the first
    *  [[refreshAll]] sweep; an expired grace timer is durable, so that sweep
    *  puts an already-paused world straight back to inactive (quietly — see
-   *  [[applyRefresh]]'s `notified` handling). */
+   *  `applyRefresh`'s `notified` handling). */
   def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
 
   /** The subscription check — the `/setup` command gate calls this directly;
@@ -79,7 +79,7 @@ final class PaywallService(
    *  declined pledge, or a failed database read all read as "not
    *  subscribed", never as an error to propagate. That answer no longer cuts
    *  anyone off on its own — it starts the grace period (see
-   *  [[applyRefresh]]), so a bad sync or a database blip costs days of
+   *  `applyRefresh`), so a bad sync or a database blip costs days of
    *  headroom rather than anyone's tracking. */
   def callerIsSubscribed(userId: String): Boolean =
     if (userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
@@ -162,7 +162,7 @@ final class PaywallService(
    *  system existed — `/setup` needs to tell those apart from a seated world
    *  to offer claiming a legacy one onto a seat, while it still can (a legacy
    *  world keeps running until its grace period runs out — see
-   *  [[applyRefresh]]). */
+   *  `applyRefresh`). */
   def hasSeat(guildId: String, world: String): Boolean =
     patreonSeatRepository.seatFor(guildId, world).isDefined
 
@@ -306,7 +306,7 @@ final class PaywallService(
    *  `setups`, supplied by the caller, since the seat table only knows about
    *  the ones that have a seat and the whole point is to also catch the ones
    *  that don't. Fires `onLapsed` once per pair whose grace period has just
-   *  run out, never twice for the same lapse (see [[applyRefresh]]) — with
+   *  run out, never twice for the same lapse (see `applyRefresh`) — with
    *  the seat owner's id and username snapshot for the notice, both empty
    *  when the world never had a seat at all and there's nobody to address. */
   def refreshAll(setups: List[(String, String)])(onLapsed: (Guild, String, String, String) => Unit): Unit = {

@@ -27,7 +27,7 @@ object RetryDecision {
  *    so spending two more requests on it is exactly wrong: it consumes more
  *    quota and can extend the penalty window. The natural retry is the next
  *    poll cycle, a minute away, which is the right timescale to back off on.
- *  - '''A `Retry-After` longer than [[maxHonouredRetryAfter]] means give up
+ *  - '''A `Retry-After` longer than `maxHonouredRetryAfter` means give up
  *    now,''' rather than holding the request open for it. These run inside the
  *    poll's bounded concurrency, so sleeping for a server-suggested 30s would
  *    stall the stream far worse than simply missing this character until the

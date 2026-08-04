@@ -35,7 +35,7 @@ final case class DeleteOnlineListMessages(messageIds: List[String]) extends Onli
  *  [[recordMessageId]]), so [[plan]]'s decide-and-commit must be atomic.
  *
  *  @param normalise applied to both sides of the "did this message change?"
- *                   comparison — see [[OnlineListEmbeds.withoutDurations]].
+ *                   comparison — see `OnlineListEmbeds.withoutDurations`.
  */
 final class OnlineListState(normalise: String => String = OnlineListEmbeds.withoutDurations) {
 

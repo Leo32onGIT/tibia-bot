@@ -193,7 +193,7 @@ object RespawnModals extends StrictLogging {
    *  and how much hunting a member gets in a day.
    *
    *  Split from the timers below because a modal takes five inputs
-   *  ([[Modal.MAX_COMPONENTS]]) and there are six settings. The split is by what
+   *  (`Modal.MAX_COMPONENTS`) and there are six settings. The split is by what
    *  a setting *is* rather than by what fits: these four are the rules of who may
    *  claim what, and the two below are how long the bot waits before acting. */
   def claimRulesModal(guildId: String): Modal = {
@@ -260,7 +260,7 @@ object RespawnModals extends StrictLogging {
    *  fragment all work.
    *
    *  This is five components, which is Discord's per-modal maximum
-   *  ([[Modal.MAX_COMPONENTS]]). Anything booking gains later has to split
+   *  (`Modal.MAX_COMPONENTS`). Anything booking gains later has to split
    *  across two modals the way the server settings already do. */
   def boardScheduleModal(guildId: String): Modal = {
     val whichSpawn = label("Which respawn?", "Enter its respawn code",

@@ -19,7 +19,7 @@ final case class LogEvent(at: Instant, level: String, logger: String, message: S
  *  within each buffer: recording never removes anything except to stay under
  *  `capacity`, and reading never removes anything at all.
  *
- *  Each buffer holds one entry per distinct *shape* (see [[normalize]]) per
+ *  Each buffer holds one entry per distinct *shape* (see `normalize`) per
  *  logger. A repeat bumps that entry's count and refreshes its message and
  *  timestamp, wherever it already sits, and moves it to the most-recent end —
  *  so a bursty repeating warning can't flood the buffer and push out

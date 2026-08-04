@@ -44,7 +44,7 @@ object Respawn {
  *  can show who hunted a spawn before.
  *
  *  `kind` exists so the not-yet-built scheduled-claim feature can add rows of a
- *  different kind without a migration; today every row is [[KindAdHoc]].
+ *  different kind without a migration; today every row is `KindAdHoc`.
  */
 final case class RespawnClaim(
   id: Long,

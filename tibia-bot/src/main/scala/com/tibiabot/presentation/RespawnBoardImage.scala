@@ -24,7 +24,7 @@ import scala.util.Try
  *
  *  Java2D, so there is no new dependency and nothing to install in the image.
  *  The names are set in a bundled font rather than the base image's (see
- *  [[nameFont]]); everything else uses the JDK's own sans. Either way no width is
+ *  `nameFont`); everything else uses the JDK's own sans. Either way no width is
  *  assumed — they are all measured, so a longer name or an added spawn grows the
  *  image instead of running off it.
  */

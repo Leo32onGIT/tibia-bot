@@ -113,7 +113,7 @@ trait RespawnRepository {
   /** Active claims still running that haven't had their reminder yet.
    *
    *  Returns the whole set rather than filtering by a lead time in SQL, because
-   *  the lead time is now per member (see [[RespawnUserPrefs]]) — there is no
+   *  the lead time is now per member (see `RespawnUserPrefs`) — there is no
    *  single window to query by. The set is bounded by how many spawns are held
    *  at once, so filtering the rest in Scala is cheap. */
   def unwarnedActiveClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]

@@ -9,7 +9,7 @@ import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of RespawnRepository against a guild's own database.
  *
- *  Every entry point calls [[ensureTables]] first. `SchemaInitializer.initGuild`
+ *  Every entry point calls `ensureTables` first. `SchemaInitializer.initGuild`
  *  only creates tables when it creates the database, so guilds that existed
  *  before this feature would otherwise never get them — the same
  *  create-on-read approach `JdbcGalthenRepository` uses for `satchel`.
