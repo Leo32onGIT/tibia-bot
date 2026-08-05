@@ -132,10 +132,12 @@ object BotApp extends App with StrictLogging {
   private val worldTransferRepository: persistence.WorldTransferRepository =
     new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
 
-  /** How long an announced world transfer is remembered. Only has to outlast the
-   *  ~month Tibia shows a former world for — past that the field has cleared and
-   *  the record has nothing left to suppress — so this is margin, not a deadline. */
-  private val TransferRecordRetentionDays = 90L
+  /** How long an announced world transfer is remembered. Must outlast the ~180
+   *  days Tibia shows a former world for: prune inside that window and the field
+   *  is still there to be detected all over again, so the transfer gets announced
+   *  a second time. Past 180 days the field has cleared and the record has nothing
+   *  left to suppress, making everything beyond that pure margin. */
+  private val TransferRecordRetentionDays = 365L
   private val huntedAlliedRepository: persistence.HuntedAlliedRepository =
     new persistence.jdbc.JdbcHuntedAlliedRepository(connectionProvider)
   private val customSortRepository: persistence.CustomSortRepository =

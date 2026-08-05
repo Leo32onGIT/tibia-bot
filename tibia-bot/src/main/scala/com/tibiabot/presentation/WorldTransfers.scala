@@ -5,10 +5,13 @@ import com.tibiabot.domain.Killers
 /** Deciding when a tracked character's former-world entry is an incoming transfer
  *  worth announcing.
  *
- *  Tibia clears the former-world field about a month after a transfer, so the
+ *  Tibia clears the former-world field about 180 days after a transfer, so the
  *  field carries its own recency and no before/after baseline is needed: if it is
- *  set, they moved recently. What it does not carry is whether we have already
- *  said so, which is what the per-guild `world_transfers` record is for. */
+ *  set, they moved within the last six months. What it does not carry is *when* in
+ *  that window, so the first sighting of a character cannot tell yesterday's move
+ *  from one five months old — only that a later change to the list is a new move.
+ *  Nor does it carry whether we have already said so, which is what the per-guild
+ *  `world_transfers` record is for. */
 object WorldTransfers {
 
   /** The worlds a character on `streamWorld` has recently come from.

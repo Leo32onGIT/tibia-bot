@@ -14,8 +14,9 @@ trait WorldTransferRepository {
   /** Record a transfer as posted (ON CONFLICT(name) DO UPDATE), so a later
    *  transfer by the same character replaces it rather than adding a row. */
   def record(guildId: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit
-  /** Drop records older than `before`. Safe well past the point where Tibia stops
-   *  showing a former world (~a month): once the field has cleared, the same
-   *  transfer cannot be detected again, so the record has nothing left to suppress. */
+  /** Drop records older than `before`. Only safe well past the point where Tibia
+   *  stops showing a former world (~180 days): until then the field is still there
+   *  to be detected, and a record dropped early lets the same transfer be announced
+   *  a second time. After it, the record has nothing left to suppress. */
   def removeExpired(guildId: String, before: ZonedDateTime): Unit
 }
