@@ -233,14 +233,14 @@ class TibiaBot(
         val guildName = char.character.character.guild.map(_.name).getOrElse("")
 
         val formerNamesList: List[String] = char.character.character.former_names.map(_.toList).getOrElse(Nil)
+        val formerWorldsList: List[String] = char.character.character.former_worlds.map(_.toList).getOrElse(Nil)
 
         // Refresh the shared hunted/allied lookup cache at most once per 6 minutes
         // per world (gated per-world, not per-character).
         val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
         if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
           val cacheWorld = char.character.character.world
-          val cacheFormerWorlds: List[String] = char.character.character.former_worlds.map(_.toList).getOrElse(Nil)
-          BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, cacheWorld, cacheFormerWorlds, guildName, char.character.character.level.toInt.toString, char.character.character.vocation, char.character.character.last_login.getOrElse(""), ZonedDateTime.now())
+          BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, cacheWorld, formerWorldsList, guildName, char.character.character.level.toInt.toString, char.character.character.vocation, char.character.character.last_login.getOrElse(""), ZonedDateTime.now())
           cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
         }
 
@@ -276,6 +276,28 @@ class TibiaBot(
               val adminChannel = discords.adminChannel
               val charVocation = vocEmoji(char.character.character.vocation)
               val charLevel = char.character.character.level.toInt
+
+              // Incoming world transfer. Independent of the guild join/leave logic
+              // below, and posted first so a character who transferred in and joined
+              // a tracked guild in the same poll reads in the order it happened.
+              if (huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck) {
+                val postedTransfer = BotApp.worldTransfersData.getOrElse(guildId, List())
+                  .find(_.name.equalsIgnoreCase(charName)).map(_.formerWorlds)
+                presentation.WorldTransfers.unreported(
+                  char.character.character.world, world, formerWorldsList, postedTransfer
+                ).foreach { arrivedFrom =>
+                  if (activityTextChannel != null) {
+                    if (activityTextChannel.canTalk() || (!Config.prod)) {
+                      val activityEmbed = new EmbedBuilder()
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** transferred in from **${presentation.WorldTransfers.sourceText(arrivedFrom)}**.")
+                      activityEmbed.setColor(presentation.GuildActivity.activityColor(huntedGuildCheck || huntedPlayerCheck, allyGuildCheck || allyPlayerCheck))
+                      activityEmbed.setThumbnail(Config.worldTransferThumbnail)
+                      sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
+                    }
+                  }
+                  BotApp.recordWorldTransfer(guildId, charName, arrivedFrom, ZonedDateTime.now())
+                }
+              }
 
               var skipJoinLeave = false
 

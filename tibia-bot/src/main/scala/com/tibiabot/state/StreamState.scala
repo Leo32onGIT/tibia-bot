@@ -1,6 +1,6 @@
 package com.tibiabot.state
 
-import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, Worlds}
+import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, Worlds, WorldTransfer}
 
 import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
@@ -36,9 +36,11 @@ final class StreamState {
   @volatile private var _discords: Map[String, List[Discords]] = Map.empty
   @volatile private var _worlds: Map[String, List[Worlds]] = Map.empty
   @volatile private var _activityBlocker: Map[String, Boolean] = Map.empty
+  @volatile private var _worldTransfers: Map[String, List[WorldTransfer]] = Map.empty
   private val _characterCache = new ConcurrentHashMap[String, ZonedDateTime]()
 
   def activityData: Map[String, List[PlayerCache]] = _activity
+  def worldTransfersData: Map[String, List[WorldTransfer]] = _worldTransfers
   def huntedPlayersData: Map[String, List[Players]] = _huntedPlayers
   def alliedPlayersData: Map[String, List[Players]] = _alliedPlayers
   def huntedGuildsData: Map[String, List[Guilds]] = _huntedGuilds
@@ -69,6 +71,8 @@ final class StreamState {
 
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     lock.synchronized { _activity = f(_activity) }
+  def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
+    lock.synchronized { _worldTransfers = f(_worldTransfers) }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
     lock.synchronized { _huntedPlayers = f(_huntedPlayers) }
   def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =

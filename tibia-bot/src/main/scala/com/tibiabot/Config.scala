@@ -60,6 +60,7 @@ object Config {
   val guildJoinGrey: String = discord.getString("guild-join-thumbnail-grey")
   val guildJoinRed: String = discord.getString("guild-join-thumbnail-red")
   val guildJoinGreen: String = discord.getString("guild-join-thumbnail-green")
+  val worldTransferThumbnail: String = discord.getString("world-transfer-thumbnail")
 
   // Emojis
  val nemesisEmoji: String = discord.getString("nemesis-emoji")

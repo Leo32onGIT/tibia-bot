@@ -36,6 +36,7 @@ object BotApp extends App with StrictLogging {
   type Guilds = domain.Guilds; val Guilds = domain.Guilds
   type BoostedCache = domain.BoostedCache; val BoostedCache = domain.BoostedCache
   type PlayerCache = domain.PlayerCache; val PlayerCache = domain.PlayerCache
+  type WorldTransfer = domain.WorldTransfer; val WorldTransfer = domain.WorldTransfer
   type DeathsCache = domain.DeathsCache; val DeathsCache = domain.DeathsCache
   type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
   type ListCache = domain.ListCache; val ListCache = domain.ListCache
@@ -128,6 +129,13 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcCacheRepository(connectionProvider)
   private val activityRepository: persistence.ActivityRepository =
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
+  private val worldTransferRepository: persistence.WorldTransferRepository =
+    new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+
+  /** How long an announced world transfer is remembered. Only has to outlast the
+   *  ~month Tibia shows a former world for — past that the field has cleared and
+   *  the record has nothing left to suppress — so this is margin, not a deadline. */
+  private val TransferRecordRetentionDays = 90L
   private val huntedAlliedRepository: persistence.HuntedAlliedRepository =
     new persistence.jdbc.JdbcHuntedAlliedRepository(connectionProvider)
   private val customSortRepository: persistence.CustomSortRepository =
@@ -299,6 +307,7 @@ object BotApp extends App with StrictLogging {
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.
   def activityData: Map[String, List[PlayerCache]] = streamState.activityData
+  def worldTransfersData: Map[String, List[WorldTransfer]] = streamState.worldTransfersData
   def huntedPlayersData: Map[String, List[Players]] = streamState.huntedPlayersData
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
   def huntedGuildsData: Map[String, List[Guilds]] = streamState.huntedGuildsData
@@ -311,6 +320,17 @@ object BotApp extends App with StrictLogging {
   def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit = streamState.warmCharacterCache(loaded)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
+  def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
+    streamState.modifyWorldTransfersData(f)
+
+  /** Record an incoming world transfer as announced for `guildId`, in cache and db. */
+  def recordWorldTransfer(guildId: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
+    val transfer = WorldTransfer(name.toLowerCase, formerWorlds, detectedAt)
+    streamState.modifyWorldTransfersData { m =>
+      m + (guildId -> (transfer :: m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(name))))
+    }
+    worldTransferRepository.record(guildId, name, formerWorlds, detectedAt)
+  }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
     streamState.modifyHuntedPlayersData(f)
   def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
@@ -961,6 +981,14 @@ object BotApp extends App with StrictLogging {
     val activityInfo = activityConfig(g)
     modifyActivityData(_ + (guildId -> activityInfo))
 
+    // Announced world transfers, minus anything old enough that the former-world
+    // field it suppresses has long since cleared. Read before the prune: the read
+    // is what creates the table on a guild that has never had one.
+    val transferCutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
+    val transferInfo = worldTransferConfig(g).filter(_.detectedAt.isAfter(transferCutoff))
+    modifyWorldTransfersData(_ + (guildId -> transferInfo))
+    worldTransferRepository.removeExpired(guildId, transferCutoff)
+
     val customSortInfo = customSortConfig(g)
     modifyCustomSortData(_ + (guildId -> customSortInfo))
 
@@ -1127,6 +1155,9 @@ object BotApp extends App with StrictLogging {
 
   private def activityConfig(guild: Guild): List[PlayerCache] =
     activityRepository.getActivity(guild.getId)
+
+  private def worldTransferConfig(guild: Guild): List[WorldTransfer] =
+    worldTransferRepository.getTransfers(guild.getId)
 
   def discordRetrieveConfig(guild: Guild): Map[String, String] =
     discordConfigRepository.getConfig(guild.getId)
