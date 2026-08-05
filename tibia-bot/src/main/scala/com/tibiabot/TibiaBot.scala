@@ -278,76 +278,60 @@ class TibiaBot(
               val charLevel = char.character.character.level.toInt
 
               var skipJoinLeave = false
-              var buggedName = false
 
-              var nameChangeCheck = false
-              formerNamesList.foreach { formerName =>
-                if (charName != "") {
-                  // Some characters have their current name duplicated in former_names
-                  // (cause unclear, possibly a namelock) — treat that as not a real rename.
-                  if (charName.equalsIgnoreCase(formerName)) {
-                    buggedName = true
-                  }
-                  if (activityData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(formerName))) {
-                    nameChangeCheck = true
-                  }
-                }
-              }
+              val rename = presentation.GuildActivity.renameFromFormerNames(
+                activityData.getOrElse(guildId, List()),
+                charName,
+                formerNamesList,
+                formerName => onlineTracker.find(formerName).isDefined
+              )
 
-              if (nameChangeCheck && !buggedName) {
-                var oldName = ""
-                var timeDelay: Option[ZonedDateTime] = None
+              rename.foreach { renamed =>
+                val oldName = renamed.oldName
                 val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
-                val updatedActivityData = activityData.getOrElse(guildId, List()).map { activity =>
-                  val updatedActivity = if (formerNamesList.exists(_.equalsIgnoreCase(activity.name))) {
-                    oldName = activity.name
-                    timeDelay = Some(activity.updatedTime)
-                    activity.copy(name = charName, formerNames = formerNamesList, updatedTime = ZonedDateTime.now())
-                  } else {
-                    activity
-                  }
-                  updatedActivity
+                val renamedAt = ZonedDateTime.now()
+                // Update name in cache and db. The recorded guild is carried across as
+                // it stands rather than being caught up to the character's current one:
+                // a rename and a guild swap in the same poll are two events, and the
+                // swap is posted by the guild-change branch on the next poll. Storing
+                // the current guild here would agree with nothing in memory and would
+                // swallow the swap outright if the bot restarted before that poll.
+                BotApp.modifyActivityData { m =>
+                  m + (guildId -> presentation.GuildActivity.applyRename(m.getOrElse(guildId, List()), oldName, charName, formerNamesList, renamedAt))
                 }
-                if (oldName != ""){
-                  // update name in cache and db
-                  BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
-                  BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, guildName, ZonedDateTime.now(), charName)
-                  skipJoinLeave = true
-                  if (timeDelay.isDefined) {
-                    val delayEndTime = timeDelay.map(_.plusMinutes(6))
-                    if (delayEndTime.exists(_.isBefore(ZonedDateTime.now()))) {
-                      // if player is in hunted or allied 'players' list, update information there too
-                      if (huntedPlayerCheck) {
-                        BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
-                        val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                          if (player.name.equalsIgnoreCase(oldName)) {
-                            player.copy(name = charName.toLowerCase)
-                          } else {
-                            player
-                          }
-                        }
-                        BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
+                BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, renamed.guild, renamedAt, charName)
+                skipJoinLeave = true
+                if (renamed.previousUpdate.plusMinutes(6).isBefore(ZonedDateTime.now())) {
+                  // if player is in hunted or allied 'players' list, update information there too
+                  if (huntedPlayerCheck) {
+                    BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
+                    val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
+                      if (player.name.equalsIgnoreCase(oldName)) {
+                        player.copy(name = charName.toLowerCase)
+                      } else {
+                        player
                       }
-                      if (allyPlayerCheck) {
-                        BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
-                        val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                          if (player.name.equalsIgnoreCase(oldName)) {
-                            player.copy(name = charName.toLowerCase)
-                          } else {
-                            player
-                          }
-                        }
-                        BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
+                    }
+                    BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
+                  }
+                  if (allyPlayerCheck) {
+                    BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
+                    val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
+                      if (player.name.equalsIgnoreCase(oldName)) {
+                        player.copy(name = charName.toLowerCase)
+                      } else {
+                        player
                       }
-                      if (activityTextChannel != null) {
-                        if (activityTextChannel.canTalk() || (!Config.prod)) {
-                          val activityEmbed = new EmbedBuilder()
-                          activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
-                          activityEmbed.setColor(playerType)
-                          activityEmbed.setThumbnail(Config.nameChangeThumbnail)
-                          sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
-                        }
-                      }
+                    }
+                    BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
+                  }
+                  if (activityTextChannel != null) {
+                    if (activityTextChannel.canTalk() || (!Config.prod)) {
+                      val activityEmbed = new EmbedBuilder()
+                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                      activityEmbed.setColor(playerType)
+                      activityEmbed.setThumbnail(Config.nameChangeThumbnail)
+                      sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                     }
                   }
                 }
@@ -514,22 +498,27 @@ class TibiaBot(
                         }
                       }
 
-                      val updatedActivityData = matchingActivityOption.map { activity =>
-                        val updatedActivity = activity.copy(guild = guildName, updatedTime = ZonedDateTime.now())
-                        activityData.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName)) :+ updatedActivity
-                      }.getOrElse(activityData.getOrElse(guildId, List()))
-
-                      // Update in cache and db
-                      BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
-                      BotApp.huntedAlliedService.updateActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now(), charName)
+                      // Update in cache and db. Re-read the list inside the lock: a
+                      // discord's activity list is shared by every world it tracks, and
+                      // those streams poll concurrently — writing back a list built from
+                      // an earlier read drops the other world's additions, and a player
+                      // dropped from the list is posted as joining all over again.
+                      val stamped = ZonedDateTime.now()
+                      BotApp.modifyActivityData { m =>
+                        val live = m.getOrElse(guildId, List())
+                        val updated = live.find(_.name.equalsIgnoreCase(charName)).map(_.copy(guild = guildName, updatedTime = stamped))
+                        m + (guildId -> (live.filterNot(_.name.equalsIgnoreCase(charName)) ++ updated))
+                      }
+                      BotApp.huntedAlliedService.updateActivityToDatabase(guild, charName, formerNamesList, guildName, stamped, charName)
                     }
                   }
                 } else if (joinGuild) { // Character doesn't exist in tracking_activity but should be
                   // add to cache and db
                   val newActivity = BotApp.PlayerCache(charName, formerNamesList, guildName, ZonedDateTime.now())
-                  val updatedActivityData = newActivity :: activityData.getOrElse(guildId, List())
-                  BotApp.modifyActivityData(m => m + (guildId -> updatedActivityData))
-                  BotApp.huntedAlliedService.addActivityToDatabase(guild, charName, formerNamesList, guildName, ZonedDateTime.now())
+                  BotApp.modifyActivityData { m =>
+                    m + (guildId -> (newActivity :: m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName))))
+                  }
+                  BotApp.huntedAlliedService.addActivityToDatabase(guild, charName, formerNamesList, guildName, newActivity.updatedTime)
                   // joined a hunted guild
                   if (huntedGuildCheck) {
                     if (huntedPlayerCheck) { // was he originally in hunted 'player' list?
