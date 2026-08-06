@@ -30,6 +30,9 @@ object AdminCommands {
       case "dreamscar" =>
         val embed = BotApp.adminService.resyncDreamCourtBosses()
         event.getHook.sendMessageEmbeds(embed).queue()
+      case "boosted" =>
+        BotApp.adminService.refreshBoostedMessages(embed =>
+          event.getHook.sendMessageEmbeds(embed).queue())
       case "message" =>
         val embed = BotApp.adminService.message(guildOption, messageOption)
         event.getHook.sendMessageEmbeds(embed).queue()

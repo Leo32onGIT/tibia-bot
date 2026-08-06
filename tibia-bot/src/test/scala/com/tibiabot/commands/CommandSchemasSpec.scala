@@ -29,6 +29,11 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
       ("guild", "player", "list", "clear", "info", "autodetect", "levels", "deaths")
   }
 
+  test("admin exposes the expected subcommands") {
+    CommandSchemas.adminCommand.getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
+      List("leave", "info", "dreamscar", "boosted", "worldlist", "message")
+  }
+
   test("initialCommands is the minimal set visible before any world is configured") {
     CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
       List("setup", "help", "galthen", "boosted", "patreon")

@@ -245,7 +245,8 @@ object BotApp extends App with StrictLogging {
     discordGateway,
     botUser,
     discordRetrieveConfig _,
-    () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap }
+    () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap },
+    () => refreshBoostedMessages()
   )
 
   // Monitoring dashboard: Discord-OAuth-gated /status endpoint + static shell,
@@ -752,68 +753,7 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              discordGateway.guilds.foreach { guild =>
-                if (checkConfigDatabase(guild)) {
-                  val discordInfo = discordRetrieveConfig(guild)
-                  val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-                  val lastWorld = if (discordInfo.nonEmpty) discordInfo("last_world") else "Antica"
-                  if (channelId != "0") {
-                    val boostedChannel = guild.getTextChannelById(channelId)
-                    if (boostedChannel != null) {
-                      if (boostedChannel.canTalk()) {
-                        val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                        if (boostedMessage != "0") {
-                          try {
-                            boostedChannel.deleteMessageById(boostedMessage).queue()
-                          } catch {
-                            case ex: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", ex)
-                          }
-                        }
-
-                        val dreamScarDaily =
-                          dreamScar
-                            .get(lastWorld)
-                            .orElse(dreamScar.get("Unknown"))
-                            .getOrElse("Unknown")
-
-                        val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
-                        val rashidEmbed = new EmbedBuilder()
-                        rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
-                        rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                        rashidEmbed.setColor(BrandColor)
-
-                        val now = Instant.now()
-                        val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
-                        val dromeEmbed = new EmbedBuilder()
-                          .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                          .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                          .setColor(BrandColor)
-
-                        val dreamScarEmbed = new EmbedBuilder()
-                        dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
-                        dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
-                        dreamScarEmbed.setColor(BrandColor)
-
-                        val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
-                        val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ embedsList
-
-                        boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-                          .setComponents(ActionRow.of(
-                            Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          ))
-                          .queue((message: Message) => {
-                            //updateBoostedMessage(guild.getId, message.getId)
-                            discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
-                          }, (e: Throwable) => {
-                            logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                          })
-                      } else {
-                        logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
-                      }
-                    }
-                  }
-                }
-              }
+              repostBoostedMessages(embeds)
             }
           }
         }
@@ -823,6 +763,97 @@ object BotApp extends App with StrictLogging {
       }
     }
   })
+
+  /** Replace every guild's boosted message: delete the one currently posted in
+   *  its boosted channel and send a fresh one carrying `boostedEmbeds` (the
+   *  boosted boss and creature) plus Rashid, that guild's own Dream Courts
+   *  boss, and the Drome cycle when it's due. Returns how many guilds a send
+   *  was dispatched for — the send itself is queued, so a guild counted here
+   *  can still fail asynchronously (logged per guild).
+   *
+   *  Shared by the server-save refresh above and `/admin boosted`. */
+  private def repostBoostedMessages(boostedEmbeds: List[MessageEmbed]): Int = {
+    var posted = 0
+    discordGateway.guilds.foreach { guild =>
+      if (checkConfigDatabase(guild)) {
+        val discordInfo = discordRetrieveConfig(guild)
+        val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+        val lastWorld = if (discordInfo.nonEmpty) discordInfo("last_world") else "Antica"
+        if (channelId != "0") {
+          val boostedChannel = guild.getTextChannelById(channelId)
+          if (boostedChannel != null) {
+            if (boostedChannel.canTalk()) {
+              val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+              if (boostedMessage != "0") {
+                try {
+                  boostedChannel.deleteMessageById(boostedMessage).queue()
+                } catch {
+                  case ex: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", ex)
+                }
+              }
+
+              val dreamScarDaily =
+                dreamScar
+                  .get(lastWorld)
+                  .orElse(dreamScar.get("Unknown"))
+                  .getOrElse("Unknown")
+
+              val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
+              val rashidEmbed = new EmbedBuilder()
+              rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+              rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+              rashidEmbed.setColor(BrandColor)
+
+              val now = Instant.now()
+              val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
+              val dromeEmbed = new EmbedBuilder()
+                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
+                .setColor(BrandColor)
+
+              val dreamScarEmbed = new EmbedBuilder()
+              dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+              dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
+              dreamScarEmbed.setColor(BrandColor)
+
+              val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
+              val addRashidDreamScarEmbeds: List[MessageEmbed] = boostedEmbeds ++ embedsList
+
+              posted += 1
+              boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+                .setComponents(ActionRow.of(
+                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                ))
+                .queue((message: Message) => {
+                  //updateBoostedMessage(guild.getId, message.getId)
+                  discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
+                }, (e: Throwable) => {
+                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                })
+            } else {
+              logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+            }
+          }
+        }
+      }
+    }
+    posted
+  }
+
+  /** `/admin boosted`: rebuild and repost every guild's boosted message right
+   *  now, off the server-save cycle — for when a save was missed, or a batch
+   *  of messages went out wrong and needs redoing without waiting a day.
+   *
+   *  Reads the boosted boss/creature straight from TibiaData (BoostedService's
+   *  embeds carry their own fallback if that call fails) and deliberately
+   *  leaves the boosted cache and its changed-flags untouched: this is a
+   *  repost of what's true now, not a second server save, so it must neither
+   *  suppress the real one nor fire the subscriber DMs again. */
+  def refreshBoostedMessages(): Future[Int] =
+    for {
+      bossEmbed <- boostedService.boostedBossEmbed()
+      creatureEmbed <- boostedService.boostedCreatureEmbed()
+    } yield repostBoostedMessages(List(bossEmbed, creatureEmbed))
 
   // Once a day: leave any guild that's tracked no worlds for a while and
   // hasn't run any command recently either — see pruneInactiveGuilds. Its

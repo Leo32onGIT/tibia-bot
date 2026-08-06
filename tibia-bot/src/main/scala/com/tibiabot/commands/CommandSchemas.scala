@@ -180,6 +180,7 @@ object CommandSchemas {
       ),
       new SubcommandData("info", "get discord info"),
       new SubcommandData("dreamscar", "resync dreamscar wiki info"),
+      new SubcommandData("boosted", "Repost the boosted boss/creature message in every discord"),
       new SubcommandData("worldlist", "get discord info"),
       new SubcommandData("message", "Send a message to a specific discord")
       .addOptions(

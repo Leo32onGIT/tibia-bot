@@ -7,17 +7,22 @@ import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
+
 
 /**
- * Bot-creator-only `/admin` operations. The actual dreamScar resync and guild
- * config lookup live in BotApp and are injected here as thunks/functions.
+ * Bot-creator-only `/admin` operations. The actual dreamScar resync, boosted
+ * repost and guild config lookup live in BotApp and are injected here as
+ * thunks/functions.
  */
 final class AdminService(
   discordGateway: DiscordGateway,
   botUserId: String,
   retrieveConfig: Guild => Map[String, String],
-  resyncDreamScar: () => Unit
-) extends StrictLogging {
+  resyncDreamScar: () => Unit,
+  refreshBoosted: () => Future[Int]
+)(implicit ec: ExecutionContext) extends StrictLogging {
 
   /** Post a "bot creator ran a command" notice to a guild's admin/command-log
    *  channel. No-op if the channel is missing, or if the bot lacks permission
@@ -62,6 +67,21 @@ final class AdminService(
     resyncDreamScar()
     com.tibiabot.presentation.Embeds.response(s":gear: The dreamcourts bosses for each world have been resynced.")
   }
+
+  /** Repost the boosted boss/creature message in every guild that has a
+   *  boosted channel, immediately, instead of waiting for the next server
+   *  save. Unlike the other subcommands this has to refetch from TibiaData
+   *  first, so the reply comes back through a callback the way `info` does. */
+  def refreshBoostedMessages(callback: MessageEmbed => Unit): Unit =
+    refreshBoosted().onComplete {
+      case Success(guilds) =>
+        callback(com.tibiabot.presentation.Embeds.response(
+          s":gear: The boosted message has been refreshed in **$guilds** discord${if (guilds == 1) "" else "s"}."))
+      case Failure(ex) =>
+        logger.warn("Failed to refresh the boosted messages", ex)
+        callback(com.tibiabot.presentation.Embeds.response(
+          s"${Config.noEmoji} The boosted messages failed to refresh."))
+    }
 
   /** Forward a message from the bot creator to a guild's admin channel. */
   def message(guildId: String, message: String): MessageEmbed = {
