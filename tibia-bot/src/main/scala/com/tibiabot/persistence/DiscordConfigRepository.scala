@@ -13,4 +13,11 @@ trait DiscordConfigRepository {
   /** Conditionally update individual fields (empty-string args are left unchanged). */
   def update(guildId: String, adminCategory: String, adminChannel: String, boostedChannel: String,
              boostedMessage: String, lastWorld: String): Unit
+
+  /** Remember the guild's "Violent Bot Moderator" role.
+   *
+   *  Its own method rather than another positional argument on `update`, which
+   *  already takes five interchangeable strings — a sixth would be one more thing
+   *  for every existing call site to pass "" to and get wrong. */
+  def setModeratorRole(guildId: String, roleId: String): Unit
 }

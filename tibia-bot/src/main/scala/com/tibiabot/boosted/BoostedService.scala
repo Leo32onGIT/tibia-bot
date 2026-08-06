@@ -21,10 +21,46 @@ final class BoostedService(
   boostedRepository: BoostedRepository,
   cacheRepository: CacheRepository,
   tibiaDataClient: TibiaApi,
-  boostedBosses: () => List[String]
+  boostedBosses: () => List[String],
+  botId: String
 )(implicit ex: ExecutionContextExecutor) {
 
-  def boostedAll(): List[BoostedStamp] = boostedRepository.all()
+  /** How many server saves in a row a DM may fail before this bot gives up on
+   *  the subscription. Deliberately not one: a bot only sees a failure for a
+   *  user it owns, but a user can close their DMs for a day, and a transient
+   *  Discord error must never cost someone the list they built. */
+  private val maxDeliveryFailures = 3
+
+  /** The subscriptions this bot should DM: the ones it owns, plus any still
+   *  unclaimed. Rows owned by another bot are that bot's to deliver — it is the
+   *  one sharing a guild with the user, and every bot trying every user means
+   *  duplicate DMs for anyone in reach of both. */
+  def boostedDmTargets(): List[BoostedStamp] =
+    boostedRepository.all().filter(entry => entry.botId == botId || entry.botId == "")
+
+  /** A DM reached this user: take ownership (claiming an unclaimed row, or
+   *  keeping one already ours) and clear the failure count. */
+  def dmDelivered(userId: String): Unit =
+    boostedRepository.claim(userId, botId)
+
+  /** A DM to this user failed. Returns true if that was the last straw and the
+   *  subscriptions this bot owns were dropped.
+   *
+   *  An unclaimed row failing means only that this isn't the bot that shares a
+   *  guild with them, so it counts for nothing — recordDeliveryFailure touches
+   *  rows this bot owns and no others, and returns 0 when it owns none. */
+  def dmFailed(userId: String): Boolean = {
+    val failures = boostedRepository.recordDeliveryFailure(userId, botId)
+    val giveUp = failures >= maxDeliveryFailures
+    if (giveUp) boostedRepository.unsubscribeAllFor(userId, botId)
+    giveUp
+  }
+
+  /** Running a `/boosted` command is proof this bot shares a guild with the
+   *  user, so it takes over their DMs — the same claim a delivered DM makes. */
+  private def claimForThisBot(userId: String): Unit =
+    try boostedRepository.claim(userId, botId)
+    catch { case _: Throwable => () } // routing only; never fail the command over it
 
   def boostedList(userId: String): Boolean =
     boostedRepository.forUser(userId).exists(bs => bs.user == userId && bs.boostedName.toLowerCase == "all")
@@ -35,11 +71,14 @@ final class BoostedService(
   private def creatureWikiUrl(creature: String): String =
     Urls.creatureWikiUrl(creature, Config.creatureUrlMappings)
 
+  // Both of these are scoped to this bot identity: the boosted cache lives in
+  // the shared bot_cache database, which several bots can point at, and its
+  // changed-flags are per-bot state (see JdbcCacheRepository.ensureBoostedSchema).
   def boostedMonsterUpdate(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit =
-    cacheRepository.updateBoosted(boss, creature, bossChanged, creatureChanged)
+    cacheRepository.updateBoosted(botId, boss, creature, bossChanged, creatureChanged)
 
   def boostedMessages(): List[BoostedCache] =
-    cacheRepository.getBoosted()
+    cacheRepository.getBoosted(botId)
 
   /** The "boosted boss today" embed (with a Podium fallback if the API fails).
    *  Shared by the channel-setup and server-save-notification paths. */
@@ -163,6 +202,7 @@ final class BoostedService(
             preparedStatement.setString(3, "all")
             preparedStatement.executeUpdate()
             preparedStatement.close()
+            claimForThisBot(userId)
             embedMessage = s"${Config.yesEmoji} you have enabled notifications for **all** bosses and creatures."
           } else {
             val isBoostedBoss = boostedBosses().exists(_.equalsIgnoreCase(sanitizedName))
@@ -186,6 +226,7 @@ final class BoostedService(
                 preparedStatement.setString(3, monsterType)
                 preparedStatement.executeUpdate()
                 preparedStatement.close()
+                claimForThisBot(userId)
 
                 val newNames = existingNames :+ BoostedStamp(userId, monsterType, sanitizedName)
                 val groupedAndSorted = renderBoostedEntries(newNames)
@@ -253,6 +294,7 @@ final class BoostedService(
         preparedStatement.setString(3, "all")
         preparedStatement.executeUpdate()
         preparedStatement.close()
+        claimForThisBot(userId)
         embedMessage = allBoostedMessage
       }
     } else if (boostedOption == "disable") {

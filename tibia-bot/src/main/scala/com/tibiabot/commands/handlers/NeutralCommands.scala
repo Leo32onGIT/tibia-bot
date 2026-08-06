@@ -84,6 +84,14 @@ object NeutralCommands {
             val embed = BotApp.worldSettingsService.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "levels")
             event.getHook.sendMessageEmbeds(embed).queue()
           }
+        case "activity" =>
+          if (toggleOption == "show") {
+            val embed = BotApp.worldSettingsService.deathsLevelsHideShow(event, worldOption, "show", "neutrals", "activity")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          } else if (toggleOption == "hide") {
+            val embed = BotApp.worldSettingsService.deathsLevelsHideShow(event, worldOption, "hide", "neutrals", "activity")
+            event.getHook.sendMessageEmbeds(embed).queue()
+          }
         case other =>
           val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/neutral`.").setColor(BrandColor).build()
           event.getHook.sendMessageEmbeds(embed).queue()

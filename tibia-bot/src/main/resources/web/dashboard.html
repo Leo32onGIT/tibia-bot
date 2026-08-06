@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Violent Bot - Dashboard</title>
-<link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
   :root {
@@ -20,6 +20,11 @@
     --warn: #e0a93e;
     --bad: #e0563e;
     --purple: #a78bfa;
+    /* Shared with the public landing page (violentbot.xyz). Identifiers and
+       numerics are set in mono there; matching it here is what makes the two
+       read as one product. */
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -27,9 +32,16 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--sans);
     font-size: 14px;
     display: flex;
+    /* Faint console grid, same 46px cell as the landing page. Only visible in
+       main's gutters — the sidebar and every panel paint their own background
+       over it. */
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+    background-size: 46px 46px;
   }
   .sidebar {
     width: 200px;
@@ -42,14 +54,22 @@
     position: sticky;
     top: 0;
   }
+  /* Brand mark, matching the landing page's header: avatar, then the name and
+     a muted path suffix on one mono line. */
   .sidebar-header {
-    padding: 18px 16px;
+    padding: 15px 16px;
     border-bottom: 1px solid var(--panel-border);
-    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 13px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--text-strong);
   }
-  .sidebar-header span { color: var(--muted); font-weight: 400; display: block; font-size: 11px; margin-top: 2px; }
+  .sidebar-header img { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
+  .sidebar-header .brand-suffix { color: var(--muted); font-weight: 400; margin-left: 5px; }
   .world-list { flex: 1; overflow-y: auto; padding: 8px 0; }
   .world-item {
     display: flex; align-items: center; gap: 10px;
@@ -60,8 +80,18 @@
   }
   .world-item i { font-size: 16px; }
   .be-icon { width: 16px; height: 16px; flex-shrink: 0; }
-  .world-item .name { flex: 1; font-size: 13px; }
-  .world-item .pop { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* Tinted name chip, the landing page's channel-name treatment. Both the text
+     colour and the background tint are set inline from the edits heat ramp
+     (see renderSidebar), so the chip reinforces the pressure signal the name
+     colour already carried rather than overwriting it with a decorative hue. */
+  .world-item .name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 5px;
+  }
+  .world-item .pop { font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
   .world-item:hover { background: rgba(255, 255, 255, 0.03); }
   .world-item.active {
     background: rgba(91, 140, 255, 0.1);
@@ -86,7 +116,7 @@
     font-size: 18px;
     cursor: pointer;
   }
-  .mobile-topbar-title { font-size: 14px; font-weight: 600; color: var(--text-strong); }
+  .mobile-topbar-title { font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-strong); }
   .sidebar-backdrop {
     display: none;
     position: fixed;
@@ -113,7 +143,7 @@
   .kpi { display: flex; align-items: center; gap: 6px; }
   .kpi i { font-size: 14px; color: var(--muted); }
   .kpi .label { color: var(--muted); font-size: 11px; }
-  .kpi .value { color: var(--text-strong); font-size: 13px; font-weight: 600; }
+  .kpi .value { color: var(--text-strong); font-size: 13px; font-weight: 600; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
   .panel {
     background: var(--panel);
@@ -122,19 +152,28 @@
     overflow: hidden;
     flex-shrink: 0;
   }
+  /* Reads as the landing page's `## section` rule: mono, wide tracking, an
+     accent hash prefix, and the existing bottom border standing in for its
+     trailing hairline. Laid out flex-start rather than space-between so the
+     ::before hash can't get flung to one end of an otherwise single-item
+     title — anything that belongs on the right claims `margin-left: auto`
+     for itself instead (see .stale and .patreon-title-actions). */
   .panel-title {
     padding: 12px 16px;
+    font-family: var(--mono);
     font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.14em;
     color: var(--muted);
     border-bottom: 1px solid var(--panel-border);
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
+    gap: 8px;
   }
-  .panel-title .stale { color: var(--warn); text-transform: none; letter-spacing: normal; font-weight: 400; }
+  .panel-title::before { content: '##'; color: var(--accent); letter-spacing: normal; }
+  .panel-title .stale { color: var(--warn); text-transform: none; letter-spacing: normal; font-weight: 400; margin-left: auto; }
   .panel-title-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .panel-chevron { color: var(--muted); font-size: 12px; flex-shrink: 0; transition: transform 0.15s ease; }
   .panel.collapsed .panel-chevron { transform: rotate(-90deg); }
@@ -144,7 +183,7 @@
   .detail-stats { display: flex; gap: 24px; padding: 16px; flex-wrap: wrap; }
   .detail-stat { display: flex; align-items: center; gap: 8px; }
   .detail-stat i { font-size: 18px; }
-  .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .detail-stat .num-label { font-size: 11px; color: var(--muted); }
 
   .bots-table-wrap { padding: 0 16px 16px; overflow-x: auto; }
@@ -152,11 +191,13 @@
   .bots-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 10px 8px; border-bottom: 1px solid var(--panel-border); }
   /* Same card background as .discord-item (world pane's discord info rows) so
      the two lists read as one visual language. */
-  .bots-table td { padding: 8px 10px; background: rgba(255, 255, 255, 0.02); font-variant-numeric: tabular-nums; }
+  .bots-table td { padding: 8px 10px; background: rgba(255, 255, 255, 0.02); font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .bots-table td:first-child { border-radius: 6px 0 0 6px; }
   .bots-table td:last-child { border-radius: 0 6px 6px 0; }
   .bots-table th:last-child, .bots-table td:last-child { text-align: right; }
-  .bots-table-name { display: flex; align-items: center; gap: 8px; font-variant-numeric: normal; }
+  /* Bot names are proper names, not identifiers — back to sans while the rest
+     of the row's figures stay mono. */
+  .bots-table-name { display: flex; align-items: center; gap: 8px; font-family: var(--sans); font-variant-numeric: normal; }
 
   .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; max-height: 320px; overflow-y: auto; }
   .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; flex-shrink: 0; }
@@ -164,7 +205,7 @@
   .discord-item .owner-icon { color: var(--warn); font-size: 13px; }
   .discord-item .sep { color: var(--muted); }
   .discord-item .owner { color: var(--muted); }
-  .gid { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .gid { color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .discord-item .gid { margin-left: auto; }
 
   /* Compact rate-limit indicator, folded into the same bordered strip as the
@@ -181,9 +222,9 @@
     text-align: center;
     min-width: 76px;
   }
-  .lane-card-label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px; }
-  .lane-card-depth { font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-  .lane-card-ms { color: var(--muted); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .lane-card-label { color: var(--muted); font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+  .lane-card-depth { font-family: var(--mono); font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .lane-card-ms { color: var(--muted); font-family: var(--mono); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 
   .log-alerts-summary { display: flex; align-items: center; gap: 12px; justify-self: end; }
   .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
@@ -199,20 +240,20 @@
   .feed-row a { color: var(--accent); text-decoration: none; }
   .feed-row a:hover { text-decoration: underline; }
   .feed-row:first-child { border-top: none; }
-  .feed-time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .feed-time { color: var(--muted); font-family: var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .feed-row.grouped { cursor: pointer; }
   .feed-group-chevron { color: var(--muted); font-size: 12px; transition: transform 0.15s ease; }
   .feed-group-chevron.expanded { transform: rotate(180deg); }
   .feed-subgroup { padding-left: 24px; }
   .feed-subgroup .feed-row { opacity: 0.8; }
-  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
   .tag.death { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
   .tag.level-up { background: rgba(62, 207, 142, 0.15); color: var(--good); }
   .tag.edit { background: rgba(91, 140, 255, 0.15); color: var(--accent); }
   .tag.error { background: rgba(224, 86, 62, 0.15); color: var(--bad); }
   .tag.warn { background: rgba(224, 169, 62, 0.15); color: var(--warn); }
   .log-alert-logger { color: var(--muted); }
-  .log-alert-repeat { background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 10px; padding: 1px 7px; border-radius: 10px; font-variant-numeric: tabular-nums; }
+  .log-alert-repeat { background: rgba(255, 255, 255, 0.06); color: var(--text); font-family: var(--mono); font-size: 10px; padding: 1px 7px; border-radius: 10px; font-variant-numeric: tabular-nums; }
 
   .muted { color: var(--muted); }
   .stale { color: var(--warn); }
@@ -225,7 +266,7 @@
      Sits in each guild's own row in the discords list (.discord-item). */
   .bot-avatar { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
 
-  .patreon-title-actions { display: flex; align-items: center; gap: 8px; }
+  .patreon-title-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
   .patreon-status-filter { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 11px; font-weight: 600; padding: 4px 8px; cursor: pointer; text-transform: none; letter-spacing: normal; }
   .patreon-status-filter:hover { background: #343d51; }
   .patreon-search-row { padding: 0 16px 12px; }
@@ -266,8 +307,10 @@
   .patreon-add-form { display: none; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-wrap: wrap; }
   .patreon-add-form.open { display: flex; }
   .patreon-add-form input { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font-size: 12px; padding: 6px 10px; flex: 1; min-width: 120px; }
-  .patreon-add-form button[type="submit"] { background: #2b3242; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-strong); font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
-  .patreon-add-form button[type="submit"]:hover { background: #343d51; }
+  /* The one genuinely primary action here, so it gets the landing page's solid
+     accent treatment rather than the grey used for every secondary control. */
+  .patreon-add-form button[type="submit"] { background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--bg); font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+  .patreon-add-form button[type="submit"]:hover { filter: brightness(1.08); }
 
   /* Below this, the fixed 200px side-by-side sidebar and the single-row KPI
      strip both stop working: the sidebar eats half a phone screen, and the
@@ -311,7 +354,10 @@
 <body>
 <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 <aside class="sidebar" id="sidebar">
-  <div class="sidebar-header">Violent Bot<span>/ status</span></div>
+  <div class="sidebar-header">
+    <img src="/dashboard/images/avatar.png" alt="">
+    <span>Violent Bot<span class="brand-suffix">/status</span></span>
+  </div>
   <div class="world-list" id="world-list"></div>
 </aside>
 <main>
@@ -438,7 +484,7 @@ const HEAT_STOPS = [
   [168, 54, 42]    // red
 ];
 
-function heatColorForRatio(ratio) {
+function heatRgbForRatio(ratio) {
   const clamped = Math.min(1, Math.max(0, ratio));
   const level = Math.min(9, Math.floor(clamped * 10)); // 10 discrete levels: 0-9
   const t = level / 9;
@@ -449,7 +495,12 @@ function heatColorForRatio(ratio) {
   const [r1, g1, b1] = HEAT_STOPS[segIndex];
   const [r2, g2, b2] = HEAT_STOPS[segIndex + 1];
   const lerp = (a, b) => Math.round(a + (b - a) * segT);
-  return `rgb(${lerp(r1, r2)}, ${lerp(g1, g2)}, ${lerp(b1, b2)})`;
+  return [lerp(r1, r2), lerp(g1, g2), lerp(b1, b2)];
+}
+
+function heatColorForRatio(ratio) {
+  const [r, g, b] = heatRgbForRatio(ratio);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 // Edits (15m) is what actually feeds the online-list rate-limit lane, so it
@@ -458,8 +509,8 @@ function heatColorForRatio(ratio) {
 // against a fixed max (not relative to the busiest world shown), so a given
 // edit count always means the same thing regardless of how busy the bot is
 // overall.
-function heatColorForEdits(edits) {
-  return heatColorForRatio(edits / 250);
+function heatRgbForEdits(edits) {
+  return heatRgbForRatio(edits / 250);
 }
 
 const BE_ICON_GREEN = '/dashboard/images/be-icon-green.gif';
@@ -471,10 +522,13 @@ function renderSidebar(worlds) {
   sortedWorlds(worlds).forEach(w => {
     const div = document.createElement('div');
     div.className = 'world-item' + (w.name === selectedWorld ? ' active' : '');
-    const nameColor = heatColorForEdits(w.edits15m);
+    // Text colour and chip tint both come off the edits heat ramp — same hue,
+    // the background just at low alpha (see .world-item .name).
+    const [hr, hg, hb] = heatRgbForEdits(w.edits15m);
+    const nameStyle = `color:rgb(${hr}, ${hg}, ${hb});background:rgba(${hr}, ${hg}, ${hb}, 0.12)`;
     const beIcon = w.battleyeGreen ? BE_ICON_GREEN : BE_ICON_YELLOW;
     const beLabel = w.battleyeGreen ? 'Green BattlEye' : 'Yellow BattlEye';
-    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="color:${nameColor}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
+    div.innerHTML = `<img class="be-icon" src="${beIcon}" alt="${beLabel}" title="${beLabel}"><span class="name" style="${nameStyle}" title="${w.edits15m} edits in the last 15m">${w.name}</span><span class="pop">${w.population}</span>`;
     div.addEventListener('click', () => { selectedWorld = w.name; render(); closeSidebar(); });
     el.appendChild(div);
   });
@@ -720,13 +774,16 @@ function buildSupporterCard(supporter) {
   // supporter.patronStatus is only present when patreonapi.PatreonApiClient's
   // sync could cross-reference this person — see StatusRoute.buildPatreonJson.
   const hasPatreonInfo = supporter.patronStatus !== undefined;
-  // Seat-holders' confirmed/unconfirmed status is untouched by the Patreon
-  // sync — still driven purely by the per-seat "active" flag from the
-  // existing Discord-role recheck (see PaywallService.refreshAll). Only a
-  // seatless, Patreon-sourced entry falls back to patronStatus, since it
-  // has no seats to check at all.
+  // Seat-holders' confirmed/unconfirmed status comes from the per-seat flags
+  // set by the periodic subscription recheck (see PaywallService.refreshAll),
+  // which reads the same synced Patreon snapshot patronStatus comes from. A
+  // seat in its grace period is still "active" (nothing is paused yet) but
+  // has already failed that recheck, so it counts as unconfirmed here —
+  // otherwise a lapse wouldn't show up on this panel until the pause landed
+  // days later. Only a seatless, Patreon-sourced entry falls back to
+  // patronStatus directly, since it has no seats to check at all.
   const confirmed = supporter.seats.length > 0
-    ? supporter.seats.every(s => s.active)
+    ? supporter.seats.every(s => s.active && !s.inGrace)
     : (hasPatreonInfo ? supporter.patronStatus === 'active_patron' : true);
 
   const key = supporterKey(supporter);

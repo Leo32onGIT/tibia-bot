@@ -17,7 +17,8 @@ object HuntedCommands {
     val nameOption: String = options.getOrElse("name", "")
     val reasonOption: String = options.getOrElse("reason", "none")
 
-    val authed = Permissions.callerHasManageServer(event)
+    // Manage Server or the guild's moderator role — see Permissions.isModerator.
+    val authed = Permissions.callerIsModerator(event, BotApp.moderatorRoleId(event.getGuild.getId))
 
     subCommand match {
       case "player" =>

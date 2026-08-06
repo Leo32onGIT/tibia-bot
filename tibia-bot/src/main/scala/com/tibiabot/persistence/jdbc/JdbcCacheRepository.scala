@@ -221,44 +221,75 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       deleteStatement.close()
     }
 
-  def getBoosted(): List[BoostedCache] =
+  /** Create `boosted_info` if it isn't there, and bring an older one up to the
+   *  current shape: the two changed-flag columns, and `bot_id`.
+   *
+   *  `bot_id` is the important one. This table used to hold a single row, and
+   *  every bot pointed at this bot_cache database shared it — but the row is a
+   *  change-detection state machine (set both flags when the names rotate, then
+   *  clear them once the message has gone out), so two bots ticking seconds
+   *  apart inside the server-save window raced: the first set the flags, the
+   *  second read them set, cleared them and posted, and the first then found
+   *  them clear and never posted to any of its guilds that day. Whichever bot
+   *  won flipped whenever either process restarted. One row per bot identity
+   *  gives each its own flag lifecycle off the same shared database. */
+  private def ensureBoostedSchema(statement: java.sql.Statement): Unit = {
+    val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_info'")
+    val tableExists = tableExistsQuery.next()
+    tableExistsQuery.close()
+
+    if (!tableExists) {
+      val createListTable =
+        s"""CREATE TABLE boosted_info (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |bot_id VARCHAR(255) NOT NULL DEFAULT '',
+           |boss VARCHAR(255) NOT NULL,
+           |bosschanged VARCHAR(255) NOT NULL,
+           |creature VARCHAR(255) NOT NULL,
+           |creaturechanged VARCHAR(255) NOT NULL
+           );""".stripMargin
+
+      statement.executeUpdate(createListTable)
+    }
+
+    def columnExists(name: String): Boolean = {
+      val query = statement.executeQuery(s"SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = '$name'")
+      val exists = query.next()
+      query.close()
+      exists
+    }
+
+    if (!columnExists("bosschanged")) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    if (!columnExists("creaturechanged")) {
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
+    }
+
+    if (!columnExists("bot_id")) {
+      // Any pre-migration row keeps bot_id '' and becomes the seed every bot's
+      // own row is created from (see getBoosted) rather than being adopted by
+      // whichever bot happens to read first.
+      statement.execute("ALTER TABLE boosted_info ADD COLUMN bot_id VARCHAR(255) NOT NULL DEFAULT ''")
+    }
+
+    // One row per bot identity, enforced rather than assumed — a duplicate would
+    // quietly reintroduce the race this column exists to remove. The delete is a
+    // no-op on a healthy table; it only has anything to do if an older seed-when-
+    // empty write managed to insert a second row.
+    statement.execute("DELETE FROM boosted_info a USING boosted_info b WHERE a.bot_id = b.bot_id AND a.id > b.id")
+    statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS boosted_info_bot_id_idx ON boosted_info (bot_id)")
+  }
+
+  def getBoosted(botId: String): List[BoostedCache] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.createStatement()
+      ensureBoostedSchema(statement)
 
-      val tableExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'boosted_info'")
-      val tableExists = tableExistsQuery.next()
-      tableExistsQuery.close()
-
-      if (!tableExists) {
-        val createListTable =
-          s"""CREATE TABLE boosted_info (
-             |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-             |boss VARCHAR(255) NOT NULL,
-             |bosschanged VARCHAR(255) NOT NULL,
-             |creature VARCHAR(255) NOT NULL,
-             |creaturechanged VARCHAR(255) NOT NULL
-             );""".stripMargin
-
-        statement.executeUpdate(createListTable)
-      }
-
-      val bossChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'bosschanged'")
-      val bossChangedExists = bossChangedExistsQuery.next()
-      bossChangedExistsQuery.close()
-
-      val creatureChangedExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'boosted_info' AND COLUMN_NAME = 'creaturechanged'")
-      val creatureChangedExists = creatureChangedExistsQuery.next()
-      creatureChangedExistsQuery.close()
-
-      if (!bossChangedExists) {
-        statement.execute("ALTER TABLE boosted_info ADD COLUMN bosschanged VARCHAR(255) DEFAULT '0'")
-      }
-
-      if (!creatureChangedExists) {
-        statement.execute("ALTER TABLE boosted_info ADD COLUMN creaturechanged VARCHAR(255) DEFAULT '0'")
-      }
-
-      val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
+      val select = conn.prepareStatement("SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info WHERE bot_id = ?;")
+      select.setString(1, botId)
+      val result = select.executeQuery()
       val results = new ListBuffer[BoostedCache]()
       while (result.next()) {
         val boss = Option(result.getString("boss")).getOrElse("None")
@@ -267,75 +298,66 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
         val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
         results += BoostedCache(boss, creature, bossChanged, creatureChanged)
       }
+      select.close()
 
       if (results.isEmpty) {
-        // Table exists but has no row yet; seed the singleton default row
-        val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-        insertStatement.setString(1, "None")
-        insertStatement.setString(2, "None")
-        insertStatement.setString(3, "0")
+        // First read for this bot. Seed its row from the pre-migration shared
+        // row when there is one, so the next save compares against the same
+        // names that row was carrying instead of treating a normal day as the
+        // first run ever. Flags start clear: this bot has posted nothing yet.
+        val seedQuery = statement.executeQuery("SELECT boss,creature FROM boosted_info WHERE bot_id = '' ORDER BY id LIMIT 1;")
+        val (seedBoss, seedCreature) =
+          if (seedQuery.next())
+            (Option(seedQuery.getString("boss")).getOrElse("None"), Option(seedQuery.getString("creature")).getOrElse("None"))
+          else ("None", "None")
+        seedQuery.close()
+
+        val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (bot_id, boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?, ?);")
+        insertStatement.setString(1, botId)
+        insertStatement.setString(2, seedBoss)
+        insertStatement.setString(3, seedCreature)
         insertStatement.setString(4, "0")
+        insertStatement.setString(5, "0")
         insertStatement.executeUpdate()
         insertStatement.close()
 
-        results += BoostedCache("None", "None", "0", "0")
+        results += BoostedCache(seedBoss, seedCreature, "0", "0")
       }
 
       statement.close()
       results.toList
     }
 
-  def updateBoosted(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit =
+  def updateBoosted(botId: String, boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.createStatement()
-
-      val result = statement.executeQuery(s"SELECT boss,creature,bosschanged,creaturechanged FROM boosted_info;")
-
-      val results = new ListBuffer[BoostedCache]()
-      while (result.next()) {
-        val boss = Option(result.getString("boss")).getOrElse("None")
-        val creature = Option(result.getString("creature")).getOrElse("None")
-        val bossChanged = Option(result.getString("bosschanged")).getOrElse("0")
-        val creatureChanged = Option(result.getString("creaturechanged")).getOrElse("0")
-
-        results += BoostedCache(boss, creature, bossChanged, creatureChanged)
-      }
+      ensureBoostedSchema(statement)
       statement.close()
 
-      if (results.isEmpty) {
-        // Table exists but has no row yet; seed the singleton default row
-        val insertStatement = conn.prepareStatement("INSERT INTO boosted_info (boss, creature, bosschanged, creaturechanged) VALUES (?, ?, ?, ?);")
-        insertStatement.setString(1, "None")
-        insertStatement.setString(2, "None")
-        insertStatement.setString(3, "0")
-        insertStatement.setString(4, "0")
-        insertStatement.executeUpdate()
-        insertStatement.close()
-      }
+      // getBoosted always runs first on the live path, so this only matters if
+      // that ordering ever changes — an update that silently wrote nothing
+      // would look exactly like a boosted rotation that never happened.
+      val seed = conn.prepareStatement(
+        """INSERT INTO boosted_info (bot_id, boss, creature, bosschanged, creaturechanged)
+          |SELECT ?, 'None', 'None', '0', '0'
+          |WHERE NOT EXISTS (SELECT 1 FROM boosted_info WHERE bot_id = ?);""".stripMargin)
+      seed.setString(1, botId)
+      seed.setString(2, botId)
+      seed.executeUpdate()
+      seed.close()
 
-      if (boss != "") {
-        val statement = conn.prepareStatement("UPDATE boosted_info SET boss = ?;")
-        statement.setString(1, boss)
-        statement.executeUpdate()
-        statement.close()
-      }
-      if (creature != "") {
-        val statement = conn.prepareStatement("UPDATE boosted_info SET creature = ?;")
-        statement.setString(1, creature)
-        statement.executeUpdate()
-        statement.close()
-      }
-      if (bossChanged != "") {
-        val statement = conn.prepareStatement("UPDATE boosted_info SET bosschanged = ?;")
-        statement.setString(1, bossChanged)
-        statement.executeUpdate()
-        statement.close()
-      }
-      if (creatureChanged != "") {
-        val statement = conn.prepareStatement("UPDATE boosted_info SET creaturechanged = ?;")
-        statement.setString(1, creatureChanged)
-        statement.executeUpdate()
-        statement.close()
-      }
+      def set(column: String, value: String): Unit =
+        if (value != "") {
+          val update = conn.prepareStatement(s"UPDATE boosted_info SET $column = ? WHERE bot_id = ?;")
+          update.setString(1, value)
+          update.setString(2, botId)
+          update.executeUpdate()
+          update.close()
+        }
+
+      set("boss", boss)
+      set("creature", creature)
+      set("bosschanged", bossChanged)
+      set("creaturechanged", creatureChanged)
     }
 }

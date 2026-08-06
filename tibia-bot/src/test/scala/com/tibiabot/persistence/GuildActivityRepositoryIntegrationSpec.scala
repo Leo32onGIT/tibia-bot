@@ -14,7 +14,7 @@ class GuildActivityRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("recordCommandRun and lastCommandAt round-trip, overwriting on repeated calls") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcGuildActivityRepository(provider)
     clearActivity(provider)
 
@@ -30,7 +30,7 @@ class GuildActivityRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("markWorldlessIfUnset sets it once and returns the original value on later calls") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcGuildActivityRepository(provider)
     clearActivity(provider)
 
@@ -43,7 +43,7 @@ class GuildActivityRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("clearWorldless resets worldless_since so a later markWorldlessIfUnset re-stamps it") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcGuildActivityRepository(provider)
     clearActivity(provider)
 
@@ -61,22 +61,5 @@ class GuildActivityRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'guild_activity'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM guild_activity")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }

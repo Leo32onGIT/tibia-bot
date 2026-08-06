@@ -49,13 +49,21 @@ final class StatusRoute(
     }
   }
 
-  /** Dashboard-local static images (currently just the BattlEye status icons —
-   *  previously hotlinked from the Tibia Fandom wiki, now vendored into the
-   *  repo so the dashboard doesn't depend on a third party staying up).
+  /** Dashboard-local static images (the BattlEye status icons — previously
+   *  hotlinked from the Tibia Fandom wiki, now vendored into the repo so the
+   *  dashboard doesn't depend on a third party staying up — plus the bot
+   *  avatar, used for both the sidebar brand mark and the page favicon).
    *  Same filesystem-override-then-classpath lookup as `dashboardHtml`. An
    *  explicit allow-list, not a raw path segment read, so this can't be used
    *  to read arbitrary files from the image directory. */
-  private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif")
+  private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif", "avatar.png")
+
+  /** Content type for an allow-listed dashboard image. Only the extensions
+   *  actually present in [[dashboardImages]] are mapped; gif is the fallback
+   *  because the BattlEye icons came first and are still the common case. */
+  private def imageContentType(filename: String): ContentType =
+    if (filename.endsWith(".png")) ContentType(MediaTypes.`image/png`)
+    else ContentType(MediaTypes.`image/gif`)
 
   /** InputStream.readAllBytes() is Java 9+; this project targets Java 8. */
   private def readAllBytes(stream: java.io.InputStream): Array[Byte] = {
@@ -82,7 +90,7 @@ final class StatusRoute(
           try readAllBytes(stream)
           finally stream.close()
         }
-      HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`image/gif`), bytes))
+      HttpResponse(entity = HttpEntity(imageContentType(filename), bytes))
     }
 
   private def requireOwner(userId: String): Directive0 =
@@ -240,8 +248,9 @@ final class StatusRoute(
    *  happens once, in PatreonAdminRoute, when a seat is actually assigned.
    *
    *  Additively merges in patreonMemberRepository's synced snapshot (see
-   *  patreonapi.PatreonApiClient) — purely informational, never affects
-   *  paywallService's own Discord-role gate:
+   *  patreonapi.PatreonApiClient) — the same snapshot the paywall gate reads,
+   *  so a supporter's patronStatus here and their ability to `/setup` come
+   *  from one source and can't disagree:
    *   - a seat-holding supporter whose Discord id matches a synced member
    *     gets that member's patronStatus/pledgeCents spliced on, and their
    *     Patreon fullName supersedes the seat's own one-time stored name;
@@ -268,6 +277,12 @@ final class StatusRoute(
     // this stays one query instead of N.
     val extraSeatsByUser = paywallService.allExtraSeats()
     def seatLimitFor(userId: String): Int = math.max(0, Config.Patreon.seatsPerUser + extraSeatsByUser.getOrElse(userId, 0))
+    // Same bulk-read reasoning as extraSeatsByUser. `active` alone can't tell
+    // the panel a subscription has lapsed any more: a lapsed seat stays fully
+    // active through its grace period (see PaywallService.worldsInGrace), so
+    // the dashboard would otherwise show it as fine right up until the pause
+    // landed a week later.
+    val inGrace = paywallService.worldsInGrace()
 
     val seatSupporters = bySupporter.toList.map { case (userId, seats) =>
       val seatsJson = seats.map { seat =>
@@ -278,7 +293,8 @@ final class StatusRoute(
           "guildName" -> JsString(guildName),
           "world" -> JsString(seat.world),
           "created" -> JsString(seat.created.toString),
-          "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world))
+          "active" -> JsBoolean(paywallService.isActive(seat.guildId, seat.world)),
+          "inGrace" -> JsBoolean(inGrace.contains((seat.guildId, seat.world)))
         ): JsValue
       }
       // A confirmed Patreon cross-reference's fullName supersedes the seat's

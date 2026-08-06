@@ -27,7 +27,7 @@ object PatreonCommands {
         .setThumbnail(Config.webHookAvatar)
         .setDescription(
           s"${Config.noEmoji} You are not an active Patreon supporter.\n" +
-          "Join as a paid member to `/setup` and use the bot\n\n" +
+          "Join as a paid member on [Patreon](https://patreon.com/violentbot) and [connect your Discord account](https://www.patreon.com/settings/apps/discord) to `/setup` and use the bot.\n\n" +
           "[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)"
         )
         .build()

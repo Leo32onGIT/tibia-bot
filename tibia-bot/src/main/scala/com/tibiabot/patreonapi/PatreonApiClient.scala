@@ -25,12 +25,15 @@ import scala.util.{Failure, Success, Try}
  *  envelope's data/included/meta shape doesn't map onto one fixed case class
  *  the way TibiaData's endpoints do.
  *
- *  Caveat: the `social_connections.discord` nested shape used below (an
- *  object with a `user_id` field, or absent/null when unlinked) is inferred
- *  from Patreon's v1 API and ecosystem convention, not confirmed against a
- *  live v2 response — Patreon's own v2 docs don't spell it out. Verify once
- *  real credentials and a patron with Discord linked exist, and adjust
- *  `parseDiscordUserId` if the real shape differs. */
+ *  The `social_connections.discord` nested shape used below (an object with a
+ *  `user_id` field, or absent/null when unlinked) isn't spelled out in
+ *  Patreon's own v2 docs — it was inferred from their v1 API and ecosystem
+ *  convention, then confirmed against the live campaign, which parsed real
+ *  Discord snowflakes for every linked patron. Worth knowing it's an
+ *  undocumented shape if Patreon ever changes it: `parseDiscordUserId`
+ *  silently yields None rather than failing, and an unlinked patron and a
+ *  changed response format look identical from here — but they no longer
+ *  cost the same, since this is what the paywall matches supporters on. */
 object PatreonApiClient {
 
   private[patreonapi] def parseDiscordUserId(userObj: Option[JsObject]): Option[String] =
@@ -105,10 +108,13 @@ object PatreonApiClient {
 }
 
 /** Direct client for Patreon API v2 (see Config.PatreonApi) — periodically
- *  synced by BotApp into persistence.PatreonMemberRepository for the
- *  dashboard's supporters panel. Purely additive/read-only: never touches
- *  the paywall's own Discord-role gate. Response parsing lives in the
- *  companion object above, so it's testable without an ActorSystem. */
+ *  synced by BotApp into persistence.PatreonMemberRepository, which backs
+ *  both the dashboard's supporters panel and the paywall gate itself (see
+ *  paywall.PaywallService.callerIsSubscribed). Read-only, but no longer
+ *  merely informational: what this fetches decides who can `/setup`, which
+ *  is why `fetchAllMembers` reports failure rather than papering over it.
+ *  Response parsing lives in the companion object above, so it's testable
+ *  without an ActorSystem. */
 final class PatreonApiClient()(implicit system: ActorSystem, ec: ExecutionContextExecutor) extends StrictLogging {
 
   private val apiBase = "https://www.patreon.com/api/oauth2/v2"
@@ -156,6 +162,14 @@ final class PatreonApiClient()(implicit system: ActorSystem, ec: ExecutionContex
     HttpRequest(uri = uri, headers = List(Authorization(OAuth2BearerToken(accessToken))))
   }
 
+  /** One page, then the rest recursively. Every failure — a bad status, an
+   *  unparseable body, a dropped connection — fails the Future rather than
+   *  degrading to an empty or partial list. That matters because the caller
+   *  replaces the stored snapshot wholesale and that snapshot is what the
+   *  paywall gate reads: a page that quietly returned `Nil` mid-pagination
+   *  would drop every member after it from the snapshot, and those people
+   *  would stop being recognised as patrons. Half a member list is worse
+   *  than none, so callers get all of it or an explicit failure. */
   private def fetchPage(cursor: Option[String], retriedAfterRefresh: Boolean = false): Future[List[PatreonMember]] =
     Http().singleRequest(membersRequest(cursor)).flatMap { response =>
       if (response.status.intValue == 401 && !retriedAfterRefresh) {
@@ -164,29 +178,30 @@ final class PatreonApiClient()(implicit system: ActorSystem, ec: ExecutionContex
       } else if (!response.status.isSuccess()) {
         val status = response.status
         response.discardEntityBytes()
-        logger.warn(s"Patreon members fetch failed: $status")
-        Future.successful(Nil)
+        Future.failed(new RuntimeException(s"Patreon members fetch failed: $status"))
       } else {
         Unmarshal(response.entity).to[String].flatMap { body =>
           Try(PatreonApiClient.parsePage(body.parseJson.asJsObject)) match {
             case Success((members, Some(next))) => fetchPage(Some(next)).map(members ++ _)
             case Success((members, None)) => Future.successful(members)
-            case Failure(ex) =>
-              logger.warn(s"Failed to parse Patreon members response: ${ex.getMessage}")
-              Future.successful(Nil)
+            case Failure(ex) => Future.failed(new RuntimeException(s"Failed to parse Patreon members response: ${ex.getMessage}", ex))
           }
         }
       }
-    }.recover {
-      case NonFatal(ex) =>
-        logger.warn(s"Patreon members fetch failed: ${ex.getMessage}")
-        Nil
     }
 
   /** Every current campaign member (active, declined, and former patrons —
    *  Patreon returns all of them, not just active ones), paginated to
-   *  exhaustion. Best-effort: never fails the caller's Future, since this
-   *  backs a periodic background sync rather than a user-facing request —
-   *  a transient error just yields whatever was fetched before it hit. */
-  def fetchAllMembers(): Future[List[PatreonMember]] = fetchPage(None)
+   *  exhaustion. `None` means the fetch failed and nothing about the campaign
+   *  should be inferred from it — explicitly not an empty list, which the
+   *  caller would otherwise be entitled to read as "the campaign has no
+   *  members" and act on. Still never fails the caller's Future: this backs a
+   *  periodic background sync, and a transient error should leave the last
+   *  good snapshot standing rather than throw. */
+  def fetchAllMembers(): Future[Option[List[PatreonMember]]] =
+    fetchPage(None).map(Option(_)).recover {
+      case NonFatal(ex) =>
+        logger.warn(s"Patreon members fetch failed: ${ex.getMessage}")
+        None
+    }
 }

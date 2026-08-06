@@ -1,7 +1,7 @@
 package com.tibiabot.paywall
 
 import com.tibiabot.discord.DiscordGateway
-import com.tibiabot.persistence.{PatreonSeatOverrideRepository, PatreonSeatRepository}
+import com.tibiabot.persistence.{PatreonGraceRepository, PatreonMemberRepository, PatreonSeatOverrideRepository, PatreonSeatRepository}
 import net.dv8tion.jda.api.entities.Guild
 
 import java.time.ZonedDateTime
@@ -12,21 +12,36 @@ import scala.jdk.CollectionConverters._
  *  each supporter gets `seatLimit` seats (adjustable per-user via
  *  [[effectiveSeatLimit]] — a dashboard-granted override on top of the flat
  *  default), and running `/setup` for a (guild, world) pair assigns one —
- *  see [[com.tibiabot.setup.ChannelService]]. A (guild, world) pair with no
- *  assigned seat (everything that existed before this feature, or a world
- *  nobody's set up under this model yet) is always treated as active — the
- *  grandfather case, so pre-existing tracking is unaffected. A positive
- *  seat-count adjustment also bypasses the underlying subscription check
- *  entirely (see [[callerIsSubscribed]]) — the dashboard's "grant extra
- *  seats" admin action doubles as a full paywall override for that one
- *  person, not just a seat-count bump. */
+ *  see [[com.tibiabot.setup.ChannelService]]. A positive seat-count
+ *  adjustment also bypasses the underlying subscription check entirely (see
+ *  [[callerIsSubscribed]]) — the dashboard's "grant extra seats" admin action
+ *  doubles as a full paywall override for that one person, not just a
+ *  seat-count bump.
+ *
+ *  Whether someone is subscribed is Patreon's answer, read from the synced
+ *  campaign snapshot in `PatreonMemberRepository` — not, as it once was, a
+ *  Patreon-granted role in the support Discord. See [[callerIsSubscribed]].
+ *  The support guild is still consulted for one unrelated thing: resolving a
+ *  username to a Discord id for the dashboard (see [[findUserIdByUsername]]).
+ *
+ *  Nothing is cut off the moment it stops checking out. A configured world
+ *  whose seat owner has lapsed — *and* one that was never tied to a seat at
+ *  all (a legacy setup, grandfathered in from before the seat system
+ *  existed) — instead starts a `graceDays` timer, kept in
+ *  `PatreonGraceRepository` so it survives restarts, and keeps running
+ *  untouched until that runs out. Resolving the subscription at any point
+ *  before the deadline stops the clock and nothing ever happens. See
+ *  `applyRefresh` — that one rule covers both cases, so an orphaned setup
+ *  and a cancelled one are on identical footing. */
 final class PaywallService(
   discordGateway: DiscordGateway,
   patreonSeatRepository: PatreonSeatRepository,
   patreonSeatOverrideRepository: PatreonSeatOverrideRepository,
+  patreonGraceRepository: PatreonGraceRepository,
+  patreonMemberRepository: PatreonMemberRepository,
   supportGuildId: String,
-  patreonRoleId: String,
   seatLimit: Int,
+  graceDays: Int,
   ownerId: String
 ) {
   private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
@@ -34,42 +49,42 @@ final class PaywallService(
   /** Cheap, synchronous — consulted on every send-loop iteration in
    *  TibiaBot. Defaults true (fail-open): a (guild, world) pair not yet
    *  checked, or one whose check errored transiently, is never silently cut
-   *  off. */
+   *  off. That default also covers the window between startup and the first
+   *  [[refreshAll]] sweep; an expired grace timer is durable, so that sweep
+   *  puts an already-paused world straight back to inactive (quietly — see
+   *  `applyRefresh`'s `notified` handling). */
   def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
 
-  /** Does this member's role list include the Patreon role? Pure, so it's
-   *  testable without a live JDA Member. */
-  private[paywall] def hasPatreonRole(memberRoleIds: List[String]): Boolean =
-    memberRoleIds.contains(patreonRoleId)
-
-  /** Blocking REST lookup against the support guild — the `/setup` command
-   *  gate calls this directly; `refreshAll` calls it once per distinct seat
-   *  owner. The bot owner always passes, regardless of role — so they can
-   *  always `/setup`, and any seat assigned to them never lapses via the
-   *  periodic recheck either, since that reuses this same check. A user with
-   *  a *positive* dashboard-granted seat adjustment also always passes,
-   *  regardless of role or membership — an admin using "grant extra seats"
-   *  is treated as an explicit override of the whole paywall for that
-   *  person, not just their seat count (a zero or negative adjustment does
-   *  not grant this bypass). Otherwise: not a member of the support guild
-   *  (or a lookup failure) reads as "not subscribed", never as an error to
-   *  propagate. A REST lookup rather than JDA's member cache deliberately —
-   *  caching every member of the support guild would need the privileged
-   *  GUILD_MEMBERS intent (Discord's bot-verification process past 100
-   *  guilds) for what's an infrequent, low-volume check. */
-  def callerIsSubscribed(userId: String): Boolean = {
+  /** The subscription check — the `/setup` command gate calls this directly;
+   *  `refreshAll` calls it once per distinct seat owner.
+   *
+   *  Answered from Patreon itself: the synced campaign snapshot (see
+   *  patreonapi.PatreonApiClient) is searched for this Discord account, and
+   *  they pass if Patreon reports them an active patron. This used to be a
+   *  REST lookup for a Patreon-granted role in the support guild, which
+   *  meant a real supporter still failed if they'd left that Discord, or if
+   *  Patreon's own role sync hadn't fired. Reading Patreon directly drops
+   *  both of those failure modes: subscribe, connect Discord on Patreon's
+   *  side, and the next `/setup` works.
+   *
+   *  Two bypasses come first and skip Patreon entirely. The bot owner always
+   *  passes — so they can always `/setup`, and any seat assigned to them
+   *  never lapses via the periodic recheck either, since that reuses this
+   *  same check. So does a user with a *positive* dashboard-granted seat
+   *  adjustment: an admin using "grant extra seats" is treated as an explicit
+   *  override of the whole paywall for that person, not just their seat count
+   *  (a zero or negative adjustment does not grant this bypass).
+   *
+   *  Unknown account, no linked Discord on Patreon's side, a lapsed or
+   *  declined pledge, or a failed database read all read as "not
+   *  subscribed", never as an error to propagate. That answer no longer cuts
+   *  anyone off on its own — it starts the grace period (see
+   *  `applyRefresh`), so a bad sync or a database blip costs days of
+   *  headroom rather than anyone's tracking. */
+  def callerIsSubscribed(userId: String): Boolean =
     if (userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
-    else {
-      val supportGuild = discordGateway.guildById(supportGuildId)
-      if (supportGuild == null) false
-      else try {
-        val member = supportGuild.retrieveMemberById(userId).complete()
-        member != null && hasPatreonRole(member.getRoles.asScala.map(_.getId).toList)
-      } catch {
-        case _: Throwable => false
-      }
-    }
-  }
+    else try patreonMemberRepository.isActivePatron(userId)
+    catch { case _: Throwable => false }
 
   /** Resolves a Discord username to that member's user id, searched within
    *  the support guild — the dashboard's "grant extra seats" admin action
@@ -77,9 +92,11 @@ final class PaywallService(
    *  Case-insensitive exact match; None if nobody matches, there are
    *  multiple guild nicknames sharing a prefix with no exact match, or the
    *  support guild isn't reachable. Uses retrieveMembersByPrefix — a scoped,
-   *  query-based gateway search, not the full member cache — so this needs
-   *  no privileged GUILD_MEMBERS intent, same reasoning as
-   *  [[callerIsSubscribed]]'s own REST-lookup choice. */
+   *  query-based gateway search, not the full member cache — so this needs no
+   *  privileged GUILD_MEMBERS intent (Discord's bot-verification process past
+   *  100 guilds) for what's a rare, admin-initiated lookup. The only thing
+   *  left that touches the support guild: it plays no part in deciding who's
+   *  subscribed. */
   def findUserIdByUsername(username: String): Option[String] = {
     val supportGuild = discordGateway.guildById(supportGuildId)
     if (supportGuild == null) None
@@ -123,19 +140,29 @@ final class PaywallService(
     )
 
   /** Assigns (or idempotently reassigns) a seat. Call only after
-   *  [[canAssignSeat]] confirmed true. */
-  def assignSeat(userId: String, userName: String, guildId: String, world: String): Unit =
+   *  [[canAssignSeat]] confirmed true. Stops any grace timer that was
+   *  running against this world — claiming it onto a live seat is exactly
+   *  the "sorted it out" outcome the timer was waiting for, and leaving the
+   *  row behind would hand the new owner a deadline they never earned. */
+  def assignSeat(userId: String, userName: String, guildId: String, world: String): Unit = {
     patreonSeatRepository.assignSeat(userId, userName, guildId, world, ZonedDateTime.now())
+    patreonGraceRepository.clearGrace(guildId, world)
+  }
 
-  /** Frees the seat assigned to (guildId, world), if any. */
-  def releaseSeat(guildId: String, world: String): Unit =
+  /** Frees the seat assigned to (guildId, world), if any, and drops any grace
+   *  timer with it — this is `/remove`, so there's no longer a setup for a
+   *  timer to be counting down against. */
+  def releaseSeat(guildId: String, world: String): Unit = {
     patreonSeatRepository.releaseSeat(guildId, world)
+    patreonGraceRepository.clearGrace(guildId, world)
+  }
 
   /** True once (guildId, world) has ever been tied to a seat. False means
    *  either it's brand new, or it's a legacy setup from before the seat
-   *  system existed — see [[isActive]]'s grandfather rule, which treats both
-   *  the same (always active) but which `/setup` needs to tell apart to
-   *  offer claiming a legacy world onto a seat. */
+   *  system existed — `/setup` needs to tell those apart from a seated world
+   *  to offer claiming a legacy one onto a seat, while it still can (a legacy
+   *  world keeps running until its grace period runs out — see
+   *  `applyRefresh`). */
   def hasSeat(guildId: String, world: String): Boolean =
     patreonSeatRepository.seatFor(guildId, world).isDefined
 
@@ -150,6 +177,14 @@ final class PaywallService(
   /** Every seat, for the dashboard's supporters panel — same source
    *  [[refreshAll]] sweeps, just exposed for reading. */
   def allSeats(): List[com.tibiabot.domain.PatreonSeat] = patreonSeatRepository.allSeats()
+
+  /** Every (guildId, world) with a grace timer running, as one bulk read for
+   *  the dashboard. [[isActive]] deliberately stays true through the grace
+   *  period — that's the whole point — so it alone can't tell the dashboard
+   *  a supporter has lapsed until the pause finally lands, a week late. This
+   *  is what makes that visible on the sweep that detects it. */
+  def worldsInGrace(): Set[(String, String)] =
+    patreonGraceRepository.allGrace().map(g => (g.guildId, g.world)).toSet
 
   /** Sets (or replaces) a user's seat-count adjustment — the dashboard's
    *  "grant extra seats" admin action. Arbitrary, admin's discretion; may be
@@ -211,37 +246,85 @@ final class PaywallService(
 
   /** Reassigns and reactivates immediately, rather than waiting for the next
    *  periodic [[refreshAll]] sweep — [[canReassignSeat]] already confirmed
-   *  the new owner's live subscription status moments before this runs. */
+   *  the new owner's live subscription status moments before this runs.
+   *  [[assignSeat]] clears the expired grace timer that paused it. */
   def reassignSeat(newUserId: String, newUserName: String, guildId: String, world: String): Unit = {
-    patreonSeatRepository.assignSeat(newUserId, newUserName, guildId, world, ZonedDateTime.now())
+    assignSeat(newUserId, newUserName, guildId, world)
     activeStatus.put((guildId, world), true)
   }
 
-  /** Given each seat's (guildId, world, userId) and a way to check a user's
-   *  live status, updates the active-status map and returns the (guildId,
-   *  world) pairs that just flipped active -> inactive on *this* call — not
-   *  pairs that were already inactive. Pure aside from the map mutation, so
-   *  the transition-detection logic (the part worth getting right) is
-   *  testable with a fake `checkUser`, no JDA or database involved. */
-  private[paywall] def applyRefresh(seats: List[(String, String, String)], checkUser: String => Boolean): List[(String, String)] =
-    seats.flatMap { case (guildId, world, userId) =>
+  /** Given every configured (guildId, world) and its seat owner if it has one
+   *  — `None` covers both a legacy setup that was never seated and one whose
+   *  seat has since been released — updates the active-status map and returns
+   *  the pairs whose grace period has just run out and which have not been
+   *  announced yet.
+   *
+   *  A setup is compliant when it has a seat *and* that seat's owner still
+   *  checks out. Anything else starts (or keeps) a grace timer, and stays
+   *  fully active until `graceDays` have passed since the first sweep that
+   *  saw it that way — so a lapsed subscription and a never-seated legacy
+   *  setup follow the same path, and a transient blip in `checkUser` (a
+   *  Discord outage, say) can no longer pause anyone as long as it clears
+   *  within the window. Becoming compliant again at any point deletes the
+   *  timer, deadline and `notified` flag together, so a later lapse gets a
+   *  fresh window and its own notice.
+   *
+   *  Announcing is gated on the persisted `notified` flag rather than on an
+   *  in-memory active -> inactive transition: the active-status map is empty
+   *  after a restart, so a transition test would re-announce every already
+   *  paused world on the first sweep after every deploy.
+   *
+   *  Pure aside from the map mutation and the grace repository, so the
+   *  timing logic (the part worth getting right) is testable with a fake
+   *  `checkUser` and an in-memory grace repository, no JDA involved. */
+  private[paywall] def applyRefresh(setups: List[(String, String, Option[String])], checkUser: String => Boolean, now: ZonedDateTime): List[(String, String)] = {
+    val timers = patreonGraceRepository.allGrace().map(g => (g.guildId, g.world) -> g).toMap
+    setups.flatMap { case (guildId, world, ownerId) =>
       val key = (guildId, world)
-      val wasActive = isActive(guildId, world)
-      val nowActive = checkUser(userId)
-      activeStatus.put(key, nowActive)
-      if (wasActive && !nowActive) Some(key) else None
+      if (ownerId.exists(checkUser)) {
+        if (timers.contains(key)) patreonGraceRepository.clearGrace(guildId, world)
+        activeStatus.put(key, true)
+        None
+      } else {
+        val timer = timers.get(key)
+        // No row yet means this sweep is the first to see it non-compliant, so
+        // the clock starts now — and the deadline below is measured from that
+        // same `now`, matching the row beginGrace just wrote.
+        if (timer.isEmpty) patreonGraceRepository.beginGrace(guildId, world, now)
+        val startedAt = timer.map(_.started).getOrElse(now)
+        val expired = !startedAt.plusDays(graceDays.toLong).isAfter(now)
+        activeStatus.put(key, !expired)
+        if (expired && !timer.exists(_.notified)) {
+          patreonGraceRepository.markNotified(guildId, world)
+          Some(key)
+        } else None
+      }
     }
+  }
 
-  /** Periodic background re-check across every assigned seat. Fires
-   *  `onLapsed` once per (guild, world) that just transitioned to inactive,
-   *  not on every recheck of an already-lapsed pair — with the seat owner's
-   *  id and username snapshot, for the lapse notice. */
-  def refreshAll(onLapsed: (Guild, String, String, String) => Unit): Unit = {
-    val seats = patreonSeatRepository.allSeats()
-    val lapsed = applyRefresh(seats.map(s => (s.guildId, s.world, s.userId)), callerIsSubscribed)
+  /** Periodic background re-check across every configured (guild, world) —
+   *  `setups`, supplied by the caller, since the seat table only knows about
+   *  the ones that have a seat and the whole point is to also catch the ones
+   *  that don't. Fires `onLapsed` once per pair whose grace period has just
+   *  run out, never twice for the same lapse (see `applyRefresh`) — with
+   *  the seat owner's id and username snapshot for the notice, both empty
+   *  when the world never had a seat at all and there's nobody to address. */
+  def refreshAll(setups: List[(String, String)])(onLapsed: (Guild, String, String, String) => Unit): Unit = {
+    val seats = patreonSeatRepository.allSeats().map(s => (s.guildId, s.world) -> s).toMap
+    // One REST lookup per distinct seat owner, not per seat: a supporter with
+    // five worlds set up is one subscription, and the sweep now walks every
+    // configured world rather than only the seated ones.
+    val checked = scala.collection.mutable.Map.empty[String, Boolean]
+    def checkOnce(userId: String): Boolean = checked.getOrElseUpdate(userId, callerIsSubscribed(userId))
+
+    val lapsed = applyRefresh(
+      setups.map { case (guildId, world) => (guildId, world, seats.get((guildId, world)).map(_.userId)) },
+      checkOnce,
+      ZonedDateTime.now()
+    )
     lapsed.foreach { case (guildId, world) =>
       val guild = discordGateway.guildById(guildId)
-      val seat = seats.find(s => s.guildId == guildId && s.world == world)
+      val seat = seats.get((guildId, world))
       val userId = seat.map(_.userId).getOrElse("")
       val userName = seat.map(_.userName).getOrElse("")
       if (guild != null) onLapsed(guild, world, userId, userName)

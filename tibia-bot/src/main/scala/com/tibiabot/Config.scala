@@ -60,6 +60,9 @@ object Config {
   val guildJoinGrey: String = discord.getString("guild-join-thumbnail-grey")
   val guildJoinRed: String = discord.getString("guild-join-thumbnail-red")
   val guildJoinGreen: String = discord.getString("guild-join-thumbnail-green")
+  val worldTransferGrey: String = discord.getString("world-transfer-thumbnail-grey")
+  val worldTransferRed: String = discord.getString("world-transfer-thumbnail-red")
+  val worldTransferGreen: String = discord.getString("world-transfer-thumbnail-green")
 
   // Emojis
  val nemesisEmoji: String = discord.getString("nemesis-emoji")
@@ -84,6 +87,7 @@ object Config {
  val kilmareshEmoji: String = discord.getString("kilmaresh-emoji")
  val exivaEmoji: String = discord.getString("exiva-emoji")
  val indentEmoji: String = discord.getString("indent-emoji")
+ val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")
  val primalEmoji: String = discord.getString("primal-emoji")
  val hazardEmoji: String = discord.getString("hazard-emoji")
@@ -113,18 +117,27 @@ object Config {
     val statusPort: Int = web.getInt("status-port")
   }
 
-  /** Patreon paywall: the support Discord + role Patreon assigns to active
-   *  subscribers, and how many (guild, world) seats each subscriber gets. */
+  /** Patreon paywall: how many (guild, world) seats each subscriber gets, and
+   *  the support Discord — which no longer gates anything, and is kept only
+   *  for the dashboard's username -> Discord id lookup (see
+   *  paywall.PaywallService.findUserIdByUsername). Who counts as subscribed
+   *  comes from the Patreon API instead; see [[PatreonApi]]. */
   object Patreon {
     private val patreon = discord.getConfig("patreon")
     val supportGuildId: String = patreon.getString("support-guild-id")
-    val roleId: String = patreon.getString("role-id")
     val seatsPerUser: Int = patreon.getInt("seats-per-user")
+    /** How long a configured world keeps running after the subscription
+     *  behind it stops checking out, before activity is actually paused —
+     *  see paywall.PaywallService's grace period. 0 pauses on the first
+     *  sweep that notices, i.e. the behaviour from before grace existed. */
+    val graceDays: Int = patreon.getInt("grace-days")
   }
 
   /** Direct Patreon API access (patreonapi.PatreonApiClient) — periodically
    *  syncs the campaign's member list for the dashboard's supporters panel.
-   *  Purely additive: does not affect the paywall's own Discord-role check.
+   *  Load-bearing: this snapshot is what the paywall's subscription check
+   *  reads (see paywall.PaywallService.callerIsSubscribed), so leaving it
+   *  unconfigured means nobody passes `/setup`.
    *  `enabled` mirrors `redisEnabled`'s shape — everything downstream no-ops
    *  cleanly while this is unconfigured. */
   object PatreonApi {
@@ -153,6 +166,59 @@ object Config {
       case _ => Disabled
     }
     val sharingEnabled: Boolean = current != Disabled
+  }
+
+  /** The respawn claim system (`/respawn` + the `📅・sᴘᴀᴡɴs` forum).
+   *
+   *  `enabled` defaults to **false** and is the feature's rollout gate. Prod and
+   *  DEV run the same image, so without it the first deploy of this branch would
+   *  start creating forum channels in every guild that has run `/setup`. While
+   *  it is off, `/respawn` isn't registered with Discord and `/setup`/`/repair`
+   *  skip the forum entirely; flip `RESPAWN_ENABLED=true` only where the feature
+   *  is actually being tested.
+   *
+   *  The duration/queue/stamina values here are *defaults for a guild's first
+   *  setup*. They're copied into that guild's `respawn_settings` row at creation
+   *  and read from there afterwards, so retuning the bot's defaults later never
+   *  silently changes the rules under a guild that is already using it.
+   */
+  object Respawn {
+    private val respawn = discord.getConfig("respawn")
+    val enabled: Boolean = respawn.getBoolean("enabled")
+    /** How long a claim runs when the user doesn't say. */
+    val defaultDurationMinutes: Int = respawn.getInt("default-duration-minutes")
+    /** Ceiling on a single claim, including extensions. */
+    val maxDurationMinutes: Int = respawn.getInt("max-duration-minutes")
+    /** How many people may wait behind the active claim. */
+    val queueLimit: Int = respawn.getInt("queue-limit")
+    /** Each user's daily claim budget, refilled at server save. 0 disables
+     *  stamina entirely (unlimited claiming). */
+    val staminaMinutes: Int = respawn.getInt("stamina-minutes")
+    /** DM the claimer this many minutes before their claim ends. */
+    val warnMinutes: Int = respawn.getInt("warn-minutes")
+    /** How long the next person in line has to accept a handover offer before
+     *  it's assumed they're away and the spawn moves on. */
+    val handoverMinutes: Int = respawn.getInt("handover-minutes")
+    /** How often the expiry/promotion sweep runs. Also the worst-case lateness
+     *  of a claim ending. */
+    val sweepInterval: FiniteDuration = respawn.getDuration("sweep-interval").toScala
+    /** How far ahead recurring slots are booked. Long enough that people can see
+     *  and plan around tonight's slot; short enough that a cancelled schedule
+     *  leaves few bookings to clear. */
+    val scheduleLookAheadMinutes: Int = respawn.getInt("schedule-look-ahead-minutes")
+    /** How long the owner of a booked slot has to say whether they are hunting it
+     *  before it passes to whoever asked. Clamped to shortly after the slot's own
+     *  start, so it never waits past the hunt it is about. */
+    val bookingRequestResponseMinutes: Int = respawn.getInt("booking-request-response-minutes")
+    /** How long before a booked slot starts its owner is reminded. 0 turns the
+     *  reminder off. Separate from the claim-end reminder members set for
+     *  themselves: this one is about a hunt that hasn't begun. */
+    val slotReminderMinutes: Int = respawn.getInt("slot-reminder-minutes")
+    /** Most standing bookings one member may hold in a guild. */
+    val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
+    /** Shown as the claim embed's image when a spawn has no `creature` set —
+     *  most of the seed catalogue starts out that way. */
+    val fallbackImage: String = respawn.getString("fallback-image")
   }
 
   /** Auto-leave a guild with no worlds tracked for this many days, unless a

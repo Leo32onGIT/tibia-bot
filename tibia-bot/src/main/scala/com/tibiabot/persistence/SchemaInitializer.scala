@@ -264,6 +264,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |deaths_min INT NOT NULL,
               |exiva_list VARCHAR(255) NOT NULL,
               |online_combined VARCHAR(255) NOT NULL,
+              |show_neutral_activity VARCHAR(255) NOT NULL DEFAULT 'true',
               |PRIMARY KEY (name)
               |);""".stripMargin
 

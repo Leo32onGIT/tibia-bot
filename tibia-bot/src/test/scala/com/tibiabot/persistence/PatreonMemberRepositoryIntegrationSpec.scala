@@ -14,7 +14,7 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("replaceSnapshot round-trips members, including nullable patron_status/discord_user_id/discord_username") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
@@ -29,7 +29,7 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("a later replaceSnapshot prunes members no longer present, without a window where the table is empty") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
@@ -48,14 +48,49 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
 
   test("replaceSnapshot with an empty list clears the whole table") {
     val provider = pgOrCancel()
-    ensureCacheDatabase(provider)
+    ensureCacheSchema(provider)
     val repo = new JdbcPatreonMemberRepository(provider)
     clearMembers(provider)
 
     repo.replaceSnapshot(List(PatreonMember("m1", "Alice", Some("active_patron"), 500, Some("111"))), syncedAt)
     repo.replaceSnapshot(Nil, syncedAt.plusMinutes(30))
 
+    // Which is exactly why BotApp.syncPatreonMembers refuses to call this
+    // with a failed or empty fetch — see the paywall gate in isActivePatron.
     repo.snapshot() shouldBe empty
+  }
+
+  test("isActivePatron: true only for a linked Discord account whose pledge is active") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcPatreonMemberRepository(provider)
+    clearMembers(provider)
+
+    repo.replaceSnapshot(List(
+      PatreonMember("m1", "Alice", Some("active_patron"), 500, Some("111")),
+      PatreonMember("m2", "Bob", Some("declined_patron"), 300, Some("222")),
+      PatreonMember("m3", "Carol", Some("former_patron"), 0, Some("333")),
+      PatreonMember("m4", "Dave", Some("active_patron"), 500, None), // never connected Discord
+      PatreonMember("m5", "Erin", None, 0, Some("555"))
+    ), syncedAt)
+
+    repo.isActivePatron("111") shouldBe true
+    repo.isActivePatron("222") shouldBe false
+    repo.isActivePatron("333") shouldBe false
+    repo.isActivePatron("555") shouldBe false
+    repo.isActivePatron("999") shouldBe false // nobody by that id at all
+  }
+
+  test("isActivePatron: an emptied snapshot recognises nobody") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcPatreonMemberRepository(provider)
+    clearMembers(provider)
+
+    repo.replaceSnapshot(List(PatreonMember("m1", "Alice", Some("active_patron"), 500, Some("111"))), syncedAt)
+    repo.isActivePatron("111") shouldBe true
+    repo.replaceSnapshot(Nil, syncedAt.plusMinutes(30))
+    repo.isActivePatron("111") shouldBe false
   }
 
   private def clearMembers(provider: JdbcConnectionProvider): Unit = {
@@ -65,22 +100,5 @@ class PatreonMemberRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
         .executeQuery("SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'patreon_members'")
       if (exists.next()) conn.createStatement().executeUpdate("DELETE FROM patreon_members")
     } finally conn.close()
-  }
-
-  private def ensureCacheDatabase(provider: JdbcConnectionProvider): Unit = {
-    val conn = provider.admin()
-    try {
-      val rs = conn.createStatement()
-        .executeQuery("SELECT datname FROM pg_database WHERE datname = 'bot_cache'")
-
-      if (!rs.next()) {
-        conn.createStatement()
-          .executeUpdate("CREATE DATABASE bot_cache")
-      }
-    } catch {
-      case _ : Throwable => //
-    } finally {
-      conn.close()
-    }
   }
 }

@@ -36,6 +36,7 @@ object BotApp extends App with StrictLogging {
   type Guilds = domain.Guilds; val Guilds = domain.Guilds
   type BoostedCache = domain.BoostedCache; val BoostedCache = domain.BoostedCache
   type PlayerCache = domain.PlayerCache; val PlayerCache = domain.PlayerCache
+  type WorldTransfer = domain.WorldTransfer; val WorldTransfer = domain.WorldTransfer
   type DeathsCache = domain.DeathsCache; val DeathsCache = domain.DeathsCache
   type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
   type ListCache = domain.ListCache; val ListCache = domain.ListCache
@@ -53,11 +54,18 @@ object BotApp extends App with StrictLogging {
   implicit private val actorSystem: ActorSystem = ActorSystem()
   implicit private val ex: ExecutionContextExecutor = actorSystem.dispatcher
 
-  /** Build a RateLimitedSender ticking every `delayMs`, plus a periodic
-   *  monitoring log tagged `[rate-limit:name]`: queue depth (and its trend
-   *  since the last log) shows whether the lane is keeping up or backing up;
-   *  the per-label breakdown shows which traffic is consuming the lane's
-   *  budget and how long it's waiting. */
+  /** Build a RateLimitedSender ticking every `delayMs`.
+   *
+   *  The five-minute tick no longer logs — the `[rate-limit:name]` line was a
+   *  steady drip of two entries every five minutes forever, and the same figures
+   *  are on the dashboard whenever somebody actually wants them.
+   *
+   *  It still runs, because [[discord.RateLimitedSender.snapshotAndReset]] is the
+   *  only thing that rolls the per-label window, and the dashboard reads that
+   *  window (see web.StatusRoute). Dropping the tick with the log would quietly
+   *  turn "avg wait" from the last five minutes into an average since boot, which
+   *  stops moving when a lane starts struggling — the opposite of what it is for.
+   */
   private def makeMonitoredSender(name: String, delayMs: Int, perGroupMinGapMs: Long = 0): discord.RateLimitedSender = {
     val sender = new discord.RateLimitedSender(drain => {
       val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
@@ -66,22 +74,9 @@ object BotApp extends App with StrictLogging {
       )(new Runnable { def run(): Unit = drain() })(actorSystem.dispatcher)
       () => cancellable.cancel()
     }, perGroupMinGapMs = perGroupMinGapMs)
-    var lastLoggedQueueDepth = 0
     actorSystem.scheduler.scheduleWithFixedDelay(5.minutes, 5.minutes)(() => {
-      val depth = sender.queueDepth
-      val delta = depth - lastLoggedQueueDepth
-      lastLoggedQueueDepth = depth
-      val trend =
-        if (delta > 0) s"+$delta, growing"
-        else if (delta < 0) s"$delta, draining"
-        else "unchanged"
-      val perLabel = sender.snapshotAndReset()
-      val breakdown =
-        if (perLabel.isEmpty) "no traffic"
-        else perLabel.toSeq.sortBy(_._1).map { case (label, stats) =>
-          s"$label: ${stats.count} sent, avg wait ${Math.round(stats.avgWaitMs)}ms"
-        }.mkString(" | ")
-      logger.info(s"[rate-limit:$name] depth: $depth ($trend vs 5m ago) | dropped total: ${sender.totalDropped} | superseded total: ${sender.totalSuperseded} | last 5m -- $breakdown")
+      sender.snapshotAndReset()
+      ()
     })(ex)
     sender
   }
@@ -134,10 +129,21 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcCacheRepository(connectionProvider)
   private val activityRepository: persistence.ActivityRepository =
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
+  private val worldTransferRepository: persistence.WorldTransferRepository =
+    new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+
+  /** How long an announced world transfer is remembered. Must outlast the ~180
+   *  days Tibia shows a former world for: prune inside that window and the field
+   *  is still there to be detected all over again, so the transfer gets announced
+   *  a second time. Past 180 days the field has cleared and the record has nothing
+   *  left to suppress, making everything beyond that pure margin. */
+  private val TransferRecordRetentionDays = 365L
   private val huntedAlliedRepository: persistence.HuntedAlliedRepository =
     new persistence.jdbc.JdbcHuntedAlliedRepository(connectionProvider)
   private val customSortRepository: persistence.CustomSortRepository =
     new persistence.jdbc.JdbcCustomSortRepository(connectionProvider)
+  private val respawnRepository: persistence.RespawnRepository =
+    new persistence.jdbc.JdbcRespawnRepository(connectionProvider)
   private val worldConfigRepository: persistence.WorldConfigRepository =
     new persistence.jdbc.JdbcWorldConfigRepository(connectionProvider, Config.mergedWorlds)
   private val discordConfigRepository: persistence.DiscordConfigRepository =
@@ -146,6 +152,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcPatreonSeatRepository(connectionProvider)
   private val patreonSeatOverrideRepository: persistence.PatreonSeatOverrideRepository =
     new persistence.jdbc.JdbcPatreonSeatOverrideRepository(connectionProvider)
+  private val patreonGraceRepository: persistence.PatreonGraceRepository =
+    new persistence.jdbc.JdbcPatreonGraceRepository(connectionProvider)
   val guildActivityRepository: persistence.GuildActivityRepository =
     new persistence.jdbc.JdbcGuildActivityRepository(connectionProvider)
   private val renameCooldownRepository: persistence.RenameCooldownRepository =
@@ -170,20 +178,51 @@ object BotApp extends App with StrictLogging {
   // Galthen's Satchel cooldown tracking
   val galthenService = new galthen.GalthenService(galthenRepository, connectionProvider, discordGateway)
 
-  // Per-user boosted boss/creature notification subscriptions
-  val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
+  /** The guild's "Violent Bot Moderator" role id, or "0" if it has none.
+   *
+   *  Read per invocation rather than cached: it changes on /setup and /repair,
+   *  and a stale id would silently lock out everyone holding the role. */
+  def moderatorRoleId(guildId: String): String =
+    try discordConfigRepository.getConfig(guildId).getOrElse("moderator_role", "0")
+    catch {
+      // A guild with no config yet has no role either; falling back to "0" means
+      // the check simply reduces to Manage Server.
+      case _: Throwable => "0"
+    }
+
+  // Respawn claim system — see respawn.RespawnService. Constructed regardless of
+  // Config.Respawn.enabled (it does no I/O until called, and the repository
+  // creates its tables lazily on first use); the flag gates command
+  // registration, channel creation and the sweep below instead.
+  val respawnService = new respawn.RespawnService(respawnRepository)
+
+  // Which guilds' respawn systems are this bot identity's to run. Several bots
+  // can share a guild and all sweep the same per-guild database; this is what
+  // stops them answering each other's claims (see respawn.RespawnOwnership).
+  private val respawnOwnership = new respawn.RespawnOwnership(discordGateway.selfUserId)
+
+  // Per-user boosted boss/creature notification subscriptions. Takes this bot's
+  // own id for the same reason respawnOwnership above does: bots sharing a
+  // bot_cache database must not consume each other's server-save state.
+  val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList, discordGateway.selfUserId)
 
   // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
   // their seats to that (guild, world) pair; that pair's activity keeps
-  // posting only while its seat's owner still holds the support-guild role.
-  // Seat count is Config.Patreon.seatsPerUser plus any per-user adjustment
-  // granted through the dashboard (see PaywallService.effectiveSeatLimit).
-  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, Config.Patreon.supportGuildId, Config.Patreon.roleId, Config.Patreon.seatsPerUser, discordGateway.applicationOwnerId)
+  // posting only while Patreon still reports that seat's owner an active
+  // patron (read from patreonMemberRepository's synced snapshot below — the
+  // support Discord's role plays no part in this any more), and a world that
+  // stops checking out (including one that was never seated at all) gets
+  // Config.Patreon.graceDays to sort it out before anything is actually
+  // paused. Seat count is Config.Patreon.seatsPerUser plus any per-user
+  // adjustment granted through the dashboard (see
+  // PaywallService.effectiveSeatLimit).
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, patreonGraceRepository, patreonMemberRepository, Config.Patreon.supportGuildId, Config.Patreon.seatsPerUser, Config.Patreon.graceDays, discordGateway.applicationOwnerId)
 
-  // Direct Patreon API access, purely additive to the dashboard's supporters
-  // panel — see Config.PatreonApi and syncPatreonMembers below. Never touches
-  // paywallService's own Discord-role gate.
+  // Direct Patreon API access — see Config.PatreonApi and syncPatreonMembers
+  // below. What this syncs is the source of truth for who's subscribed, so
+  // the paywall above depends on it running; it also feeds the dashboard's
+  // supporters panel.
   private val patreonApiClient = new patreonapi.PatreonApiClient()(actorSystem, ex)
 
   // Per-guild hunted/allied player and guild list CRUD
@@ -208,7 +247,8 @@ object BotApp extends App with StrictLogging {
     discordGateway,
     botUser,
     discordRetrieveConfig _,
-    () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap }
+    () => refreshDreamScarBosses(shiftOnFailure = false),
+    () => refreshBoostedMessages()
   )
 
   // Monitoring dashboard: Discord-OAuth-gated /status endpoint + static shell,
@@ -272,6 +312,7 @@ object BotApp extends App with StrictLogging {
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.
   def activityData: Map[String, List[PlayerCache]] = streamState.activityData
+  def worldTransfersData: Map[String, List[WorldTransfer]] = streamState.worldTransfersData
   def huntedPlayersData: Map[String, List[Players]] = streamState.huntedPlayersData
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
   def huntedGuildsData: Map[String, List[Guilds]] = streamState.huntedGuildsData
@@ -284,6 +325,17 @@ object BotApp extends App with StrictLogging {
   def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit = streamState.warmCharacterCache(loaded)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
+  def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
+    streamState.modifyWorldTransfersData(f)
+
+  /** Record an incoming world transfer as announced for `guildId`, in cache and db. */
+  def recordWorldTransfer(guildId: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
+    val transfer = WorldTransfer(name.toLowerCase, formerWorlds, detectedAt)
+    streamState.modifyWorldTransfersData { m =>
+      m + (guildId -> (transfer :: m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(name))))
+    }
+    worldTransferRepository.record(guildId, name, formerWorlds, detectedAt)
+  }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
     streamState.modifyHuntedPlayersData(f)
   def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
@@ -328,6 +380,7 @@ object BotApp extends App with StrictLogging {
     streamState,
     boostedService,
     paywallService,
+    respawnService,
     botUser,
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
@@ -353,8 +406,12 @@ object BotApp extends App with StrictLogging {
   // the /admin resync thread) but read every cycle by the per-world streams — so
   // they need @volatile for the same cross-thread visibility reason as the state
   // below; without it a stream can keep reading a stale boss/cycle after a shift.
-  @volatile var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
-  @volatile var dreamScarLastCheck: String = System.currentTimeMillis().toString
+  @volatile var dreamScar: Map[String, String] = fetchDreamScarBosses().getOrElse(Map.empty)
+  // Which server save the map above is aligned to. The refresh below fires when
+  // a newer one has happened, so the boot read counts as already covering the
+  // save it was taken after.
+  @volatile private var dreamScarSave: Long =
+    ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toEpochSecond
   @volatile var dromeTime = domain.time.DromeCycle.initial // 27 May 2026 server save - increment 2 weeks from here
 
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -388,7 +445,7 @@ object BotApp extends App with StrictLogging {
     // instead of returning empty.
     val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
     val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(g.getIdLong, g.getJDA.getSelfUser.getId)
-    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll).asJava).complete()
+    g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll, Config.Respawn.enabled).asJava).complete()
   }
 
   // Start all world streams
@@ -402,6 +459,88 @@ object BotApp extends App with StrictLogging {
     advanceDromeTime(startTime)
   }
   startBot(None, None) // guild: Option[Guild], world: Option[String]
+
+  // Respawn claim system: close expired claims, promote whoever is queued
+  // behind them, and warn claimants whose time is nearly up.
+  //
+  // On its own single-threaded scheduler rather than the shared actorSystem
+  // one, because the body blocks — it creates, edits and archives forum threads
+  // through JDA — and the Akka scheduler's dispatcher also runs every world's
+  // poll stream. scheduleWithFixedDelay on a single thread additionally means a
+  // slow sweep can never overlap itself.
+  //
+  // Nothing here is scheduled per claim, so this is restart-safe by
+  // construction: a claim that lapsed while the bot was down is resolved by the
+  // first sweep after it comes back, not lost with an in-memory timer.
+  if (Config.Respawn.enabled) {
+    val respawnSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+      (r: Runnable) => {
+        val thread = new Thread(r, "respawn-sweep")
+        thread.setDaemon(true)
+        thread
+      })
+    // Bring each configured guild's spawn images in line with the bundled list.
+    // Deciding which monster represents a spawn is an ongoing curation job, and
+    // the seed import deliberately never revisits a code a guild already has —
+    // so without this an improved list would only reach brand-new guilds.
+    // Cheap (one batched UPDATE per guild) and a no-op once in step, so it runs
+    // on every boot rather than needing to be remembered as a command.
+    discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
+      try {
+        respawnService.settings(guild.getId)
+          .filter(respawnOwnership.ownsRespawns(guild, _))
+          .foreach { _ =>
+            val changed = respawnService.syncSeedCreatures(guild.getId)
+            if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
+          }
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not sync respawn creature images for guild '${guild.getId}'", ex)
+      }
+    }
+
+    val sweepMillis = Config.Respawn.sweepInterval.toMillis
+    respawnSweeper.scheduleWithFixedDelay(new Runnable {
+      // Counts sweeps so the board-post refresh (a REST call per guild) runs
+      // roughly daily instead of every 30 seconds.
+      private var ticks = 0L
+      private val ticksPerDay = math.max(1L, (24 * 60 * 60 * 1000L) / math.max(1L, sweepMillis))
+
+      def run(): Unit = {
+        if (!startUpComplete) return
+        ticks += 1
+        val refreshBoards = ticks % ticksPerDay == 0
+        // Only guilds with a configured world are worth sweeping. The bot sits
+        // in plenty of guilds that never ran /setup and so have no
+        // `_<guildId>` database at all — asking those for their settings opens
+        // a connection that can only fail, every cycle, forever. A guild can't
+        // have a respawn forum without /setup having created its database
+        // first, so this filter loses nothing.
+        discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
+          try {
+            // Only the identity that built this guild's forum sweeps it. Several
+            // bots can share a guild and each runs this same loop against the one
+            // shared per-guild database, so without this they race over every
+            // claim — whichever got there first would send the hunt reminder,
+            // start the due slot and DM the handover offer, regardless of which
+            // bot the spawn was actually claimed through. See RespawnOwnership.
+            respawnService.settings(guild.getId)
+              .filter(respawnOwnership.ownsRespawns(guild, _))
+              .foreach { config =>
+                respawnService.sweep(guild)
+                if (refreshBoards) respawn.RespawnThreads.refreshBoard(guild, config)
+              }
+          } catch {
+            // One guild's bad state (deleted channel, revoked permission) must
+            // not stop every other guild's claims from being resolved.
+            case ex: Throwable =>
+              logger.warn(s"Respawn sweep failed for guild '${guild.getId}'", ex)
+          }
+        }
+      }
+    }, sweepMillis, sweepMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+    logger.info(s"Respawn claim system enabled — sweeping every ${Config.Respawn.sweepInterval}")
+  }
 
   // run the scheduler to clean cache and update dashboard every hour.
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
@@ -433,14 +572,22 @@ object BotApp extends App with StrictLogging {
     } else {
       updateOnOdd += 1
     }
-    // Patreon paywall: recheck every assigned seat's owner against the
-    // support guild every ~30 minutes (60 ticks at the 30s tick interval) —
-    // see paywall.PaywallService. A much lower-urgency check than
-    // updateOnOdd's ~5-minute cache cleanup, so it gets its own, longer cadence.
+    // Patreon paywall: recheck every configured world against the support
+    // guild every ~30 minutes (60 ticks at the 30s tick interval) — see
+    // paywall.PaywallService. A much lower-urgency check than updateOnOdd's
+    // ~5-minute cache cleanup, so it gets its own, longer cadence.
+    //
+    // worldsData rather than the seat table is the list of worlds to sweep:
+    // the seat table only knows the worlds that have a seat, and the grace
+    // period has to apply to the ones that don't (legacy setups) just as
+    // much. It's also the same per-guild world config the streams run off,
+    // maintained by /setup, /remove and guild-leave alike, so a world that
+    // isn't there is one nothing is being posted for anyway.
     if (paywallCheckCounter >= 60) {
       paywallCheckCounter = 0
       try {
-        paywallService.refreshAll { (guild, world, userId, userName) =>
+        val configuredSetups = worldsData.toList.flatMap { case (guildId, worlds) => worlds.map(w => (guildId, w.name)) }
+        paywallService.refreshAll(configuredSetups) { (guild, world, userId, userName) =>
           val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
           // Not routed through AdminLog.post — that helper's title ("a command
           // was run") is shared/fixed across every other caller, and this
@@ -454,9 +601,16 @@ object BotApp extends App with StrictLogging {
             // always current regardless of username staleness.
             val mention = s"<@$userId>"
             val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
+            // An empty userId means this world never had a seat at all (a
+            // legacy setup whose grace period ran out) — there's no
+            // subscription to describe as lapsed and nobody to name, so say
+            // what's actually true instead of pointing at a `<@>` nobody.
+            val cause =
+              if (userId.isEmpty) s"This world isn't tied to an active **Patreon** subscription."
+              else s"The Patreon subscription tied to $subscriber is no longer active or *cannot be verified*."
             val pausedEmbed = new EmbedBuilder()
             pausedEmbed.setTitle(s":warning: Violent Bot paused for $world")
-            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\nThe Patreon subscription tied to $subscriber is no longer active or *cannot be verified*. [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
+            pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\n$cause [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
             pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
             adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
               postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
@@ -466,14 +620,17 @@ object BotApp extends App with StrictLogging {
           // Low priority (rare, one DM per lapse) — goes through the shared
           // background lane so it can't compete with deaths/boosted-channel
           // posts for REST slots. Mirrors the boosted-DM notification pattern.
-          outboundSender.enqueue("paywall-lapse-dm") { () =>
+          // Skipped entirely for a never-seated world: no seat, no owner, so
+          // there is no personal inbox this belongs in — the admin-channel
+          // notice above is the whole story for those.
+          if (userId.nonEmpty) outboundSender.enqueue("paywall-lapse-dm") { () =>
             val user = discordGateway.retrieveUser(userId)
             if (user != null) {
               try {
                 user.openPrivateChannel().queue { pc =>
                   val dmEmbed = new EmbedBuilder()
                   dmEmbed.setTitle(s":warning: Violent Bot has been paused")
-                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or you've left the [Violent Bot Discord](https://discord.gg/qjSzsbjZx6), so the subscription check can't find you. If this was unintentional, simply rejoin the discord to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
+                  dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or your Discord account is no longer connected to Patreon, so the subscription check can't match you. If this was unintentional, [resubscribe](https://www.patreon.com/violentbot) or reconnect Discord on Patreon and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
                   dmEmbed.setColor(presentation.Embeds.NemesisPurple)
                   pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
                     List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
@@ -499,10 +656,18 @@ object BotApp extends App with StrictLogging {
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
     if (ServerSaveSchedule.isServerSaveWindow(currentTime)) {
       try{
-        val now = System.currentTimeMillis()
-        if (now - dreamScarLastCheck.toLong > 60L * 60 * 1000) {
-          dreamScarLastCheck = now.toString
-          dreamScar = shiftAllBossesUp(dreamScar)
+        // Re-read the wiki once per server save. Keyed off which save the map is
+        // aligned to rather than "has an hour passed since the last check": the
+        // old throttle started counting at boot, so a process that came up in
+        // the quarter hour before 10:00 stayed inside its own hour for the whole
+        // 45-minute window and skipped that day's rotation — permanently, since
+        // nothing re-read the wiki after boot. Re-reading also means a map that
+        // is wrong for any reason fixes itself the next morning instead of
+        // carrying the error forward a step at a time.
+        val currentSave = ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toEpochSecond
+        if (currentSave != dreamScarSave) {
+          dreamScarSave = currentSave
+          refreshDreamScarBosses(shiftOnFailure = true)
         }
         if (dromeTime.isBefore(Instant.now())) {
           advanceDromeTime(Instant.now())
@@ -562,108 +727,64 @@ object BotApp extends App with StrictLogging {
             if (bossChanged == "1" && creatureChanged == "1") {
               boostedService.boostedMonsterUpdate("", "", "0", "0")
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-              val notificationsList: List[BoostedStamp] = boostedService.boostedAll()
-              notificationsList.foreach { entry =>
-                var matchedNotification = false
-                boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all") {
-                    matchedNotification = true
-                  }
-                }
-                if (matchedNotification) {
-                  // Low priority (per-user DM burst) — goes through the shared background
-                  // lane so it can't compete with deaths/boosted-channel posts for REST slots.
-                  outboundSender.enqueue("boosted-dm") { () =>
-                    val user: User = discordGateway.retrieveUser(entry.user)
-                    if (user != null) {
-                      try {
-                        user.openPrivateChannel().queue { privateChannel =>
-                          val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                          privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
-                            Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )).queue(null, new ErrorHandler().handle(
+              val notificationsList: List[BoostedStamp] = boostedService.boostedDmTargets()
+              // One DM per user per save, not per matching subscription: someone who
+              // subscribed to today's boss and today's creature by name has two rows
+              // but only wants one message (it carries both embeds either way), and
+              // the failure count below is meant to measure saves, not rows.
+              val recipients: List[String] = notificationsList.collect {
+                case entry if boostedInfoList.exists { case (_, _, boostedName) =>
+                  boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all"
+                } => entry.user
+              }.distinct
+
+              recipients.foreach { recipientId =>
+                // Low priority (per-user DM burst) — goes through the shared background
+                // lane so it can't compete with deaths/boosted-channel posts for REST slots.
+                outboundSender.enqueue("boosted-dm") { () =>
+                  val user: User = discordGateway.retrieveUser(recipientId)
+                  if (user != null) {
+                    try {
+                      user.openPrivateChannel().queue { privateChannel =>
+                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
+                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )).queue(
+                          (_: Message) => {
+                            // Delivered — this is the bot that shares a guild with them, so it
+                            // takes ownership of their DMs (claiming the row if it was still
+                            // unclaimed) and their failure count goes back to zero.
+                            try boostedService.dmDelivered(recipientId)
+                            catch { case ex: Throwable => logger.warn(s"Failed to record boosted-DM delivery for user: '$recipientId'", ex) }
+                          },
+                          new ErrorHandler().handle(
                             List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
                             new java.util.function.Consumer[ErrorResponseException] {
-                              // The bot can never DM this user again (no shared guild left, or
-                              // DMs closed) — drop their subscription instead of retrying every
-                              // server save forever.
+                              // Can't tell "DMs closed" from "wrong bot" by error code, so this
+                              // never drops a subscription on one failure the way it used to —
+                              // with several bots on one notifications table that quietly
+                              // deleted the lists of everyone the other bot served. Only a run
+                              // of failed saves against a row this bot actually owns gives up.
                               def accept(ex: ErrorResponseException): Unit = {
-                                boostedService.boosted(entry.user, "disable", "")
-                                logger.info(s"Removed boosted-DM subscription for user '${entry.user}': can no longer be DMed")
+                                try {
+                                  if (boostedService.dmFailed(recipientId))
+                                    logger.info(s"Removed boosted-DM subscription for user '$recipientId': undeliverable for several server saves running")
+                                } catch {
+                                  case ex: Throwable => logger.warn(s"Failed to record boosted-DM failure for user: '$recipientId'", ex)
+                                }
                               }
                             }
-                          ))
-                        }
-                      } catch {
-                        case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
+                          )
+                        )
                       }
+                    } catch {
+                      case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '$recipientId'", ex)
                     }
                   }
                 }
               }
 
-              discordGateway.guilds.foreach { guild =>
-                if (checkConfigDatabase(guild)) {
-                  val discordInfo = discordRetrieveConfig(guild)
-                  val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
-                  val lastWorld = if (discordInfo.nonEmpty) discordInfo("last_world") else "Antica"
-                  if (channelId != "0") {
-                    val boostedChannel = guild.getTextChannelById(channelId)
-                    if (boostedChannel != null) {
-                      if (boostedChannel.canTalk()) {
-                        val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
-                        if (boostedMessage != "0") {
-                          try {
-                            boostedChannel.deleteMessageById(boostedMessage).queue()
-                          } catch {
-                            case ex: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", ex)
-                          }
-                        }
-
-                        val dreamScarDaily =
-                          dreamScar
-                            .get(lastWorld)
-                            .orElse(dreamScar.get("Unknown"))
-                            .getOrElse("Unknown")
-
-                        val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
-                        val rashidEmbed = new EmbedBuilder()
-                        rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
-                        rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-                        rashidEmbed.setColor(BrandColor)
-
-                        val now = Instant.now()
-                        val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
-                        val dromeEmbed = new EmbedBuilder()
-                          .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                          .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                          .setColor(BrandColor)
-
-                        val dreamScarEmbed = new EmbedBuilder()
-                        dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
-                        dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
-                        dreamScarEmbed.setColor(BrandColor)
-
-                        val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
-                        val addRashidDreamScarEmbeds: List[MessageEmbed] = embeds ++ embedsList
-
-                        boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
-                          .setComponents(ActionRow.of(
-                            Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          ))
-                          .queue((message: Message) => {
-                            //updateBoostedMessage(guild.getId, message.getId)
-                            discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
-                          }, (e: Throwable) => {
-                            logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-                          })
-                      } else {
-                        logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
-                      }
-                    }
-                  }
-                }
-              }
+              repostBoostedMessages(embeds)
             }
           }
         }
@@ -673,6 +794,97 @@ object BotApp extends App with StrictLogging {
       }
     }
   })
+
+  /** Replace every guild's boosted message: delete the one currently posted in
+   *  its boosted channel and send a fresh one carrying `boostedEmbeds` (the
+   *  boosted boss and creature) plus Rashid, that guild's own Dream Courts
+   *  boss, and the Drome cycle when it's due. Returns how many guilds a send
+   *  was dispatched for — the send itself is queued, so a guild counted here
+   *  can still fail asynchronously (logged per guild).
+   *
+   *  Shared by the server-save refresh above and `/admin boosted`. */
+  private def repostBoostedMessages(boostedEmbeds: List[MessageEmbed]): Int = {
+    var posted = 0
+    discordGateway.guilds.foreach { guild =>
+      if (checkConfigDatabase(guild)) {
+        val discordInfo = discordRetrieveConfig(guild)
+        val channelId = if (discordInfo.nonEmpty) discordInfo("boosted_channel") else "0"
+        val lastWorld = if (discordInfo.nonEmpty) discordInfo("last_world") else "Antica"
+        if (channelId != "0") {
+          val boostedChannel = guild.getTextChannelById(channelId)
+          if (boostedChannel != null) {
+            if (boostedChannel.canTalk()) {
+              val boostedMessage = if (discordInfo.nonEmpty) discordInfo("boosted_messageid") else "0"
+              if (boostedMessage != "0") {
+                try {
+                  boostedChannel.deleteMessageById(boostedMessage).queue()
+                } catch {
+                  case ex: Throwable => logger.warn(s"Failed to get the boosted boss creature message for deletion in Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", ex)
+                }
+              }
+
+              val dreamScarDaily =
+                dreamScar
+                  .get(lastWorld)
+                  .orElse(dreamScar.get("Unknown"))
+                  .getOrElse("Unknown")
+
+              val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
+              val rashidEmbed = new EmbedBuilder()
+              rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+              rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
+              rashidEmbed.setColor(BrandColor)
+
+              val now = Instant.now()
+              val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
+              val dromeEmbed = new EmbedBuilder()
+                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
+                .setColor(BrandColor)
+
+              val dreamScarEmbed = new EmbedBuilder()
+              dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+              dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
+              dreamScarEmbed.setColor(BrandColor)
+
+              val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
+              val addRashidDreamScarEmbeds: List[MessageEmbed] = boostedEmbeds ++ embedsList
+
+              posted += 1
+              boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+                .setComponents(ActionRow.of(
+                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                ))
+                .queue((message: Message) => {
+                  //updateBoostedMessage(guild.getId, message.getId)
+                  discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
+                }, (e: Throwable) => {
+                  logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+                })
+            } else {
+              logger.warn(s"Failed to send & delete boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}': no VIEW/SEND permissions")
+            }
+          }
+        }
+      }
+    }
+    posted
+  }
+
+  /** `/admin boosted`: rebuild and repost every guild's boosted message right
+   *  now, off the server-save cycle — for when a save was missed, or a batch
+   *  of messages went out wrong and needs redoing without waiting a day.
+   *
+   *  Reads the boosted boss/creature straight from TibiaData (BoostedService's
+   *  embeds carry their own fallback if that call fails) and deliberately
+   *  leaves the boosted cache and its changed-flags untouched: this is a
+   *  repost of what's true now, not a second server save, so it must neither
+   *  suppress the real one nor fire the subscriber DMs again. */
+  def refreshBoostedMessages(): Future[Int] =
+    for {
+      bossEmbed <- boostedService.boostedBossEmbed()
+      creatureEmbed <- boostedService.boostedCreatureEmbed()
+    } yield repostBoostedMessages(List(bossEmbed, creatureEmbed))
 
   // Once a day: leave any guild that's tracked no worlds for a while and
   // hasn't run any command recently either — see pruneInactiveGuilds. Its
@@ -714,7 +926,11 @@ object BotApp extends App with StrictLogging {
 
   // Own independent schedule (same reasoning as the prune sweep above) —
   // guarded by Config.PatreonApi.enabled so this is a no-op until real
-  // Patreon API credentials are configured.
+  // Patreon API credentials are configured. That "no-op" is louder than it
+  // used to be: this sync is now the only thing that answers who's
+  // subscribed, so running without credentials means an empty snapshot and
+  // nobody able to /setup. Said plainly in the log rather than left to be
+  // deduced from a paywall that quietly refuses everyone.
   if (Config.PatreonApi.enabled) {
     logger.info(s"Patreon API sync enabled, campaign '${Config.PatreonApi.campaignId}', every ${Config.PatreonApi.syncInterval}")
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
@@ -722,7 +938,7 @@ object BotApp extends App with StrictLogging {
       catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
     })(ex)
   } else {
-    logger.info("Patreon API sync disabled (no access token configured)")
+    logger.warn("Patreon API sync disabled (no access token configured) — the paywall reads this sync, so nobody will pass the /setup subscription check")
   }
 
   /** Patreon's own API only gives us a linked patron's Discord *id*, not a
@@ -730,24 +946,33 @@ object BotApp extends App with StrictLogging {
    *  dashboard's 10s poll), via the same blocking JDA lookup PatreonAdminRoute
    *  uses for a single user. A failed lookup just leaves that member's
    *  username unresolved for this pass; it's retried on the next sync. */
-  private def resolveDiscordUsername(member: domain.PatreonMember): domain.PatreonMember =
+  private def resolveDiscordUsername(member: domain.PatreonMember,
+                                     known: Map[String, String]): domain.PatreonMember =
     member.discordUserId match {
       case None => member
       case Some(discordId) =>
+        // Whatever was resolved last time, for when this lookup can't answer.
+        // The snapshot is replaced wholesale, so without this a Discord timeout
+        // blanks a supporter's name on the dashboard until some later sync
+        // happens to succeed — losing a name we already knew, over a hiccup that
+        // had nothing to do with them.
+        def lastKnown = member.copy(discordUsername = known.get(discordId))
         try {
           val user = discordGateway.retrieveUser(discordId)
-          if (user != null) member.copy(discordUsername = Some(user.getName)) else member
+          if (user != null) member.copy(discordUsername = Some(user.getName)) else lastKnown
         } catch {
           case ex: Throwable =>
             logger.warn(s"Failed to resolve Discord username for linked Patreon member '${member.patreonMemberId}' (Discord id '$discordId')", ex)
-            member
+            lastKnown
         }
     }
 
   /** Best-effort periodic snapshot of the Patreon campaign's member list
-   *  (see patreonapi.PatreonApiClient), purely for the dashboard's
-   *  supporters panel — never affects paywallService's own Discord-role
-   *  gate directly. It does reclaim a dashboard-granted seat override for
+   *  (see patreonapi.PatreonApiClient), backing both the dashboard's
+   *  supporters panel and the paywall gate itself — this snapshot is what
+   *  PaywallService.callerIsSubscribed reads, so the guards below on what
+   *  gets written are load-bearing, not tidiness. It also reclaims a
+   *  dashboard-granted seat override for
    *  someone Patreon has *just now* confirmed a Discord link for (see
    *  PaywallService.reclaimOverridesFromPatreon): a one-time hand-off from
    *  the admin's manual bridge to Patreon as the ongoing source of truth,
@@ -759,16 +984,34 @@ object BotApp extends App with StrictLogging {
    *  fetch just leaves the last snapshot in place until the next tick, same
    *  degrade-gracefully shape as everything else here. */
   private def syncPatreonMembers(): Unit =
-    patreonApiClient.fetchAllMembers().foreach { members =>
-      val enriched = members.map(resolveDiscordUsername)
-      logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account)")
-      val previouslyLinkedIds = patreonMemberRepository.snapshot().flatMap(_.discordUserId).toSet
-      try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
-      catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
+    patreonApiClient.fetchAllMembers().foreach {
+      // A failed fetch must never reach replaceSnapshot: that call prunes
+      // every row the sync didn't carry, so an empty list wouldn't leave the
+      // snapshot stale, it would erase it — and with it every supporter's
+      // access, since callerIsSubscribed reads this table.
+      case None =>
+        logger.warn("Patreon member sync failed; keeping the previous snapshot rather than replacing it")
+      // A *successful* empty response is refused for the same reason. A live
+      // campaign never legitimately drops to zero members, so this reads as a
+      // misconfigured campaign id or a Patreon-side oddity answering 200 with
+      // no data — and a campaign that really had no members would have
+      // nobody to gate anyway, so declining to wipe costs nothing.
+      case Some(members) if members.isEmpty =>
+        logger.warn("Patreon member sync returned no members at all; keeping the previous snapshot rather than emptying it")
+      case Some(members) =>
+        // Read once, before anything is overwritten, and used for two things: the
+        // names already resolved, and which accounts were already linked.
+        val previous = patreonMemberRepository.snapshot()
+        val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
+        val enriched = members.map(resolveDiscordUsername(_, knownNames))
+        logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account, ${enriched.count(m => m.patronStatus.contains("active_patron") && m.discordUserId.isDefined)} of those active)")
+        val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
+        try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
+        catch { case ex: Throwable => logger.warn("Failed to persist the Patreon member sync", ex) }
 
-      val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
-      val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
-      if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
+        val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
+        val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
+        if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
     }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
@@ -801,6 +1044,14 @@ object BotApp extends App with StrictLogging {
 
     val activityInfo = activityConfig(g)
     modifyActivityData(_ + (guildId -> activityInfo))
+
+    // Announced world transfers, minus anything old enough that the former-world
+    // field it suppresses has long since cleared. Read before the prune: the read
+    // is what creates the table on a guild that has never had one.
+    val transferCutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
+    val transferInfo = worldTransferConfig(g).filter(_.detectedAt.isAfter(transferCutoff))
+    modifyWorldTransfersData(_ + (guildId -> transferInfo))
+    worldTransferRepository.removeExpired(guildId, transferCutoff)
 
     val customSortInfo = customSortConfig(g)
     modifyCustomSortData(_ + (guildId -> customSortInfo))
@@ -911,7 +1162,7 @@ object BotApp extends App with StrictLogging {
         .get(world)
         .orElse(dreamScar.get("Unknown"))
         .getOrElse("Unknown")
-    val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
+    val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
     val rashidEmbed = new EmbedBuilder()
       .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
@@ -968,6 +1219,9 @@ object BotApp extends App with StrictLogging {
 
   private def activityConfig(guild: Guild): List[PlayerCache] =
     activityRepository.getActivity(guild.getId)
+
+  private def worldTransferConfig(guild: Guild): List[WorldTransfer] =
+    worldTransferRepository.getTransfers(guild.getId)
 
   def discordRetrieveConfig(guild: Guild): Map[String, String] =
     discordConfigRepository.getConfig(guild.getId)
@@ -1058,7 +1312,60 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def fetchDreamScarBosses(): List[BossEntry] = wikiClient.dreamScarBosses()
+  /** Read the Dream Courts table off the wiki and align it to the current game
+   *  day. None when the page gave us nothing usable, leaving it to the caller
+   *  to decide what to keep.
+   *
+   *  The alignment is the point. That page is served from Fandom's parser cache
+   *  and routinely lags a day behind the rollover — the page itself carries a
+   *  "click here to purge the cache" link for exactly this — so a read taken at
+   *  the wrong moment is a day stale. It does state the day it was rendered
+   *  for, and the rotation advances one step per day, so a stale render is both
+   *  detectable and correctable rather than something we have to discard. */
+  def fetchDreamScarBosses(): Option[Map[String, String]] = {
+    val snapshot =
+      try wikiClient.dreamScarSnapshot()
+      catch {
+        case ex: Throwable =>
+          logger.warn("Failed to fetch the Dream Courts bosses from the wiki", ex)
+          domain.DreamScarSnapshot(None, Nil)
+      }
+    if (snapshot.bosses.isEmpty) {
+      logger.warn("The Dream Courts wiki page returned no boss table")
+      None
+    } else {
+      val fetched = snapshot.bosses.map(e => e.world -> e.boss).toMap
+      val gameDay = ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin))
+      snapshot.renderedDay match {
+        case None =>
+          logger.warn("The Dream Courts wiki page didn't say which day it was rendered for — taking it at face value")
+          Some(fetched)
+        case Some(renderedDay) =>
+          val behind = domain.time.DreamScarCycle.daysBehind(renderedDay, gameDay)
+          if (behind == 0) Some(fetched)
+          else {
+            logger.warn(s"The Dream Courts wiki page was rendered for $renderedDay but the game day is $gameDay — advancing it by $behind day(s)")
+            Some(domain.time.DreamScarCycle.shiftAllBossesUp(fetched, behind))
+          }
+      }
+    }
+  }
+
+  /** Bring `dreamScar` up to date, preferring a fresh (and day-aligned) wiki
+   *  read so the map can correct itself rather than inheriting every past
+   *  mistake. `shiftOnFailure` says what to do when the wiki can't be read at
+   *  all: the server-save refresh advances the map we already hold, so an
+   *  outage still rotates instead of freezing a day behind, while a manual
+   *  `/admin dreamscar` leaves it alone — that one exists to *undo* drift, and
+   *  shifting on a failed fetch could just as easily add some. */
+  private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
+    fetchDreamScarBosses() match {
+      case Some(bosses) => dreamScar = bosses
+      case None if shiftOnFailure =>
+        logger.warn("Advancing the Dream Courts bosses locally instead of re-reading them")
+        dreamScar = shiftAllBossesUp(dreamScar)
+      case None => ()
+    }
 
   def fetchCreatureNames(): List[String] = wikiClient.creatureNames()
 

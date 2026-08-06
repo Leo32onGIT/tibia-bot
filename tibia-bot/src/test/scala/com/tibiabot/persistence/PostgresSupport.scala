@@ -18,4 +18,28 @@ trait PostgresSupport { self: AnyFunSuite =>
     if (host.isEmpty) cancel("PGHOST not set; skipping Postgres integration test")
     new JdbcConnectionProvider(host, sys.env.getOrElse("PGPASSWORD", "postgres"))
   }
+
+  /** Creates the shared `bot_cache` database and its tables, exactly once per
+   *  test JVM. Every spec that touches the cache database must go through this
+   *  rather than running its own CREATE: sbt runs suites in parallel inside one
+   *  JVM, and against a brand-new Postgres two threads would otherwise both find
+   *  the database (or a table) missing and both try to create it — failing with
+   *  `database "bot_cache" does not exist` or a duplicate `pg_type` key. */
+  protected def ensureCacheSchema(provider: JdbcConnectionProvider): Unit =
+    PostgresSupport.ensureCacheSchema(provider)
+}
+
+private object PostgresSupport {
+
+  private var initialised = false
+
+  /** Deliberately implemented via `SchemaInitializer.initCache` — that is the
+   *  production path SchemaInitializerIntegrationSpec asserts on, so the specs
+   *  set up their database the same way the bot does. */
+  def ensureCacheSchema(provider: JdbcConnectionProvider): Unit = synchronized {
+    if (!initialised) {
+      new SchemaInitializer(provider).initCache()
+      initialised = true
+    }
+  }
 }

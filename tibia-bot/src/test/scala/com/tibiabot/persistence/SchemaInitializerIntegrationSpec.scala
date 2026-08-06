@@ -11,6 +11,11 @@ class SchemaInitializerIntegrationSpec extends AnyFunSuite with Matchers with Po
 
   test("initCache ensures bot_cache with deaths/levels/list/satchel tables") {
     val provider = pgOrCancel()
+    // Take the shared one-time setup first: it runs initCache under a JVM-wide
+    // guard, so no sibling suite can be creating these tables in parallel. The
+    // direct call below is then a genuine (and now safely idempotent) exercise
+    // of the method under test rather than a race against every other spec.
+    ensureCacheSchema(provider)
     new SchemaInitializer(provider).initCache()
     val conn = provider.cache()
     try {

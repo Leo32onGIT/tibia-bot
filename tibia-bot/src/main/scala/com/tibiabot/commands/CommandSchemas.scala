@@ -2,7 +2,7 @@ package com.tibiabot.commands
 
 import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
-import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
+import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData, SubcommandGroupData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 
 /** Slash-command schema (shape) definitions, extracted verbatim from BotApp.
@@ -139,6 +139,15 @@ object CommandSchemas {
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("activity", "Show or hide activity for players you don't track")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral activity?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         )
     )
 
@@ -180,6 +189,7 @@ object CommandSchemas {
       ),
       new SubcommandData("info", "get discord info"),
       new SubcommandData("dreamscar", "resync dreamscar wiki info"),
+      new SubcommandData("boosted", "Repost the boosted boss/creature message in every discord"),
       new SubcommandData("worldlist", "get discord info"),
       new SubcommandData("message", "Send a message to a specific discord")
       .addOptions(
@@ -244,6 +254,21 @@ object CommandSchemas {
         )
     )
 
+  /** The respawn claim system's only slash command.
+   *
+   *  Everything else it does is a button or a modal on the spawns forum, on the
+   *  card for the spawn being acted on. Stamina is the exception: it belongs to
+   *  the member rather than to any one spawn, so there is no card for it to live
+   *  on. */
+  val staminaCommand: SlashCommandData =
+    Commands.slash("stamina", "Show your claim stamina and what's using it")
+
+  /** A member's own bookings, across every spawn. The Book button on a spawn's
+   *  card only ever shows that spawn's, so there is nowhere else to see them all
+   *  — and nowhere else to clear them in one go. */
+  val bookingsCommand: SlashCommandData =
+    Commands.slash("bookings", "Show the respawn slots you have booked")
+
   /** Visible immediately when the bot joins a guild, before any world's been
    *  set up — /setup itself, /help (how do I use this bot, including how to
    *  run /setup in the first place), and galthen/boosted/patreon (personal,
@@ -254,7 +279,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, staminaCommand, bookingsCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands
@@ -291,10 +316,25 @@ object CommandSchemas {
    *  object deliberately stays decoupled from Config/BotRole/JDA) — when
    *  true, an empty list is returned so the caller's bulk `updateCommands()`
    *  call clears any commands this identity may have previously registered
-   *  there, not just skips future registration and leaves stale ones behind. */
-  def commandsFor(guildId: Long, hasWorldConfigured: Boolean, excludeAll: Boolean = false): List[SlashCommandData] =
-    if (excludeAll) Nil
-    else if (supportGuildIds.contains(guildId)) adminCommands
-    else if (hasWorldConfigured) commands
-    else initialCommands
+   *  there, not just skips future registration and leaves stale ones behind.
+   *
+   *  `respawnEnabled` is the respawn claim system's rollout gate, decided by
+   *  the caller from `Config.Respawn.enabled` (this object deliberately stays
+   *  decoupled from Config). `/stamina` stays in the lists above regardless, so
+   *  the schema is still covered by the routing spec, but it is filtered out of
+   *  what actually gets registered while the feature is off — prod and DEV run
+   *  the same image, and a command Discord shows but the bot won't service is
+   *  worse than no command at all. */
+  private def respawnCommandNames(command: SlashCommandData): Boolean =
+    command.getName == staminaCommand.getName || command.getName == bookingsCommand.getName
+
+  def commandsFor(guildId: Long, hasWorldConfigured: Boolean, excludeAll: Boolean = false,
+                  respawnEnabled: Boolean = false): List[SlashCommandData] = {
+    val selected =
+      if (excludeAll) Nil
+      else if (supportGuildIds.contains(guildId)) adminCommands
+      else if (hasWorldConfigured) commands
+      else initialCommands
+    if (respawnEnabled) selected else selected.filterNot(respawnCommandNames)
+  }
 }
