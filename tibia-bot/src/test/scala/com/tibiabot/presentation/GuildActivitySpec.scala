@@ -91,4 +91,27 @@ class GuildActivitySpec extends AnyFunSuite with Matchers {
     val activity = List(row("Carol"))
     GuildActivity.applyRename(activity, "Bob", "Alice", List("Bob"), now) shouldBe activity
   }
+
+  /* A cache-bypassed character fetch can be served different cached copies of
+   * the same sheet from one poll to the next, so a rename shows up, vanishes
+   * and shows up again. Moving the row is what makes the announcement one-shot,
+   * which is why TibiaBot only moves it on the poll it announces on — these two
+   * pin down the halves of that. */
+
+  test("a rename held back for the settling window is still there to find next poll") {
+    val activity = List(row("Bob"))
+    val first = GuildActivity.renameFromFormerNames(activity, "Alice", List("Bob"), nobodyOnline)
+    // Nothing was moved, so a later poll re-detects exactly the same rename —
+    // against the row's original timestamp, so the window still expires on time.
+    GuildActivity.renameFromFormerNames(activity, "Alice", List("Bob"), nobodyOnline) shouldBe first
+    first.map(_.previousUpdate) shouldBe Some(earlier)
+  }
+
+  test("once the row is moved a flip-flopping sheet cannot announce the rename again") {
+    val moved = GuildActivity.applyRename(List(row("Bob")), "Bob", "Alice", List("Bob"), now)
+    // The stale copy comes back naming the character Bob, with no former names.
+    GuildActivity.renameFromFormerNames(moved, "Bob", Nil, nobodyOnline) shouldBe None
+    // Then the fresh copy again — the moved row is what refuses it this time.
+    GuildActivity.renameFromFormerNames(moved, "Alice", List("Bob"), nobodyOnline) shouldBe None
+  }
 }

@@ -312,48 +312,72 @@ class TibiaBot(
                 val oldName = renamed.oldName
                 val playerType = if (huntedPlayerCheck || huntedGuildCheck) 13773097 else if (allyPlayerCheck || allyGuildCheck) 36941 else 3092790
                 val renamedAt = ZonedDateTime.now()
-                // Update name in cache and db. The recorded guild is carried across as
-                // it stands rather than being caught up to the character's current one:
-                // a rename and a guild swap in the same poll are two events, and the
-                // swap is posted by the guild-change branch on the next poll. Storing
-                // the current guild here would agree with nothing in memory and would
-                // swallow the swap outright if the bot restarted before that poll.
-                BotApp.modifyActivityData { m =>
-                  m + (guildId -> presentation.GuildActivity.applyRename(m.getOrElse(guildId, List()), oldName, charName, formerNamesList, renamedAt))
-                }
-                BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, renamed.guild, renamedAt, charName)
+                // Whatever else happens, the character is not posted as joining or
+                // leaving under their new name this poll — that would read as a
+                // stranger appearing in the guild.
                 skipJoinLeave = true
-                if (renamed.previousUpdate.plusMinutes(6).isBefore(ZonedDateTime.now())) {
-                  // if player is in hunted or allied 'players' list, update information there too
-                  if (huntedPlayerCheck) {
-                    BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
-                    val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                      if (player.name.equalsIgnoreCase(oldName)) {
-                        player.copy(name = charName.toLowerCase)
-                      } else {
-                        player
-                      }
-                    }
-                    BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
+                // Six minutes for the character sheet to settle. A cache-bypassed
+                // fetch can be served different cached copies of the same sheet from
+                // one poll to the next, so a rename shows up, disappears and shows up
+                // again; announcing on first sight spammed the activity channel.
+                //
+                // Moving the row is what makes the announcement one-shot — once it
+                // carries the new name, renameFromFormerNames stops recognising the
+                // character — so the move and the notice have to be the same decision.
+                // Renaming the row while staying silent (what this did before) spent
+                // the one chance to announce and posted nothing; the sheet could then
+                // flip-flop freely and the rename was simply never reported. Holding
+                // both back instead means the next poll re-detects it against the
+                // untouched row and announces exactly once, just later.
+                if (renamed.previousUpdate.plusMinutes(6).isBefore(renamedAt)) {
+                  // The recorded guild is carried across as it stands rather than being
+                  // caught up to the character's current one: a rename and a guild swap
+                  // in the same poll are two events, and the swap is posted by the
+                  // guild-change branch on the next poll. Storing the current guild here
+                  // would agree with nothing in memory and would swallow the swap
+                  // outright if the bot restarted before that poll.
+                  var moved = false
+                  BotApp.modifyActivityData { m =>
+                    val live = m.getOrElse(guildId, List())
+                    moved = live.exists(_.name.equalsIgnoreCase(oldName))
+                    m + (guildId -> presentation.GuildActivity.applyRename(live, oldName, charName, formerNamesList, renamedAt))
                   }
-                  if (allyPlayerCheck) {
-                    BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
-                    val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                      if (player.name.equalsIgnoreCase(oldName)) {
-                        player.copy(name = charName.toLowerCase)
-                      } else {
-                        player
+                  // The row went while we were deciding. Announcing now would be
+                  // announcing a move that did not happen, and nothing suppresses a
+                  // repeat afterwards, so say nothing.
+                  if (moved) {
+                    BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, renamed.guild, renamedAt, charName)
+                    // if player is in hunted or allied 'players' list, update information there too
+                    if (huntedPlayerCheck) {
+                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
+                      val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
+                        if (player.name.equalsIgnoreCase(oldName)) {
+                          player.copy(name = charName.toLowerCase)
+                        } else {
+                          player
+                        }
                       }
+                      BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
                     }
-                    BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
-                  }
-                  if (activityTextChannel != null) {
-                    if (activityTextChannel.canTalk() || (!Config.prod)) {
-                      val activityEmbed = new EmbedBuilder()
-                      activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
-                      activityEmbed.setColor(playerType)
-                      activityEmbed.setThumbnail(Config.nameChangeThumbnail)
-                      sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
+                    if (allyPlayerCheck) {
+                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
+                      val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
+                        if (player.name.equalsIgnoreCase(oldName)) {
+                          player.copy(name = charName.toLowerCase)
+                        } else {
+                          player
+                        }
+                      }
+                      BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
+                    }
+                    if (activityTextChannel != null) {
+                      if (activityTextChannel.canTalk() || (!Config.prod)) {
+                        val activityEmbed = new EmbedBuilder()
+                        activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$oldName](${charUrl(oldName)})** changed their name to **[$charName](${charUrl(charName)})**.")
+                        activityEmbed.setColor(playerType)
+                        activityEmbed.setThumbnail(Config.nameChangeThumbnail)
+                        sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
+                      }
                     }
                   }
                 }
