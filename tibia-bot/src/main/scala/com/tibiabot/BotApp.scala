@@ -201,8 +201,10 @@ object BotApp extends App with StrictLogging {
   // stops them answering each other's claims (see respawn.RespawnOwnership).
   private val respawnOwnership = new respawn.RespawnOwnership(discordGateway.selfUserId)
 
-  // Per-user boosted boss/creature notification subscriptions
-  val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList)
+  // Per-user boosted boss/creature notification subscriptions. Takes this bot's
+  // own id for the same reason respawnOwnership above does: bots sharing a
+  // bot_cache database must not consume each other's server-save state.
+  val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList, discordGateway.selfUserId)
 
   // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
@@ -725,41 +727,58 @@ object BotApp extends App with StrictLogging {
             if (bossChanged == "1" && creatureChanged == "1") {
               boostedService.boostedMonsterUpdate("", "", "0", "0")
               val embeds: List[MessageEmbed] = boostedInfoList.map { case (embed, _, _) => embed }.toList
-              val notificationsList: List[BoostedStamp] = boostedService.boostedAll()
-              notificationsList.foreach { entry =>
-                var matchedNotification = false
-                boostedInfoList.foreach { case (_, _, boostedName) =>
-                  if (boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all") {
-                    matchedNotification = true
-                  }
-                }
-                if (matchedNotification) {
-                  // Low priority (per-user DM burst) — goes through the shared background
-                  // lane so it can't compete with deaths/boosted-channel posts for REST slots.
-                  outboundSender.enqueue("boosted-dm") { () =>
-                    val user: User = discordGateway.retrieveUser(entry.user)
-                    if (user != null) {
-                      try {
-                        user.openPrivateChannel().queue { privateChannel =>
-                          val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                          privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
-                            Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                          )).queue(null, new ErrorHandler().handle(
+              val notificationsList: List[BoostedStamp] = boostedService.boostedDmTargets()
+              // One DM per user per save, not per matching subscription: someone who
+              // subscribed to today's boss and today's creature by name has two rows
+              // but only wants one message (it carries both embeds either way), and
+              // the failure count below is meant to measure saves, not rows.
+              val recipients: List[String] = notificationsList.collect {
+                case entry if boostedInfoList.exists { case (_, _, boostedName) =>
+                  boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all"
+                } => entry.user
+              }.distinct
+
+              recipients.foreach { recipientId =>
+                // Low priority (per-user DM burst) — goes through the shared background
+                // lane so it can't compete with deaths/boosted-channel posts for REST slots.
+                outboundSender.enqueue("boosted-dm") { () =>
+                  val user: User = discordGateway.retrieveUser(recipientId)
+                  if (user != null) {
+                    try {
+                      user.openPrivateChannel().queue { privateChannel =>
+                        val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
+                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
+                          Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
+                        )).queue(
+                          (_: Message) => {
+                            // Delivered — this is the bot that shares a guild with them, so it
+                            // takes ownership of their DMs (claiming the row if it was still
+                            // unclaimed) and their failure count goes back to zero.
+                            try boostedService.dmDelivered(recipientId)
+                            catch { case ex: Throwable => logger.warn(s"Failed to record boosted-DM delivery for user: '$recipientId'", ex) }
+                          },
+                          new ErrorHandler().handle(
                             List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
                             new java.util.function.Consumer[ErrorResponseException] {
-                              // The bot can never DM this user again (no shared guild left, or
-                              // DMs closed) — drop their subscription instead of retrying every
-                              // server save forever.
+                              // Can't tell "DMs closed" from "wrong bot" by error code, so this
+                              // never drops a subscription on one failure the way it used to —
+                              // with several bots on one notifications table that quietly
+                              // deleted the lists of everyone the other bot served. Only a run
+                              // of failed saves against a row this bot actually owns gives up.
                               def accept(ex: ErrorResponseException): Unit = {
-                                boostedService.boosted(entry.user, "disable", "")
-                                logger.info(s"Removed boosted-DM subscription for user '${entry.user}': can no longer be DMed")
+                                try {
+                                  if (boostedService.dmFailed(recipientId))
+                                    logger.info(s"Removed boosted-DM subscription for user '$recipientId': undeliverable for several server saves running")
+                                } catch {
+                                  case ex: Throwable => logger.warn(s"Failed to record boosted-DM failure for user: '$recipientId'", ex)
+                                }
                               }
                             }
-                          ))
-                        }
-                      } catch {
-                        case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '${entry.user}'", ex)
+                          )
+                        )
                       }
+                    } catch {
+                      case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '$recipientId'", ex)
                     }
                   }
                 }

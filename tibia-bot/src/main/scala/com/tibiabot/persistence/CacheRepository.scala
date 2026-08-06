@@ -23,8 +23,13 @@ trait CacheRepository {
   /** Delete list rows older than 7 days relative to `now`. */
   def removeExpiredList(now: ZonedDateTime): Unit
 
-  /** Read the boosted boss/creature row (creating the table + default row if needed). */
-  def getBoosted(): List[BoostedCache]
-  /** Update boosted fields; empty-string arguments are left unchanged. */
-  def updateBoosted(boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit
+  /** Read `botId`'s own boosted boss/creature row (creating the table, the
+   *  bot_id column and that bot's row if needed).
+   *
+   *  Keyed by bot identity because several bots can share one bot_cache
+   *  database — see JdbcCacheRepository's note on why a single shared row
+   *  silently cost one of them its server-save post. */
+  def getBoosted(botId: String): List[BoostedCache]
+  /** Update `botId`'s own boosted fields; empty-string arguments are left unchanged. */
+  def updateBoosted(botId: String, boss: String, creature: String, bossChanged: String, creatureChanged: String): Unit
 }
