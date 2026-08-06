@@ -12,13 +12,13 @@ import scala.util.{Failure, Success, Try}
 
 /** Owner-only Patreon seat admin actions for the dashboard: release one seat,
  *  release every seat a user holds, or set a per-user seat-count adjustment
- *  (`extra-seats` below, resolved from a Discord username rather than a raw
- *  id — see [[paywall.PaywallService.findUserIdByUsername]]). A *positive*
- *  adjustment also fully bypasses the Patreon subscription check for that
- *  person (see [[paywall.PaywallService.callerIsSubscribed]]), so this
- *  doubles as "give this specific person bot access without a real
- *  subscription" — arbitrary overrides of the normal `/setup`-driven seat
- *  flow. Reuses [[DiscordAuth.authenticatedUser]] the same way
+ *  (`extra-seats` below, taking a Discord username, raw id or pasted mention —
+ *  see [[paywall.PaywallService.resolveUserId]]). A *positive* adjustment also
+ *  fully bypasses the Patreon subscription check for that person (see
+ *  [[paywall.PaywallService.callerIsSubscribed]]), so this doubles as "give
+ *  this specific person bot access without a real subscription" — an arbitrary
+ *  override of the normal `/setup`-driven seat flow, deliberately not gated on
+ *  the target being in the support server or anywhere else. Reuses [[DiscordAuth.authenticatedUser]] the same way
  *  [[StatusRoute]] does; mounted alongside it under the same `/dashboard`
  *  prefix in BotApp. */
 final class PatreonAdminRoute(
@@ -72,12 +72,12 @@ final class PatreonAdminRoute(
                   val username = fields("username").convertTo[String]
                   Try(fields("extraSeats").convertTo[Int]) match {
                     case Success(extraSeats) =>
-                      paywallService.findUserIdByUsername(username) match {
+                      paywallService.resolveUserId(username) match {
                         case Some(targetUserId) =>
                           paywallService.setExtraSeats(targetUserId, extraSeats)
                           complete(ok)
                         case None =>
-                          badRequest(s"No member found with username '$username' in the support server")
+                          badRequest(s"Couldn't resolve '$username' — paste their Discord user ID if they aren't in the support server")
                       }
                     case Failure(_) => badRequest("Expected an integer extraSeats")
                   }
