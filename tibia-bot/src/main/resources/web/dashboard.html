@@ -54,23 +54,36 @@
     position: sticky;
     top: 0;
   }
-  /* Brand mark, matching the landing page's header: avatar, then the name and
-     a muted path suffix on one mono line. */
-  .sidebar-header {
-    padding: 15px 16px;
-    border-bottom: 1px solid var(--panel-border);
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-family: var(--mono);
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--text-strong);
+  /* The world list is always taller than the viewport (80-odd worlds at 40px),
+     so where it ends is a permanent visual edge rather than an edge case. The
+     fade makes that edge look deliberate instead of guillotined; it sits over
+     the list rather than masking .sidebar so the scrollbar stays crisp. */
+  .sidebar::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 34px;
+    background: linear-gradient(to top, var(--sidebar-bg), transparent);
+    pointer-events: none;
   }
-  .sidebar-header img { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
-  .sidebar-header .brand-suffix { color: var(--muted); font-weight: 400; margin-left: 5px; }
+  /* No brand mark here any more — the masthead carries it, and two copies of
+     the same wordmark sitting side by side at the top of the page read as a
+     mistake. The sidebar is now purely the world list. */
   .world-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  /* The browser default scrollbar is a bright grey slab against this panel's
+     near-black, and it is on screen permanently. Thumb is drawn inset via a
+     transparent border + background-clip so it reads as a slim pill rather
+     than filling the gutter edge to edge. */
+  .world-list { scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .world-list::-webkit-scrollbar { width: 10px; }
+  .world-list::-webkit-scrollbar-track { background: transparent; }
+  .world-list::-webkit-scrollbar-thumb {
+    background: #2a3140;
+    border-radius: 5px;
+    border: 3px solid var(--sidebar-bg);
+    background-clip: padding-box;
+  }
+  .world-list::-webkit-scrollbar-thumb:hover { background: #39435a; background-clip: padding-box; }
   .world-item {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 16px;
@@ -128,22 +141,32 @@
 
   main { flex: 1; padding: 20px 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 
+  /* Page masthead. Rate-limit lane cards used to occupy the left column here;
+     they now live in the API throughput panel's Discord row, next to the
+     throughput figures they belong with, which freed the width for the three
+     headline stats to be read rather than squinted at. The brand mark also
+     only ever existed in the sidebar, which is off-canvas on mobile — so this
+     is the only header the page has at that size. */
   .kpis-strip {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--panel-border);
     border-radius: 8px;
-    padding: 8px 16px;
+    padding: 14px 18px;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: 16px;
+    gap: 26px;
     flex-shrink: 0;
   }
-  .kpi-group { display: flex; gap: 20px; justify-self: center; }
-  .kpi { display: flex; align-items: center; gap: 6px; }
-  .kpi i { font-size: 14px; color: var(--muted); }
-  .kpi .label { color: var(--muted); font-size: 11px; }
-  .kpi .value { color: var(--text-strong); font-size: 13px; font-weight: 600; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .masthead-brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-strong); }
+  .masthead-brand img { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; }
+  .masthead-brand .brand-suffix { color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .masthead-sub { display: block; font-size: 10px; font-weight: 400; color: var(--muted); letter-spacing: 0.04em; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .kpi-group { display: flex; gap: 34px; justify-self: center; }
+  .kpi { display: flex; flex-direction: column; gap: 5px; }
+  .kpi .label { font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .kpi .label i { font-size: 12px; }
+  .kpi .value { color: var(--text-strong); font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
   .panel {
     background: var(--panel);
@@ -186,19 +209,6 @@
   .detail-stat .num { font-size: 16px; font-weight: 600; color: var(--text-strong); font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .detail-stat .num-label { font-size: 11px; color: var(--muted); }
 
-  .bots-table-wrap { padding: 0 16px 16px; overflow-x: auto; }
-  .bots-table { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-size: 12px; }
-  .bots-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 10px 8px; border-bottom: 1px solid var(--panel-border); }
-  /* Same card background as .discord-item (world pane's discord info rows) so
-     the two lists read as one visual language. */
-  .bots-table td { padding: 8px 10px; background: rgba(255, 255, 255, 0.02); font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  .bots-table td:first-child { border-radius: 6px 0 0 6px; }
-  .bots-table td:last-child { border-radius: 0 6px 6px 0; }
-  .bots-table th:last-child, .bots-table td:last-child { text-align: right; }
-  /* Bot names are proper names, not identifiers — back to sans while the rest
-     of the row's figures stay mono. */
-  .bots-table-name { display: flex; align-items: center; gap: 8px; font-family: var(--sans); font-variant-numeric: normal; }
-
   .discord-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 16px; max-height: 320px; overflow-y: auto; }
   .discord-item { display: flex; align-items: center; gap: 8px; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 8px 10px; border-radius: 6px; flex-shrink: 0; }
   .discord-item i { color: var(--muted); font-size: 14px; }
@@ -208,23 +218,71 @@
   .gid { color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .discord-item .gid { margin-left: auto; }
 
-  /* Compact rate-limit indicator, folded into the same bordered strip as the
-     KPI group (see .kpis-strip above) — rate-limit health is bot-wide, not
-     tied to the selected world's details, so it doesn't belong in the
-     world-detail panel below. */
-  .lanes-compact { justify-self: start; }
-  .lanes-rows { display: flex; gap: 8px; }
-  .lane-card {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    padding: 6px 14px;
-    text-align: center;
-    min-width: 76px;
-  }
-  .lane-card-label { color: var(--muted); font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
-  .lane-card-depth { font-family: var(--mono); font-size: 18px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-  .lane-card-ms { color: var(--muted); font-family: var(--mono); font-size: 9px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  /* API throughput panel — bot > source > detail.
+     The bot level is only rendered when more than one bot is connected; with a
+     plain single-bot deployment the source rows sit directly in the panel and
+     this collapses to two rows, since a lone "which bot" wrapper around
+     everything would be pure chrome. Deliberately built from .patreon-sup's
+     idiom (bordered card, clickable head, rotating chevron, hidden body) —
+     the page already had a component for exactly this, so the extra level of
+     nesting introduces no new visual language. */
+  .bot-cards { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; }
+  .bot-card { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+  .bot-head { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 18px; padding: 10px 13px; background: rgba(255, 255, 255, 0.02); cursor: pointer; }
+  .bot-head:hover { background: rgba(255, 255, 255, 0.032); }
+  .bot-id { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+  .bot-id .bot-avatar { width: 22px; height: 22px; }
+  .bot-name { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
+  /* The fleet roster line — worlds, guilds, last check-in. This is what the
+     separate Bots panel used to be: once every bot has its own card here, a
+     second table repeating the same roster was pure duplication. Its remaining
+     two figures (tracked players, bot id) are on this element's tooltip. */
+  .bot-meta { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; cursor: help; }
+  /* Roll-up so a collapsed bot still reports its rates — the whole point of
+     collapsing it is that you shouldn't have to open it to see if it's alive. */
+  .bot-roll { display: flex; gap: 22px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .bot-roll .r { display: flex; flex-direction: column; gap: 3px; text-align: right; }
+  .bot-roll .r .v { font-size: 14px; font-weight: 600; color: var(--text-strong); }
+  .bot-roll .r .v .unit { font-size: 9px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+  .bot-roll .r .k { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+  .bot-chevron { color: var(--muted); font-size: 12px; transition: transform 0.15s ease; }
+  .bot-card.expanded .bot-chevron { transform: rotate(180deg); }
+  .bot-body { display: none; padding: 10px 12px 12px; }
+  .bot-card.expanded .bot-body { display: block; }
+
+  .api-rows { display: flex; flex-direction: column; gap: 8px; }
+  .api-rows.top-level { padding: 0 16px 16px; }
+  .api-row { background: rgba(255, 255, 255, 0.02); border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+  .api-head { position: relative; padding: 13px 15px; cursor: pointer; }
+  .api-head:hover { background: rgba(255, 255, 255, 0.022); }
+  /* The 10-minute history, drawn edge to edge behind the row rather than in a
+     column of its own: at this size the shape is what's legible, not values off
+     it, and as a backdrop it costs no width and never competes with a figure. */
+  .api-bleed { position: absolute; inset: 0; opacity: 0.55; pointer-events: none; }
+  .api-bleed svg { width: 100%; height: 100%; display: block; }
+  .api-head-inner { position: relative; display: grid; grid-template-columns: 150px repeat(3, minmax(80px, 1fr)) 20px; align-items: center; gap: 14px; }
+  .api-src { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-strong); }
+  .api-src i { font-size: 15px; }
+  .api-metric .v { font-family: var(--mono); font-size: 16px; font-weight: 600; line-height: 1; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .api-metric .v .unit { font-size: 10px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .api-metric .k { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin-top: 3px; }
+  .api-chevron { color: var(--muted); font-size: 12px; justify-self: end; transition: transform 0.15s ease; }
+  .api-row.expanded .api-chevron { transform: rotate(180deg); }
+  .api-detail { display: none; padding: 2px 15px 14px; border-top: 1px solid var(--panel-border); }
+  .api-row.expanded .api-detail { display: block; }
+
+  .detail-group { margin-top: 13px; }
+  .detail-group-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .detail-group-title .note { text-transform: none; letter-spacing: normal; }
+  .detail-group-title::after { content: ''; flex: 1; height: 1px; background: var(--panel-border); }
+  .drow { display: grid; grid-template-columns: 145px 1fr 54px 70px 92px; align-items: center; gap: 12px; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; padding: 5px 0; }
+  .drow.dhead { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; padding-bottom: 6px; }
+  .drow .dname { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drow .dname .dim { color: var(--muted); }
+  .drow .dnum { text-align: right; color: var(--text-strong); }
+  .drow .dmuted { text-align: right; color: var(--muted); }
+  .dbar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.045); overflow: hidden; }
+  .dbar span { display: block; height: 100%; border-radius: 3px; }
 
   .log-alerts-summary { display: flex; align-items: center; gap: 12px; justify-self: end; }
   .log-alert-count { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
@@ -312,13 +370,42 @@
   .patreon-add-form button[type="submit"] { background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--bg); font-size: 12px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
   .patreon-add-form button[type="submit"]:hover { filter: brightness(1.08); }
 
-  /* Below this, the fixed 200px side-by-side sidebar and the single-row KPI
-     strip both stop working: the sidebar eats half a phone screen, and the
-     KPI strip's three grid columns have nowhere to shrink to. The sidebar
+  /* First break: the API panel's wide grids. The source row's five columns and
+     the detail rows' five columns both stop fitting well before the phone
+     breakpoint below, so they reflow here rather than being squeezed. The
+     detail tables drop their cumulative-total column — it is the one figure
+     that is reference rather than signal, and the rate beside it is what you
+     came for. */
+  /* The masthead loses its three-across layout well before the phone
+     breakpoint, because the 200px sidebar is still taking its width here: the
+     brand, three 30px figures and the alert pair need more room than a ~1000px
+     window leaves. Brand and alerts keep the top row; the figures drop to their
+     own full-width centered row rather than being crushed. */
+  @media (max-width: 1040px) {
+    .kpis-strip { grid-template-columns: 1fr auto; row-gap: 16px; }
+    .kpi-group { grid-column: 1 / -1; justify-self: center; }
+  }
+
+  @media (max-width: 900px) {
+    .api-head-inner { grid-template-columns: 1fr 1fr 20px; row-gap: 12px; }
+    /* Keep only the leading figure — queue depth for a lane, share for a
+       breakdown — since that is the signal and the rest is reference. Dropped
+       positionally rather than by class so a header row (whose cells are all
+       .dnum) loses exactly the same columns as the body rows it labels;
+       matching on .dmuted left headers one cell wider than their own grid,
+       which wrapped them onto a second line. */
+    .drow { grid-template-columns: 110px 1fr 58px; }
+    .drow > *:nth-last-child(-n+2) { display: none; }
+    .bot-head { grid-template-columns: 1fr auto; row-gap: 12px; }
+    .bot-roll { gap: 16px; }
+  }
+
+  /* Below this, the fixed 200px side-by-side sidebar and the single-row
+     masthead both stop working: the sidebar eats half a phone screen, and the
+     masthead's three grid columns have nowhere to shrink to. The sidebar
      becomes an off-canvas drawer (opened via .mobile-topbar's button,
      closed via the backdrop or picking a world) instead of taking any
-     permanent screen space; the KPI strip drops to one stacked, centered
-     column instead of three fixed side-by-side ones. */
+     permanent screen space; the masthead stacks into one centered column. */
   @media (max-width: 720px) {
     .mobile-topbar { display: flex; }
     .sidebar {
@@ -335,9 +422,10 @@
 
     main { padding: 12px 12px 32px; gap: 14px; }
 
-    .kpis-strip { grid-template-columns: 1fr; gap: 12px; }
-    .lanes-compact, .kpi-group, .log-alerts-summary { justify-self: center; }
-    .kpi-group { flex-wrap: wrap; justify-content: center; }
+    .kpis-strip { grid-template-columns: 1fr; gap: 16px; }
+    .masthead-brand, .kpi-group, .log-alerts-summary { justify-self: center; }
+    .kpi-group { flex-wrap: wrap; justify-content: center; gap: 22px; }
+    .kpi .value { font-size: 24px; }
 
     .detail-stats { gap: 12px 20px; padding: 12px; }
     .discord-item { flex-wrap: wrap; }
@@ -354,10 +442,6 @@
 <body>
 <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 <aside class="sidebar" id="sidebar">
-  <div class="sidebar-header">
-    <img src="/dashboard/images/avatar.png" alt="">
-    <span>Violent Bot<span class="brand-suffix">/status</span></span>
-  </div>
   <div class="world-list" id="world-list"></div>
 </aside>
 <main>
@@ -366,13 +450,16 @@
     <span class="mobile-topbar-title">Violent Bot</span>
   </div>
   <div class="kpis-strip">
-    <div class="lanes-compact" id="lanes-compact">
-      <div class="lanes-rows" id="lanes"></div>
+    <div class="masthead-brand">
+      <img src="/dashboard/images/avatar.png" alt="">
+      <span>Violent Bot<span class="brand-suffix">/status</span>
+        <span class="masthead-sub" id="masthead-sub">&nbsp;</span>
+      </span>
     </div>
     <div class="kpi-group">
-      <div class="kpi"><i class="ti ti-world" aria-hidden="true"></i><span class="label">Worlds</span><span class="value" id="kpi-worlds">–</span></div>
-      <div class="kpi"><i class="ti ti-brand-discord" aria-hidden="true"></i><span class="label">Discords</span><span class="value" id="kpi-discords">–</span></div>
-      <div class="kpi"><i class="ti ti-users" aria-hidden="true"></i><span class="label">Tracked Players</span><span class="value" id="kpi-population">–</span></div>
+      <div class="kpi"><span class="label"><i class="ti ti-world" aria-hidden="true"></i>Worlds</span><span class="value" id="kpi-worlds">–</span></div>
+      <div class="kpi"><span class="label"><i class="ti ti-brand-discord" aria-hidden="true"></i>Discords</span><span class="value" id="kpi-discords">–</span></div>
+      <div class="kpi"><span class="label"><i class="ti ti-users" aria-hidden="true"></i>Tracked Players</span><span class="value" id="kpi-population">–</span></div>
     </div>
     <div class="log-alerts-summary">
       <span class="log-alert-count error" id="log-error-toggle"><i class="ti ti-alert-circle" aria-hidden="true"></i><span id="log-error-count">0 errors</span><i class="ti ti-chevron-down log-alerts-chevron" id="log-error-chevron" aria-hidden="true"></i></span>
@@ -380,26 +467,11 @@
     </div>
   </div>
 
-  <div class="panel" id="bots-panel" style="display:none;">
+  <div class="panel" id="api-panel">
     <div class="panel-title">
-      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i>Bots</span>
+      <span class="panel-title-toggle"><i class="ti ti-chevron-down panel-chevron" aria-hidden="true"></i>API throughput</span>
     </div>
-    <div class="bots-table-wrap">
-      <table class="bots-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>Worlds</th>
-            <th>Tracked Players</th>
-            <th>General</th>
-            <th>Online Lists</th>
-            <th>Last seen</th>
-            <th>ID</th>
-          </tr>
-        </thead>
-        <tbody id="bots-list"></tbody>
-      </table>
-    </div>
+    <div id="api-body"></div>
   </div>
 
   <div class="panel" id="log-errors-panel" style="display:none;">
@@ -447,7 +519,7 @@
     </div>
     <div class="patreon-list" id="patreon-list"></div>
     <form class="patreon-add-form" id="patreon-extra-form">
-      <input type="text" id="patreon-extra-username" placeholder="Discord username" required>
+      <input type="text" id="patreon-extra-username" placeholder="Discord username, ID or @mention" required>
       <input type="number" id="patreon-extra-count" placeholder="Extra seats (can be negative)" required>
       <button type="submit">Set extra seats</button>
     </form>
@@ -505,7 +577,7 @@ function heatColorForRatio(ratio) {
 
 // Edits (15m) is what actually feeds the online-list rate-limit lane, so it
 // stands in for per-world queue pressure — there's no true per-world queue
-// depth tracked today, only bot-wide lane totals (see renderLanes). Ratio
+// depth tracked today, only bot-wide lane totals (see renderLaneGroup). Ratio
 // against a fixed max (not relative to the busiest world shown), so a given
 // edit count always means the same thing regardless of how busy the bot is
 // overall.
@@ -574,68 +646,307 @@ function laneMaxWaitMs(lane) {
   return Object.values(lane.labels).reduce((max, s) => Math.max(max, s.avgWaitMs), 0);
 }
 
-function renderLanes(lanes, hasFleet) {
-  // Redundant once the Bots panel is showing (2+ bots) — this bot's own
-  // queue depths already appear there as one of its rows, so the KPI
-  // header's copy would just be the same numbers shown twice. Hidden with
-  // visibility (not display:none) so its grid column keeps the same
-  // footprint either way — the KPI/log-alerts groups next to it sit in a
-  // 1fr/auto/1fr grid, and removing this column's content entirely would
-  // let their positions shift depending on whether it's showing.
-  document.getElementById('lanes-compact').style.visibility = hasFleet ? 'hidden' : 'visible';
-
-  const el = document.getElementById('lanes');
-  el.innerHTML = '';
-  Object.entries(lanes).forEach(([name, lane]) => {
-    // "general" tends to stay small so 0-100 shows real movement; online-list
-    // can genuinely back up into the hundreds/thousands under load, so it
-    // needs the wider 0-1000 scale to stay meaningful instead of pinning at 100%.
-    const barMax = name === 'background' ? 100 : 1000;
-    const ratio = Math.min(1, lane.queueDepth / barMax);
-    const depthColor = heatColorForRatio(ratio);
-    const maxWaitMs = laneMaxWaitMs(lane);
-    const labelDetail = Object.entries(lane.labels).map(([label, s]) => `${label}: ${Math.round(s.avgWaitMs)}ms`).join(', ') || 'no traffic yet';
-
-    const card = document.createElement('div');
-    card.className = 'lane-card';
-    card.title = `${laneDisplayName(name)} — ${lane.queueDepth} queued, ${lane.totalDropped} dropped, ${lane.totalSuperseded} superseded\n${labelDetail}`;
-    card.innerHTML = `
-      <div class="lane-card-label">${laneDisplayName(name)}</div>
-      <div class="lane-card-depth" style="color:${depthColor};">${lane.queueDepth}</div>
-      <div class="lane-card-ms">${Math.round(maxWaitMs)}ms</div>
-    `;
-    el.appendChild(card);
-  });
+// A queue depth's severity on the shared heat ramp. "general" tends to stay
+// small so 0-100 shows real movement; online-list can genuinely back up into
+// the hundreds/thousands under load, so it needs the wider 0-1000 scale to
+// stay meaningful instead of pinning at 100%.
+function laneDepthRatio(name, queueDepth) {
+  return Math.min(1, queueDepth / (name === 'background' ? 100 : 1000));
 }
 
-// Only worth a whole panel once there's a fleet to compare — a plain
-// single-bot deployment already shows its own worlds/population/queues
-// elsewhere, so a one-row "Bots" table would just repeat them.
-function renderBots(bots) {
-  const panel = document.getElementById('bots-panel');
-  if (bots.length < 2) { panel.style.display = 'none'; return; }
-  panel.style.display = '';
-  document.getElementById('bots-list').innerHTML = bots.map(b => {
-    const roleLabel = b.bot.role === 'primary' ? 'Primary' : b.bot.role === 'secondary' ? 'Secondary' : '';
-    const lanes = b.rateLimitLanes || {};
-    const bgLane = lanes.background || { queueDepth: 0, labels: {} };
-    const olLane = lanes['online-list'] || { queueDepth: 0, labels: {} };
-    // Same heat ramp + scale (100/1000) as the KPI header's lane cards
-    // (renderLanes) so a queue depth reads the same severity everywhere.
-    const bgColor = heatColorForRatio(bgLane.queueDepth / 100);
-    const olColor = heatColorForRatio(olLane.queueDepth / 1000);
-    const bgWaitMs = Math.round(laneMaxWaitMs(bgLane));
-    const olWaitMs = Math.round(laneMaxWaitMs(olLane));
-    return `<tr>
-      <td class="bots-table-name"><img class="bot-avatar" src="${b.bot.avatarUrl}" alt="${b.bot.name}" title="${b.bot.name} (${b.bot.userId})"><span>${b.bot.name}</span>${roleLabel ? `<span class="muted">&middot; ${roleLabel}</span>` : ''}</td>
-      <td>${b.worldCount}</td>
-      <td>${b.population}</td>
-      <td style="color:${bgColor};">${bgLane.queueDepth} <span class="muted">&middot; ${bgWaitMs}ms</span></td>
-      <td style="color:${olColor};">${olLane.queueDepth} <span class="muted">&middot; ${olWaitMs}ms</span></td>
-      <td class="muted">${timeAgo(b.publishedAt)}</td>
-      <td class="gid">${b.bot.userId}</td>
-    </tr>`;
+function fmtCount(n) {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+function fmtCompact(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e5 ? 0 : 1) + 'k';
+  return Math.round(n).toString();
+}
+
+// Sub-1/s traffic still needs a digit to show it's moving; a few hundred a
+// second doesn't, and the decimal there is just noise that changes every poll.
+function fmtRate(r) {
+  return r >= 100 ? Math.round(r).toString() : r.toFixed(1);
+}
+
+// Queue waits span four orders of magnitude here — the general lane sits around
+// 100ms while a saturated online-list lane runs to a minute or two — so a flat
+// "Nms" prints things like 109000ms, which nobody reads as "just under two
+// minutes". Switches unit at one second.
+function fmtWait(ms) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
+function fmtDuration(seconds) {
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+// Filled-area sparkline stretched to its container, drawn as the row's
+// backdrop. preserveAspectRatio="none" plus a non-scaling stroke lets one
+// viewBox fill any row width without the line thickening with it.
+function sparklineSvg(history, color) {
+  if (!history || history.length < 2) return '';
+  const w = 300, h = 60;
+  const max = Math.max(...history) * 1.15;
+  const min = Math.min(...history) * 0.85;
+  const span = Math.max(1e-6, max - min);
+  const points = history.map((v, i) =>
+    `${((i / (history.length - 1)) * w).toFixed(1)},${(h - ((v - min) / span) * h).toFixed(1)}`
+  ).join(' ');
+  // Gradient ids must be unique per instance or every sparkline on the page
+  // resolves to whichever one rendered last.
+  const id = 'spark-' + Math.random().toString(36).slice(2, 9);
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" height="${h}" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <polygon points="0,${h} ${points} ${w},${h}" fill="url(#${id})"/>
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.1" stroke-opacity="0.55"
+      vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+// Which bot cards and source rows are open. Keyed rather than read off the DOM
+// so it survives the poll cycle rebuilding this panel from scratch every 10s —
+// same approach as expandedSupporters on the Patreon panel.
+const expandedApiRows = new Set();
+
+const API_SOURCES = [
+  { key: 'discord', label: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
+  { key: 'tibiadata', label: 'TibiaData', icon: 'ti-api', color: '#5b8cff' }
+];
+
+// One breakdown table. `share` is normally computed within the group, which is
+// right for a dimension that covers every call (status, endpoint). Pass
+// `denominator` for a group that is deliberately partial — the operation
+// breakdown hides its catch-all row, so sharing against the visible rows would
+// inflate each one to cover traffic it didn't do. Such a group won't sum to
+// 100%, which is the honest result.
+function renderDetailGroup(title, note, nameHeader, rows, color, denominator) {
+  if (!rows.length) return '';
+  const groupTotal = denominator || rows.reduce((sum, r) => sum + r.total, 0) || 1;
+  const body = rows.slice().sort((a, b) => b.total - a.total).map(r => {
+    const share = r.total / groupTotal;
+    const pct = share < 0.001 ? '&lt;1%' : `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
+    return `<div class="drow">
+      <span class="dname" title="${r.name}">${r.name}${r.note ? ` <span class="dim">${r.note}</span>` : ''}</span>
+      <span class="dbar"><span style="width:${Math.max(1, share * 100).toFixed(1)}%;background:${r.color || color}"></span></span>
+      <span class="dnum"${r.color ? ` style="color:${r.color}"` : ''}>${pct}</span>
+      <span class="dnum">${fmtRate(r.perSecond)}</span>
+      <span class="dmuted">${fmtCount(r.total)}</span>
+    </div>`;
   }).join('');
+  return `<div class="detail-group">
+    <div class="detail-group-title">${title}${note ? ` <span class="note">${note}</span>` : ''}</div>
+    <div class="drow dhead"><span>${nameHeader}</span><span></span><span class="dnum">Share</span><span class="dnum">Per sec</span><span class="dnum">Total</span></div>
+    ${body}
+  </div>`;
+}
+
+function dimensionRows(throughput, dimension) {
+  const values = (throughput.dimensions || {})[dimension] || {};
+  return Object.entries(values).map(([name, s]) => ({ name, total: s.total, perSecond: s.perSecond }));
+}
+
+// HTTP statuses colour-coded so a rising error share reads at a glance rather
+// than needing the number to be parsed. 2xx good, 4xx that we caused (429) bad,
+// 5xx and connection failures warn — an upstream wobble is not our bug, but it
+// is our problem.
+function statusColor(name) {
+  if (/^2/.test(name)) return 'var(--good)';
+  if (name === '429') return 'var(--bad)';
+  if (/^5/.test(name) || name === 'failed') return 'var(--warn)';
+  return null;
+}
+
+function renderLaneGroup(lanes) {
+  const entries = Object.entries(lanes || {});
+  if (!entries.length) return '';
+  const rows = entries.map(([name, lane]) => {
+    const color = heatColorForRatio(laneDepthRatio(name, lane.queueDepth));
+    return `<div class="drow">
+      <span class="dname">${laneDisplayName(name)}</span>
+      <span class="dbar"><span style="width:${(laneDepthRatio(name, lane.queueDepth) * 100).toFixed(1)}%;background:${color}"></span></span>
+      <span class="dnum" style="color:${color}">${lane.queueDepth}</span>
+      <span class="dnum" style="color:${color}">${fmtWait(laneMaxWaitMs(lane))}</span>
+      <span class="dmuted">${fmtCount(lane.totalDropped)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="detail-group">
+    <div class="detail-group-title">Rate-limit lanes</div>
+    <div class="drow dhead"><span>Lane</span><span></span><span class="dnum">Queued</span><span class="dnum">Avg wait</span><span class="dnum">Dropped</span></div>
+    ${rows}
+  </div>`;
+}
+
+function renderApiDetail(sourceKey, throughput, lanes) {
+  if (sourceKey === 'discord') {
+    // Catch-all dropped from the view (see DiscordApiRoute.Other): it is
+    // gateway/user GETs, reaction PUTs and channel creation, all a rounding
+    // error next to the named five. It stays in the data so the dimension still
+    // reconciles to the total, which is why share is taken against that total.
+    const operations = dimensionRows(throughput, 'operation').filter(r => r.name !== 'other');
+    return renderLaneGroup(lanes)
+      + renderDetailGroup('By operation', '', 'Call', operations, '#a78bfa', throughput.total)
+      + renderDetailGroup('By response', '', 'Status',
+          dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#a78bfa');
+  }
+  return renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
+    + renderDetailGroup('By response', '', 'Status',
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff');
+}
+
+function renderApiSourceRow(bot, source, throughput, lanes) {
+  const key = `src:${bot.bot.userId}:${source.key}`;
+  const expanded = expandedApiRows.has(key);
+  const row = document.createElement('div');
+  row.className = 'api-row' + (expanded ? ' expanded' : '');
+
+  // Below a full hour of history the per-hour figure is a partial count, not a
+  // rate — labelled as such rather than shown as a confident number that is
+  // really "everything since this bot restarted".
+  const partialHour = throughput.observedSeconds < 3600;
+  const hourLabel = partialHour ? `Last ${fmtDuration(throughput.observedSeconds)}` : 'Per hour';
+
+  const head = document.createElement('div');
+  head.className = 'api-head';
+  head.innerHTML = `
+    <div class="api-bleed">${sparklineSvg(throughput.history, source.color)}</div>
+    <div class="api-head-inner">
+      <div class="api-src"><i class="ti ${source.icon}" style="color:${source.color}" aria-hidden="true"></i>${source.label}</div>
+      <div class="api-metric"><div class="v">${fmtRate(throughput.perSecond)}<span class="unit">/s</span></div><div class="k">Per second</div></div>
+      <div class="api-metric"><div class="v">${fmtCompact(throughput.perHour)}${partialHour ? '' : '<span class="unit">/h</span>'}</div><div class="k">${hourLabel}</div></div>
+      <div class="api-metric"><div class="v">${fmtCount(throughput.total)}</div><div class="k">Total</div></div>
+      <i class="ti ti-chevron-down api-chevron" aria-hidden="true"></i>
+    </div>
+  `;
+  head.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedApiRows.has(key)) expandedApiRows.delete(key);
+    else expandedApiRows.add(key);
+    row.classList.toggle('expanded');
+  });
+  row.appendChild(head);
+
+  const detail = document.createElement('div');
+  detail.className = 'api-detail';
+  detail.innerHTML = renderApiDetail(source.key, throughput, lanes);
+  row.appendChild(detail);
+  return row;
+}
+
+function renderApiSourceRows(bot) {
+  const wrap = document.createElement('div');
+  wrap.className = 'api-rows';
+  if (!bot.apiThroughput) {
+    // A secondary still running a build from before these counters existed —
+    // see StatusRoute.buildBotsJson. Explicitly "no data", never a 0/s that
+    // would read as a bot sitting idle.
+    wrap.innerHTML = '<div class="muted" style="padding:4px 2px;">No throughput data published by this bot</div>';
+    return wrap;
+  }
+  API_SOURCES.forEach(source => {
+    const throughput = bot.apiThroughput[source.key];
+    if (throughput) wrap.appendChild(renderApiSourceRow(bot, source, throughput, bot.rateLimitLanes));
+  });
+  return wrap;
+}
+
+// The masthead's one-line subtitle: uptime, fleet size, combined rate. Reads
+// this process's own startedAt (the primary is always bots[0] — see
+// StatusRoute.buildBotsJson, which puts `own` first), not a secondary's.
+function renderMastheadSub(bots) {
+  const el = document.getElementById('masthead-sub');
+  const own = bots[0];
+  const parts = [];
+  if (own && own.startedAt) {
+    parts.push(`${fmtDuration((Date.now() - new Date(own.startedAt).getTime()) / 1000)} uptime`);
+  }
+  // Deliberately no throughput figure here — see fleetRate. The panel title
+  // below carries it, split by source, which is the only form of it that means
+  // anything.
+  if (bots.length > 1) parts.push(`${bots.length} bots`);
+  el.innerHTML = parts.join(' &middot; ') || '&nbsp;';
+}
+
+function renderApiThroughput(bots) {
+  const body = document.getElementById('api-body');
+  body.innerHTML = '';
+  if (!bots.length) {
+    body.innerHTML = '<div class="muted" style="padding:0 16px 16px;">No bots reporting</div>';
+    document.getElementById('api-summary').textContent = '';
+    return;
+  }
+
+  // One bot: the source rows go straight into the panel. A lone "which bot"
+  // wrapper around everything would be a level of nesting that answers a
+  // question nobody has on a single-bot deployment — same reasoning as the
+  // Bots panel only appearing at 2+.
+  if (bots.length < 2) {
+    const rows = renderApiSourceRows(bots[0]);
+    rows.classList.add('top-level');
+    body.appendChild(rows);
+    return;
+  }
+
+  const cards = document.createElement('div');
+  cards.className = 'bot-cards';
+  bots.forEach(bot => {
+    const key = `bot:${bot.bot.userId}`;
+    const expanded = expandedApiRows.has(key);
+    const card = document.createElement('div');
+    card.className = 'bot-card' + (expanded ? ' expanded' : '');
+
+    const roleLabel = bot.bot.role === 'primary' ? 'Primary' : bot.bot.role === 'secondary' ? 'Secondary' : '';
+    const throughput = bot.apiThroughput || {};
+    // En dash, not 0, wherever a bot published nothing — a real zero here would
+    // read as a bot that is connected but doing nothing, which is a completely
+    // different (and alarming) thing from one running a build that predates
+    // these counters.
+    const rollFor = k => throughput[k] ? `${fmtRate(throughput[k].perSecond)}<span class="unit">/s</span>` : '–';
+    const combinedTotal = bot.apiThroughput
+      ? fmtCompact(API_SOURCES.reduce((sum, s) => sum + ((throughput[s.key] || {}).total || 0), 0))
+      : '–';
+
+    const head = document.createElement('div');
+    head.className = 'bot-head';
+    head.innerHTML = `
+      <div class="bot-id">
+        <img class="bot-avatar" src="${bot.bot.avatarUrl}" alt="" title="${bot.bot.name} (${bot.bot.userId})">
+        <span class="bot-name">${bot.bot.name}</span>
+        ${roleLabel ? `<span class="tag ${bot.bot.role === 'primary' ? 'active' : 'unconfirmed'}">${roleLabel}</span>` : ''}
+        <span class="bot-meta" title="${bot.bot.userId} &middot; ${fmtCount(bot.population)} tracked players">&middot; ${bot.worldCount} worlds &middot; ${bot.discordCount} discords &middot; ${timeAgo(bot.publishedAt)}</span>
+      </div>
+      <div class="bot-roll">
+        <div class="r"><div class="v">${rollFor('discord')}</div><div class="k">Discord</div></div>
+        <div class="r"><div class="v">${rollFor('tibiadata')}</div><div class="k">TibiaData</div></div>
+        <div class="r"><div class="v">${combinedTotal}</div><div class="k">Total</div></div>
+      </div>
+      <i class="ti ti-chevron-down bot-chevron" aria-hidden="true"></i>
+    `;
+    head.addEventListener('click', () => {
+      if (expandedApiRows.has(key)) expandedApiRows.delete(key);
+      else expandedApiRows.add(key);
+      card.classList.toggle('expanded');
+    });
+    card.appendChild(head);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'bot-body';
+    bodyEl.appendChild(renderApiSourceRows(bot));
+    card.appendChild(bodyEl);
+    cards.appendChild(card);
+  });
+  body.appendChild(cards);
 }
 
 function renderFeedRow(ev, groupCount) {
@@ -987,14 +1298,16 @@ function render() {
   const worlds = lastData.worlds;
   if (!selectedWorld && worlds.length) selectedWorld = sortedWorlds(worlds)[0].name;
 
+  const bots = lastData.bots || [];
+
   document.getElementById('kpi-worlds').textContent = worlds.length;
   document.getElementById('kpi-discords').textContent = new Set(worlds.flatMap(w => w.discords.map(d => d.id))).size;
-  document.getElementById('kpi-population').textContent = worlds.reduce((sum, w) => sum + w.population, 0);
+  document.getElementById('kpi-population').textContent = worlds.reduce((sum, w) => sum + w.population, 0).toLocaleString('en-US');
+  renderMastheadSub(bots);
 
   renderSidebar(worlds);
   renderDetail(worlds);
-  renderLanes(lastData.rateLimitLanes, (lastData.bots || []).length >= 2);
-  renderBots(lastData.bots || []);
+  renderApiThroughput(bots);
   renderLogAlerts(lastData.logAlerts);
   renderPatreon(lastData.patreon || []);
   const selected = worlds.find(w => w.name === selectedWorld);

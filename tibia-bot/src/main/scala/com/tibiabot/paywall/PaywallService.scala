@@ -22,7 +22,9 @@ import scala.jdk.CollectionConverters._
  *  campaign snapshot in `PatreonMemberRepository` — not, as it once was, a
  *  Patreon-granted role in the support Discord. See [[callerIsSubscribed]].
  *  The support guild is still consulted for one unrelated thing: resolving a
- *  username to a Discord id for the dashboard (see [[findUserIdByUsername]]).
+ *  *username* to a Discord id for the dashboard (see [[resolveUserId]]) — and
+ *  only as a convenience, since a raw id or pasted mention bypasses it and
+ *  works for anyone, member or not.
  *
  *  Nothing is cut off the moment it stops checking out. A configured world
  *  whose seat owner has lapsed — *and* one that was never tied to a seat at
@@ -86,18 +88,48 @@ final class PaywallService(
     else try patreonMemberRepository.isActivePatron(userId)
     catch { case _: Throwable => false }
 
-  /** Resolves a Discord username to that member's user id, searched within
-   *  the support guild — the dashboard's "grant extra seats" admin action
-   *  takes a username rather than asking the admin to go find a raw id.
-   *  Case-insensitive exact match; None if nobody matches, there are
-   *  multiple guild nicknames sharing a prefix with no exact match, or the
-   *  support guild isn't reachable. Uses retrieveMembersByPrefix — a scoped,
-   *  query-based gateway search, not the full member cache — so this needs no
-   *  privileged GUILD_MEMBERS intent (Discord's bot-verification process past
-   *  100 guilds) for what's a rare, admin-initiated lookup. The only thing
-   *  left that touches the support guild: it plays no part in deciding who's
-   *  subscribed. */
-  def findUserIdByUsername(username: String): Option[String] = {
+  /** Resolves whatever the dashboard's "grant extra seats" box was given into a
+   *  Discord user id: a raw id, a pasted `<@id>` mention, or a username.
+   *
+   *  The id paths exist because the username path can only ever see the support
+   *  guild, and the people most likely to be granted a free seat — an allied
+   *  guild leader, say — are exactly the people who were never in it. That made
+   *  support-guild membership an accidental precondition for an override that
+   *  is supposed to be arbitrary. An id is resolved against Discord directly
+   *  (`GET /users/{id}` needs no shared guild), so it works for anyone.
+   *
+   *  The id is still verified rather than trusted: a mistyped snowflake would
+   *  otherwise write a durable override for an account that does not exist,
+   *  and nothing downstream would ever flag it.
+   *
+   *  The username path is unchanged and kept for convenience. It uses
+   *  retrieveMembersByPrefix — a scoped, query-based gateway search, not the
+   *  full member cache — so it needs no privileged GUILD_MEMBERS intent
+   *  (Discord's bot-verification threshold past 100 guilds) for what is a rare,
+   *  admin-initiated lookup. Case-insensitive exact match; None if nobody
+   *  matches or the support guild isn't reachable. */
+  def resolveUserId(input: String): Option[String] = {
+    val trimmed = input.trim
+    // A mention pasted straight out of Discord — `<@123>` or the legacy
+    // nickname form `<@!123>`.
+    val mention = """^<@!?(\d{17,20})>$""".r
+    val rawId = """^\d{17,20}$""".r
+    trimmed match {
+      case mention(id) => verifiedUserId(id)
+      case rawId()     => verifiedUserId(trimmed)
+      case username    => findUserIdByUsername(username)
+    }
+  }
+
+  /** The id back, but only if Discord actually knows that account. The input is
+   *  already a well-formed snowflake by this point, so the lookup is purely an
+   *  existence check — hence returning `id` rather than re-reading it off the
+   *  response. */
+  private def verifiedUserId(id: String): Option[String] =
+    try Option(discordGateway.retrieveUser(id)).map(_ => id)
+    catch { case _: Throwable => None }
+
+  private def findUserIdByUsername(username: String): Option[String] = {
     val supportGuild = discordGateway.guildById(supportGuildId)
     if (supportGuild == null) None
     else try {

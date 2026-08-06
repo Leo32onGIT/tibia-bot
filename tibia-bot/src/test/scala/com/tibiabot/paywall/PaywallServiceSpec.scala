@@ -11,10 +11,24 @@ import java.time.ZonedDateTime
 
 class PaywallServiceSpec extends AnyFunSuite with Matchers {
 
-  private class FakeGateway extends DiscordGateway {
+  /** Any non-null `User`. `resolveUserId` only asks whether the lookup returned
+   *  something, never reads a field off it, so a proxy that answers nothing is
+   *  exactly as much User as these tests need — and avoids hand-implementing a
+   *  very large JDA interface to express "this account exists". */
+  private def stubUser: User =
+    java.lang.reflect.Proxy
+      .newProxyInstance(classOf[User].getClassLoader, Array(classOf[User]), (_, _, _) => null)
+      .asInstanceOf[User]
+
+  /** `knownUsers` are the ids Discord would answer `GET /users/{id}` for; any
+   *  other id retrieves null, the same as a real lookup for an account that
+   *  doesn't exist. `guildById` is always null, so the support guild is never
+   *  reachable in these tests — deliberately, since nothing about granting a
+   *  seat should depend on it. */
+  private class FakeGateway(knownUsers: Set[String] = Set.empty, user: User = null) extends DiscordGateway {
     def guildById(id: String): Guild = null
     def guilds: List[Guild] = Nil
-    def retrieveUser(id: String): User = null
+    def retrieveUser(id: String): User = if (knownUsers.contains(id)) user else null
     def selfUserId: String = "self"
     def selfUserName: String = "ViolentBot"
     def selfUserAvatarUrl: String = "https://example.com/avatar.png"
@@ -68,10 +82,12 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     graceDays: Int = 7,
     grace: FakeGraceRepository = new FakeGraceRepository(),
     activePatrons: Set[String] = Set.empty,
-    memberLookupFails: Boolean = false
+    memberLookupFails: Boolean = false,
+    knownUsers: Set[String] = Set.empty,
+    user: User = null
   ) =
     new PaywallService(
-      new FakeGateway, new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), grace,
+      new FakeGateway(knownUsers, user), new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), grace,
       new FakeMemberRepository(activePatrons, memberLookupFails), "support-guild", seatLimit, graceDays, ownerId
     )
 
@@ -123,10 +139,10 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     svc.callerIsSubscribed("user-2") shouldBe false
   }
 
-  test("findUserIdByUsername: an unreachable support guild resolves to None") {
+  test("resolveUserId: an unreachable support guild resolves a username to None") {
     // FakeGateway.guildById always returns null, same as the
     // support-guild-unreachable path callerIsSubscribed already covers.
-    service().findUserIdByUsername("someone") shouldBe None
+    service().resolveUserId("someone") shouldBe None
   }
 
   test("canAssignSeatPure: under the limit with no existing owner is allowed") {
@@ -306,5 +322,52 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     svc.applyRefresh(List(("guild-1", "Antica", Some("good-user")), ("guild-1", "Secura", Some("bad-user"))), checker, now) shouldBe List(("guild-1", "Secura"))
     svc.isActive("guild-1", "Antica") shouldBe true
     svc.isActive("guild-1", "Secura") shouldBe false
+  }
+
+  // resolveUserId — the dashboard's "grant extra seats" lookup. FakeGateway
+  // never returns a support guild, so every passing case below is one that
+  // works for somebody who has never joined it.
+
+  test("resolveUserId accepts a raw user id for someone not in the support server") {
+    val svc = service(knownUsers = Set("183948374766182401"), user = stubUser)
+    svc.resolveUserId("183948374766182401") shouldBe Some("183948374766182401")
+  }
+
+  test("resolveUserId accepts a mention pasted straight out of Discord") {
+    val svc = service(knownUsers = Set("183948374766182401"), user = stubUser)
+    svc.resolveUserId("<@183948374766182401>") shouldBe Some("183948374766182401")
+    svc.resolveUserId("<@!183948374766182401>") shouldBe Some("183948374766182401")
+  }
+
+  test("resolveUserId tolerates surrounding whitespace from a paste") {
+    val svc = service(knownUsers = Set("183948374766182401"), user = stubUser)
+    svc.resolveUserId("  183948374766182401 ") shouldBe Some("183948374766182401")
+  }
+
+  // A mistyped snowflake would otherwise write a durable override against an
+  // account that doesn't exist, and nothing downstream would ever flag it.
+  test("resolveUserId rejects a well-formed id Discord doesn't know") {
+    val svc = service(knownUsers = Set.empty)
+    svc.resolveUserId("183948374766182401") shouldBe None
+  }
+
+  test("resolveUserId reads a non-snowflake as a username, not an id") {
+    // No support guild reachable, so the username path can only fail here —
+    // the point is that it took the username path at all rather than trying
+    // to verify "guildleader" as an id.
+    service().resolveUserId("guildleader") shouldBe None
+  }
+
+  test("resolveUserId does not mistake a short numeric string for an id") {
+    // Falls through to the username path rather than being sent to Discord as
+    // a snowflake; snowflakes are 17-20 digits.
+    service(knownUsers = Set("12345")).resolveUserId("12345") shouldBe None
+  }
+
+  test("a positive extra-seat grant is a full paywall bypass, with no Patreon record") {
+    // The whole point of the dashboard override: an arbitrary +1 gives someone
+    // access without a subscription and without support-server membership.
+    val svc = service(activePatrons = Set.empty, overrides = Map("guild-leader" -> 1))
+    svc.callerIsSubscribed("guild-leader") shouldBe true
   }
 }

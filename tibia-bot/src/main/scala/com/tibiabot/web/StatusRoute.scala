@@ -107,6 +107,30 @@ final class StatusRoute(
     ) ++ (if (adaptiveRefresh) Map("refreshIntervalSeconds" -> JsNumber(discord.AdaptiveRefreshInterval.intervalSeconds(sender.queueDepth))) else Map.empty)
   )
 
+  private def apiCallStatsJson(stats: tracking.ApiCallStats): JsValue = JsObject(
+    "total" -> JsNumber(stats.total),
+    "perSecond" -> JsNumber(stats.perSecond),
+    "perHour" -> JsNumber(stats.perHour)
+  )
+
+  /** One upstream's throughput for the dashboard's API panel. `observedSeconds`
+   *  travels with it so the frontend can tell a genuine hourly rate from a
+   *  partial hour shortly after a restart, rather than presenting "everything
+   *  since boot" as if it were a rate. */
+  private def apiThroughputJson(metrics: tracking.ApiCallMetrics): JsObject = {
+    val snap = metrics.snapshot()
+    JsObject(
+      "total" -> JsNumber(snap.total),
+      "perSecond" -> JsNumber(snap.perSecond),
+      "perHour" -> JsNumber(snap.perHour),
+      "observedSeconds" -> JsNumber(snap.observedSeconds),
+      "history" -> JsArray(snap.history.map(v => JsNumber(v): JsValue)),
+      "dimensions" -> JsObject(snap.dimensions.map { case (dimension, byValue) =>
+        dimension -> (JsObject(byValue.map { case (value, stats) => value -> apiCallStatsJson(stats) }): JsValue)
+      })
+    )
+  }
+
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
   /** This process's own Discord identity — attached to every discords/guild
@@ -179,10 +203,18 @@ final class StatusRoute(
   def buildBotStatusJson(): JsObject = JsObject(
     "bot" -> botIdentityJson,
     "publishedAt" -> JsString(java.time.Instant.now().toString),
+    "startedAt" -> JsString(StatusRoute.startedAt.toString),
     "worlds" -> buildWorldsJson(),
     "rateLimitLanes" -> JsObject(
       "background" -> laneJson(outboundSender),
       "online-list" -> laneJson(onlineListSender, adaptiveRefresh = true)
+    ),
+    // Per-bot, and published by a secondary along with everything else here, so
+    // the dashboard's throughput panel can show one subtree per connected bot
+    // without a separate fetch or a second shape to decode.
+    "apiThroughput" -> JsObject(
+      "discord" -> apiThroughputJson(tracking.ApiMetrics.discord),
+      "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData)
     )
   )
 
@@ -395,6 +427,13 @@ final class StatusRoute(
 }
 
 object StatusRoute {
+  /** When this process came up, for the dashboard's uptime readout. Taken at
+   *  class-load of this object, which happens during startup wiring — close
+   *  enough to process start for a figure displayed to the minute, and it
+   *  cannot drift the way a per-instance field would if a route were ever
+   *  rebuilt. */
+  val startedAt: java.time.Instant = java.time.Instant.now()
+
   /** Redis key prefix a shared-world-cycle secondary publishes its worlds
    *  snapshot under (full key: this prefix + its own Discord user id, a
    *  stable and always-unique suffix — see BotApp.publishSecondaryStatus),
@@ -458,12 +497,27 @@ object StatusRoute {
       val population = worlds.map { w =>
         w.asJsObject.fields.get("population").collect { case JsNumber(n) => n.toInt }.getOrElse(0)
       }.sum
+      // Distinct, not summed: one guild commonly tracks several worlds, so a
+      // naive count over each world's list would report a guild once per world
+      // it watches. Counted over this bot's own worlds (every entry here is a
+      // single bot's snapshot, pre-merge), so a guild is attributed to the bot
+      // actually serving it.
+      val discordCount = worlds.flatMap { w =>
+        w.asJsObject.fields.get("discords").collect { case JsArray(ds) => ds }.getOrElse(Vector.empty)
+          .flatMap(_.asJsObject.fields.get("id").collect { case JsString(id) => id })
+      }.distinct.size
       JsObject(
         "bot" -> status.fields.getOrElse("bot", JsObject.empty),
         "publishedAt" -> status.fields.getOrElse("publishedAt", JsNull),
+        "startedAt" -> status.fields.getOrElse("startedAt", JsNull),
         "worldCount" -> JsNumber(worlds.size),
+        "discordCount" -> JsNumber(discordCount),
         "population" -> JsNumber(population),
-        "rateLimitLanes" -> status.fields.getOrElse("rateLimitLanes", JsObject.empty)
+        "rateLimitLanes" -> status.fields.getOrElse("rateLimitLanes", JsObject.empty),
+        // Absent, not empty, for a secondary still running a build from before
+        // these counters existed — the dashboard renders that as "no data"
+        // rather than a confident 0/s that looks like a dead bot.
+        "apiThroughput" -> status.fields.getOrElse("apiThroughput", JsNull)
       )
     }
     JsArray((summarize(own) +: secondaries.map(summarize)).toVector)
