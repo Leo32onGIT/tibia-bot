@@ -9,8 +9,14 @@ import com.typesafe.scalalogging.StrictLogging
  *
  * Each queued item is a `dispatch` thunk that performs the actual JDA send, which
  * keeps this class free of JDA types and unit-testable, tagged with a `label`
- * (e.g. "rename", "online-list", "level-up") purely for observability — see
- * [[snapshotAndReset]]. Scheduling is injected via `startTicker`: it must run the
+ * naming the Discord operation ("editmessage", "editchannel", "send") or the
+ * kind of post it is ("activity", "admin", "level-up"), purely for
+ * observability — it buckets the queue-wait stats in [[snapshotAndReset]], and
+ * the worst of those buckets is what the dashboard shows as a lane's avg wait.
+ * It says nothing about how many Discord calls were made; that is counted at
+ * the HTTP layer instead (see app.Bootstrap), since plenty of this bot's
+ * traffic never passes through here at all.
+ * Scheduling is injected via `startTicker`: it must run the
  * supplied drain action immediately and then on a fixed delay, returning a handle
  * that stops the ticker. The drain loop is started lazily on the first enqueue.
  *

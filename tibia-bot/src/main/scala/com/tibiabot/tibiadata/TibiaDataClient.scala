@@ -22,7 +22,15 @@ import akka.http.scaladsl.model.headers.{Date => DateHeader, `Retry-After`, Retr
 import java.time.{ZonedDateTime, ZoneId}
 import java.time.format.DateTimeFormatter
 
-class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
+/** `metrics` defaults to the process-wide TibiaData counter rather than being
+ *  wired in at each call site: this class is constructed in three places
+ *  (BotApp, TibiaBot, WorldManager) that all issue real traffic, and the
+ *  dashboard wants one figure for the process, not three. Tests pass their own
+ *  instance to keep assertions isolated. */
+class TibiaDataClient(
+  streamState: StreamState,
+  metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData
+)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
 
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
@@ -50,6 +58,15 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
       }
     }
 
+  /** The endpoint a request belongs to, for the dashboard's per-endpoint
+   *  breakdown: the first two path segments, so `/v4/character/Bubble` and
+   *  `/v4/world/Antica` collapse onto `/v4/character` and `/v4/world` rather
+   *  than becoming one counter per character and world ever looked up. */
+  private def endpointOf(request: HttpRequest): String = {
+    val segments = request.uri.path.toString.split('/').filter(_.nonEmpty).take(2)
+    if (segments.isEmpty) "/" else segments.mkString("/", "/", "")
+  }
+
   /** Issue a GET, retrying only when [[RetryPolicy]] says it is worth it: a
    *  transient upstream failure (500/502/503/504) or a connection-level failure
    *  (timeout, reset). Anything else — a well-formed 200, a definitive 404, or
@@ -60,6 +77,10 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
   private def requestWithRetry(request: HttpRequest, attempt: Int = 0): Future[HttpResponse] =
     Http().singleRequest(request).flatMap { response =>
       val status = response.status.intValue
+      // Counted per attempt, not per logical fetch: a retried request really is
+      // a second call on TibiaData, and hiding that would make the panel
+      // understate our load exactly when an upstream wobble is causing it.
+      metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString)
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt) match {
         case RetryDecision.RetryIn(delay) =>
@@ -77,6 +98,10 @@ class TibiaDataClient(streamState: StreamState)(implicit val system: ActorSystem
       }
     }.recoverWith {
       case NonFatal(ex) =>
+        // A call that never got a status still left this process, so it counts;
+        // "failed" keeps timeouts and resets visible on the panel instead of
+        // silently shrinking the total.
+        metrics.record("endpoint" -> endpointOf(request), "status" -> "failed")
         retryPolicy.onConnectionFailure(attempt) match {
           case RetryDecision.RetryIn(delay) =>
             logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")

@@ -1509,7 +1509,7 @@ class TibiaBot(
     onlineListState.plan(channelId, fields).foreach {
       case tracking.EditOnlineListMessage(index, messageId, field) =>
         worldMetrics.incrementEdits()
-        onlineListSender.enqueue("edit", Some(s"$channelId:$index"), Some(channelId)) { () =>
+        onlineListSender.enqueue("editmessage", Some(s"$channelId:$index"), Some(channelId)) { () =>
           try channel.editMessageEmbedsById(messageId, buildEmbed(field, index == lastIndex))
             .queue(null, onlineListErrorHandler(channelId))
           catch { case ex: Throwable => failed(ex) }
@@ -1738,7 +1738,7 @@ class TibiaBot(
           val renamedAt = ZonedDateTime.now()
           onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> renamedAt)
           BotApp.recordRenameCooldown(world, categoryId, renamedAt)
-          outboundSender.enqueue("rename", Some(categoryId)) { () =>
+          outboundSender.enqueue("editchannel", Some(categoryId)) { () =>
             try {
               category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
             } catch {
@@ -1765,7 +1765,7 @@ class TibiaBot(
         val renamedAt = ZonedDateTime.now()
         onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> renamedAt)
         BotApp.recordRenameCooldown(world, channel.getId, renamedAt)
-        outboundSender.enqueue("rename", Some(channel.getId)) { () =>
+        outboundSender.enqueue("editchannel", Some(channel.getId)) { () =>
           try {
             channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)
           } catch {
@@ -1776,8 +1776,12 @@ class TibiaBot(
     }
   }
 
-  // Helper method to queue messages with rate limiting. `label` tags the send for
-  // the periodic queue-monitoring log (BotApp) — e.g. "activity", "admin", "level-up".
+  // Helper method to queue messages with rate limiting. `label` buckets the
+  // send's queue-wait stats (see RateLimitedSender) — these are all message
+  // POSTs, so they are labelled by what the post is ("activity", "admin",
+  // "level-up") rather than by the Discord call, which would collapse them all
+  // onto one uninformative "send" and lose any sense of which kind of traffic
+  // is the one waiting.
   private def sendMessageWithRateLimit(
     channel: TextChannel,
     label: String,

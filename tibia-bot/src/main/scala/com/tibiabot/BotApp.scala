@@ -741,7 +741,7 @@ object BotApp extends App with StrictLogging {
               recipients.foreach { recipientId =>
                 // Low priority (per-user DM burst) — goes through the shared background
                 // lane so it can't compete with deaths/boosted-channel posts for REST slots.
-                outboundSender.enqueue("boosted-dm") { () =>
+                outboundSender.enqueue("send") { () =>
                   val user: User = discordGateway.retrieveUser(recipientId)
                   if (user != null) {
                     try {
