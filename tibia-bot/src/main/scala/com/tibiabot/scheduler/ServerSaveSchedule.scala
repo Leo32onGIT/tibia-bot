@@ -65,6 +65,15 @@ object ServerSaveSchedule {
   def nextServerSave(now: ZonedDateTime): ZonedDateTime =
     lastServerSave(now).plusDays(1)
 
+  /** The weekday the *game* is on, which is not the calendar weekday: the day
+   *  turns over at server save (10:00 Berlin), so from midnight until 10:00 the
+   *  game is still on yesterday. Berlin minus 10 hours expresses exactly that,
+   *  and is also identical to the UTC-8 day the Dream Courts wiki page renders
+   *  itself against — which is what makes that page's stated day comparable to
+   *  this one. */
+  def gameDayOfWeek(now: ZonedDateTime): DayOfWeek =
+    now.withZoneSameInstant(Clock.Berlin).minusHours(10).getDayOfWeek
+
   /** The city where Rashid can be found on a given (Berlin minus 10h) weekday. */
   def rashidLocation(day: DayOfWeek): String = day match {
     case DayOfWeek.MONDAY    => "Svargrond"

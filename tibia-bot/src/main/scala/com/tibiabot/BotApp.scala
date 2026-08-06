@@ -245,7 +245,7 @@ object BotApp extends App with StrictLogging {
     discordGateway,
     botUser,
     discordRetrieveConfig _,
-    () => { dreamScar = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap },
+    () => refreshDreamScarBosses(shiftOnFailure = false),
     () => refreshBoostedMessages()
   )
 
@@ -404,8 +404,12 @@ object BotApp extends App with StrictLogging {
   // the /admin resync thread) but read every cycle by the per-world streams — so
   // they need @volatile for the same cross-thread visibility reason as the state
   // below; without it a stream can keep reading a stale boss/cycle after a shift.
-  @volatile var dreamScar: Map[String, String] = fetchDreamScarBosses().map(e => e.world -> e.boss).toMap
-  @volatile var dreamScarLastCheck: String = System.currentTimeMillis().toString
+  @volatile var dreamScar: Map[String, String] = fetchDreamScarBosses().getOrElse(Map.empty)
+  // Which server save the map above is aligned to. The refresh below fires when
+  // a newer one has happened, so the boot read counts as already covering the
+  // save it was taken after.
+  @volatile private var dreamScarSave: Long =
+    ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toEpochSecond
   @volatile var dromeTime = domain.time.DromeCycle.initial // 27 May 2026 server save - increment 2 weeks from here
 
   val boostedBosses: Future[Either[String, BoostedResponse]] = tibiaDataClient.getBoostedBoss()
@@ -650,10 +654,18 @@ object BotApp extends App with StrictLogging {
     val currentTime = ZonedDateTime.now(ZoneId.of("Europe/Berlin")).toLocalTime()
     if (ServerSaveSchedule.isServerSaveWindow(currentTime)) {
       try{
-        val now = System.currentTimeMillis()
-        if (now - dreamScarLastCheck.toLong > 60L * 60 * 1000) {
-          dreamScarLastCheck = now.toString
-          dreamScar = shiftAllBossesUp(dreamScar)
+        // Re-read the wiki once per server save. Keyed off which save the map is
+        // aligned to rather than "has an hour passed since the last check": the
+        // old throttle started counting at boot, so a process that came up in
+        // the quarter hour before 10:00 stayed inside its own hour for the whole
+        // 45-minute window and skipped that day's rotation — permanently, since
+        // nothing re-read the wiki after boot. Re-reading also means a map that
+        // is wrong for any reason fixes itself the next morning instead of
+        // carrying the error forward a step at a time.
+        val currentSave = ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toEpochSecond
+        if (currentSave != dreamScarSave) {
+          dreamScarSave = currentSave
+          refreshDreamScarBosses(shiftOnFailure = true)
         }
         if (dromeTime.isBefore(Instant.now())) {
           advanceDromeTime(Instant.now())
@@ -798,7 +810,7 @@ object BotApp extends App with StrictLogging {
                   .orElse(dreamScar.get("Unknown"))
                   .getOrElse("Unknown")
 
-              val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
+              val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
               val rashidEmbed = new EmbedBuilder()
               rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
               rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
@@ -1131,7 +1143,7 @@ object BotApp extends App with StrictLogging {
         .get(world)
         .orElse(dreamScar.get("Unknown"))
         .getOrElse("Unknown")
-    val rashidLocation = ServerSaveSchedule.rashidLocation(ZonedDateTime.now(ZoneId.of("Europe/Berlin")).minusHours(10).getDayOfWeek)
+    val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
     val rashidEmbed = new EmbedBuilder()
       .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
@@ -1281,7 +1293,60 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def fetchDreamScarBosses(): List[BossEntry] = wikiClient.dreamScarBosses()
+  /** Read the Dream Courts table off the wiki and align it to the current game
+   *  day. None when the page gave us nothing usable, leaving it to the caller
+   *  to decide what to keep.
+   *
+   *  The alignment is the point. That page is served from Fandom's parser cache
+   *  and routinely lags a day behind the rollover — the page itself carries a
+   *  "click here to purge the cache" link for exactly this — so a read taken at
+   *  the wrong moment is a day stale. It does state the day it was rendered
+   *  for, and the rotation advances one step per day, so a stale render is both
+   *  detectable and correctable rather than something we have to discard. */
+  def fetchDreamScarBosses(): Option[Map[String, String]] = {
+    val snapshot =
+      try wikiClient.dreamScarSnapshot()
+      catch {
+        case ex: Throwable =>
+          logger.warn("Failed to fetch the Dream Courts bosses from the wiki", ex)
+          domain.DreamScarSnapshot(None, Nil)
+      }
+    if (snapshot.bosses.isEmpty) {
+      logger.warn("The Dream Courts wiki page returned no boss table")
+      None
+    } else {
+      val fetched = snapshot.bosses.map(e => e.world -> e.boss).toMap
+      val gameDay = ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin))
+      snapshot.renderedDay match {
+        case None =>
+          logger.warn("The Dream Courts wiki page didn't say which day it was rendered for — taking it at face value")
+          Some(fetched)
+        case Some(renderedDay) =>
+          val behind = domain.time.DreamScarCycle.daysBehind(renderedDay, gameDay)
+          if (behind == 0) Some(fetched)
+          else {
+            logger.warn(s"The Dream Courts wiki page was rendered for $renderedDay but the game day is $gameDay — advancing it by $behind day(s)")
+            Some(domain.time.DreamScarCycle.shiftAllBossesUp(fetched, behind))
+          }
+      }
+    }
+  }
+
+  /** Bring `dreamScar` up to date, preferring a fresh (and day-aligned) wiki
+   *  read so the map can correct itself rather than inheriting every past
+   *  mistake. `shiftOnFailure` says what to do when the wiki can't be read at
+   *  all: the server-save refresh advances the map we already hold, so an
+   *  outage still rotates instead of freezing a day behind, while a manual
+   *  `/admin dreamscar` leaves it alone — that one exists to *undo* drift, and
+   *  shifting on a failed fetch could just as easily add some. */
+  private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
+    fetchDreamScarBosses() match {
+      case Some(bosses) => dreamScar = bosses
+      case None if shiftOnFailure =>
+        logger.warn("Advancing the Dream Courts bosses locally instead of re-reading them")
+        dreamScar = shiftAllBossesUp(dreamScar)
+      case None => ()
+    }
 
   def fetchCreatureNames(): List[String] = wikiClient.creatureNames()
 

@@ -1,6 +1,6 @@
 package com.tibiabot.wiki
 
-import com.tibiabot.domain.BossEntry
+import com.tibiabot.domain.DreamScarSnapshot
 import io.circe.parser._
 import sttp.client3._
 
@@ -8,8 +8,8 @@ import sttp.client3._
  *  I/O on construction; each method performs its own request. */
 final class FandomWikiClient extends WikiClient {
 
-  def dreamScarBosses(): List[BossEntry] =
-    FandomWikiParser.parseDreamScarBosses(fetchHtml("Dream_Scar/Boss_of_the_Day"))
+  def dreamScarSnapshot(): DreamScarSnapshot =
+    FandomWikiParser.parseDreamScarSnapshot(fetchHtml("Dream_Scar/Boss_of_the_Day"))
 
   def creatureNames(): List[String] =
     FandomWikiParser.parseCreatureNames(fetchHtml("List_of_Creatures_(Ordered)"))
