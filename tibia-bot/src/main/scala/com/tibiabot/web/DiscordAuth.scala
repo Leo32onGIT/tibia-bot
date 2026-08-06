@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.HttpCookie
-import akka.http.scaladsl.server.Directive
+import akka.http.scaladsl.server.{Directive, StandardRoute}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import com.typesafe.scalalogging.StrictLogging
@@ -43,6 +43,18 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private val sessionTtl = 7.days
   private val loginPath = s"$mountPath/auth/login"
 
+  /** Short-lived companion to the session cookie, holding the OAuth `state`
+   *  nonce for exactly as long as one login round-trip: set when we send the
+   *  visitor to Discord, compared against the `state` echoed back on the
+   *  callback, then deleted. Without it the callback would accept an
+   *  authorization code from anywhere, letting an attacker land their own
+   *  Discord identity in a victim's browser session (login CSRF). Ten minutes
+   *  is long enough to read a consent screen and short enough that an
+   *  abandoned attempt doesn't linger. */
+  private val stateCookieName = "vb_oauth_state"
+  private val stateTtl = 10.minutes
+  private val secureRandom = new java.security.SecureRandom()
+
   private def hmac(data: String): String = {
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(new SecretKeySpec(sessionSecret.getBytes("UTF-8"), "HmacSHA256"))
@@ -66,10 +78,77 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
     case _ => None
   }
 
-  private def authorizeUrl: String = {
+  private def authorizeUrl(state: String): String = {
     val encodedRedirect = URLEncoder.encode(redirectUri, "UTF-8")
-    s"https://discord.com/api/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify"
+    val encodedState = URLEncoder.encode(state, "UTF-8")
+    s"https://discord.com/api/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify&state=$encodedState"
   }
+
+  private def newState(): String = {
+    val bytes = new Array[Byte](32)
+    secureRandom.nextBytes(bytes)
+    Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
+  }
+
+  private def stateMatches(fromCookie: Option[String], fromQuery: Option[String]): Boolean =
+    (fromCookie, fromQuery) match {
+      case (Some(expected), Some(actual)) =>
+        java.security.MessageDigest.isEqual(expected.getBytes("UTF-8"), actual.getBytes("UTF-8"))
+      case _ => false
+    }
+
+  private def sessionCookie(value: String): HttpCookie = HttpCookie(
+    name = cookieName,
+    value = value,
+    path = Some(mountPath),
+    httpOnly = true,
+    secure = true,
+    maxAge = Some(sessionTtl.toSeconds),
+    // Lax, not Strict: the request right after the callback is the browser
+    // following our redirect to `mountPath`, still part of the redirect chain
+    // that began on discord.com. Browsers treat every hop of a cross-site
+    // chain as cross-site, so a Strict cookie would be withheld there — the
+    // dashboard would see no session, bounce back to login, and loop through
+    // Discord forever. Lax is sent on top-level GET navigations, which is
+    // exactly that hop, and still withholds the cookie from cross-site POSTs
+    // (the seat-admin endpoints).
+    extension = Some("SameSite=Lax")
+  )
+
+  /** Same Lax reasoning as the session cookie, and for the same reason it is
+   *  load-bearing here: the callback that reads this one *is* the cross-site
+   *  hop from discord.com, so under Strict there would be nothing to compare
+   *  the echoed `state` against and every login would fail. */
+  private def stateCookie(value: String): HttpCookie = HttpCookie(
+    name = stateCookieName,
+    value = value,
+    path = Some(mountPath),
+    httpOnly = true,
+    secure = true,
+    maxAge = Some(stateTtl.toSeconds),
+    extension = Some("SameSite=Lax")
+  )
+
+  /** A dead end the visitor can act on rather than a bare status line: every
+   *  way a login can fail short of a server fault (they cancelled, the attempt
+   *  went stale, Discord refused) ends here, styled to match the dashboard, with
+   *  the one useful next step. `message` is ours, never echoed from the query
+   *  string — an attacker-supplied `error` would otherwise be HTML injection. */
+  private def loginProblem(status: StatusCode, message: String): StandardRoute =
+    complete(status, HttpEntity(ContentTypes.`text/html(UTF-8)`,
+      s"""<!doctype html>
+         |<html lang="en"><head><meta charset="utf-8">
+         |<meta name="viewport" content="width=device-width, initial-scale=1">
+         |<title>Sign in</title></head>
+         |<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+         |             background:#0b0d12;color:#d7dce3;font-size:14px;
+         |             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+         |  <div style="background:#12151c;border:1px solid #1f2430;border-radius:10px;padding:28px 32px;
+         |              max-width:26rem;text-align:center">
+         |    <p style="margin:0 0 18px">$message</p>
+         |    <a href="$loginPath" style="color:#5b8cff;text-decoration:none;font-weight:600">Sign in with Discord</a>
+         |  </div>
+         |</body></html>""".stripMargin))
 
   /** Exchanges an OAuth `code` for the authenticated Discord user's id, via the
    *  token endpoint then `/users/@me`. None on any failure (bad code, network,
@@ -138,31 +217,54 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   val routes: akka.http.scaladsl.server.Route =
     path("auth" / "login") {
       get {
-        redirect(authorizeUrl, StatusCodes.Found)
+        val state = newState()
+        setCookie(stateCookie(state)) {
+          redirect(authorizeUrl(state), StatusCodes.Found)
+        }
       }
     } ~
     path("auth" / "callback") {
       get {
-        parameter("code") { code =>
-          onComplete(resolveUserId(code)) {
-            case Success(Some(userId)) =>
-              val expiry = Instant.now().plusSeconds(sessionTtl.toSeconds).getEpochSecond
-              setCookie(HttpCookie(
-                name = cookieName,
-                value = signSession(userId, expiry),
-                path = Some(mountPath),
-                httpOnly = true,
-                secure = true,
-                maxAge = Some(sessionTtl.toSeconds),
-                extension = Some("SameSite=Strict")
-              )) {
-                redirect(mountPath, StatusCodes.Found)
+        // The nonce is spent the moment we look at it, whatever the outcome —
+        // clearing it on every branch keeps a stale one from being replayed and
+        // stops a failed attempt from poisoning the next login.
+        deleteCookie(stateCookieName, path = mountPath) {
+          optionalCookie(stateCookieName) { stateCookieOpt =>
+            parameterMap { params =>
+              val stateOk = stateMatches(stateCookieOpt.map(_.value), params.get("state"))
+              (params.get("error"), params.get("code")) match {
+                // Discord reports a refusal in the query string rather than by
+                // withholding the callback, so this is the ordinary "user hit
+                // Cancel" path, not an error worth logging loudly.
+                case (Some("access_denied"), _) =>
+                  loginProblem(StatusCodes.Forbidden, "You cancelled the Discord sign-in.")
+                case (Some(error), _) =>
+                  logger.warn(s"Discord OAuth returned an error: $error")
+                  loginProblem(StatusCodes.BadRequest, "Discord turned down the sign-in request.")
+                case (None, Some(_)) if !stateOk =>
+                  // Either a genuinely forged callback or, far more often, a
+                  // stale tab whose nonce cookie has since expired. The visitor
+                  // can't tell the difference and neither can we, so say the
+                  // benign thing and let them start over.
+                  logger.warn("Discord OAuth callback rejected: state parameter did not match the login cookie")
+                  loginProblem(StatusCodes.BadRequest, "That sign-in link has expired. Please start again.")
+                case (None, Some(code)) =>
+                  onComplete(resolveUserId(code)) {
+                    case Success(Some(userId)) =>
+                      val expiry = Instant.now().plusSeconds(sessionTtl.toSeconds).getEpochSecond
+                      setCookie(sessionCookie(signSession(userId, expiry))) {
+                        redirect(mountPath, StatusCodes.Found)
+                      }
+                    case Success(None) =>
+                      loginProblem(StatusCodes.Unauthorized, "Discord sign-in failed.")
+                    case Failure(ex) =>
+                      logger.error(s"Discord OAuth callback failed: ${ex.getMessage}")
+                      loginProblem(StatusCodes.InternalServerError, "Something went wrong signing you in.")
+                  }
+                case (None, None) =>
+                  loginProblem(StatusCodes.BadRequest, "That sign-in link is incomplete. Please start again.")
               }
-            case Success(None) =>
-              complete(StatusCodes.Unauthorized -> "Discord login failed")
-            case Failure(ex) =>
-              logger.error(s"Discord OAuth callback failed: ${ex.getMessage}")
-              complete(StatusCodes.InternalServerError -> "Discord login failed")
+            }
           }
         }
       }

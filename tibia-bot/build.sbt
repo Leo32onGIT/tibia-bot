@@ -46,6 +46,12 @@ libraryDependencies += "io.lettuce" % "lettuce-core" % "6.2.6.RELEASE"
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.15"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
 libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
+// Lets web.DiscordAuthSpec drive the OAuth routes as real requests — the login
+// and callback-failure branches are all cookie and redirect behaviour, which is
+// only meaningful end to end.
+libraryDependencies += "com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test
+libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.7.0" % Test
+libraryDependencies += "com.typesafe.akka" %% "akka-stream-testkit" % "2.7.0" % Test
 libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.3.18"
 libraryDependencies += "org.jsoup" % "jsoup" % "1.17.2"
 libraryDependencies += "io.circe" %% "circe-core" % "0.14.10"
