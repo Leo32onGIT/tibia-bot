@@ -26,7 +26,13 @@ case class Worlds(name: String,
   deathsMin: Int,
   exivaList: String,
   activityChannel: String,
-  onlineCombined: String
+  onlineCombined: String,
+  /** Whether the activity channel carries events for characters in no tracked
+   *  guild and on no tracked list — currently just a high-level stranger
+   *  transferring in. On by default, like its show_neutral_ siblings: the level
+   *  bar keeps the volume to a handful, and a server that does not want it has
+   *  `/neutral activity hide`. */
+  showNeutralActivity: String
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

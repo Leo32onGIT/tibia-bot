@@ -14,6 +14,16 @@ object GuildActivity {
   def activityColor(huntedGuild: Boolean, alliedGuild: Boolean): Int =
     if (huntedGuild) 13773097 else if (alliedGuild) 36941 else 14397256
 
+  /** Dark grey — what a neutral with no guild gets in the deaths channel (the
+   *  `embedColor` default in TibiaBot's death block), reused for an event about
+   *  somebody in no tracked guild and on no tracked list, so a stranger reads
+   *  the same way here as their deaths do.
+   *
+   *  Not activityColor's neutral yellow, which is the colour of a *tracked*
+   *  player doing something involving an untracked guild — a different thing
+   *  from someone the server has no interest in at all. */
+  val untrackedColor: Int = 3092790
+
   /** The guild's tracked-status label, used in the activity description. */
   def guildType(huntedGuild: Boolean, alliedGuild: Boolean): String =
     if (huntedGuild) "hunted" else if (alliedGuild) "allied" else "neutral"

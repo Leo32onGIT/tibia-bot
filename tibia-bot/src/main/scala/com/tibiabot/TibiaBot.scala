@@ -280,7 +280,24 @@ class TibiaBot(
               // Incoming world transfer. Independent of the guild join/leave logic
               // below, and posted first so a character who transferred in and joined
               // a tracked guild in the same poll reads in the order it happened.
-              if (huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck) {
+              //
+              // Anyone tracked is announced at any level — that is the whole point of
+              // tracking them. Everybody else has to clear the world's bar (see
+              // WorldTransfers.untrackedMinLevel), which keeps this from turning a
+              // channel about hunted and allied players into a feed of every stranger
+              // who moved house.
+              //
+              // No baseline is kept for the untracked, and none can be: the former-world
+              // field says somebody moved within about 180 days, never when. So the first
+              // sweep of a world announces whoever is over the bar and moved at some point
+              // in that window, however long ago, and only settles into real arrivals once
+              // everybody over the bar has been seen once. The bar is what keeps that
+              // opening burst to a handful.
+              val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
+              val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
+              val notableStranger =
+                showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
+              if (trackedHere || notableStranger) {
                 val postedTransfer = BotApp.worldTransfersData.getOrElse(guildId, List())
                   .find(_.name.equalsIgnoreCase(charName)).map(_.formerWorlds)
                 presentation.WorldTransfers.unreported(
@@ -290,7 +307,9 @@ class TibiaBot(
                     if (activityTextChannel.canTalk() || (!Config.prod)) {
                       val activityEmbed = new EmbedBuilder()
                       activityEmbed.setDescription(s"$charVocation **$charLevel** — **[$charName](${charUrl(charName)})** transferred in from **${presentation.WorldTransfers.sourceText(arrivedFrom)}**.")
-                      activityEmbed.setColor(presentation.GuildActivity.activityColor(huntedGuildCheck || huntedPlayerCheck, allyGuildCheck || allyPlayerCheck))
+                      activityEmbed.setColor(
+                        if (trackedHere) presentation.GuildActivity.activityColor(huntedGuildCheck || huntedPlayerCheck, allyGuildCheck || allyPlayerCheck)
+                        else presentation.GuildActivity.untrackedColor)
                       activityEmbed.setThumbnail(Config.worldTransferThumbnail)
                       sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                     }

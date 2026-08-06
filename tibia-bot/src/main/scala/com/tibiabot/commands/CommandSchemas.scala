@@ -139,6 +139,15 @@ object CommandSchemas {
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+        ),
+      new SubcommandData("activity", "Show or hide activity for players you don't track")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral activity?").setRequired(true)
+            .addChoices(
+              new Choice("show", "show"),
+              new Choice("hide", "hide")
+            ),
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         )
     )
 

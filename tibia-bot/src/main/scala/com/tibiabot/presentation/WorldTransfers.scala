@@ -43,6 +43,17 @@ object WorldTransfers {
     else Some(arrivedFrom)
   }
 
+  /** The level at or above which a character in no tracked guild and on no
+   *  tracked list is still worth announcing the arrival of.
+   *
+   *  Flat, and deliberately not tied to the levels/deaths channel filters: those
+   *  are set for a different purpose and accept values from 1, so borrowing them
+   *  would let a server that wants to see every level-up turn this into a feed
+   *  of every stranger who moved house. A stranger arriving earns a line in a
+   *  channel about hunted and allied players only when they are the kind of
+   *  character the whole world would notice. */
+  val UntrackedMinLevel = 1000
+
   /** "Nefera", "Nefera and Antica", "Nefera, Antica and Bona". */
   def sourceText(worlds: List[String]): String = Killers.joinNatural(worlds)
 }
