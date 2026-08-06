@@ -58,4 +58,14 @@ class WorldTransfersSpec extends AnyFunSuite with Matchers {
     WorldTransfers.sourceText(List("Nefera", "Bona")) shouldBe "Nefera and Bona"
     WorldTransfers.sourceText(List("Nefera", "Bona", "Antica")) shouldBe "Nefera, Bona and Antica"
   }
+
+  test("the arrow follows the side: hunted red, allied green, stranger grey") {
+    WorldTransfers.side(hunted = true, allied = false) shouldBe WorldTransfers.Side.Hunted
+    WorldTransfers.side(hunted = false, allied = true) shouldBe WorldTransfers.Side.Allied
+    WorldTransfers.side(hunted = false, allied = false) shouldBe WorldTransfers.Side.Neutral
+  }
+
+  test("somebody on both lists arrives as hunted, as they read everywhere else") {
+    WorldTransfers.side(hunted = true, allied = true) shouldBe WorldTransfers.Side.Hunted
+  }
 }

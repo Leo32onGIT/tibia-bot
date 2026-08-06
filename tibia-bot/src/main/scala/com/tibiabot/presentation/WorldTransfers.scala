@@ -1,5 +1,6 @@
 package com.tibiabot.presentation
 
+import com.tibiabot.Config
 import com.tibiabot.domain.Killers
 
 /** Deciding when a tracked character's former-world entry is an incoming transfer
@@ -56,4 +57,35 @@ object WorldTransfers {
 
   /** "Nefera", "Nefera and Antica", "Nefera, Antica and Bona". */
   def sourceText(worlds: List[String]): String = Killers.joinNatural(worlds)
+
+  /** Which side an arrival is announced as, and so which arrow it gets.
+   *
+   *  The same three cases the embed colour already distinguishes, and no more:
+   *  the activity block only posts a transfer for somebody tracked or for a
+   *  notable stranger, so a character who is neither hunted nor allied here is
+   *  necessarily the stranger. That is also why activityColor's neutral yellow
+   *  — a *tracked* player doing something involving an untracked guild — cannot
+   *  come up on this path, and three thumbnails cover it. */
+  sealed trait Side
+  object Side {
+    case object Hunted extends Side
+    case object Allied extends Side
+    case object Neutral extends Side
+  }
+
+  /** Hunted wins over allied, matching activityColor's ordering: a character on
+   *  both lists reads as the threat in every other notification too. */
+  def side(hunted: Boolean, allied: Boolean): Side =
+    if (hunted) Side.Hunted else if (allied) Side.Allied else Side.Neutral
+
+  /** The configured thumbnail for a side. */
+  def thumbnail(side: Side): String = side match {
+    case Side.Hunted  => Config.worldTransferRed
+    case Side.Allied  => Config.worldTransferGreen
+    case Side.Neutral => Config.worldTransferGrey
+  }
+
+  /** Classify and map to the configured thumbnail in one call — the form the
+   *  activity call site uses. */
+  def thumbnail(hunted: Boolean, allied: Boolean): String = thumbnail(side(hunted, allied))
 }

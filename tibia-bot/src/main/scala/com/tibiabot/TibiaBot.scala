@@ -310,7 +310,10 @@ class TibiaBot(
                       activityEmbed.setColor(
                         if (trackedHere) presentation.GuildActivity.activityColor(huntedGuildCheck || huntedPlayerCheck, allyGuildCheck || allyPlayerCheck)
                         else presentation.GuildActivity.untrackedColor)
-                      activityEmbed.setThumbnail(Config.worldTransferThumbnail)
+                      // Arrow matches the colour: red for a hunted arrival, green for an
+                      // allied one, grey for a stranger over the bar.
+                      activityEmbed.setThumbnail(presentation.WorldTransfers.thumbnail(
+                        huntedGuildCheck || huntedPlayerCheck, allyGuildCheck || allyPlayerCheck))
                       sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                     }
                   }
