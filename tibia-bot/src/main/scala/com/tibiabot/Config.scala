@@ -170,12 +170,17 @@ object Config {
 
   /** The respawn claim system (`/respawn` + the `📅・sᴘᴀᴡɴs` forum).
    *
-   *  `enabled` defaults to **false** and is the feature's rollout gate. Prod and
-   *  DEV run the same image, so without it the first deploy of this branch would
-   *  start creating forum channels in every guild that has run `/setup`. While
-   *  it is off, `/respawn` isn't registered with Discord and `/setup`/`/repair`
-   *  skip the forum entirely; flip `RESPAWN_ENABLED=true` only where the feature
-   *  is actually being tested.
+   *  `enabled` was the feature's rollout gate, defaulting to false so that the
+   *  first deploy of the branch couldn't start creating forum channels in every
+   *  guild that had run `/setup` — prod and DEV run the same image. The feature
+   *  has since been live in prod, so the default is now **true** and matches
+   *  what actually runs; `RESPAWN_ENABLED` no longer has to be set to turn on a
+   *  shipped feature.
+   *
+   *  Setting it false is still a clean withdrawal rather than a broken state:
+   *  `/respawn` isn't registered with Discord and `/setup`/`/repair` skip the
+   *  forum entirely. Worth keeping for a local run that shouldn't touch a
+   *  guild's forums.
    *
    *  The duration/queue/stamina values here are *defaults for a guild's first
    *  setup*. They're copied into that guild's `respawn_settings` row at creation
