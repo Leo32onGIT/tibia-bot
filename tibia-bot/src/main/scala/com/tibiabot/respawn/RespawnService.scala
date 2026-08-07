@@ -1396,16 +1396,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // The card itself already flips to free with a Claim button on it, so
           // there is nothing to say — a "now free" post would just be noise in a
           // thread meant to stay readable.
-          //
-          // The post is not archived here. It used to be, on the reasoning that
-          // a spawn nobody holds is asleep — but Discord disables message
-          // components in an archived thread, so that killed the spawn's own
-          // Claim button at exactly the moment the spawn became claimable (the
-          // same reasoning behind RespawnThreads.postBoard leaving the board
-          // post open). Discord's own auto-archive still closes an idle post in
-          // its own time; that is left alone, and openThread revives whatever
-          // it finds archived on the next claim.
-          refreshThread(guild, respawn, config)
+          refreshThread(guild, respawn, config).foreach { thread =>
+            // Archived, not locked: people can still leave notes on a spawn
+            // between hunts, and reviving it doesn't need a moderator. Archiving
+            // is what keeps the forum's front page to the spawns people are
+            // actually on — a free spawn is claimed from the pinned board, since
+            // Discord disables this post's own Claim button while it sleeps.
+            RespawnThreads.archive(thread)
+          }
           None
       }
     }

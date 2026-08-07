@@ -440,6 +440,15 @@ object RespawnThreads extends StrictLogging {
       logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
     }
 
+  /** Put the spawn's post to sleep once nobody holds it, so the forum's front
+   *  page stays the spawns people are actually on. Not locked — a locked thread
+   *  needs MANAGE_THREADS to reopen and would also stop people leaving notes on
+   *  a spawn between hunts. */
+  def archive(thread: ThreadChannel): Unit =
+    Try(thread.getManager.setArchived(true).complete()).failed.foreach { error =>
+      logger.warn(s"Could not archive respawn thread '${thread.getId}'", error)
+    }
+
   /** Swap a post's status tag. Tags are looked up by name on the parent forum,
    *  so a guild that deleted them just gets no tag rather than an error. */
   def applyTag(forum: ForumChannel, thread: ThreadChannel, tagName: String): Unit = {
