@@ -1167,6 +1167,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               RespawnEmbeds.dmEmbed("Handover expired", RespawnEmbeds.handoverLapsed(respawn),
                 imageFor(respawn), RespawnEmbeds.RedColor))
             logger.info(s"Handover offer ${offer.id} on '${respawn.code}' in guild '$guildId' lapsed unanswered")
+            // Usually there is an outgoing claim in limbo behind this offer and the
+            // pass below closes it and moves the spawn on. But that claim only gets
+            // one handover window: once it has been closed out, every later offer on
+            // the same spawn stands alone, so a second lapse leaves nothing for the
+            // pass below to find. Advance it here in that case, or the spawn sits
+            // free with a lapsed offer still on its card, its post still open, and
+            // whoever is behind in the queue never asked.
+            if (repository.activeClaim(guildId, respawn.id).isEmpty)
+              beginHandover(guild, respawn, config, now, outgoing = None)
           }
         }.failed.foreach { error =>
           logger.warn(s"Failed to expire handover offer ${offer.id} in guild '$guildId'", error)
@@ -1390,20 +1399,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // does not need telling that it ended.
             if (notifyOutgoing) notifyClaimEnded(guild, respawn, claim)
           }
-          // Use the thread refreshThread just resolved rather than re-deriving it
-          // from `respawn`: that is a snapshot taken before the refresh, so on a
-          // spawn's first claim its threadId is still empty here.
           // The card itself already flips to free with a Claim button on it, so
           // there is nothing to say — a "now free" post would just be noise in a
-          // thread meant to stay readable.
-          refreshThread(guild, respawn, config).foreach { thread =>
-            // Archived, not locked: people can still leave notes on a spawn
-            // between hunts, and reviving it doesn't need a moderator. Archiving
-            // is what keeps the forum's front page to the spawns people are
-            // actually on — a free spawn is claimed from the pinned board, since
-            // Discord disables this post's own Claim button while it sleeps.
-            RespawnThreads.archive(thread)
-          }
+          // thread meant to stay readable. refreshThread also puts the post to
+          // sleep, since by now nobody holds the spawn.
+          refreshThread(guild, respawn, config)
           None
       }
     }
@@ -1485,7 +1485,16 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   /** Rewrite a spawn's post to match the database — the one function that keeps
    *  Discord and the claim state in step, called after every mutation. Creates
-   *  the post on first claim and revives it if the spawn was idle. */
+   *  the post on first claim, revives it if the spawn was idle, and puts it back
+   *  to sleep once nobody holds it.
+   *
+   *  Sleeping belongs here rather than at the call sites that end a hunt. It used
+   *  to live in `beginHandover`, which is only one of the ways a spawn comes free
+   *  — a lapsed offer, a missed or unaffordable booked slot, a cancelled diary all
+   *  free a spawn too, and each of those went through this function, which wakes
+   *  the post to redraw the card and never closed it again. So a spawn's post
+   *  stayed open on every path but one. Tying it to `active` instead makes the
+   *  post's state a function of the claim state, like the card and the tag are. */
   def refreshThread(guild: Guild, respawn: Respawn, config: RespawnSettings): Option[ThreadChannel] =
     RespawnThreads.findForum(guild, config).flatMap { forum =>
       val guildId = guild.getId
@@ -1506,6 +1515,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
       thread.foreach { channel =>
         RespawnThreads.applyTag(forum, channel, RespawnThreads.tagFor(claimed = active.isDefined))
+        // Archived, not locked: people can still leave notes on a spawn between
+        // hunts, and reviving it doesn't need a moderator. Archiving is what keeps
+        // the forum's front page to the spawns people are actually on — a free
+        // spawn is claimed from the pinned board, since Discord disables this
+        // post's own Claim button while it sleeps.
+        //
+        // Keyed on the holder alone: a spawn with bookings but nobody on it is
+        // still nobody's hunt, and its diary is on the card for whoever opens it.
+        // `active` covers a claim in limbo, so a post stays awake for the whole of
+        // a handover rather than flickering shut between two hunts.
+        if (active.isEmpty) RespawnThreads.archive(channel)
       }
       thread
     }
