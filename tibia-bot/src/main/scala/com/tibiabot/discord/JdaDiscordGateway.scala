@@ -9,12 +9,20 @@ import scala.util.control.NonFatal
 
 /** JDA-backed [[DiscordGateway]]. */
 final class JdaDiscordGateway(jda: JDA) extends DiscordGateway with com.typesafe.scalalogging.StrictLogging {
-  def guildById(id: String): Guild = jda.getGuildById(id)
+  /** The guild, or null when there isn't one — including when the id could not
+   *  name a guild in the first place.
+   *
+   *  JDA throws on an id that is not a snowflake rather than answering "no such
+   *  guild", which turns one bad row into a 500 for every caller that was
+   *  reasonably expecting null. A lookup by id should say "not found" for an id
+   *  that cannot exist, so that case is answered here instead of propagated. */
+  def guildById(id: String): Guild =
+    if (id == null || !id.forall(_.isDigit) || id.isEmpty) null else jda.getGuildById(id)
   def guilds: List[Guild] = jda.getGuilds.asScala.toList
   def retrieveUser(id: String): User = jda.retrieveUserById(id).complete()
 
   def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
-    val guild = jda.getGuildById(guildId)
+    val guild = guildById(guildId)
     if (guild == null) None
     else
       // A member who isn't in the guild makes this throw rather than return
