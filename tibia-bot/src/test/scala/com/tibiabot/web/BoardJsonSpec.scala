@@ -37,10 +37,12 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
     "describe a free spawn without inventing a holder" in {
       val fields = firstSpawn(json(RespawnBoardEntry(spawn(), None, Nil, Nil, None))).fields
       fields("code") shouldBe JsString("415")
-      fields("name") shouldBe JsString("Cult Orcs")
       fields("state") shouldBe JsString("free")
       fields.contains("holder") shouldBe false
       fields.contains("endsAt") shouldBe false
+      // The name is not here. It belongs to the catalogue, which is fetched
+      // once rather than on every ten-second poll.
+      fields.contains("name") shouldBe false
     }
 
     // The page draws the progress bar and keeps it moving between polls, so it
@@ -63,20 +65,14 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
       fields.contains("endsAt") shouldBe false
     }
 
-    "point the sprite at our own domain, never the wiki" in {
+    // What a spawn *is* has moved to the catalogue, so the live board carries
+    // none of it. That split is the whole point: names, regions and sprite
+    // paths are most of the bytes and almost none of the change.
+    "leave what a spawn is to the catalogue" in {
       val fields = firstSpawn(json(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None))).fields
-      fields("sprite") shouldBe JsString("/dashboard/sprites/Orc_Warlord.gif")
-    }
-
-    // The page falls back to the avatar placeholder, which is why absence is
-    // fine and a broken URL would not be.
-    "omit the sprite for a spawn with no creature set" in {
-      firstSpawn(json(RespawnBoardEntry(spawn(""), None, Nil, Nil, None))).fields.contains("sprite") shouldBe false
-    }
-
-    "omit the sprite rather than emit an unsafe name" in {
-      firstSpawn(json(RespawnBoardEntry(spawn("../../etc/passwd"), None, Nil, Nil, None)))
-        .fields.contains("sprite") shouldBe false
+      fields.contains("sprite") shouldBe false
+      fields.contains("name") shouldBe false
+      fields.contains("region") shouldBe false
     }
 
     "report the queue length" in {
@@ -153,6 +149,49 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
       val slot = claim(RespawnClaim.StatusReserved, startsAt = Some(now.plusHours(2)))
       firstSpawn(json(RespawnBoardEntry(spawn(), None, Nil, List(slot), None), viewerId = "u1"))
         .fields("booked") shouldBe JsBoolean(true)
+    }
+  }
+
+  "catalogueJson" should {
+
+    def catalogue(entries: com.tibiabot.respawn.RespawnBoardEntry*) =
+      RespawnDashboardRoute.catalogueJson(entries.toList)
+
+    def firstEntry(o: JsObject) =
+      o.fields("spawns").asInstanceOf[JsArray].elements.head.asJsObject
+
+    "carry what a spawn is, and nothing about what is happening on it" in {
+      val held = claim(RespawnClaim.StatusActive, startsAt = Some(now), endsAt = Some(now.plusHours(2)))
+      val fields = firstEntry(catalogue(RespawnBoardEntry(spawn(), Some(held), Nil, Nil, None))).fields
+      fields("code") shouldBe JsString("415")
+      fields("name") shouldBe JsString("Cult Orcs")
+      fields("region") shouldBe JsString("Edron")
+      fields.contains("state") shouldBe false
+      fields.contains("holder") shouldBe false
+    }
+
+    "point the sprite at our own domain, never the wiki" in {
+      firstEntry(catalogue(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None)))
+        .fields("sprite") shouldBe JsString("/dashboard/sprites/Orc_Warlord.gif")
+    }
+
+    // The page falls back to the avatar placeholder, which is why absence is
+    // fine and a broken URL would not be.
+    "omit the sprite for a spawn with no creature set" in {
+      firstEntry(catalogue(RespawnBoardEntry(spawn(""), None, Nil, Nil, None)))
+        .fields.contains("sprite") shouldBe false
+    }
+
+    "omit the sprite rather than emit an unsafe name" in {
+      firstEntry(catalogue(RespawnBoardEntry(spawn("../../etc/passwd"), None, Nil, Nil, None)))
+        .fields.contains("sprite") shouldBe false
+    }
+
+    "keep the catalogue in the order the board is in" in {
+      val a = RespawnBoardEntry(spawn().copy(code = "415"), None, Nil, Nil, None)
+      val b = RespawnBoardEntry(spawn().copy(code = "416"), None, Nil, Nil, None)
+      catalogue(a, b).fields("spawns").asInstanceOf[JsArray].elements
+        .map(_.asJsObject.fields("code")) shouldBe Vector(JsString("415"), JsString("416"))
     }
   }
 

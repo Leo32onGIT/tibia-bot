@@ -510,7 +510,9 @@ function serverDayBit(date) {
 }
 
 // ---- State ----------------------------------------------------------------
-let board = null;          // the catalogue and this visitor's limits
+let board = null;          // the two halves, stitched: what the spawns are and what is happening
+/** code -> the unchanging half of a spawn. Fetched once. */
+let catalogue = null;
 let filterText = '';
 let slots = [];            // the open spawn's week, as drawn blocks
 
@@ -754,12 +756,39 @@ function tick() {
 }
 
 // ---- Data -----------------------------------------------------------------
+/** What the spawns are — names, regions, sprites — which changes only when an
+ *  admin edits the catalogue.
+ *
+ *  Fetched once and kept. It is most of the bytes and almost none of the
+ *  change, so sending it on every ten-second poll was the bulk of the traffic
+ *  for no information at all. The browser's own cache handles repeat visits;
+ *  this only refetches when a spawn turns up that we have never heard of.
+ */
+async function loadCatalogue() {
+  const res = await fetch(`/dashboard/g/${GUILD_ID}/catalogue`, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
+  const data = await res.json();
+  catalogue = new Map(data.spawns.map(s => [s.code, s]));
+}
+
 async function loadBoard() {
   const res = await fetch(`/dashboard/g/${GUILD_ID}/board`, { headers: { 'Accept': 'application/json' } });
   // A session that expired mid-visit lands here; the redirect to login is not
   // something fetch can follow usefully, so say so rather than looping.
   if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
-  board = await res.json();
+  const live = await res.json();
+
+  if (!catalogue) await loadCatalogue();
+  // A spawn nobody has told us about means the catalogue moved under us — an
+  // admin added one. Refetch once rather than drawing a card with no name.
+  if (live.spawns.some(s => !catalogue.has(s.code))) await loadCatalogue();
+
+  // The two halves are stitched back together here, so everything downstream
+  // still sees one flat spawn with a name and a state on it.
+  board = {
+    ...live,
+    spawns: live.spawns.map(s => Object.assign({}, catalogue.get(s.code), s))
+  };
   if (view.duration == null && limits()) {
     view.duration = Math.max(SLOT, Math.min(limits().defaultDurationMinutes, cap()));
   }
@@ -1310,7 +1339,7 @@ function readout() {
  */
 function modTools(body, spawn) {
   const holder = spawn.holderId;
-  const queue = spawn.queue || [];
+  const queue = spawn.queue || [];   // omitted from the payload when empty
   if (!holder) return;
 
   const box = el('div', 'mod');

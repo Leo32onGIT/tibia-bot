@@ -1,8 +1,8 @@
 package com.tibiabot.web
 
 import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, MediaTypes, StatusCodes}
-import akka.http.scaladsl.model.headers.CacheDirectives.{`max-age`, `public`}
-import akka.http.scaladsl.model.headers.`Cache-Control`
+import akka.http.scaladsl.model.headers.CacheDirectives.{`max-age`, `private`, `public`}
+import akka.http.scaladsl.model.headers.{`Cache-Control`, `If-None-Match`, ETag, EntityTag}
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.Directives._
 import com.typesafe.scalalogging.StrictLogging
@@ -109,6 +109,38 @@ final class RespawnDashboardRoute(
   private def json(value: JsValue) =
     complete(HttpEntity(ContentTypes.`application/json`, value.compactPrint))
 
+  /** JSON with an ETag, so a caller that already has this exact answer is told
+   *  so instead of being sent it again.
+   *
+   *  The board is polled every ten seconds by every open tab and most of those
+   *  polls find nothing has changed. The work of producing the answer still
+   *  happens — knowing whether anything changed means reading it — but the
+   *  answer stops crossing the network, and the page can skip its own work too.
+   *
+   *  `maxAge` is how long a caller may reuse it without asking at all. Zero for
+   *  anything live; a catalogue can sit for a while, since a spawn being
+   *  renamed is not urgent.
+   */
+  private def cachedJson(value: JsValue, maxAge: Long): Route = {
+    val body = value.compactPrint
+    val tag = EntityTag(Integer.toHexString(body.hashCode) + "-" + body.length)
+    optionalHeaderValueByType(`If-None-Match`) { presented =>
+      // Only an exact match counts. `*` means "any representation you have",
+      // which is a question about whether the thing exists rather than about
+      // this particular answer, so it is not treated as a hit.
+      val known = presented.exists {
+        case `If-None-Match`(akka.http.scaladsl.model.headers.EntityTagRange.Default(tags)) =>
+          tags.exists(_.tag == tag.tag)
+        case _ => false
+      }
+      val headers = List(ETag(tag), `Cache-Control`(`private`(), `max-age`(maxAge)))
+      respondWithHeaders(headers) {
+        if (known) complete(StatusCodes.NotModified)
+        else complete(HttpEntity(ContentTypes.`application/json`, body))
+      }
+    }
+  }
+
   /** Completes once the action has actually been performed — which for a guild
    *  another bot runs means once that process has answered. Nothing is parked
    *  waiting: the request simply is not completed until the Future is. */
@@ -199,12 +231,24 @@ final class RespawnDashboardRoute(
         withAccess(guildId)(access => html(board(access)))
       }
     } ~
+    // The part of a board that does not change: what the spawns are called and
+    // what they look like. Split out because it is by far the larger half of
+    // the payload and almost never differs, so a poll should not carry it.
+    path("g" / Segment / "catalogue") { guildId =>
+      get {
+        withAccess(guildId) { _ =>
+          read(boardOf(guildId)) { entries =>
+            cachedJson(RespawnDashboardRoute.catalogueJson(entries),
+              RespawnDashboardRoute.CatalogueMaxAge)
+          }
+        }
+      }
+    } ~
     path("g" / Segment / "board") { guildId =>
       get {
         withAccessAs(guildId) { (userId, access) =>
           read((boardOf(guildId), limitsOf(guildId, userId))) { case (entries, limits) =>
-            complete(HttpEntity(ContentTypes.`application/json`,
-              RespawnDashboardRoute.boardJson(entries, access.tier, userId, limits).compactPrint))
+            cachedJson(RespawnDashboardRoute.boardJson(entries, access.tier, userId, limits), 0L)
           }
         }
       }
@@ -392,6 +436,11 @@ final class RespawnDashboardRoute(
 object RespawnDashboardRoute {
   /** A month. The file behind a given creature name is immutable in practice,
    *  and a stale sprite is the mildest possible wrongness. */
+  /** How long a catalogue may be reused without asking. Long enough that
+   *  opening the board twice in a sitting costs one fetch, short enough that a
+   *  renamed spawn corrects itself while somebody is still looking. */
+  val CatalogueMaxAge: Long = 120L
+
   val SpriteMaxAge: scala.concurrent.duration.FiniteDuration =
     scala.concurrent.duration.Duration(30, java.util.concurrent.TimeUnit.DAYS)
 
@@ -488,13 +537,27 @@ object RespawnDashboardRoute {
    *  The sprite is a URL on our own domain or absent — the page falls back to
    *  the placeholder — so nothing here ever points a browser at the wiki that
    *  some of them cannot reach. */
+  /** What a spawn is, as opposed to what is happening on it.
+   *
+   *  Its name, where it is and what it looks like change when an admin edits
+   *  the catalogue and not otherwise, so this is fetched once and kept. It is
+   *  also most of the bytes: on a 285-spawn guild the names, regions and sprite
+   *  paths are several times the size of everything that actually moves. */
+  private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry]): JsObject =
+    JsObject("spawns" -> JsArray(entries.map { entry =>
+      val spawn = entry.respawn
+      JsObject(Map[String, JsValue](
+        "id" -> JsNumber(spawn.id),
+        "code" -> JsString(spawn.code),
+        "name" -> JsString(spawn.name),
+        "region" -> JsString(spawn.region)
+      ) ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue)))
+    }.toVector))
+
   private def entryJson(entry: com.tibiabot.respawn.RespawnBoardEntry, viewerId: String): JsValue = {
     val spawn = entry.respawn
     val base = Map[String, JsValue](
-      "id" -> JsNumber(spawn.id),
       "code" -> JsString(spawn.code),
-      "name" -> JsString(spawn.name),
-      "region" -> JsString(spawn.region),
       "state" -> JsString(entry.state),
       "queueLength" -> JsNumber(entry.queue.size),
       // Which action a card offers turns entirely on these, and the holder's
@@ -509,9 +572,10 @@ object RespawnDashboardRoute {
     // it would be a worse tool than the button in the thread they already have.
     // Sent to everybody: the queue is public in the Discord thread already, so
     // hiding it here would be a pretence rather than a protection.
-    val queue = Map[String, JsValue]("queue" -> JsArray(entry.queue.map(person).toVector))
+    val queue =
+      if (entry.queue.isEmpty) Map.empty[String, JsValue]
+      else Map[String, JsValue]("queue" -> JsArray(entry.queue.map(person).toVector))
     val holder = entry.active.map(claim => "holderId" -> (JsString(claim.userId): JsValue))
-    val sprite = CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue))
     val holderName = entry.holderLabel.map(name => "holder" -> (JsString(name): JsValue))
     // Both ends of a live hunt, so the page can draw the progress bar itself and
     // keep it moving between polls rather than freezing at whatever we sent.
@@ -522,7 +586,7 @@ object RespawnDashboardRoute {
     val nextAt = entry.nextReservation.flatMap(_.startsAt).map(s => "nextAt" -> instant(s))
     val touched = entry.lastActivity.map(t => "lastActivity" -> instant(t))
 
-    JsObject(base ++ window ++ sprite ++ holderName ++ holder ++ queue ++ nextAt ++ touched)
+    JsObject(base ++ window ++ holderName ++ holder ++ queue ++ nextAt ++ touched)
   }
 
   /** The board a visitor sees, plus what they are allowed to do with it. The
@@ -543,9 +607,13 @@ object RespawnDashboardRoute {
           ++ l.budgetMinutes.map(m => "budgetMinutes" -> (JsNumber(m): JsValue))
       ): JsValue)
     }
+    // Deliberately no clock in here. It used to carry one, which nothing read
+    // and which changed on every response — so the ETag changed on every
+    // response too, and "nothing has changed since last time" could never be
+    // true. Every time that matters is already an absolute instant on the thing
+    // it belongs to.
     JsObject(Map[String, JsValue](
       "tier" -> JsString(tier.name),
-      "now" -> JsString(java.time.Instant.now().toString),
       "spawns" -> JsArray(entries.map(entryJson(_, viewerId)).toVector)
     ) ++ stamina)
   }

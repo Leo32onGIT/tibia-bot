@@ -211,6 +211,45 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   // The page hides these from a plain member, but that is convenience — this is
   // the control, and it is what stops somebody posting to the endpoint directly.
+  // Most polls find nothing has changed, and the answer to those should not
+  // cross the network again.
+  test("a board that has not changed comes back as 304 with no body") {
+    val actions = new RecordingActions
+    val r = routes(actions)
+    var tag: akka.http.scaladsl.model.headers.EntityTag = null
+    Get("/dashboard/g/g1/board") ~> signedIn ~> r ~> check {
+      status shouldBe StatusCodes.OK
+      tag = header[akka.http.scaladsl.model.headers.ETag]
+        .map(_.etag).getOrElse(fail("no ETag on the board"))
+    }
+    Get("/dashboard/g/g1/board")
+      .withHeaders(akka.http.scaladsl.model.headers.`If-None-Match`(tag)) ~> signedIn ~> r ~> check {
+      status shouldBe StatusCodes.NotModified
+      responseAs[String] shouldBe ""
+    }
+  }
+
+  test("a stale ETag is answered in full rather than as unchanged") {
+    val actions = new RecordingActions
+    val stale = akka.http.scaladsl.model.headers.EntityTag("something-else")
+    Get("/dashboard/g/g1/board")
+      .withHeaders(akka.http.scaladsl.model.headers.`If-None-Match`(stale)) ~>
+      signedIn ~> routes(actions) ~> check {
+      status shouldBe StatusCodes.OK
+    }
+  }
+
+  // The catalogue is the half that does not change, so it may be reused for a
+  // while without asking at all.
+  test("the catalogue is cacheable and carries what a spawn is") {
+    val actions = new RecordingActions
+    Get("/dashboard/g/g1/catalogue") ~> signedIn ~> routes(actions) ~> check {
+      status shouldBe StatusCodes.OK
+      header("Cache-Control").map(_.value) should contain("private, max-age=120")
+      header("ETag") should not be empty
+    }
+  }
+
   test("the calendar hands the asked-for window straight through") {
     val actions = new RecordingActions
     Get("/dashboard/g/g1/slots?code=415&from=2026-08-10T00:00:00Z&to=2026-08-17T00:00:00Z") ~>
