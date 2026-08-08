@@ -168,9 +168,11 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
         defaultDurationMinutes = 120, resetsAt = now)
       val out = RespawnDashboardRoute.boardJson(Nil, AccessTier.Member, "u1", Some(limits))
         .fields("limits").asJsObject.fields
-      // 95 minutes left snaps down to a whole 30, and stamina is named as the
-      // limit doing the stopping.
-      out("claimableMinutes") shouldBe JsNumber(90)
+      // All 95 minutes, not the 90 a whole-step ceiling would have offered:
+      // rounding stranded the last five, which the service would have granted
+      // perfectly happily. Stamina is still named as the limit doing the
+      // stopping.
+      out("claimableMinutes") shouldBe JsNumber(95)
       out("boundBy") shouldBe JsString("stamina")
     }
 
@@ -194,8 +196,18 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
       out("claimableMinutes") shouldBe JsNumber(240)
     }
 
-    "leave nothing claimable when the tank is empty" in {
+    // The last of a tank is offered as it stands rather than rounded away.
+    // Ten minutes is ten minutes of hunting, and refusing it to keep the
+    // numbers in half hours would be a convention costing somebody a hunt.
+    "offer the remainder of a tank that no longer covers a whole step" in {
       val limits = BoardLimits(Some(10), Some(240), maxDurationMinutes = 240,
+        defaultDurationMinutes = 120, resetsAt = now)
+      RespawnDashboardRoute.boardJson(Nil, AccessTier.Member, "u1", Some(limits))
+        .fields("limits").asJsObject.fields("claimableMinutes") shouldBe JsNumber(10)
+    }
+
+    "leave nothing claimable only when the tank is genuinely empty" in {
+      val limits = BoardLimits(Some(0), Some(240), maxDurationMinutes = 240,
         defaultDurationMinutes = 120, resetsAt = now)
       RespawnDashboardRoute.boardJson(Nil, AccessTier.Member, "u1", Some(limits))
         .fields("limits").asJsObject.fields("claimableMinutes") shouldBe JsNumber(0)

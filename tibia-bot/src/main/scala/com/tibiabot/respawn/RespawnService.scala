@@ -438,7 +438,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 case None =>
                   val boundary = resetBoundary(now)
                   val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-                  if (!tank.canAfford(minutes))
+                  // Not being able to afford the whole hunt is no longer a
+                  // refusal — beginClaim shortens it to whatever is left. Only
+                  // a tank with nothing worth starting in it is refused, and it
+                  // is refused here so that somebody with none is not put in a
+                  // queue they could never take their turn in.
+                  if (!tank.unlimited && tank.remainingMinutes < MinimumClaimMinutes)
                     ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
                   // An outstanding offer means the spawn is already spoken for,
                   // even though its previous holder may already have been closed
@@ -471,16 +476,31 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     // exempt, or it would truncate against itself.
     val reservation =
       if (kind == RespawnClaim.KindScheduled) None else nextReservationStart(guildId, respawn.id, now)
-    val end = endsAtFor(now, minutes, reservation)
-    val granted = math.max(0, java.time.Duration.between(now, end).toMinutes).toInt
+    val untilBooking = endsAtFor(now, minutes, reservation)
+    val allowedByBooking = math.max(0, java.time.Duration.between(now, untilBooking).toMinutes).toInt
+    if (allowedByBooking < MinimumClaimMinutes)
+      return ClaimOutcome.Reserved(respawn, reservation.getOrElse(untilBooking))
+
+    // A tank that cannot cover the whole hunt shortens it rather than refusing
+    // it. Somebody with forty minutes left wants those forty minutes, and being
+    // told to come back after server save because they cannot afford two hours
+    // is a refusal that helps nobody — the spawn sits empty and they hunt
+    // nothing. The same rule a booking already gets: take what is there, charge
+    // for what was taken, and say it was shortened.
+    val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
+    val granted = RespawnService.grantedMinutes(allowedByBooking, tank)
+    // Below the floor there is genuinely nothing worth starting, and that is a
+    // stamina refusal rather than a booking one.
     if (granted < MinimumClaimMinutes)
-      return ClaimOutcome.Reserved(respawn, reservation.getOrElse(end))
-    // Re-check under the reservation itself rather than trusting the earlier
-    // read: a second claim from the same user may have taken the room in
-    // between, and reserveStamina writing nothing is the authoritative answer.
+      return ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
+    val end = now.plusMinutes(granted.toLong)
+
+    // Re-check under the reservation itself rather than trusting the read above:
+    // a second claim from the same user may have taken the room in between, and
+    // reserveStamina writing nothing is the authoritative answer.
     if (!repository.reserveStamina(guildId, userId, granted, config.staminaMinutes, boundary)) {
-      val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-      ClaimOutcome.NoStamina(respawn, granted, tank, ServerSaveSchedule.nextServerSave(now))
+      val fresh = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
+      ClaimOutcome.NoStamina(respawn, granted, fresh, ServerSaveSchedule.nextServerSave(now))
     } else {
       repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
         now, end, granted, kind) match {
@@ -494,8 +514,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         case Some(claim) =>
           refreshThread(guild, respawn, config)
           // The caller is told when the hunt was shortened, rather than quietly
-          // getting less than they asked for.
-          if (granted < minutes) ClaimOutcome.Shortened(respawn, claim, minutes, reservation)
+          // getting less than they asked for. The booking is named only when the
+          // booking is what did it — a hunt cut short by an empty tank has no
+          // booking to blame, and saying otherwise would send somebody looking
+          // for a slot that isn't there.
+          val shortenedByBooking = reservation.isDefined && granted >= allowedByBooking
+          if (granted < minutes)
+            ClaimOutcome.Shortened(respawn, claim, minutes, if (shortenedByBooking) reservation else None)
           else ClaimOutcome.Claimed(respawn, claim)
       }
     }
@@ -1668,6 +1693,22 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 }
 
 object RespawnService {
+
+  /** How long a claim actually runs for, given what a booking leaves and what
+   *  is in the tank.
+   *
+   *  Both limits shorten rather than refuse. A booking has always worked that
+   *  way; stamina now does too, because "you cannot afford two hours" was a
+   *  refusal that left the spawn empty and the person hunting nothing, when
+   *  what they wanted was the forty minutes they had.
+   *
+   *  Pure, so the table — which limit binds, and what happens when the tank is
+   *  unlimited or empty — is checkable without a database or a Discord guild.
+   *  The floor, and what the shortfall is blamed on, stay with the caller that
+   *  has the spawn and the booking to name.
+   */
+  def grantedMinutes(allowedByBooking: Int, tank: Stamina): Int =
+    if (tank.unlimited) allowedByBooking else math.min(allowedByBooking, tank.remainingMinutes)
 
   /** Stitch a board together from the bulk reads that feed it.
    *
