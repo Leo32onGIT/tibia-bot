@@ -224,6 +224,10 @@ object Config {
     /** Shown as the claim embed's image when a spawn has no `creature` set —
      *  most of the seed catalogue starts out that way. */
     val fallbackImage: String = respawn.getString("fallback-image")
+    /** Directory the member dashboard caches creature sprites into, so they are
+     *  served from our own domain rather than hotlinked from a wiki that
+     *  geoblocks some of the people looking at them. */
+    val spriteCacheDir: String = respawn.getString("sprite-cache-dir")
   }
 
   /** Auto-leave a guild with no worlds tracked for this many days, unless a
