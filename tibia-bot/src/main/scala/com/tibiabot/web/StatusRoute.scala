@@ -49,50 +49,6 @@ final class StatusRoute(
     }
   }
 
-  /** Dashboard-local static images (the BattlEye status icons — previously
-   *  hotlinked from the Tibia Fandom wiki, now vendored into the repo so the
-   *  dashboard doesn't depend on a third party staying up — plus the bot
-   *  avatar, used for both the sidebar brand mark and the page favicon).
-   *  Same filesystem-override-then-classpath lookup as `dashboardHtml`. An
-   *  explicit allow-list, not a raw path segment read, so this can't be used
-   *  to read arbitrary files from the image directory. */
-  private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif", "avatar.png")
-
-  /** Content type for an allow-listed dashboard image. Only the extensions
-   *  actually present in [[dashboardImages]] are mapped; gif is the fallback
-   *  because the BattlEye icons came first and are still the common case. */
-  private def imageContentType(filename: String): ContentType =
-    if (filename.endsWith(".png")) ContentType(MediaTypes.`image/png`)
-    else ContentType(MediaTypes.`image/gif`)
-
-  /** InputStream.readAllBytes() is Java 9+; this project targets Java 8. */
-  private def readAllBytes(stream: java.io.InputStream): Array[Byte] = {
-    val buffer = new java.io.ByteArrayOutputStream()
-    val chunk = new Array[Byte](4096)
-    var n = stream.read(chunk)
-    while (n != -1) {
-      buffer.write(chunk, 0, n)
-      n = stream.read(chunk)
-    }
-    buffer.toByteArray
-  }
-
-  private def dashboardImage(filename: String): HttpResponse =
-    if (!dashboardImages.contains(filename)) {
-      HttpResponse(StatusCodes.NotFound)
-    } else {
-      val overridePath = java.nio.file.Paths.get(s"web/images/$filename")
-      val bytes =
-        if (java.nio.file.Files.isReadable(overridePath)) {
-          java.nio.file.Files.readAllBytes(overridePath)
-        } else {
-          val stream = getClass.getClassLoader.getResourceAsStream(s"web/images/$filename")
-          try readAllBytes(stream)
-          finally stream.close()
-        }
-      HttpResponse(entity = HttpEntity(imageContentType(filename), bytes))
-    }
-
   private def requireOwner(userId: String): Directive0 =
     if (userId == ownerId) pass else complete(StatusCodes.Forbidden -> "Forbidden")
 
@@ -396,8 +352,10 @@ final class StatusRoute(
   }
 
   val routes: Route =
-    discordAuth.routes ~
-    path("status") {
+    // No auth routes here: they live once, under the member dashboard's mount,
+    // and reach this area through the session cookie set for both paths. Two
+    // copies would mean two callbacks and two redirect URIs to register.
+    path("data") {
       get {
         discordAuth.authenticatedUser { userId =>
           requireOwner(userId) {
@@ -410,7 +368,7 @@ final class StatusRoute(
       get {
         discordAuth.authenticatedUser { userId =>
           requireOwner(userId) {
-            complete(dashboardImage(filename))
+            complete(StatusRoute.dashboardImage(filename))
           }
         }
       }
@@ -427,6 +385,56 @@ final class StatusRoute(
 }
 
 object StatusRoute {
+  /** Dashboard-local static images (the BattlEye status icons — previously
+   *  hotlinked from the Tibia Fandom wiki, now vendored into the repo so the
+   *  dashboard doesn't depend on a third party staying up — plus the bot
+   *  avatar, used for both the sidebar brand mark and the page favicon).
+   *  Same filesystem-override-then-classpath lookup as `dashboardHtml`. An
+   *  explicit allow-list, not a raw path segment read, so this can't be used
+   *  to read arbitrary files from the image directory.
+   *
+   *  On the companion because both dashboards serve the same few files: the
+   *  member one needs the avatar for its own chrome and as the stand-in for a
+   *  spawn with no creature art. Two copies would mean two allow-lists, and
+   *  the weaker of them would be the one that mattered. */
+  private val dashboardImages: Set[String] = Set("be-icon-green.gif", "be-icon-yellow.gif", "avatar.png")
+
+  /** Content type for an allow-listed dashboard image. Only the extensions
+   *  actually present in [[dashboardImages]] are mapped; gif is the fallback
+   *  because the BattlEye icons came first and are still the common case. */
+  private def imageContentType(filename: String): ContentType =
+    if (filename.endsWith(".png")) ContentType(MediaTypes.`image/png`)
+    else ContentType(MediaTypes.`image/gif`)
+
+  /** InputStream.readAllBytes() is Java 9+; this project targets Java 8. */
+  private def readAllBytes(stream: java.io.InputStream): Array[Byte] = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val chunk = new Array[Byte](4096)
+    var n = stream.read(chunk)
+    while (n != -1) {
+      buffer.write(chunk, 0, n)
+      n = stream.read(chunk)
+    }
+    buffer.toByteArray
+  }
+
+  def dashboardImage(filename: String): HttpResponse =
+    if (!dashboardImages.contains(filename)) {
+      HttpResponse(StatusCodes.NotFound)
+    } else {
+      val overridePath = java.nio.file.Paths.get(s"web/images/$filename")
+      val bytes =
+        if (java.nio.file.Files.isReadable(overridePath)) {
+          java.nio.file.Files.readAllBytes(overridePath)
+        } else {
+          val stream = getClass.getClassLoader.getResourceAsStream(s"web/images/$filename")
+          try readAllBytes(stream)
+          finally stream.close()
+        }
+      HttpResponse(entity = HttpEntity(imageContentType(filename), bytes))
+    }
+
+
   /** When this process came up, for the dashboard's uptime readout. Taken at
    *  class-load of this object, which happens during startup wiring — close
    *  enough to process start for a figure displayed to the minute, and it

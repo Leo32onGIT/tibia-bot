@@ -1,0 +1,1253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Violent Bot - <!--TITLE--></title>
+<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151c; --panel-border: #1f2430;
+    --text: #d7dce3; --text-strong: #e8ebf0; --muted: #7c8698;
+    --accent: #5b8cff; --warn: #e0a93e; --bad: #e0563e; --purple: #a78bfa;
+
+    /* Lifted from the Discord side so a spawn looks the same in both places:
+       the code colour is RespawnBoardImage.CodeColor, free and claimed are
+       RespawnEmbeds' own FreeColor and RedColor. */
+    --code: #f0b232;
+    --spawn-name: #e8e9ea;
+
+    /* One definition for every state, used by the cards and by the calendar
+       inside the spawn window. Booked and confirmed share a hue deliberately: a
+       confirmed slot is the same booking with the question settled, so it reads
+       as a stronger version of it (dashed outline -> solid, plus a tick) rather
+       than a fourth colour. That keeps the palette three hues wide, which stays
+       legible with a red-green colour vision deficiency, and the tick carries
+       the distinction with no colour at all. */
+    --st-free: #2ecc71;
+    --st-claimed: #d23369;
+    --st-booked: #5b8cff;
+    --st-confirmed: #5b8cff;
+    --st-asked: #e0a93e;
+
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+    background-size: 46px 46px;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 26px 24px 70px; }
+  .muted { color: var(--muted); }
+
+  .masthead {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 13px 18px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-strong); }
+  .brand img { width: 32px; height: 32px; border-radius: 8px; }
+  .brand .sub { display: block; font-size: 10px; font-weight: 400; color: var(--muted); letter-spacing: 0.04em; margin-top: 3px; }
+  .tier { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; border-radius: 4px; padding: 2px 7px; }
+  .tier-member { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .tier-moderator { background: rgba(91,140,255,0.15); color: var(--accent); }
+  .tier-admin { background: rgba(167,139,250,0.15); color: var(--purple); }
+  .masthead-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .filter {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 6px 10px; width: 190px;
+  }
+  .filter::placeholder { color: var(--muted); font-family: var(--sans); }
+  .filter:focus { outline: none; border-color: var(--accent); }
+  .stale-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; }
+  .panel-title {
+    padding: 12px 16px; font-family: var(--mono); font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
+    border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::before { content: '##'; color: var(--accent); letter-spacing: normal; }
+  .panel-title .right { margin-left: auto; text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 11px; }
+
+  .legend { display: flex; gap: 15px; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--panel-border); }
+  .legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .sw { width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0; border: 1.5px solid; }
+  .sw.free { border-color: var(--st-free); background: rgba(46,204,113,0.26); }
+  .sw.claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
+  .sw.booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
+  .sw.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  .sw.asked { border-color: var(--st-asked); background: rgba(224,169,62,0.28); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 10px; padding: 14px 16px; }
+  .card {
+    position: relative; overflow: hidden; cursor: pointer;
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .card:hover { border-color: var(--accent); }
+  /* State also shows as a hairline down the leading edge, because on a busy
+     watermark the dot alone gets lost against the art. */
+  .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--edge, transparent); }
+
+  /* Never mirrored. Tibia sprites are drawn facing a deliberate direction and
+     flipping one reads as wrong art rather than as a design choice — and it
+     would disagree with the same creature shown the right way round in the
+     Discord thread's thumbnail. */
+  .sprite {
+    position: absolute; right: -10px; bottom: -12px; width: 84px; height: 84px;
+    opacity: 0.17; pointer-events: none;
+    image-rendering: pixelated; object-fit: contain;
+    filter: grayscale(var(--drain, 0));
+  }
+  /* The avatar stand-in is always fully drained — it is a placeholder for
+     missing art and must never be the brightest thing on a board of real
+     sprites. */
+  .sprite.placeholder { filter: grayscale(1); opacity: 0.1; }
+
+  .card-body { position: relative; }
+  .card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .code-chip {
+    display: inline-flex; align-items: center; font-family: var(--mono); font-weight: 700;
+    font-size: 12px; font-variant-numeric: tabular-nums; color: var(--code);
+    background: rgba(240,178,50,0.13); border: 1px solid rgba(240,178,50,0.32);
+    border-radius: 5px; padding: 2px 7px; flex-shrink: 0;
+  }
+  .code-chip.live { color: #ffd98a; border-color: rgba(240,178,50,0.75); animation: pulse 2.6s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(240,178,50,0.42); } 70% { box-shadow: 0 0 0 6px rgba(240,178,50,0); } 100% { box-shadow: 0 0 0 0 rgba(240,178,50,0); } }
+  @media (prefers-reduced-motion: reduce) { .code-chip.live { animation: none; box-shadow: 0 0 0 2px rgba(240,178,50,0.3); } }
+
+  .spawn-name { color: var(--spawn-name); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .age { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .card-state { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid; }
+  .dot.free { border-color: var(--st-free); background: var(--st-free); }
+  .dot.claimed { border-color: var(--st-claimed); background: var(--st-claimed); }
+  .dot.booked { border-color: var(--st-booked); background: transparent; }
+  .dot.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  .dot.asked { border-color: var(--st-asked); background: var(--st-asked); }
+  .who { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who.free { color: var(--st-free); }
+  .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
+  .queue { font-family: var(--mono); font-size: 10px; color: var(--muted); flex-shrink: 0; }
+  .card-state .queue { margin-left: auto; }
+
+  .card-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.07); margin-top: 8px; overflow: hidden; }
+  .card-bar span { display: block; height: 100%; border-radius: 2px; background: var(--st-claimed); transition: width 1s linear; }
+
+  .empty-note { padding: 26px 16px; color: var(--muted); font-size: 13px; text-align: center; }
+
+  /* ---- The spawn window ---------------------------------------------------
+     One window per spawn, big enough to hold the whole decision: what is
+     happening on it now, and the week it is booked into. Booking used to be a
+     link somewhere else, which made planning a hunt feel like a separate errand
+     from taking one — they are the same thought, so they are one window. */
+  .veil { position: fixed; inset: 0; background: rgba(4,5,8,0.72); backdrop-filter: blur(2px); z-index: 40; display: none; }
+  .veil.open { display: block; }
+  .window {
+    position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(1120px, calc(100vw - 28px)); height: min(792px, calc(100vh - 40px));
+    background: var(--panel); border: 1px solid #2a3142; border-radius: 14px;
+    box-shadow: 0 30px 90px rgba(0,0,0,0.6);
+    display: none; overflow: hidden;
+  }
+  .window.open { display: flex; flex-direction: column; }
+
+  /* The creature, filling the window rather than tucked in a corner. Kept far
+     enough back that everything on top of it stays readable — the scrim does
+     that work, so the art can be large without becoming noise. Never mirrored,
+     for the same reason as the card sprites. */
+  .watermark {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; object-position: center 46%;
+    image-rendering: pixelated; pointer-events: none; user-select: none;
+    opacity: 0.09; filter: saturate(0.85);
+  }
+  .watermark.placeholder { opacity: 0.05; filter: grayscale(1); }
+  .scrim {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 50% 45%, rgba(18,21,28,0.12) 0%, rgba(18,21,28,0.7) 62%, rgba(18,21,28,0.93) 100%),
+      linear-gradient(rgba(18,21,28,0.55), rgba(18,21,28,0.18) 30%, rgba(18,21,28,0.75));
+  }
+  .window > .win-head, .window > .win-body { position: relative; }
+
+  .win-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px 13px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .win-head .code-chip { font-size: 15px; padding: 4px 11px; border-radius: 7px; }
+  .win-title { font-size: 17px; color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em; }
+  .win-region { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
+  .win-close:hover { color: var(--text-strong); }
+  .win-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .win-body::-webkit-scrollbar { width: 10px; }
+  .win-body::-webkit-scrollbar-track { background: transparent; }
+  .win-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
+
+  .strip {
+    display: flex; align-items: center; gap: 11px; padding: 10px 20px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+  }
+  .strip i { font-size: 14px; }
+  .now-strip { background: rgba(255,255,255,0.02); }
+  .tz-pill { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 5px; background: rgba(255,255,255,0.05); color: var(--text); }
+  .tz-pill.server { background: rgba(224,169,62,0.14); color: #e8c887; }
+  .field { display: flex; align-items: center; gap: 7px; }
+  .field-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+  .live-bar { flex: 1; min-width: 80px; max-width: 220px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .live-bar span { display: block; height: 100%; background: var(--st-claimed); transition: width 1s linear; }
+
+  .stamina-bar { width: 120px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; display: flex; }
+  .stamina-bar .used { background: var(--muted); height: 100%; }
+  .stamina-bar .pending { background: var(--accent); height: 100%; }
+  .stamina-val { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+
+  .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: transparent; border: none; border-left: 1px solid var(--panel-border);
+    color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg button:first-child { border-left: none; }
+  .seg button:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .seg button.on { background: rgba(91,140,255,0.18); color: #cfdcff; }
+
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .stepper button {
+    width: 22px; height: 22px; padding: 0; flex-shrink: 0;
+    background: transparent; border: 1px solid var(--panel-border); border-radius: 5px;
+    color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .stepper button:hover:not([disabled]) { border-color: var(--accent); color: var(--text-strong); }
+  .stepper button[disabled] { opacity: 0.35; cursor: not-allowed; }
+  .stepper input[type=range] { width: 112px; accent-color: var(--accent); }
+  .dur-val { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text-strong); min-width: 42px; font-variant-numeric: tabular-nums; }
+  .dur-cap { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  .btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 6px;
+    color: var(--bg); font-size: 12.5px; font-weight: 600; padding: 6px 15px; cursor: pointer;
+  }
+  .btn:hover:not([disabled]) { filter: brightness(1.08); }
+  .btn[disabled] { background: transparent; color: var(--muted); border-color: var(--panel-border); cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--text); border-color: var(--panel-border); }
+  .btn.ghost:hover:not([disabled]) { border-color: var(--accent); }
+  .btn.danger { background: transparent; color: var(--st-claimed); border-color: rgba(210,51,105,0.5); }
+  .btn.danger:hover:not([disabled]) { background: rgba(210,51,105,0.12); }
+  .btn.small { font-size: 11px; padding: 4px 10px; }
+  .btn.mod-btn { background: transparent; color: var(--purple); border-color: rgba(167,139,250,0.4); }
+  .btn.mod-btn:hover:not([disabled]) { background: rgba(167,139,250,0.12); }
+
+  .answer { padding: 10px 20px; font-size: 12.5px; line-height: 1.5; border-bottom: 1px solid var(--panel-border); }
+  .answer.ok { color: var(--st-free); }
+  .answer.no { color: var(--st-asked); }
+
+  /* Moderator tools, walled off from the member ones. Acting on somebody else's
+     claim is a different kind of act from taking a free spawn, and a strip that
+     mixed them would make it easy to do the first while meaning the second. */
+  .mod { border-top: 1px dashed var(--panel-border); padding: 12px 20px 18px; display: flex; flex-direction: column; gap: 9px; }
+  .mod-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
+  .mod-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+  /* ---- Week grid ---------------------------------------------------------- */
+  .cal-legend { display: flex; gap: 14px; padding: 9px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .cal-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; border: 1.5px solid; }
+  .sw-claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
+  .sw-booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
+  .sw-confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  .sw-asked { border-color: var(--st-asked); background: rgba(224,169,62,0.28); }
+  .sw-pick { border-color: var(--purple); border-style: dashed; background: rgba(167,139,250,0.4); }
+
+  .wk { display: grid; grid-template-columns: 56px repeat(7, 1fr); padding: 0 20px; }
+  .wk-head { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
+  .wk-head.today { color: var(--accent); }
+  .wk-head .dnum { display: block; font-size: 13px; color: var(--text-strong); margin-top: 2px; letter-spacing: 0; }
+  /* Sized off the viewport rather than fixed, so on a laptop screen the grid
+     gives ground to the strips above and below it instead of pushing the
+     booking controls off the bottom of the window. */
+  .wk-body { position: relative; height: clamp(200px, calc(100vh - 430px), 430px); overflow-y: auto; margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .wk-body::-webkit-scrollbar { width: 10px; }
+  .wk-body::-webkit-scrollbar-track { background: transparent; }
+  .wk-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
+  .wk-grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); position: relative; }
+  .wk-hours { border-right: 1px solid var(--panel-border); }
+  .wk-hour {
+    height: 28px; font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+    text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
+  }
+  /* The server-time echo, so a Berlin-anchored rule can be read off a local axis
+     without doing the arithmetic in your head. */
+  .wk-hour .srv { display: block; font-size: 8px; opacity: 0.5; margin-top: -3px; }
+  .wk-col { border-left: 1px solid var(--panel-border); position: relative; }
+  .wk-cell { height: 28px; border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
+  .wk-cell:hover { background: rgba(91,140,255,0.07); }
+  .wk-cell.past { cursor: not-allowed; background: rgba(0,0,0,0.3); }
+  .wk-cell.past:hover { background: rgba(0,0,0,0.3); }
+  .wk-block {
+    position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; overflow: hidden;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1.25; cursor: pointer; border: 1px solid;
+  }
+  .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; }
+  /* State decides the colour; whose it is decides how loud. Two hues would have
+     meant a booking of yours and a booking of theirs looked like different
+     kinds of thing, which they are not. */
+  .b-claimed { background: rgba(210,51,105,0.26); border-color: var(--st-claimed); color: #f3a6c0; }
+  .b-booked { background: rgba(91,140,255,0.16); border-color: var(--st-booked); border-style: dashed; color: #cfdcff; }
+  .b-confirmed { background: rgba(91,140,255,0.3); border-color: var(--st-confirmed); color: #cfdcff; }
+  .b-asked { background: rgba(224,169,62,0.2); border-color: var(--st-asked); color: #e8c887; }
+  .b-mine { box-shadow: inset 3px 0 0 currentColor; }
+  /* A rule that will produce this slot but has not booked a row for it yet.
+     Real enough to plan around, not yet real enough for its owner to be asked. */
+  .b-predicted { opacity: 0.62; }
+  .b-pick { background: rgba(167,139,250,0.34); border: 1px dashed var(--purple); color: #ddd0ff; z-index: 3; }
+  /* An evening the weekly rule will also take. Fainter than the one being
+     picked, because it is a consequence rather than a choice. */
+  .b-echo { background: rgba(167,139,250,0.14); opacity: 0.8; }
+  /* A block clipped by local midnight keeps a flat edge, so it reads as
+     continuing rather than as a booking that really stops there. */
+  .clip-top { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
+  .clip-bottom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: dashed; }
+
+  .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
+  .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: 8px; color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
+  .now-line { position: absolute; left: 56px; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  .now-flag {
+    position: absolute; left: 2px; transform: translateY(-50%); z-index: 5; pointer-events: none;
+    font-family: var(--mono); font-size: 8.5px; font-weight: 600; color: var(--bg);
+    background: var(--bad); border-radius: 3px; padding: 1px 4px; font-variant-numeric: tabular-nums;
+  }
+
+  .readout { padding: 12px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 10px; font-size: 12.5px; flex-wrap: wrap; min-height: 48px; }
+  .readout i { font-size: 15px; }
+  .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
+  .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+
+  @media (max-width: 900px) { .wk, .wk-grid { grid-template-columns: 44px repeat(7, 1fr); } .now-line { left: 44px; } }
+  @media (max-width: 620px) {
+    main { padding: 18px 12px 50px; }
+    .masthead-right { margin-left: 0; width: 100%; }
+    .filter { flex: 1; width: auto; }
+    .window { width: 100vw; height: 100vh; border-radius: 0; }
+    .wk { padding: 0 10px; }
+    .wk-body { margin: 0 10px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="masthead">
+    <div class="brand">
+      <img src="/dashboard/images/avatar.png" alt="">
+      <span><!--GUILD_NAME--><span class="sub" id="sub">loading…</span></span>
+    </div>
+    <span class="tier tier-<!--TIER-->"><!--TIER--></span>
+    <div class="masthead-right">
+      <span class="stale-note" id="stale"></span>
+      <input class="filter" id="filter" type="search" placeholder="Filter by code or name…" aria-label="Filter spawns">
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Spawns <span class="right" id="count"></span></div>
+    <div class="legend">
+      <span><i class="sw free"></i>Free</span>
+      <span><i class="sw claimed"></i>Being hunted</span>
+      <span><i class="sw booked"></i>Booked</span>
+      <span><i class="sw confirmed"></i>Booked &amp; confirmed</span>
+      <span><i class="sw asked"></i>Asked</span>
+    </div>
+    <div class="cards" id="cards"></div>
+  </div>
+</main>
+
+<div class="veil" id="veil"></div>
+<div class="window" id="window" role="dialog" aria-modal="true" aria-labelledby="win-title">
+  <img class="watermark" id="watermark" alt="">
+  <div class="scrim"></div>
+  <div class="win-head">
+    <span class="code-chip" id="win-code"></span>
+    <span class="win-title" id="win-title"></span>
+    <span class="win-region" id="win-region"></span>
+    <button class="win-close" id="win-close" aria-label="Close">&times;</button>
+  </div>
+  <div class="win-body" id="win-body"></div>
+</div>
+
+<script>
+const GUILD_ID = '<!--GUILD_ID-->';
+// Presentation only. Which tools are drawn; never whether they are allowed,
+// which every endpoint decides for itself against the live guild.
+const TIER = '<!--TIER-->';
+// The clock a repeat rule's weekdays and the stamina reset are read in. The page
+// cannot guess it, and one that guessed wrong would book the wrong day.
+const SERVER_TZ = '<!--SERVER_TZ-->';
+const SS_SERVER_HOUR = Number('<!--SERVER_SAVE_HOUR-->');
+const PLACEHOLDER = '/dashboard/images/avatar.png';
+
+const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
+const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+const pad = n => String(n).padStart(2, '0');
+const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtDur = m =>
+  m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
+
+// Quantised rather than continuous, for the same reason the monitoring
+// dashboard's heat ramp is: a spawn should sit at a recognisable level rather
+// than a slightly different shade every poll. `drain` desaturates the sprite in
+// step, because full-colour art is the one thing on a faded card that still
+// shouts.
+const FADE = [
+  { maxHours: 1,        opacity: 1.00, drain: 0.00 },
+  { maxHours: 24,       opacity: 0.88, drain: 0.15 },
+  { maxHours: 72,       opacity: 0.68, drain: 0.40 },
+  { maxHours: 168,      opacity: 0.50, drain: 0.65 },
+  { maxHours: 720,      opacity: 0.34, drain: 0.85 },
+  { maxHours: Infinity, opacity: 0.20, drain: 1.00 }
+];
+/** Total by construction. A spawn nobody has ever claimed has no age at all,
+ *  and `Infinity < Infinity` is false — so relying on the last step to match
+ *  everything left over silently returned undefined and took the whole render
+ *  down with it. The floor is explicit instead. */
+function fadeFor(hours) {
+  const dormant = FADE[FADE.length - 1];
+  if (hours == null || !isFinite(hours)) return dormant;
+  return FADE.find(step => hours < step.maxHours) || dormant;
+}
+
+function ageLabel(hours) {
+  if (hours == null) return 'never';
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m ago`;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = Math.round(hours / 24);
+  return days < 30 ? `${days}d ago` : `${Math.round(days / 30)}mo ago`;
+}
+
+/** Rendered in the reader's own zone — every time on the wire is an absolute
+ *  instant precisely so this can be done here. */
+function clockTime(iso) {
+  const d = new Date(iso);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function minutesLeft(endsAt) {
+  return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
+}
+
+const STATE_TEXT = {
+  free: () => 'free',
+  claimed: s => `${s.holder || 'someone'}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  booked: s => `${s.holder || 'someone'} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  confirmed: s => `${s.holder || 'someone'} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  asked: s => `${s.holder || 'someone'} — asked`
+};
+
+// ---- Timezone -------------------------------------------------------------
+// The calendar's axis is the reader's own clock, but a repeat rule's weekdays
+// and the stamina reset are read on the server's. Rather than hide that, both
+// are shown: the hour gutter carries a server echo, and server save is drawn
+// where the server's 10:00 actually falls here.
+const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+
+function offsetMinutes(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day,
+    parts.hour === '24' ? 0 : parts.hour, parts.minute, parts.second);
+  return (asUtc - date.getTime()) / 60000;
+}
+/** A server wall-clock reading -> the instant it names. Resolved twice so a
+ *  daylight saving changeover lands on the right side of the jump. */
+function serverToInstant(y, mo, d, h, mi) {
+  let guess = new Date(Date.UTC(y, mo, d, h, mi));
+  for (let i = 0; i < 2; i++) guess = new Date(Date.UTC(y, mo, d, h, mi) - offsetMinutes(guess, SERVER_TZ) * 60000);
+  return guess;
+}
+function serverParts(date) {
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: SERVER_TZ, hour12: false, weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(date).reduce((acc, x) => (acc[x.type] = x.value, acc), {});
+  return { weekday: p.weekday, hour: Number(p.hour === '24' ? 0 : p.hour), minute: Number(p.minute) };
+}
+/** The weekday bit the bot would read for this instant — server time, Monday
+ *  low. The page never expands a rule itself, but it does have to send the mask
+ *  for a weekly booking, and that mask is in the server's terms. */
+function serverDayBit(date) {
+  return 1 << DAY_NAMES.indexOf(serverParts(date).weekday);
+}
+
+// ---- State ----------------------------------------------------------------
+let board = null;          // the catalogue and this visitor's limits
+let filterText = '';
+let slots = [];            // the open spawn's week, as drawn blocks
+
+const view = {
+  code: null,              // the spawn whose window is open, or null
+  weekOffset: 0,
+  duration: null,
+  repeat: 'once',
+  days: new Set(),
+  pick: null,
+  answer: null,
+  busy: false
+};
+
+let gridEl = null;
+let scrolledOnce = false;
+
+const limits = () => (board && board.limits) || null;
+const step = () => (limits() ? limits().step : SLOT);
+/** The longest claim that can actually be made: the shorter of the guild's
+ *  ceiling and what is left in the tank, already snapped to the step. */
+const cap = () => { const l = limits(); return l ? l.claimableMinutes : 0; };
+const openSpawn = () => (board && view.code ? board.spawns.find(s => s.code === view.code) : null);
+
+function hoursSince(iso) {
+  if (!iso) return null;
+  return (Date.now() - new Date(iso).getTime()) / 3600000;
+}
+
+function matches(spawn) {
+  if (!filterText) return true;
+  const q = filterText.toLowerCase();
+  return spawn.code.toLowerCase().includes(q) || spawn.name.toLowerCase().includes(q);
+}
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
+/** Anything that came from Discord — a spawn name, a booking owner — is escaped
+ *  before it goes anywhere near innerHTML. */
+function esc(s) {
+  const node = document.createElement('div');
+  node.textContent = s == null ? '' : s;
+  return node.innerHTML;
+}
+
+// ---- The board ------------------------------------------------------------
+function cardFor(spawn) {
+  // A spawn nobody has ever claimed has no lastActivity at all, which is the
+  // most dormant the ramp goes rather than an error.
+  const hours = hoursSince(spawn.lastActivity);
+  const fade = fadeFor(hours);
+  const state = spawn.state;
+
+  const card = el('div', 'card');
+  card.style.opacity = fade.opacity;
+  card.style.setProperty('--drain', fade.drain);
+  card.style.setProperty('--edge', `var(--st-${state})`);
+  card.title = `${spawn.code} — ${spawn.name}${spawn.region ? ' · ' + spawn.region : ''}`;
+
+  const img = document.createElement('img');
+  img.className = 'sprite' + (spawn.sprite ? '' : ' placeholder');
+  img.src = spawn.sprite || PLACEHOLDER;
+  img.alt = '';
+  img.loading = 'lazy';
+  // A sprite the cache has not fetched yet 404s; the fetch has just been started
+  // by that very request, so the next poll will have it.
+  img.addEventListener('error', () => {
+    img.src = PLACEHOLDER;
+    img.classList.add('placeholder');
+  });
+  card.appendChild(img);
+
+  const tick = state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
+  const queue = spawn.queueLength > 0 ? `<span class="queue">+${spawn.queueLength} queued</span>` : '';
+
+  const body = el('div', 'card-body', `
+    <div class="card-top">
+      <span class="code-chip ${state === 'claimed' ? 'live' : ''}">${esc(spawn.code)}</span>
+      <span class="spawn-name">${esc(spawn.name)}</span>
+      <span class="age">${ageLabel(hours)}</span>
+    </div>
+    <div class="card-state">
+      <span class="dot ${state}"></span>${tick}
+      <span class="who ${state === 'free' ? 'free' : ''}">${esc(STATE_TEXT[state](spawn))}</span>
+      ${queue}
+    </div>`);
+
+  if (state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    const start = new Date(spawn.startsAt).getTime();
+    const end = new Date(spawn.endsAt).getTime();
+    const done = Math.min(1, Math.max(0, (Date.now() - start) / Math.max(1, end - start)));
+    body.appendChild(el('div', 'card-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
+  }
+
+  card.addEventListener('click', () => openWindow(spawn.code));
+  card.appendChild(body);
+  return card;
+}
+
+function renderBoard() {
+  if (!board) return;
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '';
+
+  // Most recently touched first, so whatever is alive rises to the top. A spawn
+  // never claimed sorts last rather than first.
+  const shown = board.spawns.filter(matches).slice().sort((a, b) => {
+    const ha = hoursSince(a.lastActivity), hb = hoursSince(b.lastActivity);
+    return (ha == null ? Infinity : ha) - (hb == null ? Infinity : hb);
+  });
+
+  if (!shown.length) {
+    cards.innerHTML = `<div class="empty-note">${
+      board.spawns.length ? 'No spawns match that filter.' : 'This server has no spawns in its catalogue yet.'
+    }</div>`;
+  } else {
+    shown.forEach(spawn => cards.appendChild(cardFor(spawn)));
+  }
+
+  const live = board.spawns.filter(s => s.state === 'claimed').length;
+  const booked = board.spawns.filter(s => ['booked', 'confirmed', 'asked'].includes(s.state)).length;
+  document.getElementById('count').textContent =
+    `${board.spawns.length} spawns · ${live} being hunted · ${booked} booked`;
+  document.getElementById('sub').textContent = `${board.spawns.length} spawns · ${LOCAL_TZ}`;
+}
+
+// ---- Data -----------------------------------------------------------------
+async function loadBoard() {
+  const res = await fetch(`/dashboard/g/${GUILD_ID}/board`, { headers: { 'Accept': 'application/json' } });
+  // A session that expired mid-visit lands here; the redirect to login is not
+  // something fetch can follow usefully, so say so rather than looping.
+  if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
+  board = await res.json();
+  if (view.duration == null && limits()) {
+    view.duration = Math.max(SLOT, Math.min(limits().defaultDurationMinutes, cap()));
+  }
+}
+
+/** The open spawn's week.
+ *
+ *  The window asked for is an absolute range covering the *local* week, not the
+ *  server week. A booking near either edge belongs to a different server day
+ *  than the column it is drawn in, and asking for the server week would drop it
+ *  from the view entirely — silently, which is the worst way for a calendar to
+ *  be wrong.
+ */
+async function loadSlots() {
+  if (!view.code) { slots = []; return; }
+  const start = weekStart();
+  const end = new Date(start.getTime() + 7 * DAY_MS);
+  const url = `/dashboard/g/${GUILD_ID}/slots?code=${encodeURIComponent(view.code)}`
+    + `&from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error('could not read that week');
+  const data = await res.json();
+  slots = data.slots.map(s => ({ ...s, start: new Date(s.startsAt), end: new Date(s.endsAt) }));
+}
+
+async function refresh() {
+  try {
+    await loadBoard();
+    await loadSlots();
+    document.getElementById('stale').textContent = '';
+  } catch (e) {
+    document.getElementById('stale').textContent = e.message || 'offline';
+  }
+  renderBoard();
+  if (view.code) renderWindow();
+}
+
+// ---- The week -------------------------------------------------------------
+function weekStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + view.weekOffset * 7);   // local Monday
+  return d;
+}
+const dayStart = (start, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; };
+const localMinutes = d => d.getHours() * 60 + d.getMinutes();
+
+function weekLabel(start) {
+  const end = new Date(start.getTime() + 6 * DAY_MS);
+  const month = d => d.toLocaleDateString(undefined, { month: 'short' });
+  return view.weekOffset === 0 ? 'This week'
+    : `${start.getDate()} ${month(start)} – ${end.getDate()} ${month(end)}`;
+}
+
+// ---- Verdict --------------------------------------------------------------
+// Advisory only. The bot decides what a clash means — whether it can be put to
+// the other person, whether they have already been asked — and its answer is
+// what the window shows after booking. This exists so the button is not a blind
+// guess, not to duplicate ClashVerdict.
+function overlapping(start, minutes) {
+  const end = new Date(start.getTime() + minutes * 60000);
+  return slots.filter(b => start < b.end && b.start < end);
+}
+
+function judge(start) {
+  const end = new Date(start.getTime() + view.duration * 60000);
+  if (start.getTime() <= Date.now()) return { type: 'no', text: 'That start time has already passed.' };
+  const hit = overlapping(start, view.duration);
+  if (!hit.length) return { type: 'ok', text: `Free — ${fmtLocal(start)}–${fmtLocal(end)}, ${fmtDur(view.duration)}` };
+  if (hit.some(b => b.mine)) return { type: 'no', text: 'That runs over a booking of your own.' };
+  if (hit.some(b => b.state === 'claimed')) return { type: 'no', text: 'Somebody is hunting that right now.' };
+  if (view.repeat === 'week') return { type: 'no', text: 'A repeating booking cannot be settled by asking about one evening.' };
+  if (hit.length > 1) return { type: 'no', text: 'That runs over more than one booking — nobody single to ask.' };
+  if (hit[0].state === 'asked') return { type: 'no', text: `${hit[0].owner} has already been asked about that slot.` };
+  if (hit[0].predicted) return { type: 'no', text: `${hit[0].owner} books that every week — too far ahead to ask about yet.` };
+  return { type: 'ask', text: `Taken by ${hit[0].owner}. Booking asks whether they are actually hunting it.` };
+}
+
+function canBook() {
+  if (!view.pick || view.busy || !view.duration) return false;
+  if (view.repeat === 'week' && view.days.size === 0) return false;
+  return judge(view.pick).type !== 'no';
+}
+
+// ---- The spawn window -----------------------------------------------------
+const veil = document.getElementById('veil');
+const windowEl = document.getElementById('window');
+
+function openWindow(code) {
+  view.code = code;
+  view.weekOffset = 0;
+  view.pick = null;
+  view.answer = null;
+  view.repeat = 'once';
+  view.days = new Set();
+  scrolledOnce = false;
+  const l = limits();
+  // Start at the guild's default, but never above what is actually claimable —
+  // a default of 2h is meaningless if only 30m of stamina is left.
+  view.duration = l ? Math.max(SLOT, Math.min(l.defaultDurationMinutes, l.claimableMinutes)) : null;
+  veil.classList.add('open');
+  windowEl.classList.add('open');
+  renderWindow();
+  loadSlots().then(renderWindow).catch(() => {});
+}
+
+function closeWindow() {
+  view.code = null;
+  slots = [];
+  gridEl = null;
+  veil.classList.remove('open');
+  windowEl.classList.remove('open');
+}
+
+function setDuration(minutes) {
+  const s = step();
+  view.duration = Math.max(s, Math.min(cap(), Math.round(minutes / s) * s));
+  view.answer = null;
+  renderWindow();
+}
+
+function renderWindow() {
+  const spawn = openSpawn();
+  if (!spawn) { closeWindow(); return; }
+  const keepScroll = gridEl ? gridEl.scrollTop : null;
+
+  const watermark = document.getElementById('watermark');
+  const wanted = spawn.sprite || PLACEHOLDER;
+  if (watermark.getAttribute('src') !== wanted) {
+    watermark.src = wanted;
+    watermark.className = 'watermark' + (spawn.sprite ? '' : ' placeholder');
+    watermark.onerror = () => { watermark.src = PLACEHOLDER; watermark.className = 'watermark placeholder'; };
+  }
+
+  const chip = document.getElementById('win-code');
+  chip.textContent = spawn.code;
+  chip.className = 'code-chip' + (spawn.state === 'claimed' ? ' live' : '');
+  document.getElementById('win-title').textContent = spawn.name;
+  document.getElementById('win-region').textContent = spawn.region || '';
+
+  const body = document.getElementById('win-body');
+  body.innerHTML = '';
+  body.appendChild(nowStrip(spawn));
+  if (view.answer) {
+    body.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
+  }
+  body.appendChild(calendar());
+  if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
+
+  wireWindow();
+  if (keepScroll !== null && gridEl) gridEl.scrollTop = keepScroll;
+  else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
+}
+
+/** What is happening on this spawn right now, and what can be done about it
+ *  this minute — as against the calendar below, which is about later. */
+function nowStrip(spawn) {
+  const l = limits();
+  const strip = el('div', 'strip now-strip');
+  const tick = spawn.state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
+  strip.innerHTML = `<span class="dot ${spawn.state}"></span>${tick}
+    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(STATE_TEXT[spawn.state](spawn))}</span>
+    ${spawn.queueLength ? `<span class="queue">+${spawn.queueLength} queued</span>` : ''}`;
+
+  if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    const start = new Date(spawn.startsAt).getTime(), end = new Date(spawn.endsAt).getTime();
+    const done = Math.min(1, Math.max(0, (Date.now() - start) / Math.max(1, end - start)));
+    strip.appendChild(el('span', 'live-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
+  }
+
+  // Already holding it, or already standing in its queue, means there is
+  // nothing to ask for — the service would refuse either way, and offering the
+  // button anyway just invites a pointless round trip.
+  const canClaim = !spawn.mine && !spawn.queued && l && l.claimableMinutes >= step();
+  if (canClaim) {
+    strip.appendChild(el('span', 'field', `
+      <span class="field-label">For</span>
+      <span class="stepper">
+        <button data-claim-step="-1" ${view.duration <= step() ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
+        <span class="dur-val">${fmtDur(view.duration)}</span>
+        <button data-claim-step="1" ${view.duration >= cap() ? 'disabled' : ''} aria-label="Longer">+</button>
+      </span>
+      <span class="dur-cap">up to ${fmtDur(cap())} · ${esc(l.boundBy)}</span>`));
+  } else if (l && l.claimableMinutes < step() && !spawn.mine) {
+    strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
+  }
+
+  const actions = el('span', 'field');
+  actions.style.marginLeft = 'auto';
+  if (l && l.remainingMinutes !== undefined) {
+    const left = l.remainingMinutes, budget = l.budgetMinutes || 1;
+    actions.appendChild(el('span', 'stamina-bar', `
+      <span class="used" style="width:${((budget - left) / budget * 100).toFixed(1)}%"></span>
+      <span class="pending" style="width:${(Math.min(view.duration || 0, left) / budget * 100).toFixed(1)}%"></span>`));
+    actions.appendChild(el('span', 'stamina-val', `${fmtDur(left)} left`));
+  }
+  if (canClaim) {
+    // Wording follows what will actually happen, so nobody presses "Claim" and
+    // is surprised to find themselves in a queue. Only a *live hunt* produces a
+    // queue: booked, confirmed and asked all mean nobody is on it right now, so
+    // claiming succeeds — cut short by the booking, which the answer explains.
+    actions.appendChild(button(spawn.state === 'claimed' ? 'Join queue' : 'Claim now', 'btn',
+      () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration })));
+  }
+  if (spawn.mine || spawn.queued) {
+    actions.appendChild(button(spawn.mine ? 'Release' : 'Leave queue', 'btn danger',
+      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code })));
+  }
+  strip.appendChild(actions);
+  return strip;
+}
+
+/** The week, shown by default rather than behind a button: when to hunt
+ *  something is the same decision as whether to take it now, and the two belong
+ *  in one view. */
+function calendar() {
+  const wrap = el('div');
+  const now = new Date();
+  const start = weekStart();
+
+  // --- booking controls
+  wrap.appendChild(el('div', 'strip', `
+    <span class="field-label">Book</span>
+    <span class="seg" data-seg="repeat">
+      <button data-v="once" class="${view.repeat === 'once' ? 'on' : ''}">Once</button>
+      <button data-v="week" class="${view.repeat === 'week' ? 'on' : ''}">Weekly</button>
+    </span>
+    ${view.repeat === 'week'
+      ? `<span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
+          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span>`
+      : ''}
+    <span class="field"><span class="field-label">For</span>
+      <span class="stepper">
+        <button data-step="-1" ${view.duration <= SLOT ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
+        <input type="range" id="dur" min="${SLOT}" max="${Math.max(SLOT, cap())}" step="${SLOT}"
+               value="${Math.min(view.duration || SLOT, Math.max(SLOT, cap()))}" aria-label="Duration">
+        <span class="dur-val">${fmtDur(view.duration)}</span>
+        <button data-step="1" ${view.duration >= cap() ? 'disabled' : ''} aria-label="Longer">+</button>
+      </span>
+    </span>
+    <span class="field" style="margin-left:auto">
+      <span class="seg" data-seg="week">
+        <button data-v="-1" aria-label="Previous week">&lsaquo;</button>
+        <button data-v="0" class="${view.weekOffset === 0 ? 'on' : ''}">${weekLabel(start)}</button>
+        <button data-v="1" aria-label="Next week">&rsaquo;</button>
+      </span>
+      <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> Now</button>
+    </span>`));
+
+  // --- the two clocks
+  const srvNow = serverParts(now);
+  const diff = (offsetMinutes(now, LOCAL_TZ) - offsetMinutes(now, SERVER_TZ)) / 60;
+  wrap.appendChild(el('div', 'strip', `
+    <i class="ti ti-clock" aria-hidden="true"></i>
+    Times in <span class="tz-pill">${esc(LOCAL_TZ)} · ${fmtLocal(now)}</span>
+    <span class="muted">· ${diff === 0 ? 'same as server' : `${diff > 0 ? '+' : ''}${diff}h vs server`}</span>
+    <span style="margin-left:auto"></span>
+    Server <span class="tz-pill server">${esc(SERVER_TZ.split('/').pop().replace('_', ' '))} · ${pad(srvNow.hour)}:${pad(srvNow.minute)}</span>
+    <span class="muted">· repeat days and server save follow this clock</span>`));
+
+  wrap.appendChild(el('div', 'cal-legend', `
+    <span><i class="swatch sw-claimed"></i>Being hunted</span>
+    <span><i class="swatch sw-booked"></i>Booked</span>
+    <span><i class="swatch sw-confirmed"></i>Booked &amp; confirmed</span>
+    <span><i class="swatch sw-asked"></i>Asked</span>
+    <span><i class="swatch sw-pick"></i>Your selection</span>
+    <span style="margin-left:auto"><i class="swatch" style="border:none;border-left:2px solid var(--bad);border-radius:0;width:2px"></i>Now</span>
+    <span><i class="swatch" style="border:none;border-left:2px dashed var(--warn);border-radius:0;width:2px"></i>Server save</span>`));
+
+  // --- day headings
+  wrap.appendChild(el('div', 'wk', '<div></div>' + [0,1,2,3,4,5,6].map(i => {
+    const d = dayStart(start, i);
+    const today = d.toDateString() === now.toDateString();
+    return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[i]}<span class="dnum">${d.getDate()}</span></div>`;
+  }).join('')));
+
+  // --- grid
+  const body = el('div', 'wk-body');
+  const grid = el('div', 'wk-grid');
+
+  const hours = el('div', 'wk-hours');
+  for (let h = 0; h < 24; h++) {
+    // Read on a midweek day so the echo is not skewed by a changeover at either
+    // end of the week.
+    const probe = dayStart(start, 3); probe.setHours(h, 0, 0, 0);
+    hours.innerHTML += `<div class="wk-hour">${pad(h)}:00<span class="srv">${pad(serverParts(probe).hour)} srv</span></div>`;
+  }
+  grid.appendChild(hours);
+
+  for (let day = 0; day < 7; day++) {
+    const col = el('div', 'wk-col');
+    const colStart = dayStart(start, day).getTime(), colEnd = colStart + DAY_MS;
+
+    for (let h = 0; h < 24; h++) {
+      const cell = el('div', 'wk-cell');
+      if (colStart + (h + 1) * 3600000 <= Date.now()) cell.classList.add('past');
+      cell.addEventListener('click', e => {
+        const half = e.offsetY > cell.offsetHeight / 2 ? SLOT : 0;
+        const picked = new Date(colStart + (h * 60 + half) * 60000);
+        if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
+        view.pick = picked;
+        view.answer = null;
+        // A weekly booking defaults to the day it was picked on, read in server
+        // time — which is not always the column it was clicked in.
+        if (view.repeat === 'week' && view.days.size === 0) {
+          view.days.add(DAY_NAMES.indexOf(serverParts(picked).weekday));
+        }
+        renderWindow();
+      });
+      col.appendChild(cell);
+    }
+
+    // Blocks, clipped to this local day. A window crossing local midnight is
+    // drawn as two clipped pieces rather than dropped or overflowing.
+    slots.filter(b => b.start.getTime() < colEnd && colStart < b.end.getTime()).forEach(b => {
+      const from = Math.max(b.start.getTime(), colStart), to = Math.min(b.end.getTime(), colEnd);
+      const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
+        + (b.start.getTime() < colStart ? ' clip-top' : '')
+        + (b.end.getTime() > colEnd ? ' clip-bottom' : ''));
+      block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
+      block.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+      block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
+        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(b.end)}</span>`;
+      block.title = `${b.owner} · ${fmtLocal(b.start)}–${fmtLocal(b.end)} your time`
+        + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '');
+      block.addEventListener('click', e => {
+        e.stopPropagation();
+        view.pick = b.start;
+        view.answer = null;
+        renderWindow();
+      });
+      col.appendChild(block);
+    });
+
+    // The selection, drawn over everything so its extent is obvious — and, for a
+    // weekly booking, every evening it will actually take, not only the one that
+    // was clicked. A rule that quietly recurs on days the reader never saw is
+    // how somebody ends up holding four evenings they meant to hold one of.
+    if (view.duration) {
+      previews(start, day).forEach(p => {
+        const pEnd = new Date(p.at.getTime() + view.duration * 60000);
+        if (p.at.getTime() >= colEnd || colStart >= pEnd.getTime()) return;
+        const from = Math.max(p.at.getTime(), colStart), to = Math.min(pEnd.getTime(), colEnd);
+        const sel = el('div', 'wk-block b-pick' + (p.echo ? ' b-echo' : '')
+          + (p.at.getTime() < colStart ? ' clip-top' : '')
+          + (pEnd.getTime() > colEnd ? ' clip-bottom' : ''));
+        sel.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
+        sel.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+        sel.innerHTML = `<span class="who">${p.label}</span>
+          <span class="tm">${fmtLocal(p.at)}–${fmtLocal(pEnd)}</span>`;
+        col.appendChild(sel);
+      });
+    }
+
+    // Server save, drawn where the server's 10:00 actually falls on this local day.
+    const anchor = dayStart(start, day);
+    const ss = serverToInstant(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), SS_SERVER_HOUR, 0);
+    if (ss.getTime() >= colStart && ss.getTime() < colEnd) {
+      const y = ((ss.getTime() - colStart) / 3600000) * ROW_H;
+      const line = el('div', 'ss-line'); line.style.top = y + 'px'; col.appendChild(line);
+      const lbl = el('div', 'ss-label', `SS ${fmtLocal(ss)}`); lbl.style.top = y + 'px'; col.appendChild(lbl);
+    }
+    grid.appendChild(col);
+  }
+
+  // Now line, if this week contains it.
+  const nowDay = Math.floor((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
+  if (nowDay >= 0 && nowDay < 7) {
+    const y = (localMinutes(now) / 60) * ROW_H;
+    const line = el('div', 'now-line'); line.style.top = y + 'px';
+    const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
+    grid.appendChild(line); grid.appendChild(flag);
+  }
+
+  body.appendChild(grid);
+  wrap.appendChild(body);
+  gridEl = body;
+  wrap.appendChild(readout());
+  return wrap;
+}
+
+/** Where the selection should be drawn on `day` of the week starting `start`.
+ *
+ *  One entry for the slot that was actually picked, and — when the booking
+ *  repeats — an echo on every other day the mask names, at the same local time
+ *  of day. The echoes are a preview of the rule, not slots that exist: the bot
+ *  produces them from the anchor plus whole days, so a local daylight saving
+ *  change between here and there would move one by an hour.
+ */
+function previews(start, day) {
+  if (!view.pick) return [];
+  const at = dayStart(start, day);
+  at.setHours(view.pick.getHours(), view.pick.getMinutes(), 0, 0);
+  const weekly = view.repeat === 'week' && view.days.size > 0;
+  const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
+  if (at.getTime() === new Date(view.pick).setSeconds(0, 0)) {
+    // The day that was clicked is only a slot if the mask names it. When it does
+    // not, the click was just the time of day — drawing it as a booking there
+    // would promise an evening nobody is going to get.
+    return weekly && !covers(view.pick)
+      ? [{ at: view.pick, echo: true, label: 'Start time' }]
+      : [{ at: view.pick, echo: false, label: 'You' }];
+  }
+  if (!weekly) return [];
+  // The mask is in server weekdays, so which local column an echo belongs in is
+  // a question about that instant, not about this column's heading.
+  return covers(at) ? [{ at, echo: true, label: 'Repeats' }] : [];
+}
+
+function readout() {
+  const out = el('div', 'readout');
+  if (!view.pick) {
+    out.innerHTML = '<span class="muted">Pick a start time on the grid to book it, '
+      + 'or click one of your own bookings to cancel it.</span>';
+    return out;
+  }
+
+  const v = judge(view.pick);
+  const srv = serverParts(view.pick);
+  const localDay = DAY_NAMES[(view.pick.getDay() + 6) % 7];
+  const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop' : 'ti-alert-triangle';
+  const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask' : 'verdict-no';
+  // Only worth saying when the two clocks disagree about the day; otherwise it
+  // is noise on every pick.
+  const dayNote = srv.weekday !== localDay
+    ? `<span class="srv-note">· ${pad(srv.hour)}:${pad(srv.minute)} ${srv.weekday} server time${view.repeat === 'week' ? ` — a weekly booking repeats on ${srv.weekday}s` : ''}</span>`
+    : `<span class="muted">· ${pad(srv.hour)}:${pad(srv.minute)} server</span>`;
+  // A weekly booking anchored on a day its own mask excludes is legal — the
+  // anchor gives the time of day and the mask gives the days — but it means the
+  // first slot is not the evening that was clicked, which nobody expects unless
+  // they are told.
+  const offMask = view.repeat === 'week' && view.days.size
+    && !view.days.has(DAY_NAMES.indexOf(srv.weekday))
+    ? `<span class="srv-note">· repeats on ${[...view.days].sort().map(d => DAY_NAMES[d]).join(', ')}, so the first slot is not this ${srv.weekday}</span>`
+    : '';
+
+  out.innerHTML = `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
+    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}
+    <span style="margin-left:auto"></span>`;
+
+  const book = button(view.busy ? 'Working…' : v.type === 'ask' ? 'Book & ask' : 'Book', 'btn', doBook);
+  book.disabled = !canBook();
+  out.appendChild(book);
+
+  // Cancelling is offered on the slot itself: picking a block of your own is how
+  // you reach it, which is the same gesture as picking a time.
+  const mine = slots.find(b => b.mine && b.scheduleId != null && b.start.getTime() === view.pick.getTime());
+  if (mine) {
+    out.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
+      () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
+  }
+  return out;
+}
+
+/** The tools that act on somebody else's claim.
+ *
+ *  Drawn only for a moderator, but that is convenience and not the control:
+ *  every one of these endpoints re-resolves the tier server-side, so a member
+ *  who forges the request is refused anyway. What the hiding buys is that nobody
+ *  is offered a button they cannot press.
+ *
+ *  Nothing is offered against a spawn nobody holds — there is no claim to move,
+ *  hand over, or refund — so the whole block simply is not drawn.
+ */
+function modTools(body, spawn) {
+  const holder = spawn.holderId;
+  const queue = spawn.queue || [];
+  if (!holder) return;
+
+  const box = el('div', 'mod');
+  box.appendChild(el('div', 'mod-title', `<i class="ti ti-shield-half" aria-hidden="true"></i>Moderator`));
+
+  const row = el('div', 'mod-row');
+  row.appendChild(button('Move them off', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code })));
+  // Giving the time back is the usual companion to moving somebody off: they
+  // paid for a window up front and are losing the rest of it.
+  row.appendChild(button('Refund 30m', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/grant-stamina`, { userId: holder, minutes: 30 })));
+  box.appendChild(row);
+
+  // Handing over needs somebody to hand to, and the people already waiting for
+  // this spawn are the ones a moderator means nine times in ten. Typing a
+  // Discord id would be the alternative, and nobody knows their own.
+  if (queue.length) {
+    const give = el('div', 'mod-row');
+    give.appendChild(el('span', 'field-label', 'Hand to'));
+    queue.slice(0, 5).forEach(person => {
+      const b = button(person.name, 'btn mod-btn small',
+        () => post(`/dashboard/g/${GUILD_ID}/reassign`, { code: spawn.code, toUserId: person.id }));
+      b.title = `Give ${spawn.code} to ${person.name}`;
+      give.appendChild(b);
+    });
+    box.appendChild(give);
+  }
+  body.appendChild(box);
+}
+
+function button(label, className, onClick) {
+  const b = document.createElement('button');
+  b.className = className;
+  b.textContent = label;
+  b.disabled = view.busy;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function scrollToNow(smooth) {
+  if (!gridEl) return;
+  const y = (localMinutes(new Date()) / 60) * ROW_H;
+  gridEl.style.scrollBehavior = smooth ? 'smooth' : 'auto';
+  // A third down: enough of the morning above for context, most of the evening
+  // below, which is where hunts actually are.
+  gridEl.scrollTop = Math.max(0, Math.min(y - gridEl.clientHeight / 3, 24 * ROW_H - gridEl.clientHeight));
+}
+
+function wireWindow() {
+  const body = document.getElementById('win-body');
+
+  body.querySelectorAll('[data-claim-step]').forEach(btn =>
+    btn.addEventListener('click', () => setDuration(view.duration + Number(btn.dataset.claimStep) * step())));
+  body.querySelectorAll('[data-step]').forEach(btn =>
+    btn.addEventListener('click', () => setDuration(view.duration + Number(btn.dataset.step) * SLOT)));
+
+  const dur = body.querySelector('#dur');
+  if (dur) {
+    // `input` keeps the figure live under the thumb; `change` settles it. A full
+    // re-render on every pixel of drag fights the drag.
+    dur.addEventListener('input', e =>
+      body.querySelectorAll('.dur-val').forEach(v => { v.textContent = fmtDur(Number(e.target.value)); }));
+    dur.addEventListener('change', e => setDuration(Number(e.target.value)));
+  }
+
+  body.querySelectorAll('[data-seg] button').forEach(btn => btn.addEventListener('click', () => {
+    const seg = btn.closest('[data-seg]').dataset.seg;
+    const v = btn.dataset.v;
+    if (seg === 'repeat') {
+      view.repeat = v;
+      // Coming back to a weekly booking, start from the day that is picked.
+      if (v === 'week' && view.days.size === 0 && view.pick) {
+        view.days.add(DAY_NAMES.indexOf(serverParts(view.pick).weekday));
+      }
+      view.answer = null;
+      renderWindow();
+    } else if (seg === 'days') {
+      const d = Number(v);
+      view.days.has(d) ? view.days.delete(d) : view.days.add(d);
+      renderWindow();
+    } else {
+      view.weekOffset = v === '0' ? 0 : view.weekOffset + Number(v);
+      view.pick = null;
+      loadSlots().then(renderWindow).catch(() => {});
+    }
+  }));
+
+  const jump = body.querySelector('#jump');
+  if (jump) jump.addEventListener('click', () => {
+    if (view.weekOffset !== 0) {
+      view.weekOffset = 0;
+      view.pick = null;
+      loadSlots().then(() => { renderWindow(); scrollToNow(true); }).catch(() => {});
+    } else scrollToNow(true);
+  });
+}
+
+// ---- Writes ---------------------------------------------------------------
+async function post(path, payload) {
+  view.busy = true;
+  renderWindow();
+  let answer;
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    answer = await res.json().catch(() => ({ ok: false, message: 'That did not go through.' }));
+  } catch (e) {
+    answer = { ok: false, message: 'Could not reach the server.' };
+  }
+  view.busy = false;
+  // Re-read before showing the answer, so what the message lands on is the state
+  // the action produced rather than the one that prompted it.
+  await refresh();
+  view.answer = answer;
+  if (answer.ok) view.pick = null;
+  renderWindow();
+}
+
+function doBook() {
+  if (!canBook()) return;
+  // The mask is in server-time weekdays, which is what the bot reads it as. A
+  // weekly booking with nothing ticked would mean "no days at all", so the day
+  // the slot lands on server-side is the floor.
+  const days = view.repeat === 'week'
+    ? (view.days.size ? [...view.days].reduce((mask, d) => mask | (1 << d), 0) : serverDayBit(view.pick))
+    : 0;
+  post(`/dashboard/g/${GUILD_ID}/book`, {
+    code: view.code,
+    startsAt: view.pick.toISOString(),
+    minutes: view.duration,
+    days
+  });
+}
+
+document.getElementById('win-close').addEventListener('click', closeWindow);
+veil.addEventListener('click', closeWindow);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWindow(); });
+
+document.getElementById('filter').addEventListener('input', e => {
+  filterText = e.target.value;
+  renderBoard();
+});
+
+refresh();
+// The board keeps up on its own. The open window is left alone while somebody is
+// mid-decision: rebuilding the grid under a half-made selection would throw it
+// away, and a week of bookings does not change under the reader the way a live
+// board does.
+setInterval(() => { if (!view.busy && !view.pick) refresh(); }, 10000);
+// The progress bars and "m left" move between polls, so redraw on a shorter beat
+// than the fetch — otherwise a hunt would visibly jump every ten seconds.
+setInterval(() => { if (board && !view.code) renderBoard(); }, 1000);
+</script>
+</body>
+</html>

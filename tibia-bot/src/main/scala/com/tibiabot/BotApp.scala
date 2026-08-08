@@ -251,34 +251,92 @@ object BotApp extends App with StrictLogging {
     () => refreshBoostedMessages()
   )
 
-  // Monitoring dashboard: Discord-OAuth-gated /status endpoint + static shell,
-  // mounted at /dashboard on the bot's public domain (which also serves an
-  // unrelated, unauthenticated landing page at its root via Caddy passing
-  // through to GitHub Pages — see Caddyfile). The OAuth client id is the bot's
-  // own application id, which for a standard bot is the same snowflake as its
-  // user id.
+  // Two gated areas on the bot's public domain, which also serves an unrelated,
+  // unauthenticated landing page at its root via Caddy passing through to
+  // GitHub Pages (see Caddyfile).
+  //
+  //   /dashboard — the member-facing respawn dashboard, and where the OAuth
+  //                routes live. Primary, so a bare login lands here and the
+  //                redirect URI already registered with Discord is unchanged.
+  //   /status    — the owner-only monitoring dashboard. Named for what its own
+  //                masthead has always said (`Violent Bot /status`) rather than
+  //                something new.
+  //
+  // One login covers both: the callback sets the session cookie under each
+  // path. Deliberately not one cookie at `/`, which would hand the session to
+  // GitHub Pages on every visit to the landing page.
+  //
+  // The OAuth client id is the bot's own application id, which for a standard
+  // bot is the same snowflake as its user id.
   private val dashboardMountPath = "/dashboard"
+  private val adminMountPath = "/status"
   private val discordAuth = new web.DiscordAuth(
     clientId = botUser,
     clientSecret = Config.Web.discordClientSecret,
     sessionSecret = Config.Web.sessionSecret,
     redirectUri = s"https://${Config.Web.statusDomain}$dashboardMountPath/auth/callback",
-    mountPath = dashboardMountPath
+    mountPath = dashboardMountPath,
+    extraCookiePaths = List(adminMountPath)
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)
+  private val dashboardAccessService = new web.DashboardAccessService(
+    discordGateway,
+    respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
+    worldsOf = guildId => worldConfigRepository.listWorlds(guildId)
+      .map(w => web.WorldChannel(w.name, w.category)),
+    moderatorRoleOf = moderatorRoleId
+  )
+  // Fetched on this host, which can reach the wiki even where the people
+  // looking at the dashboard cannot, and served back from our own domain.
+  private val creatureSpriteCache = new web.CreatureSpriteCache(
+    java.nio.file.Paths.get(Config.Respawn.spriteCacheDir),
+    new web.WikiSpriteFetcher()(actorSystem, ex).fetch
+  )(ex)
+  // Writes go through their own seam, which is where the "is this bot the one
+  // that runs this guild's respawns" check lives — see JdaRespawnActions.
+  // Its own small pool: every dashboard write is blocking work (JDA REST calls
+  // and database round trips), and running it on the HTTP dispatcher would let a
+  // handful of slow claims starve the server that is meant to be answering
+  // everybody else.
+  private val respawnActionPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "respawn-action")
+      thread.setDaemon(true)
+      thread
+    }))
+  private val respawnActions =
+    new web.JdaRespawnActions(discordGateway, respawnService, respawnOwnership)(respawnActionPool)
+  private val respawnDashboardRoute =
+    new web.RespawnDashboardRoute(discordAuth, dashboardAccessService, creatureSpriteCache,
+      boardOf = guildId => respawnService.board(guildId),
+      // None when the guild never set the respawn system up, which is the same
+      // condition that leaves it out of the access funnel in the first place.
+      limitsOf = (guildId, userId) => respawnService.settings(guildId).map { settings =>
+        web.BoardLimits.from(
+          respawnService.stamina(guildId, userId, settings),
+          settings.maxDurationMinutes,
+          settings.defaultDurationMinutes,
+          respawnService.nextStaminaReset())
+      },
+      actions = respawnActions)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
   if (Config.BotRole.current != Config.BotRole.Secondary) {
-    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
-      .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
-        akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
-      })
-    logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
+    import akka.http.scaladsl.server.Directives._
+    // The auth routes stay under /dashboard, where their redirect URI already
+    // points; /status reaches them via the session cookie set for both paths.
+    val routes = concat(
+      pathPrefix("dashboard") { concat(discordAuth.routes, respawnDashboardRoute.routes) },
+      pathPrefix("status") { concat(statusRoute.routes, patreonAdminRoute.routes) }
+    )
+    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
+    logger.info(s"Dashboards listening internally on port ${Config.Web.statusPort}: " +
+      s"members at $dashboardMountPath, owner at $adminMountPath")
   } else {
     // Matches the dashboard's own ~10s poll cadence (StatusRoute's comment on
     // buildPatreonJson) — frequent enough that a primary's merged view feels
