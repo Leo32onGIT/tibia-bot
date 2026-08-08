@@ -159,6 +159,17 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_starts_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requested_duration_minutes INT;")
+      // Confirmation. `confirmed_at` is the owner saying they are hunting this
+      // slot; `confirm_by` is the deadline a booking that started on its own has
+      // to say it by, and doubles as the marker for "this began as a booking".
+      //
+      // Both null on every existing row, deliberately and with no backfill: a
+      // hunt already running when this ships has no deadline, so the sweep that
+      // gives up on unconfirmed bookings cannot touch it.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS confirm_by TIMESTAMPTZ;")
       // One holder per spawn, enforced by the database.
       //
       // The service checks "is anyone on it" and then inserts, and those are two
@@ -256,7 +267,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       requestedDurationMinutes = {
         val minutes = result.getInt("requested_duration_minutes")
         if (result.wasNull()) None else Some(minutes)
-      }
+      },
+      confirmedAt = optionalZoned(result, "confirmed_at"),
+      confirmBy = optionalZoned(result, "confirm_by")
     )
 
   private def collectClaims(result: ResultSet): List[RespawnClaim] = {
@@ -1190,18 +1203,56 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
-                       endsAt: ZonedDateTime): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+                       endsAt: ZonedDateTime,
+                       confirmBy: ZonedDateTime): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+    // `confirm_by` is stamped whether or not the slot was already confirmed —
+    // it records that this claim began as a booking, which stays true either
+    // way. What keeps a confirmed one safe from the sweep is `confirmed_at`,
+    // which this deliberately does not touch.
     val statement = conn.prepareStatement(
       """UPDATE respawn_claims
-        |SET status = 'active', starts_at = ?, ends_at = ?, warned = FALSE
+        |SET status = 'active', starts_at = ?, ends_at = ?, warned = FALSE, confirm_by = ?
         |WHERE id = ? AND status = 'reserved'
         |RETURNING *;""".stripMargin)
     try {
       statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
       statement.setTimestamp(2, Timestamp.from(endsAt.toInstant))
-      statement.setLong(3, claimId)
+      statement.setTimestamp(3, Timestamp.from(confirmBy.toInstant))
+      statement.setLong(4, claimId)
       val result = statement.executeQuery()
       if (result.next()) Some(readClaim(result)) else None
+    } finally statement.close()
+  }
+
+  def confirmClaim(guildId: String, claimId: Long, at: ZonedDateTime): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      // `confirmed_at IS NULL` makes a second press a no-op rather than a
+      // restamp, so a double-click answers "already confirmed" instead of
+      // quietly moving the record of when they turned up.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET confirmed_at = ?
+          |WHERE id = ? AND status IN ('reserved', 'active') AND confirmed_at IS NULL
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(at.toInstant))
+        statement.setLong(2, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def unconfirmedClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    // Limbo is excluded: such a claim's time is already up and a handover is
+    // deciding it, so giving up on it again would advance that twice.
+    val statement = conn.prepareStatement(
+      """SELECT * FROM respawn_claims
+        |WHERE status = 'active' AND confirmed_at IS NULL AND confirm_by IS NOT NULL
+        |  AND confirm_by <= ? AND limbo_until IS NULL
+        |ORDER BY confirm_by;""".stripMargin)
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
     } finally statement.close()
   }
 
@@ -1300,9 +1351,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def expiredRequests(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    // `confirmed_at IS NULL` is belt and braces. Confirming already clears the
+    // request (see RespawnService.settleRequestOn), so a confirmed slot should
+    // never have one outstanding — but passing on a slot whose owner has said
+    // they are coming is the one outcome here that cannot be undone.
     val statement = conn.prepareStatement(
       """SELECT * FROM respawn_claims
         |WHERE status = 'reserved' AND requester_user_id IS NOT NULL AND request_deadline <= ?
+        |  AND confirmed_at IS NULL
         |ORDER BY request_deadline;""".stripMargin)
     try {
       statement.setTimestamp(1, Timestamp.from(now.toInstant))

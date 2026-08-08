@@ -157,6 +157,14 @@ class RespawnBoardSpec extends AnyWordSpec with Matchers {
         RespawnBoardEntry.Confirmed
     }
 
+    // The other way a booking gets settled: its owner pressed Confirm on the
+    // reminder, with nobody having asked at all. Reading the card off asked_at
+    // alone would show this one as merely booked.
+    "read a booking its owner confirmed as confirmed, with nobody having asked" in {
+      entry(reservations = List(reserved().copy(confirmedAt = Some(now)))).state shouldBe
+        RespawnBoardEntry.Confirmed
+    }
+
     "always be one of the known states" in {
       List(entry(), entry(active = Some(claim(1, 1, RespawnClaim.StatusActive))),
         entry(reservations = List(reserved())),

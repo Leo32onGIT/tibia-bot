@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
+import com.tibiabot.respawn.{ClaimOutcome, ConfirmOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -123,6 +123,32 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.noEmoji} That slot isn't yours.")
               case SlotAnswer.Gone =>
                 respond.text(s"${Config.noEmoji} That's already been answered or has expired.")
+                clearOfferButtons(event)
+            }
+        }
+
+      // "I'm here" — Confirm on a booking reminder, or Take Claim once that
+      // booking has started. Both from a DM, so the guild travels in the id.
+      case Some(RespawnButtonId.ConfirmSlotButton(guildId, claimId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None => respond.text(s"${Config.noEmoji} That server is no longer reachable.")
+          case Some(slotGuild) =>
+            BotApp.respawnService.confirmSlot(slotGuild, event.getUser.getId, claimId) match {
+              case ConfirmOutcome.Settled(respawn, _) =>
+                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** is settled — nobody can " +
+                  "ask you for it now, and it'll start on its own with nothing left to answer.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.Taken(respawn, _) =>
+                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** is yours — enjoy the hunt.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.Already(respawn) =>
+                respond.text(s"${Config.yesEmoji} You've already confirmed **${respawn.displayName}**.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.NotYours =>
+                respond.text(s"${Config.noEmoji} That booking isn't yours.")
+              case ConfirmOutcome.Gone =>
+                respond.text(s"${Config.noEmoji} That hunt has already been given up — you didn't " +
+                  "take the claim in time, so it's gone to whoever was next.")
                 clearOfferButtons(event)
             }
         }

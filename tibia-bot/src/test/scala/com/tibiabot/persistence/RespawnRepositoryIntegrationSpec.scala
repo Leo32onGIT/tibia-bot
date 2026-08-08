@@ -638,9 +638,98 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // `warned` is reused for the start nudge while reserved. Activating has to
     // clear it, or the claim-end reminder would be skipped for every booked hunt.
-    val started = repo.startReservation(g, slot.id, now.plusHours(2), now.plusHours(4))
+    val started = repo.startReservation(g, slot.id, now.plusHours(2), now.plusHours(4),
+      now.plusHours(2).plusMinutes(15))
     started.map(_.warned) shouldBe Some(false)
     repo.unwarnedActiveClaims(g, now.plusHours(2)).map(_.id) shouldBe List(slot.id)
+  }
+
+  // --- confirming a booking ------------------------------------------------
+
+  test("a booking that starts is left awaiting confirmation, and is swept once its window is up") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    val start = now.plusHours(2)
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15)).get
+    started.awaitingConfirmation shouldBe true
+
+    // Nothing to give up on until the deadline actually passes.
+    repo.unconfirmedClaims(g, start.plusMinutes(14)) shouldBe empty
+    repo.unconfirmedClaims(g, start.plusMinutes(15)).map(_.id) shouldBe List(slot.id)
+  }
+
+  test("taking the claim keeps it off the sweep") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    val start = now.plusHours(2)
+    repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15))
+    repo.confirmClaim(g, slot.id, start.plusMinutes(3)).map(_.confirmed) shouldBe Some(true)
+    repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
+  }
+
+  test("confirming before the start settles the slot, and survives it starting") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    // Confirmed while still reserved: no longer open to being asked for.
+    val settled = repo.confirmClaim(g, slot.id, now).get
+    settled.requestable shouldBe false
+    settled.isReserved shouldBe true
+
+    // And it carries through the start, so the hunt needs no second answer.
+    val start = now.plusHours(2)
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15)).get
+    started.confirmed shouldBe true
+    started.awaitingConfirmation shouldBe false
+    repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
+  }
+
+  test("a confirmed slot is never passed to whoever asked for it") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    // Asked first, then confirmed from the reminder rather than from the request
+    // DM — the two prompts overlap, and both are ways of saying yes.
+    repo.requestOccurrence(g, slot.id, "asker", "Asker", now, now.plusMinutes(60)) should not be empty
+    repo.confirmClaim(g, slot.id, now.plusMinutes(30)) should not be empty
+    repo.expiredRequests(g, now.plusMinutes(61)) shouldBe empty
+  }
+
+  test("confirming twice is a no-op rather than a restamp") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+      now.plusHours(2), 120).get
+
+    repo.confirmClaim(g, slot.id, now) should not be empty
+    // None is what tells the caller to answer "already confirmed" rather than
+    // moving the record of when they turned up.
+    repo.confirmClaim(g, slot.id, now.plusMinutes(5)) shouldBe None
+  }
+
+  test("an ad-hoc claim has no confirmation deadline, so the sweep never sees it") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    // The guard on every hunt that was already running when confirmation
+    // shipped: no deadline stamped, so nothing gives up on it.
+    repo.insertActiveClaim(g, spawn.id, "owner", "Owner", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc)
+    repo.unconfirmedClaims(g, now.plusDays(1)) shouldBe empty
   }
 
   test("removing a spawn takes its schedules, not just its claims") {

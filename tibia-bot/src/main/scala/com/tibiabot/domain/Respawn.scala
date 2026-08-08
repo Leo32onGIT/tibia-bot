@@ -86,7 +86,25 @@ final case class RespawnClaim(
    *  Empty only on a row from before booking over a slot became the one way to
    *  ask; those hand over the slot as it stands. */
   requestedStartsAt: Option[ZonedDateTime] = None,
-  requestedDurationMinutes: Option[Int] = None
+  requestedDurationMinutes: Option[Int] = None,
+  /** When this slot's owner said, in as many words, that they are hunting it —
+   *  by pressing Confirm on the reminder before it starts, or Take Claim once
+   *  it has. Empty on every ad-hoc claim, which needs no confirming: making one
+   *  is itself the act of turning up.
+   *
+   *  Set once and never cleared. It is what makes a booking stop being
+   *  provisional: a confirmed slot can no longer be asked for (see
+   *  [[requestable]]) and is never swept away unhunted (see [[confirmBy]]). */
+  confirmedAt: Option[ZonedDateTime] = None,
+  /** The deadline by which a booking that started on its own has to be
+   *  confirmed, or it is given up on the owner's behalf. Stamped by
+   *  `startReservation` and never cleared, so it also serves as the marker for
+   *  "this claim began as a booking rather than by somebody pressing Claim".
+   *
+   *  Empty on an ad-hoc claim, and on every row written before confirmation
+   *  existed — which is what keeps the sweep off hunts that were already
+   *  running when this shipped. */
+  confirmBy: Option[ZonedDateTime] = None
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -109,9 +127,19 @@ final case class RespawnClaim(
    *  running hunt and must be left alone. */
   def eligibleForHandover: Boolean = limboUntil.isDefined
 
+  /** Whether its owner has said they are hunting this one. */
+  def confirmed: Boolean = confirmedAt.isDefined
+
   /** Whether this slot can still be asked for. Once its owner has been asked the
-   *  answer stands for that slot, so nobody may ask again. */
-  def requestable: Boolean = isReserved && askedAt.isEmpty
+   *  answer stands for that slot, so nobody may ask again — and a slot they have
+   *  already confirmed is not open to the question at all, which is the point of
+   *  confirming early. */
+  def requestable: Boolean = isReserved && askedAt.isEmpty && confirmedAt.isEmpty
+
+  /** A booking that started on its own and is waiting for its owner to say they
+   *  are actually there. It holds the spawn meanwhile — it is a real claim — but
+   *  is given up on their behalf if the deadline goes by (see [[confirmBy]]). */
+  def awaitingConfirmation: Boolean = isActive && confirmBy.isDefined && confirmedAt.isEmpty
 
   /** Whether somebody is waiting on the owner's answer right now. */
   def requestPending: Boolean = isReserved && requesterUserId.isDefined
@@ -208,6 +236,9 @@ object RespawnClaim {
     val GivenUp: String = "given-up"
     /** The slot's owner never answered, so it went to whoever asked. */
     val NoAnswer: String = "no-answer"
+    /** A booking started on its own and its owner never confirmed they were
+     *  there, so it was given up for them. */
+    val Unconfirmed: String = "unconfirmed"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -227,6 +258,7 @@ object RespawnClaim {
       case Merged      => "folded into a hunt already running"
       case GivenUp     => "given up for the night"
       case NoAnswer    => "no answer, passed on"
+      case Unconfirmed => "never confirmed, given up"
       case other       => other
     }
   }
@@ -368,6 +400,9 @@ object ClashVerdict {
   case object ManySlots extends ClashVerdict
   /** That slot's owner has already been asked once, which is the limit. */
   case object AlreadyAsked extends ClashVerdict
+  /** Its owner has already confirmed they are hunting it, so there is nothing
+   *  to ask — confirming early is exactly how somebody says "don't ask me". */
+  case object Confirmed extends ClashVerdict
 }
 
 object RespawnSchedule {
@@ -434,6 +469,10 @@ object RespawnSchedule {
       ClashVerdict.TooFarAhead
     else slots match {
       case slot :: Nil if slot.requestable => ClashVerdict.Ask(slot)
+      // Ahead of AlreadyAsked, which it would otherwise fall into now that
+      // `requestable` covers both — and they are not the same refusal: one says
+      // the question has been used up, this one says it was never open.
+      case slot :: Nil if slot.confirmed   => ClashVerdict.Confirmed
       case _ :: Nil                        => ClashVerdict.AlreadyAsked
       case _                               => ClashVerdict.ManySlots
     }

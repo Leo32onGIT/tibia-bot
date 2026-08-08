@@ -300,9 +300,25 @@ trait RespawnRepository {
 
   /** Turn a booked slot into the live claim it was always going to be. Returns
    *  None if it is no longer reserved, which is the guard against two sweeps
-   *  starting the same slot. */
+   *  starting the same slot.
+   *
+   *  `confirmBy` is the deadline its owner has to say they are actually there
+   *  (see [[unconfirmedClaims]]). Stamped even when the slot was confirmed
+   *  ahead of time, since it also records that this claim began as a booking. */
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
-                       endsAt: ZonedDateTime): Option[RespawnClaim]
+                       endsAt: ZonedDateTime, confirmBy: ZonedDateTime): Option[RespawnClaim]
+
+  /** Record that a slot's owner has said they are hunting it — Confirm on the
+   *  reminder while it is still reserved, or Take Claim once it has started.
+   *
+   *  Returns None if it is already confirmed, or in neither of those states,
+   *  which is what makes a second press a no-op rather than a restamp. */
+  def confirmClaim(guildId: String, claimId: Long, at: ZonedDateTime): Option[RespawnClaim]
+
+  /** Running claims that began as a booking, whose confirmation deadline has
+   *  gone by with nobody saying they were there. The caller gives these up on
+   *  the owner's behalf — see RespawnService's sweep. */
+  def unconfirmedClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
   /** Book a slot for somebody with no schedule of their own — used when a booked
    *  slot passes to whoever asked for it. */

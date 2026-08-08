@@ -254,11 +254,12 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   private val window = (anchor.minusDays(1), anchor.plusDays(2))
 
   private def slot(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u2",
-                   scheduleId: Option[Long] = Some(9L), askedAt: Option[ZonedDateTime] = None) =
+                   scheduleId: Option[Long] = Some(9L), askedAt: Option[ZonedDateTime] = None,
+                   confirmedAt: Option[ZonedDateTime] = None) =
     RespawnClaim(7L, 1L, owner, owner, "", RespawnClaim.StatusReserved, 0, anchor,
       Some(start), Some(start.plusMinutes(durationMinutes.toLong)), durationMinutes,
       warned = false, RespawnClaim.KindScheduled, None, None, None, None,
-      scheduleId = scheduleId, askedAt = askedAt)
+      scheduleId = scheduleId, askedAt = askedAt, confirmedAt = confirmedAt)
 
   private def oneOff(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u1") =
     RespawnSchedule(0L, 1L, owner, owner, "", start, RespawnSchedule.Daily, durationMinutes,
@@ -339,5 +340,40 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   test("a slot its owner has already been asked about is not asked about again") {
     RespawnSchedule.verdict(oneOff(anchor), Nil, List(slot(anchor, askedAt = Some(anchor)))) shouldBe
       ClashVerdict.AlreadyAsked
+  }
+
+  test("a slot its owner has confirmed is refused as confirmed, not as already asked") {
+    // Confirming early is how somebody says "don't ask me about this one", and it
+    // is a different answer from having used up the one question — so it gets its
+    // own verdict rather than falling into AlreadyAsked.
+    val settled = slot(anchor, confirmedAt = Some(anchor.minusMinutes(15)))
+    settled.requestable shouldBe false
+    RespawnSchedule.verdict(oneOff(anchor), Nil, List(settled)) shouldBe ClashVerdict.Confirmed
+  }
+
+  test("an unconfirmed slot nobody has asked about is still open to the question") {
+    slot(anchor).requestable shouldBe true
+  }
+
+  // --- confirming a booking that has started -------------------------------
+
+  test("a started booking is awaiting confirmation until its owner takes the claim") {
+    val started = slot(anchor).copy(status = RespawnClaim.StatusActive,
+      confirmBy = Some(anchor.plusMinutes(15)))
+    started.awaitingConfirmation shouldBe true
+    started.copy(confirmedAt = Some(anchor.plusMinutes(2))).awaitingConfirmation shouldBe false
+  }
+
+  test("a claim with no confirmation deadline is never awaiting one") {
+    // Every ad-hoc claim, and every hunt that was already running when
+    // confirmation shipped — making one is itself the act of turning up.
+    val adhoc = slot(anchor).copy(status = RespawnClaim.StatusActive, kind = RespawnClaim.KindAdHoc)
+    adhoc.awaitingConfirmation shouldBe false
+  }
+
+  test("a booking still waiting to start is not awaiting confirmation either") {
+    // The deadline only means anything once the hunt is live; a reserved slot has
+    // its whole reminder window to settle itself.
+    slot(anchor).copy(confirmBy = Some(anchor.plusMinutes(15))).awaitingConfirmation shouldBe false
   }
 }

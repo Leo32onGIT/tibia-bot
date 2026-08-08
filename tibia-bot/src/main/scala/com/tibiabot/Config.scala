@@ -230,6 +230,11 @@ object Config {
      *  reminder off. Separate from the claim-end reminder members set for
      *  themselves: this one is about a hunt that hasn't begun. */
     val slotReminderMinutes: Int = respawn.getInt("slot-reminder-minutes")
+    /** How long after a booking starts on its own its owner has to confirm they
+     *  are there, before it is given up for them and the spawn moves on as it
+     *  would after any other claim ending. Capped at the slot's own end, so a
+     *  booking shorter than this is never outlived by its own deadline. */
+    val slotConfirmMinutes: Int = respawn.getInt("slot-confirm-minutes")
     /** Most standing bookings one member may hold in a guild. */
     val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
     /** Shown as the claim embed's image when a spawn has no `creature` set —

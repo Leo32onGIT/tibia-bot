@@ -131,8 +131,13 @@ final case class RespawnBoardEntry(
     if (active.isDefined) RespawnBoardEntry.Claimed
     else nextReservation match {
       case None => RespawnBoardEntry.Free
-      case Some(slot) if slot.askedAt.isEmpty => RespawnBoardEntry.Booked
-      case Some(_) => RespawnBoardEntry.Confirmed
+      // Two ways a booking reads as settled, and the card does not distinguish
+      // them: its owner said so outright, or somebody asked and the question has
+      // been answered. Before Confirm existed only the second was possible, and
+      // reading the word off `askedAt` alone would now leave a booking whose
+      // owner has explicitly confirmed it showing as merely booked.
+      case Some(slot) if slot.confirmed || slot.askedAt.isDefined => RespawnBoardEntry.Confirmed
+      case Some(_) => RespawnBoardEntry.Booked
     }
 
   /** Whoever the card should name: the holder if it is being hunted, otherwise
@@ -172,6 +177,23 @@ object SlotAnswer {
   /** Already answered, lapsed, or the slot is gone. */
   case object Gone extends SlotAnswer
   case object NotYours extends SlotAnswer
+}
+
+/** The result of a booking's owner confirming they are there — Confirm on the
+ *  reminder, or Take Claim once the slot has started. */
+sealed trait ConfirmOutcome
+object ConfirmOutcome {
+  /** Confirmed ahead of the start: the slot is settled and nobody may ask for
+   *  it now. */
+  final case class Settled(respawn: Respawn, slot: RespawnClaim) extends ConfirmOutcome
+  /** Confirmed a hunt already under way, so it is no longer at risk of being
+   *  given up. */
+  final case class Taken(respawn: Respawn, claim: RespawnClaim) extends ConfirmOutcome
+  /** Already confirmed — a second press, which changes nothing. */
+  final case class Already(respawn: Respawn) extends ConfirmOutcome
+  /** The window went by and it was given up, or the slot is otherwise gone. */
+  case object Gone extends ConfirmOutcome
+  case object NotYours extends ConfirmOutcome
 }
 
 /** The result of answering a handover offer DM. */
@@ -944,6 +966,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         refuse(" It's too far ahead to ask them about — try again nearer the day.")
       case ClashVerdict.AlreadyAsked =>
         refuse(" Its owner has already been asked about that slot once, which is the limit.")
+      case ClashVerdict.Confirmed =>
+        refuse(" Its owner has confirmed they're hunting it, so there's nothing to ask.")
       case ClashVerdict.ManySlots =>
         refuse(" It runs over more than one booking, so there's nobody single to ask.")
 
@@ -1097,20 +1121,29 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  stays theirs. */
   def keepSlot(guild: Guild, userId: String, claimId: Long): SlotAnswer =
     withOwnedSlot(guild, userId, claimId) { (config, respawn, slot) =>
-      repository.keepOccurrence(guild.getId, claimId) match {
-        case None => SlotAnswer.Gone
-        case Some(_) =>
-          slot.requesterUserId.foreach { requester =>
-            RespawnThreads.dm(guild, requester,
-              RespawnEmbeds.dmEmbed("Slot request declined",
-                RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
-                RespawnEmbeds.RedColor))
-          }
-          // Nor here: the slot stays exactly where it was, with the same owner
-          // and the same time. Only the *asked* note goes, which is not worth an
-          // edit of its own.
-          SlotAnswer.Kept(respawn)
-      }
+      if (settleRequestOn(guild, respawn, slot)) SlotAnswer.Kept(respawn) else SlotAnswer.Gone
+    }
+
+  /** Take a pending request off a slot its owner is keeping, and tell whoever
+   *  asked. Shared by the two ways of saying yes: **Keep** on the request DM, and
+   *  **Confirm** on the reminder, which settles the slot outright and so has to
+   *  answer any outstanding question with it.
+   *
+   *  `askedAt` deliberately survives (see `keepOccurrence`), so the slot still
+   *  cannot be asked about a second time. No card rewrite either: the slot stays
+   *  exactly where it was, with the same owner and the same time — only the
+   *  *asked* note goes, which is not worth an edit of its own. */
+  private def settleRequestOn(guild: Guild, respawn: Respawn, slot: RespawnClaim): Boolean =
+    repository.keepOccurrence(guild.getId, slot.id) match {
+      case None => false
+      case Some(_) =>
+        slot.requesterUserId.foreach { requester =>
+          RespawnThreads.dm(guild, requester,
+            RespawnEmbeds.dmEmbed("Slot request declined",
+              RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
+              RespawnEmbeds.RedColor))
+        }
+        true
     }
 
   /** The owner isn't hunting it, or never answered: the slot passes to whoever
@@ -1214,10 +1247,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           Try {
             repository.markWarned(guildId, slot.id)
             repository.findById(guildId, slot.respawnId).foreach { respawn =>
+              // Blue rather than the warning yellow it used to be: this is a
+              // booking, and booking is what blue means on the board too (see
+              // RespawnEmbeds.BookedColor). Nothing is wrong here — it is a hunt
+              // about to start, not a deadline running out.
               RespawnThreads.dm(guild, slot.userId,
                 RespawnEmbeds.dmEmbed("Your hunt starts soon",
                   RespawnEmbeds.slotReminder(respawn, slot), imageFor(respawn),
-                  RespawnEmbeds.WarnColor))
+                  RespawnEmbeds.BookedColor),
+                // Optional, and worth pressing: it settles the slot early, so
+                // nobody can ask for it and the start needs no answer.
+                Some(RespawnThreads.confirmSlotButtons(guildId, slot.id, "Confirm")))
             }
           }.failed.foreach { error =>
             logger.warn(s"Failed to remind about respawn slot ${slot.id} in guild '$guildId'", error)
@@ -1301,27 +1341,66 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
 
-      // Reminder lead time is per member, so every running claim is considered
-      // and each one's own owner decides whether it is due yet.
-      repository.unwarnedActiveClaims(guildId, now).foreach { claim =>
+      // Bookings that started on their own and whose owner never said they were
+      // there. Given up on their behalf, exactly as if they had pressed Leave:
+      // the unused minutes go back in the tank and the spawn moves on through
+      // the ordinary handover, to whoever is queued or to nobody.
+      //
+      // The point is the people behind them. A booking nobody turned up for used
+      // to hold a spawn for its whole window while everyone who would have hunted
+      // it waited on somebody absent.
+      repository.unconfirmedClaims(guildId, now).foreach { claim =>
         Try {
-          val lead = repository.userPrefs(guildId, claim.userId).warnMinutesOr(config.warnMinutes)
-          val due = lead > 0 && claim.endsAt.exists(!_.isAfter(now.plusMinutes(lead.toLong)))
-          if (due) {
-            repository.markWarned(guildId, claim.id)
-            repository.findById(guildId, claim.respawnId).foreach { respawn =>
-              // DM only, with no thread fallback: a nudge about your own claim
-              // isn't worth pinging a shared thread for, and missing it costs
-              // nothing — the claim ends the same way either way.
-              RespawnThreads.dm(guild, claim.userId,
-                RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
-                  imageFor(respawn), RespawnEmbeds.WarnColor))
-            }
+          repository.findById(guildId, claim.respawnId).foreach { respawn =>
+            val refunded = refundFor(claim, now)
+            if (refunded > 0) repository.refundStamina(guildId, claim.userId, refunded, resetBoundary(now))
+            RespawnThreads.dm(guild, claim.userId,
+              RespawnEmbeds.dmEmbed("Hunt given up", RespawnEmbeds.slotUnconfirmed(respawn, refunded),
+                imageFor(respawn), RespawnEmbeds.RedColor))
+            logger.info(s"Gave up unconfirmed respawn claim ${claim.id} on '${respawn.code}' in " +
+              s"guild '$guildId' — user ${claim.userId} never took it")
+            // Not finished here, same as an early release: the next person gets
+            // their answer window and the spawn stays put until they take it, so
+            // a third party cannot snipe it in between. beginHandover closes the
+            // claim itself when there is nobody to hand it to.
+            beginHandover(guild, respawn, config, now, outgoing = Some(claim),
+              outgoingOutcome = RespawnClaim.Outcome.Unconfirmed)
           }
         }.failed.foreach { error =>
-          logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
+          logger.warn(s"Failed to give up unconfirmed respawn claim ${claim.id} in guild '$guildId'", error)
         }
       }
+
+      // The claim-ending reminder, kept but not sent. It was one DM per hunt
+      // telling somebody something their own claim card already says, and the
+      // confirmation prompts above are now the DMs a booking produces — three
+      // notifications for one evening's hunt was more than the feature is worth.
+      //
+      // Left here rather than deleted because turning it back on is a matter of
+      // uncommenting it: `unwarnedActiveClaims`, `markWarned` and
+      // RespawnEmbeds.expiryWarning are all still in place and still tested.
+      //
+      // // Reminder lead time is per member, so every running claim is considered
+      // // and each one's own owner decides whether it is due yet.
+      // repository.unwarnedActiveClaims(guildId, now).foreach { claim =>
+      //   Try {
+      //     val lead = repository.userPrefs(guildId, claim.userId).warnMinutesOr(config.warnMinutes)
+      //     val due = lead > 0 && claim.endsAt.exists(!_.isAfter(now.plusMinutes(lead.toLong)))
+      //     if (due) {
+      //       repository.markWarned(guildId, claim.id)
+      //       repository.findById(guildId, claim.respawnId).foreach { respawn =>
+      //         // DM only, with no thread fallback: a nudge about your own claim
+      //         // isn't worth pinging a shared thread for, and missing it costs
+      //         // nothing — the claim ends the same way either way.
+      //         RespawnThreads.dm(guild, claim.userId,
+      //           RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
+      //             imageFor(respawn), RespawnEmbeds.WarnColor))
+      //       }
+      //     }
+      //   }.failed.foreach { error =>
+      //     logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
+      //   }
+      // }
     }
 
   /** Turn a booked slot into a live claim.
@@ -1406,16 +1485,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       } else {
         // Only what is left of the booked window is charged for, so a late start
         // costs its owner nothing out of the day's tank beyond the hunt they get.
-        repository.startReservation(guildId, slot.id, now, bookedEnd) match {
+        // Capped at the slot's own end, so a booking shorter than the confirm
+        // window is never outlived by its own deadline — a 10-minute slot with a
+        // 15-minute window would simply run out first and be swept as finished,
+        // which reads as the deadline never having applied.
+        val window = now.plusMinutes(Config.Respawn.slotConfirmMinutes.toLong)
+        val confirmBy = if (window.isBefore(bookedEnd)) window else bookedEnd
+        repository.startReservation(guildId, slot.id, now, bookedEnd, confirmBy) match {
           case None =>
             // Something else already started it; hand the stamina straight back.
             repository.refundStamina(guildId, slot.userId, remaining, boundary)
-          case Some(started) =>
+          case Some(started) if started.confirmed =>
+            // Settled from the reminder, so there is nothing left to ask.
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your hunt has started",
                 RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn),
                 RespawnEmbeds.FreeColor))
+          case Some(started) =>
+            // The spawn is genuinely theirs from this moment — the card shows
+            // them on it and nobody else can take it — but only until the
+            // deadline above, which the sweep enforces.
+            refreshThread(guild, respawn, config)
+            RespawnThreads.dm(guild, slot.userId,
+              RespawnEmbeds.dmEmbed("Your hunt has started",
+                RespawnEmbeds.slotStartedUnconfirmed(respawn, started, confirmBy), imageFor(respawn),
+                RespawnEmbeds.BookedColor),
+              Some(RespawnThreads.confirmSlotButtons(guildId, started.id, "Take Claim")))
         }
       }
     }
@@ -1504,6 +1600,51 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           refreshThread(guild, respawn, config)
           None
       }
+    }
+  }
+
+  /** Someone pressed **Confirm** on a booking reminder, or **Take Claim** on the
+   *  hunt it grew into. One method for both, because it is one answer to one
+   *  question — "yes, I'm here" — and which of the two they pressed is decided by
+   *  where the claim had got to, not by the button.
+   *
+   *  Confirming early is worth something on its own: it takes the slot out of
+   *  reach of anyone trying to book over it (see `RespawnClaim.requestable`) and
+   *  means the start needs no answer. Confirming a started hunt is what keeps it,
+   *  and the sweep gives up on one nobody confirms.
+   *
+   *  No card rewrite either way. Confirming changes nothing a card shows — the
+   *  same person holds (or has booked) the same spawn for the same window — and
+   *  card edits are the system's scarcest resource. */
+  def confirmSlot(guild: Guild, userId: String, claimId: Long,
+                  now: ZonedDateTime = ZonedDateTime.now()): ConfirmOutcome = {
+    val guildId = guild.getId
+    repository.findClaimById(guildId, claimId) match {
+      case None => ConfirmOutcome.Gone
+      case Some(claim) if claim.userId != userId => ConfirmOutcome.NotYours
+      case Some(claim) =>
+        repository.findById(guildId, claim.respawnId) match {
+          case None => ConfirmOutcome.Gone
+          case Some(respawn) =>
+            repository.confirmClaim(guildId, claimId, now) match {
+              // Either it was confirmed already — a second press, from the
+              // reminder after Take Claim, say — or it is neither reserved nor
+              // active any more, which is the deadline having gone by while the
+              // DM sat open. Those are different answers to the presser.
+              case None =>
+                if (claim.confirmed) ConfirmOutcome.Already(respawn) else ConfirmOutcome.Gone
+              case Some(confirmed) if confirmed.isActive => ConfirmOutcome.Taken(respawn, confirmed)
+              case Some(confirmed) =>
+                // Confirming answers an outstanding "are you hunting tonight?"
+                // too — it is the same yes. Left alone, the request would sit
+                // there and the sweep would hand this slot to whoever asked,
+                // hours after its owner said they were coming; worse, a slot
+                // with a request still on it never starts at all, since
+                // `dueReservations` waits for one to be resolved.
+                if (claim.requestPending) settleRequestOn(guild, respawn, claim)
+                ConfirmOutcome.Settled(respawn, confirmed)
+            }
+        }
     }
   }
 

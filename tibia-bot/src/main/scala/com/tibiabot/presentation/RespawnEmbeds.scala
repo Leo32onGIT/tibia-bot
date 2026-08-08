@@ -18,6 +18,13 @@ object RespawnEmbeds {
   val RedColor: Int = 13773097
   /** The bot's yellow (see GuildActivity.activityColor) — a claim nearing its end. */
   val WarnColor: Int = 14397256
+  /** Blue — a booking, as opposed to a hunt someone claimed on the spot.
+   *
+   *  The same `#5b8cff` the member dashboard draws booked slots in (board.html's
+   *  `--st-booked`), so the colour means one thing across the website and
+   *  Discord: somebody reading a blue DM and a blue slot on the board is looking
+   *  at the same kind of thing. Keep the two in step if either moves. */
+  val BookedColor: Int = 5999871
 
   /** Discord renders `<t:epoch:R>` as a live-updating "in 2 hours" that keeps
    *  counting down without the bot editing the message, which is why claim
@@ -254,17 +261,46 @@ object RespawnEmbeds {
       "Book a shorter slot, or claim it on the night."
 
   /** DM'd shortly before a booked slot begins, so its owner can be there for it —
-   *  or free it up if they can't. */
+   *  or free it up if they can't.
+   *
+   *  Says what Confirm buys them, because pressing it is optional and the reason
+   *  to bother is not otherwise visible: it settles the slot early, so nobody
+   *  can ask for it and there is nothing left to answer once it starts. */
   def slotReminder(respawn: Respawn, slot: RespawnClaim): String = {
     val start = slot.startsAt.map(relative).getOrElse("shortly")
     s"Your booked slot on **${respawn.displayName}** starts $start for " +
-      s"${humanDuration(slot.durationMinutes)}."
+      s"${humanDuration(slot.durationMinutes)}.\n" +
+      "Confirm now and it's settled — nobody can ask you for it, and you won't " +
+      "need to answer again when it starts."
   }
 
-  /** DM'd when a booked slot starts. */
+  /** DM'd when a booked slot starts and its owner has already confirmed it. */
   def slotStarted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(clockTime).getOrElse("soon")
     s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends."
+  }
+
+  /** DM'd when a booked slot starts unconfirmed: the spawn is theirs from this
+   *  moment, but only if they say they are there.
+   *
+   *  Leads with the deadline rather than the hunt, because the thing to act on is
+   *  the one that expires. A booking nobody turns up for used to hold a spawn for
+   *  its whole window while the people who would have hunted it queued behind
+   *  somebody absent. */
+  def slotStartedUnconfirmed(respawn: Respawn, claim: RespawnClaim, confirmBy: ZonedDateTime): String = {
+    val ends = claim.endsAt.map(clockTime).getOrElse("soon")
+    s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends.\n" +
+      s"**Take the claim ${relative(confirmBy)}** or it's given up for you and the spawn " +
+      "goes to whoever's next."
+  }
+
+  /** DM'd when that deadline goes by unanswered. Says what it cost and what to do
+   *  instead, since the booking itself is untouched and comes round again. */
+  def slotUnconfirmed(respawn: Respawn, refundedMinutes: Int): String = {
+    val refund = if (refundedMinutes > 0) s" You've had **${humanDuration(refundedMinutes)}** put back in your tank." else ""
+    s"Your booked hunt on **${respawn.displayName}** was given up — you didn't take the claim in " +
+      s"time, so it's gone to whoever was next.$refund\n" +
+      "Your booking still stands for the days after."
   }
 
   /** DM'd when a booking comes round to find its own owner already on the spawn:

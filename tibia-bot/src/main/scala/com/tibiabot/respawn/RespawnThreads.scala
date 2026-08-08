@@ -180,6 +180,16 @@ object RespawnThreads extends StrictLogging {
       .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
   }
 
+  /** The single button on a booking's confirmation DMs.
+   *
+   *  `label` is the only difference between the two: **Confirm** on the reminder
+   *  before a slot starts, where it is optional and settles the slot early, and
+   *  **Take Claim** on the started hunt, where the hunt is lost without it. Both
+   *  carry the same id — the claim's own status is what decides which question
+   *  was answered — so a reminder pressed a minute late still works. */
+  def confirmSlotButtons(guildId: String, claimId: Long, label: String): ActionRow =
+    ActionRow.of(Button.success(RespawnButtonId.confirmSlot(guildId, claimId), label).withEmoji(claimEmoji))
+
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
    *  exactly like leaving it. */
@@ -678,6 +688,13 @@ object RespawnButtonId {
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
 
+  /** One id for both confirmation prompts — the reminder's Confirm and the
+   *  started hunt's Take Claim. They ask the same question at two moments, and
+   *  the claim's own status is what tells them apart, so a single id keeps a
+   *  reminder pressed late (after the slot has started) working rather than
+   *  answering "out of date". */
+  def confirmSlot(guildId: String, claimId: Long): String = s"${Prefix}confirmslot:$guildId:$claimId"
+
   def handles(componentId: String): Boolean = componentId.startsWith(Prefix)
 
   /** What a respawn button press means. Parsing to an ADT rather than a tuple
@@ -694,6 +711,9 @@ object RespawnButtonId {
   final case class DmSpawnButton(action: String, guildId: String, respawnId: Long) extends Action
   /** A booked slot's owner answering whether they are hunting it, from a DM. */
   final case class SlotAnswerButton(keep: Boolean, guildId: String, claimId: Long) extends Action
+  /** A booked slot's owner confirming they are there — from the reminder before
+   *  it starts, or from the started-hunt DM after. */
+  final case class ConfirmSlotButton(guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
   /** A page of the claim log — `respawnId` empty for the board's guild-wide view. */
@@ -745,6 +765,8 @@ object RespawnButtonId {
         Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = true, guildId, _))
       case Array("passslot", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = false, guildId, _))
+      case Array("confirmslot", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(ConfirmSlotButton(guildId, _))
       case Array("accept", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>

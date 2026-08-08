@@ -435,7 +435,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     text should not include "<@"
   }
 
-  test("the slot reminder says when and how long, and stops there") {
+  test("the slot reminder says when, how long, and what confirming buys you") {
     val text = RespawnEmbeds.slotReminder(cultOrcs, reserved("99", now.plusMinutes(6)))
     text should include("415 — Cult Orcs")
     text should include("2h")
@@ -443,6 +443,44 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // No instructions to act on: it claims itself, and the one useful action was
     // buried at the end of a sentence about doing nothing.
     text should not include "cancel it"
+    // Confirm is optional, so the reason to bother has to be on the message —
+    // the button alone doesn't say what it settles.
+    text should include("Confirm now")
+    text should include("ask you for it")
+  }
+
+  // --- confirming a booking ------------------------------------------------
+
+  test("a started booking that was confirmed early just says it has started") {
+    val text = RespawnEmbeds.slotStarted(cultOrcs, reserved("99", now).copy(endsAt = Some(now.plusHours(2))))
+    text should include("has started")
+    text should not include "Take the claim"
+  }
+
+  test("an unconfirmed start leads with the deadline, not the hunt") {
+    val started = reserved("99", now).copy(endsAt = Some(now.plusHours(2)))
+    val text = RespawnEmbeds.slotStartedUnconfirmed(cultOrcs, started, now.plusMinutes(15))
+    text should include("415 — Cult Orcs")
+    // The thing to act on is the one that expires, and it has to be findable at a
+    // glance in a notification.
+    text should include("**Take the claim")
+    text should include(":R>")
+    text should include("whoever's next")
+  }
+
+  test("giving up an unconfirmed hunt says what it cost and that the booking survives") {
+    val text = RespawnEmbeds.slotUnconfirmed(cultOrcs, 90)
+    text should include("was given up")
+    text should include("1h 30m")
+    // The booking itself is untouched and comes round again — worth saying, or it
+    // reads as having lost the standing slot too.
+    text should include("still stands")
+  }
+
+  test("a give-up with nothing left to refund doesn't mention the tank") {
+    val text = RespawnEmbeds.slotUnconfirmed(cultOrcs, 0)
+    text should not include "tank"
+    text should include("was given up")
   }
 
   test("a refused request says when the slot they wanted runs to") {
