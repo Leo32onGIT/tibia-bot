@@ -17,9 +17,9 @@
   ],
   "spawns": [
     { "code": "101",  "region": "Thais",       "name": "Misguided Camp",                         "creature": "Misguided Bully" },
-    { "code": "102",  "region": "Thais",       "name": "The Extension Site (MOTA Furies)",              "creature": "Fury" },
-    { "code": "103",  "region": "Thais",       "name": "Minotaurs Cult Cave",        "creature": "Minotaur Cult Follower" },
-    { "code": "104",  "region": "Thais",       "name": "Minotaurs Cult Cave -1",        "creature": "Minotaur Cult Follower" },
+    { "code": "102",  "region": "Thais",       "name": "The Extension Site (MOTA Furies)",       "creature": "Fury" },
+    { "code": "103",  "region": "Thais",       "name": "Minotaurs Cult Cave",                    "creature": "Minotaur Cult Follower" },
+    { "code": "104",  "region": "Thais",       "name": "Minotaurs Cult Cave -1",                 "creature": "Minotaur Cult Follower" },
 
     { "code": "201",  "region": "Carlin",      "name": "Secret Library (Fire)",                  "creature": "Burning Book" },
     { "code": "202",  "region": "Carlin",      "name": "Secret Library (Energy)",                "creature": "Energetic Book" },
@@ -57,10 +57,10 @@
     { "code": "411b", "region": "Edron",       "name": "Old Fortress -2",                        "creature": "Hero" },
     { "code": "411c", "region": "Edron",       "name": "Old Fortress -3",                        "creature": "Vile Grandmaster" },
     { "code": "412",  "region": "Edron",       "name": "Grimvale",                               "creature": "Wereboar" },
-    { "code": "413",  "region": "Edron",       "name": "Cormaya Werecreatures",                     "creature": "Shadowpelt" },
+    { "code": "413",  "region": "Edron",       "name": "Cormaya Werecreatures",                  "creature": "Shadowpelt" },
     { "code": "414",  "region": "Edron",       "name": "Edron Vampire Crypt",                    "creature": "Vampire Viscount" },
     { "code": "415",  "region": "Edron",       "name": "Orc Cults",                              "creature": "Orc Cult Fanatic" },
-    { "code": "416",  "region": "Edron",       "name": "Bounac East (Ancient Lion Knight)",                            "creature": "Usurper Knight" },
+    { "code": "416",  "region": "Edron",       "name": "Bounac East (Ancient Lion Knight)",      "creature": "Usurper Knight" },
     { "code": "417",  "region": "Edron",       "name": "Bounac West",                            "creature": "Usurper Archer" },
     { "code": "418",  "region": "Edron",       "name": "Bounac Crypt Warriors",                  "creature": "Crypt Warrior" },
     { "code": "419",  "region": "Edron",       "name": "Bounac Carnasylvans",                    "creature": "Hulking Carnisylvan" },
@@ -85,7 +85,7 @@
     { "code": "507",  "region": "Venore",      "name": "Pits of Inferno - Ashfalor",             "creature": "Undead Dragon" },
     { "code": "508",  "region": "Venore",      "name": "Pits of Inferno - Dragon Lord Lair",     "creature": "Dragon Lord" },
     { "code": "509",  "region": "Venore",      "name": "Venore Flimsies",                        "creature": "Flimsy Lost Soul" },
-    { "code": "510",  "region": "Venore",      "name": "Stonerefiners",                        "creature": "Stonerefiner" },
+    { "code": "510",  "region": "Venore",      "name": "Stonerefiners",                          "creature": "Stonerefiner" },
 
     { "code": "510",  "region": "Venore",      "name": "Ripper Spectres",                        "creature": "Ripper Spectre" },
     { "code": "511a", "region": "Venore",      "name": "Buried Cathedral -1 & -2",               "creature": "Arachnophobica" },
@@ -205,6 +205,7 @@
     { "code": "1112", "region": "Yalahar",     "name": "Norcferatu Castle",                      "creature": "Norcferatu Heartless" },
     { "code": "1113a","region": "Yalahar",     "name": "Norcferatu East",                        "creature": "Orclops Bloodbreaker" },
     { "code": "1113b","region": "Yalahar",     "name": "Norcferatu West",                        "creature": "Varg" },
+    { "code": "1114", "region": "Yalahar",     "name": "Fenrock Dragon Lords",                   "creature": "Dragon Lord" },
 
     { "code": "1201", "region": "Farmine",     "name": "Chazorai",                               "creature": "Draken Warmaster" },
     { "code": "1202", "region": "Farmine",     "name": "Corruption Hole",                        "creature": "Lizard Chosen" },
@@ -312,6 +313,7 @@
     { "code": "1802", "region": "Ab'dendriel", "name": "Forgotten Crypt (Outer)",                "creature": "Walking Dread" },
     { "code": "1803", "region": "Ab'dendriel", "name": "Forsaken Crypt (Inner)",                 "creature": "Crypt Mage" },
     { "code": "1804", "region": "Ab'dendriel", "name": "Unhallowed Crypt",                       "creature": "Crypt Fiend" },
+    { "code": "1805", "region": "Ab'dendriel", "name": "Elvenbane",                              "creature": "Orc Shaman" },
 
     { "code": "1901", "region": "Marapur",     "name": "Great Pearl Fan Reef",                   "creature": "Two-Headed Turtle" },
     { "code": "1902", "region": "Marapur",     "name": "Temple of the Moon Goddess",             "creature": "Naga Warrior" },
