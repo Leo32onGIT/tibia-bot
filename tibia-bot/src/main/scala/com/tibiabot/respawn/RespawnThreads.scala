@@ -20,10 +20,18 @@ import scala.util.Try
  *  post, and the one reused post per spawn.
  *
  *  Split out from [[RespawnService]] so the claim rules stay separable from the
- *  JDA calls. Calls here are blocking (`.complete()`) in the same style as
- *  `setup.ChannelService`, because each step depends on the previous one's id —
- *  callers are expected to be on the slash-command pool or the respawn sweep's
- *  own thread, never on JDA's event thread or the Akka dispatcher.
+ *  JDA calls. Anything whose result is needed to carry on — creating a thread,
+ *  because the next step needs its id — is blocking (`.complete()`) in the same
+ *  style as `setup.ChannelService`, and callers are expected to be on the
+ *  slash-command pool or the respawn sweep's own thread, never on JDA's event
+ *  thread or the Akka dispatcher.
+ *
+ *  The three that merely *tell Discord about a change* — rewriting a card,
+ *  swapping a tag, archiving a post — are handed over instead (`.queue()`).
+ *  Nothing downstream reads their result, and they were the reason a button
+ *  press sat through two or three sequential round trips after it had already
+ *  been acknowledged. Failures still surface: they are logged from the callback
+ *  rather than the call.
  */
 object RespawnThreads extends StrictLogging {
 
@@ -446,8 +454,15 @@ object RespawnThreads extends StrictLogging {
   /** Rewrite a spawn's claim card in place. A forum post's starter message
    *  shares the thread's id, so this needs no extra fetch to find it. */
   def updateCard(thread: ThreadChannel, card: MessageEmbed, buttons: ActionRow): Unit =
-    Try(thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons).complete()).failed.foreach { error =>
-      logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
+    // Handed over rather than waited on. The card is the thing a person is
+    // looking at, so it wants to be quick — but nothing this method's caller
+    // goes on to do depends on the edit having landed, and waiting for it put a
+    // whole Discord round trip between a button press and the reply to it.
+    Try(thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons).queue(
+      _ => (),
+      error => logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
+    )).failed.foreach { error =>
+      logger.warn(s"Could not send the claim card update for thread '${thread.getId}'", error)
     }
 
   /** Put the spawn's post to sleep once nobody holds it, so the forum's front
@@ -455,8 +470,11 @@ object RespawnThreads extends StrictLogging {
    *  needs MANAGE_THREADS to reopen and would also stop people leaving notes on
    *  a spawn between hunts. */
   def archive(thread: ThreadChannel): Unit =
-    Try(thread.getManager.setArchived(true).complete()).failed.foreach { error =>
-      logger.warn(s"Could not archive respawn thread '${thread.getId}'", error)
+    Try(thread.getManager.setArchived(true).queue(
+      _ => (),
+      error => logger.warn(s"Could not archive respawn thread '${thread.getId}'", error)
+    )).failed.foreach { error =>
+      logger.warn(s"Could not ask to archive respawn thread '${thread.getId}'", error)
     }
 
   /** Swap a post's status tag. Tags are looked up by name on the parent forum,
@@ -470,8 +488,11 @@ object RespawnThreads extends StrictLogging {
       // tags come from JDA's cache, so the check itself costs nothing.
       val alreadyApplied = thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId)
       if (!alreadyApplied) {
-        Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).complete()).failed.foreach { error =>
-          logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
+        Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).queue(
+          _ => (),
+          error => logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
+        )).failed.foreach { error =>
+          logger.warn(s"Could not ask for the '$tagName' tag on thread '${thread.getId}'", error)
         }
       }
     }
