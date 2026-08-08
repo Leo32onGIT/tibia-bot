@@ -998,12 +998,44 @@ function nowStrip(spawn) {
     // is surprised to find themselves in a queue. Only a *live hunt* produces a
     // queue: booked and confirmed both mean nobody is on it right now, so
     // claiming succeeds — cut short by the booking, which the answer explains.
-    actions.appendChild(button(spawn.state === 'claimed' ? 'Join queue' : 'Claim now', 'btn',
-      () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration })));
+    const joining = spawn.state === 'claimed';
+    actions.appendChild(button(joining ? 'Join queue' : 'Claim now', 'btn',
+      () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
+        if (joining) {
+          // Behind whoever is on it. The position is theirs to know, so the
+          // count moves and nothing claims to know where in the line they are.
+          s.queued = true;
+          s.queueLength = (s.queueLength || 0) + 1;
+        } else {
+          // Theirs from now until the duration runs out — subject to a booking
+          // or a tank the server knows more about, which the answer corrects.
+          s.state = 'claimed';
+          s.mine = true;
+          s.holder = 'you';
+          s.startsAt = new Date().toISOString();
+          s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
+          s.lastActivity = s.startsAt;
+        }
+      })));
   }
   if (spawn.mine || spawn.queued) {
-    actions.appendChild(button(spawn.mine ? 'Release' : 'Leave queue', 'btn danger',
-      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code })));
+    const holding = spawn.mine;
+    actions.appendChild(button(holding ? 'Release' : 'Leave queue', 'btn danger',
+      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
+        if (holding) {
+          s.mine = false;
+          // Free unless somebody is waiting, in which case it passes to them.
+          // Who that is, is not ours to guess — naming the wrong person for a
+          // second is worse than saying "someone" until the poll says.
+          s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
+          delete s.holder;
+          delete s.startsAt;
+          delete s.endsAt;
+        } else {
+          s.queued = false;
+          s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
+        }
+      })));
   }
   strip.appendChild(actions);
   return strip;
@@ -1439,9 +1471,45 @@ function wireWindow() {
 }
 
 // ---- Writes ---------------------------------------------------------------
-async function post(path, payload) {
-  view.busy = true;
+
+/** What the spawn will look like if this works, applied right now.
+ *
+ *  A claim takes a round trip — longer when the guild's respawns are run by
+ *  another bot and the write is relayed through Redis — and a button that sits
+ *  there doing nothing for half a second reads as broken however fast the
+ *  server actually is. So the change is drawn immediately and the server's
+ *  answer is treated as the correction.
+ *
+ *  Only what this visitor can work out for certain is guessed at. A claim on a
+ *  free spawn is theirs; a claim on a held one puts them in the queue. Anything
+ *  the server decides — how long they actually got once stamina and bookings
+ *  are taken into account, whether a booking clashed — is left alone and
+ *  arrives with the answer.
+ */
+function optimistically(change) {
+  const spawn = openSpawn();
+  if (!spawn) return null;
+  const before = { ...spawn };
+  change(spawn);
+  paintCard(spawn);
   renderWindow();
+  return before;
+}
+
+/** Put back what was guessed, when the guess turns out to be wrong. */
+function revert(before) {
+  if (!before) return;
+  const spawn = openSpawn();
+  if (!spawn) return;
+  Object.assign(spawn, before);
+  paintCard(spawn);
+}
+
+async function post(path, payload, guess) {
+  view.busy = true;
+  const before = guess ? optimistically(guess) : null;
+  renderWindow();
+
   let answer;
   try {
     const res = await fetch(path, {
@@ -1454,11 +1522,19 @@ async function post(path, payload) {
     answer = { ok: false, message: 'Could not reach the server.' };
   }
   view.busy = false;
-  // Re-read before showing the answer, so what the message lands on is the state
-  // the action produced rather than the one that prompted it.
-  await refresh();
+
+  // A refusal means the guess was wrong, so it goes back before the message
+  // explaining why — otherwise the page would be showing one thing and saying
+  // another.
+  if (!answer.ok) revert(before);
   view.answer = answer;
   if (answer.ok) view.pick = null;
+  renderWindow();
+
+  // Re-read either way, and after the message rather than before it: the answer
+  // is what the person asked for, and it should not wait on a poll. The read
+  // then corrects whatever the guess got approximately right.
+  await refresh();
   renderWindow();
 }
 
