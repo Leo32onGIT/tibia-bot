@@ -461,6 +461,7 @@ object BotApp extends App with StrictLogging {
     botUser,
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
+    syncPatreonBeforeCheck = () => syncPatreonMembersForSetup(),
     forgetGuild = guildId => {
       if (worldsData.contains(guildId)) modifyWorldsData(_ - guildId)
       val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
@@ -1001,6 +1002,10 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  // Declared ahead of the schedule below and of syncPatreonMembers, both of
+  // which stamp it — object fields initialise top-to-bottom.
+  private val patreonSyncThrottle = new patreonapi.SyncThrottle(Config.PatreonApi.setupSyncCooldown)
+
   // Own independent schedule (same reasoning as the prune sweep above) —
   // guarded by Config.PatreonApi.enabled so this is a no-op until real
   // Patreon API credentials are configured. That "no-op" is louder than it
@@ -1011,12 +1016,49 @@ object BotApp extends App with StrictLogging {
   if (Config.PatreonApi.enabled) {
     logger.info(s"Patreon API sync enabled, campaign '${Config.PatreonApi.campaignId}', every ${Config.PatreonApi.syncInterval}")
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
-      try syncPatreonMembers()
+      try syncPatreonMembers().failed.foreach(ex => logger.warn("Failed to sync Patreon members", ex))
       catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
     })(ex)
   } else {
     logger.warn("Patreon API sync disabled (no access token configured) — the paywall reads this sync, so nobody will pass the /setup subscription check")
   }
+
+  /** Runs a Patreon sync ahead of `/setup`'s subscription check, so someone who
+   *  subscribed and linked their Discord minutes ago passes on their first try
+   *  instead of being told to subscribe until the next half-hourly sweep lands.
+   *  Called from setup.ChannelService.createChannels.
+   *
+   *  Blocking, but bounded three ways, because `/setup` answering from slightly
+   *  stale data is a nuisance and `/setup` hanging is not:
+   *   - Skipped entirely if any sync started within
+   *     `Config.PatreonApi.setupSyncCooldown` — so a burst of `/setup`s, or one
+   *     right after the periodic sweep, is one fetch rather than one each (see
+   *     patreonapi.SyncThrottle).
+   *   - Waits at most `Config.PatreonApi.setupSyncTimeout`. On timeout the sync
+   *     is left running — it'll land for the next caller — and this one answers
+   *     from the previous snapshot.
+   *   - Every failure is swallowed and logged. A Patreon outage must never be
+   *     the reason `/setup` errors, and it can't cost anyone access either: a
+   *     failed fetch leaves the last good snapshot in place (see
+   *     [[syncPatreonMembers]]).
+   *
+   *  Names are deliberately not resolved on this path (`resolveNames = false`)
+   *  — that's a blocking Discord lookup per linked patron, easily the slowest
+   *  part of a sync, and it feeds only the dashboard's supporters panel. The
+   *  paywall reads patron status and the linked Discord id, both of which come
+   *  straight from Patreon. Known names are carried forward regardless, so
+   *  nothing on the dashboard blanks out; the next periodic sync refreshes
+   *  them. */
+  def syncPatreonMembersForSetup(): Unit =
+    if (Config.PatreonApi.enabled && patreonSyncThrottle.tryAcquire(System.nanoTime())) {
+      try Await.result(syncPatreonMembers(resolveNames = false), Config.PatreonApi.setupSyncTimeout)
+      catch {
+        case _: java.util.concurrent.TimeoutException =>
+          logger.warn(s"Patreon sync for /setup didn't finish within ${Config.PatreonApi.setupSyncTimeout}; leaving it running and answering from the previous snapshot")
+        case ex: Throwable =>
+          logger.warn("Patreon sync for /setup failed; answering from the previous snapshot", ex)
+      }
+    }
 
   /** Patreon's own API only gives us a linked patron's Discord *id*, not a
    *  display name — resolved here, once per sync (infrequent, unlike the
@@ -1044,8 +1086,12 @@ object BotApp extends App with StrictLogging {
         }
     }
 
-  /** Best-effort periodic snapshot of the Patreon campaign's member list
-   *  (see patreonapi.PatreonApiClient), backing both the dashboard's
+  /** Best-effort snapshot of the Patreon campaign's member list (see
+   *  patreonapi.PatreonApiClient) — run on the periodic schedule above and,
+   *  with `resolveNames = false`, on demand ahead of `/setup`'s subscription
+   *  check (see [[syncPatreonMembersForSetup]], which is also where the
+   *  throttling and the reasoning for skipping name resolution live). Backs
+   *  both the dashboard's
    *  supporters panel and the paywall gate itself — this snapshot is what
    *  PaywallService.callerIsSubscribed reads, so the guards below on what
    *  gets written are load-bearing, not tidiness. It also reclaims a
@@ -1060,8 +1106,9 @@ object BotApp extends App with StrictLogging {
    *  anything in the fetched member data itself. Fire-and-forget: a failed
    *  fetch just leaves the last snapshot in place until the next tick, same
    *  degrade-gracefully shape as everything else here. */
-  private def syncPatreonMembers(): Unit =
-    patreonApiClient.fetchAllMembers().foreach {
+  private def syncPatreonMembers(resolveNames: Boolean = true): Future[Unit] = {
+    patreonSyncThrottle.record(System.nanoTime())
+    patreonApiClient.fetchAllMembers().map {
       // A failed fetch must never reach replaceSnapshot: that call prunes
       // every row the sync didn't carry, so an empty list wouldn't leave the
       // snapshot stale, it would erase it — and with it every supporter's
@@ -1080,7 +1127,11 @@ object BotApp extends App with StrictLogging {
         // names already resolved, and which accounts were already linked.
         val previous = patreonMemberRepository.snapshot()
         val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
-        val enriched = members.map(resolveDiscordUsername(_, knownNames))
+        val enriched =
+          if (resolveNames) members.map(resolveDiscordUsername(_, knownNames))
+          // The /setup path — no Discord lookups, just whatever was resolved
+          // last time, so the fetch is the only slow part of the sync.
+          else members.map(m => m.copy(discordUsername = m.discordUserId.flatMap(knownNames.get)))
         logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account, ${enriched.count(m => m.patronStatus.contains("active_patron") && m.discordUserId.isDefined)} of those active)")
         val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
         try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
@@ -1090,6 +1141,7 @@ object BotApp extends App with StrictLogging {
         val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
         if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
     }
+  }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()

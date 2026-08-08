@@ -148,6 +148,17 @@ object Config {
     val refreshToken: String = patreonApi.getString("refresh-token")
     val campaignId: String = patreonApi.getString("campaign-id")
     val syncInterval: FiniteDuration = patreonApi.getDuration("sync-interval").toScala
+    /** `/setup` kicks off its own sync before the subscription check, so
+     *  someone who subscribed minutes ago doesn't have to wait out
+     *  `sync-interval` — this is the shortest gap allowed between two syncs,
+     *  so a run of `/setup`s can't turn into a run of Patreon fetches. Shared
+     *  with the periodic sync: one that just ran counts, and `/setup` reuses
+     *  what it wrote. See BotApp.syncPatreonMembersForSetup. */
+    val setupSyncCooldown: FiniteDuration = patreonApi.getDuration("setup-sync-cooldown").toScala
+    /** How long `/setup` will wait on that sync before giving up on it and
+     *  answering from the previous snapshot. The sync itself is left running;
+     *  this only bounds how long the command blocks. */
+    val setupSyncTimeout: FiniteDuration = patreonApi.getDuration("setup-sync-timeout").toScala
     val enabled: Boolean = accessToken.nonEmpty
   }
 

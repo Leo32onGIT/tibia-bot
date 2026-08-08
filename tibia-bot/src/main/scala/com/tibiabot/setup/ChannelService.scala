@@ -40,6 +40,7 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
  *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
+ *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
  */
 final class ChannelService(
   streamSupervisor: StreamSupervisor,
@@ -53,6 +54,7 @@ final class ChannelService(
   botUser: String,
   startBot: (Option[Guild], Option[String]) => Unit,
   serverSaveExtraEmbeds: String => List[MessageEmbed],
+  syncPatreonBeforeCheck: () => Unit,
   forgetGuild: String => Unit,
   sharedConfigGuilds: Set[String]
 )(implicit ex: ExecutionContextExecutor) extends StrictLogging {
@@ -476,6 +478,13 @@ final class ChannelService(
     // error, channel cap) the server is left half-built and the slash interaction
     // would otherwise hang with no reply — so report it cleanly and point at /repair.
     val embedText = try {
+      // Subscribing is what someone does immediately *before* running this, so
+      // the periodic sync is exactly the wrong thing to make them wait on —
+      // refresh the snapshot the check below reads first. Throttled and
+      // time-bounded on the other side, and swallows its own failures, so the
+      // worst case here is that the check answers from data that was already
+      // good enough before this line existed.
+      syncPatreonBeforeCheck()
       if (!paywallService.callerIsSubscribed(event.getUser.getId)) {
         // Both halves matter and neither is guessable: an active pledge alone
         // isn't enough, because Patreon only tells us who a patron is on
