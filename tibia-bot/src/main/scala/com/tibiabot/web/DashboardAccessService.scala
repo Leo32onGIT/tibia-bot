@@ -38,22 +38,22 @@ final class DashboardAccessService(
    *  now, so a stale or tampered-with guild list can at worst make this do less
    *  work, never more.
    *
-   *  An empty list therefore means "no hint", not "no guilds". It happens
-   *  whenever the cache has aged out or the process restarted, and treating it
-   *  as an answer would show somebody with a perfectly valid session an empty
-   *  dashboard until they signed in again. So every guild is considered
-   *  instead, and the checks below decide as they always do — a visitor who is
-   *  not in a guild, or cannot see any of its worlds, still resolves to no
-   *  access.
+   *  An empty list resolves to no access, and deliberately so.
    *
-   *  The cost of that is bounded by how many guilds have the respawn system set
-   *  up rather than by how many the bot is in, since `respawnConfigured` is a
-   *  cheap local read and dismisses the rest before any REST call.
+   *  It briefly did the opposite: an empty list was treated as "no hint" and
+   *  every guild was considered, so that somebody whose cache had aged out was
+   *  not shown an empty dashboard. That is a real problem, but this was the
+   *  wrong answer to it. Each candidate costs a blocking member lookup, and
+   *  after a restart *every* visitor's list is empty at once — so the fallback
+   *  turned one page load into one REST call per respawn-configured guild and
+   *  pushed `GET /dashboard` past akka's request timeout in production.
+   *
+   *  The narrowing is what keeps this affordable, so it stays. The cache going
+   *  empty wants fixing where it happens — by outliving a restart — rather than
+   *  by scanning everything each time it does.
    */
   def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
-    val candidates =
-      if (userGuildIds.isEmpty) discordGateway.guilds
-      else discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
+    val candidates = discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
     candidates.flatMap { guild =>
       val guildId = guild.getId
       // Checked before the REST call, because it is a cheap local read and a

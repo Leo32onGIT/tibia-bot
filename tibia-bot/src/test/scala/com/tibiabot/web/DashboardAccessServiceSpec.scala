@@ -80,34 +80,18 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       svc.accessFor("u1", Set("g1", "g-elsewhere")).map(_.guildId) shouldBe List("g1")
     }
 
-    // An empty list is the absence of a hint, not the answer "none". It happens
-    // whenever the login cache aged out or the process restarted, and reading it
-    // as an answer would show somebody with a valid session an empty dashboard.
-    "consider every guild when the visitor's list is missing" in {
-      val (_, svc) = service()
-      svc.accessFor("u1", Set.empty).map(_.guildId) shouldBe List("g1")
-    }
-
-    // Which is only safe because the hint never granted anything: membership is
-    // resolved live, so a guild the visitor is not in still refuses them.
-    "still refuse a guild the visitor is not in when there is no list to narrow by" in {
-      val (_, svc) = service(
-        botGuilds = List("g1" -> "Violent", "g2" -> "Somewhere else"),
-        members = Map(("g1", "u1") -> member()),
-        configured = Set("g1", "g2"),
-        worlds = Map("g1" -> List(WorldChannel("Antica", AnticaCategory)),
-                     "g2" -> List(WorldChannel("Secura", SecuraCategory))))
-      svc.accessFor("u1", Set.empty).map(_.guildId) shouldBe List("g1")
-    }
-
-    // The widened search is bounded by how many guilds run respawns, not by how
-    // many the bot is in — otherwise a restart would cost a REST call per guild.
-    "not ask Discord about unconfigured guilds even with no list to narrow by" in {
-      val (gateway, svc) = service(
-        botGuilds = List("g1" -> "Violent", "g2" -> "Somewhere else"),
-        configured = Set("g1"))
-      svc.accessFor("u1", Set.empty)
-      gateway.lookups shouldBe List("g1")
+    // Briefly the opposite: an empty list meant "no hint" and every guild was
+    // considered, so a visitor whose cache had aged out still saw their board.
+    // Each candidate costs a blocking member lookup, though, and after a restart
+    // every visitor's list is empty at once — which took GET /dashboard past
+    // akka's request timeout in production. The narrowing is what makes this
+    // affordable, so an empty list resolves to no access and the cache going
+    // empty is fixed where it happens instead.
+    "skip every guild when the visitor's list is missing" in {
+      val (gateway, svc) = service()
+      svc.accessFor("u1", Set.empty) shouldBe empty
+      // Nothing was asked of Discord at all, which is the point.
+      gateway.lookups shouldBe empty
     }
 
     "refuse a guild that never set the respawn system up" in {
