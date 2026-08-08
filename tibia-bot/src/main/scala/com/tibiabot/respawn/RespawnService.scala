@@ -85,6 +85,64 @@ final case class LogPage(entries: List[RespawnClaim], page: Int, hasOlder: Boole
  *  most of it happened. */
 final case class LogSummary(total: Int, busiest: Option[(Respawn, Int)], days: Int)
 
+/** One spawn as the web board shows it: the catalogue row, whoever holds it,
+ *  who is waiting, what is booked ahead, and when it was last touched.
+ *
+ *  Assembled in bulk by [[RespawnService.board]]. `lastActivity` is what the
+ *  board's fade is computed from — a spawn nobody has ever claimed has none,
+ *  and reads as fully dormant rather than as missing data.
+ */
+final case class RespawnBoardEntry(
+  respawn: Respawn,
+  active: Option[RespawnClaim],
+  queue: List[RespawnClaim],
+  reservations: List[RespawnClaim],
+  lastActivity: Option[ZonedDateTime]
+) {
+  /** The soonest booking, which is the one a card has room to talk about. */
+  def nextReservation: Option[RespawnClaim] = reservations.headOption
+
+  /** How this spawn reads on the board, as one of
+   *  [[RespawnBoardEntry.States]].
+   *
+   *  Being hunted right now outranks anything booked for later: a card has one
+   *  state, and "somebody is in there" is the one that matters.
+   *
+   *  The three booked states come straight out of how a slot records having
+   *  been asked about (see `keepOccurrence`): `askedAt` is set the moment
+   *  somebody asks and never cleared, while the requester fields are cleared
+   *  once it is answered. So an untouched booking is open to being asked for, a
+   *  booking with a live requester is waiting on its owner, and one that has
+   *  been asked and answered is settled.
+   */
+  def state: String =
+    if (active.isDefined) RespawnBoardEntry.Claimed
+    else nextReservation match {
+      case None => RespawnBoardEntry.Free
+      case Some(slot) if slot.requesterUserId.isDefined => RespawnBoardEntry.Asked
+      case Some(slot) if slot.askedAt.isEmpty => RespawnBoardEntry.Booked
+      case Some(_) => RespawnBoardEntry.Confirmed
+    }
+
+  /** Whoever the card should name: the holder if it is being hunted, otherwise
+   *  whoever booked it next. Their Tibia character when they gave one, since
+   *  that is who the team recognises. */
+  def holderLabel: Option[String] =
+    active.orElse(nextReservation).map { claim =>
+      if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+    }
+}
+
+object RespawnBoardEntry {
+  val Free = "free"
+  val Claimed = "claimed"
+  val Booked = "booked"
+  val Confirmed = "confirmed"
+  val Asked = "asked"
+
+  val States: Set[String] = Set(Free, Claimed, Booked, Confirmed, Asked)
+}
+
 /** The result of a slot owner answering "are you hunting tonight?". */
 sealed trait SlotAnswer
 object SlotAnswer {
@@ -1539,6 +1597,23 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =
     (repository.activeClaim(guildId, respawn.id), repository.queueFor(guildId, respawn.id))
 
+  /** The whole catalogue with its live state, for the web dashboard's board.
+   *
+   *  Five queries whatever the catalogue's size, rather than the three per
+   *  spawn the single-spawn accessors would cost — a few hundred spawns on a
+   *  polling page makes that difference the whole performance story.
+   *
+   *  `lastActivity` is absent for a spawn nobody has ever claimed, which the
+   *  board renders as its most faded state rather than as an error. */
+  def board(guildId: String, now: ZonedDateTime = ZonedDateTime.now()): List[RespawnBoardEntry] =
+    RespawnService.assembleBoard(
+      repository.listRespawns(guildId),
+      repository.allActiveClaims(guildId),
+      repository.allQueuedClaims(guildId),
+      repository.allReservations(guildId, now),
+      repository.lastActivityByRespawn(guildId).toMap
+    )
+
   /** Stop tracking respawns for this guild entirely — claims, catalogue and
    *  settings all go. Called when the guild's last world is removed; the forum
    *  channel itself is retired as read-only history rather than deleted (see
@@ -1590,4 +1665,41 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   /** Look up the guild's forum channel, for callers that need to link to it. */
   def forumChannel(guild: Guild): Option[ForumChannel] =
     settings(guild.getId).flatMap(RespawnThreads.findForum(guild, _))
+}
+
+object RespawnService {
+
+  /** Stitch a board together from the bulk reads that feed it.
+   *
+   *  Pure, so the part that can actually be wrong — which claim wins when a
+   *  spawn somehow has more than one active, what order a queue comes out in,
+   *  what a never-claimed spawn looks like — is checkable without a database.
+   *  [[RespawnService.board]] is then only the five reads.
+   */
+  private[respawn] def assembleBoard(
+    respawns: List[Respawn],
+    active: List[RespawnClaim],
+    queued: List[RespawnClaim],
+    reserved: List[RespawnClaim],
+    lastActivity: Map[Long, ZonedDateTime]
+  ): List[RespawnBoardEntry] = {
+    val activeByRespawn = active.groupBy(_.respawnId)
+    val queuedByRespawn = queued.groupBy(_.respawnId)
+    val reservedByRespawn = reserved.groupBy(_.respawnId)
+
+    respawns.map { respawn =>
+      RespawnBoardEntry(
+        respawn = respawn,
+        // A spawn should only ever have one active claim; if the data says
+        // otherwise the earliest-ending one is the honest answer, since that is
+        // the one whose end is about to change the spawn's state.
+        active = activeByRespawn.getOrElse(respawn.id, Nil)
+          .sortBy(_.endsAt.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue)).headOption,
+        queue = queuedByRespawn.getOrElse(respawn.id, Nil).sortBy(_.queuePosition),
+        reservations = reservedByRespawn.getOrElse(respawn.id, Nil)
+          .sortBy(_.startsAt.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue)),
+        lastActivity = lastActivity.get(respawn.id)
+      )
+    }
+  }
 }

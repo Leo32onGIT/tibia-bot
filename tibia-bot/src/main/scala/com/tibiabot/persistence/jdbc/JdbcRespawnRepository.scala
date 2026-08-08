@@ -578,6 +578,49 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     finally statement.close()
   }
 
+  def allQueuedClaims(guildId: String): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.createStatement()
+    try collectClaims(statement.executeQuery(
+      "SELECT * FROM respawn_claims WHERE status = 'queued' ORDER BY respawn_id, queue_position;"))
+    finally statement.close()
+  }
+
+  def allReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """SELECT * FROM respawn_claims
+        |WHERE status = 'reserved' AND starts_at > ?
+        |ORDER BY respawn_id, starts_at;""".stripMargin)
+    try {
+      statement.setTimestamp(1, Timestamp.from(now.toInstant))
+      collectClaims(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)] = withGuild(guildId) { conn =>
+    val statement = conn.createStatement()
+    try {
+      // GREATEST over the three, because a spawn's last activity is whichever
+      // happened most recently: a claim that ended, one still running, or a
+      // booking made for later. COALESCE inside so a NULL column — a claim that
+      // never ended, a row from before ended_at existed — doesn't swallow the
+      // whole result, which is what GREATEST does with a NULL argument.
+      val result = statement.executeQuery(
+        """SELECT respawn_id,
+          |       MAX(GREATEST(COALESCE(ended_at, claimed_at),
+          |                    COALESCE(starts_at, claimed_at),
+          |                    claimed_at)) AS last_seen
+          |FROM respawn_claims
+          |GROUP BY respawn_id;""".stripMargin)
+      val rows = scala.collection.mutable.ListBuffer.empty[(Long, ZonedDateTime)]
+      while (result.next()) {
+        val stamp = result.getTimestamp("last_seen")
+        if (stamp != null)
+          rows += result.getLong("respawn_id") -> stamp.toInstant.atZone(java.time.ZoneOffset.UTC)
+      }
+      rows.toList
+    } finally statement.close()
+  }
+
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim] = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """SELECT * FROM respawn_claims

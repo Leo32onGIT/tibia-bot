@@ -92,6 +92,23 @@ trait RespawnRepository {
   /** Every spawn currently held, for `/respawn list`. */
   def allActiveClaims(guildId: String): List[RespawnClaim]
 
+  /** Every queued claim in the guild, for callers that need the whole board at
+   *  once. The per-spawn [[queueFor]] is right for one spawn; asking it once per
+   *  spawn to draw a catalogue of a few hundred is not. */
+  def allQueuedClaims(guildId: String): List[RespawnClaim]
+
+  /** Every booked slot still ahead of `now`, across the guild. Bulk counterpart
+   *  to [[reservationsFor]], for the same reason. */
+  def allReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** When each spawn was last touched — the most recent claim on it, whether it
+   *  ended or is still running.
+   *
+   *  Drives how far a spawn has faded on the board, so it has to cover every
+   *  spawn ever claimed in one query rather than a history read per spawn.
+   *  Spawns never claimed at all are simply absent. */
+  def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)]
+
   /** Active or queued claims belonging to one user, for `/respawn release` and
    *  the per-user stamina display. */
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
