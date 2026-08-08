@@ -21,13 +21,15 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     com.typesafe.config.ConfigFactory.defaultReference()
 
   private val mountPath = "/dashboard"
+  private val adminPath = "/status"
 
   private def auth = new DiscordAuth(
     clientId = "1234",
     clientSecret = "secret",
     sessionSecret = "session-secret",
     redirectUri = s"https://example.test$mountPath/auth/callback",
-    mountPath = mountPath
+    mountPath = mountPath,
+    extraCookiePaths = List(adminPath)
   )(system, executor)
 
   private def routes = pathPrefix("dashboard")(auth.routes)
@@ -110,11 +112,49 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     }
   }
 
-  test("an unauthenticated visitor to a guarded route is sent to login") {
+  test("an unauthenticated visitor to a guarded route is sent to login, and back afterwards") {
+    // The return path rides along so somebody who opens a gated area cold is
+    // returned there rather than dropped on whichever one happens to be primary.
     val guarded = pathPrefix("dashboard")(path("thing")(auth.authenticatedUser(_ => complete("ok"))))
     Get(s"$mountPath/thing") ~> guarded ~> check {
       status shouldBe StatusCodes.Found
-      header("Location").get.value() shouldBe s"$mountPath/auth/login"
+      header("Location").get.value() shouldBe s"$mountPath/auth/login?next=%2Fdashboard"
+    }
+  }
+
+  test("a visitor to the admin area is sent back there, not to the member one") {
+    val guarded = pathPrefix("status")(path("thing")(auth.authenticatedUser(_ => complete("ok"))))
+    Get(s"$adminPath/thing") ~> guarded ~> check {
+      status shouldBe StatusCodes.Found
+      header("Location").get.value() shouldBe s"$mountPath/auth/login?next=%2Fstatus"
+    }
+  }
+
+  test("login carries the destination inside the state, not as its own parameter") {
+    // It has to survive the round-trip through Discord, and it has to be
+    // covered by the same comparison the nonce is — otherwise the destination
+    // could be swapped without invalidating the nonce.
+    Get(s"$mountPath/auth/login?next=%2Fstatus") ~> routes ~> check {
+      status shouldBe StatusCodes.Found
+      val state = header("Location").get.value().split("state=").last
+      state should endWith(".1")
+      val cookie = header[`Set-Cookie`].get.cookie
+      cookie.value shouldBe state
+    }
+  }
+
+  // An index into the known paths, so nothing that comes back can be bent into
+  // a redirect off our own domain.
+  test("an off-site destination is ignored rather than honoured") {
+    Get(s"$mountPath/auth/login?next=https%3A%2F%2Fevil.test") ~> routes ~> check {
+      status shouldBe StatusCodes.Found
+      header("Location").get.value().split("state=").last should endWith(".0")
+    }
+  }
+
+  test("an unknown destination falls back to the primary mount") {
+    Get(s"$mountPath/auth/login?next=%2Fnowhere") ~> routes ~> check {
+      header("Location").get.value().split("state=").last should endWith(".0")
     }
   }
 }

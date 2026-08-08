@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.HttpCookie
-import akka.http.scaladsl.server.{Directive, StandardRoute}
+import akka.http.scaladsl.server.{Directive, Directive0, StandardRoute}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import com.typesafe.scalalogging.StrictLogging
@@ -36,12 +36,41 @@ import scala.util.{Failure, Success, Try}
  * cookie's scope, kept to this one gated area rather than the whole domain
  * (this app's domain also serves an unrelated, unauthenticated landing page).
  */
-final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: String, redirectUri: String, mountPath: String)
+final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: String, redirectUri: String,
+                        mountPath: String, extraCookiePaths: List[String] = Nil)
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
+
+  /** Every area this session is good for. `mountPath` is where the auth routes
+   *  themselves live and where a bare login lands; the rest are other gated
+   *  areas on the same domain that should not demand a second sign-in.
+   *
+   *  They get one cookie each rather than one cookie at `/`, which would be the
+   *  obvious shortcut and is the one thing that must not happen here: this
+   *  domain also proxies an unrelated landing page to GitHub Pages, so a
+   *  root-scoped session cookie would be handed to a third party on every visit
+   *  to the front page. A response may set the same cookie under several paths,
+   *  so one login still covers them all. */
+  private val cookiePaths: List[String] = (mountPath :: extraCookiePaths).distinct
 
   private val cookieName = "vb_session"
   private val sessionTtl = 7.days
   private val loginPath = s"$mountPath/auth/login"
+
+  /** `guilds` is asked for on top of `identify` so the respawn dashboard can
+   *  narrow the bot's several hundred guilds down to the handful this visitor
+   *  is actually in. The bot cannot answer that itself: resolving it through
+   *  JDA would need the privileged GUILD_MEMBERS intent, which this bot
+   *  deliberately avoids (see PaywallService's note on Discord's verification
+   *  threshold past 100 guilds), and checking membership guild by guild would
+   *  be one REST call per guild per sign-in.
+   *
+   *  Widening the scope invalidates consent, so every existing session has to
+   *  sign in again once — including the owner's. */
+  private val scope = "identify guilds"
+
+  /** Guild ids from the login, kept only long enough to save asking again on
+   *  every request. Not a permission — see [[UserGuildCache]]. */
+  val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl)
 
   /** Short-lived companion to the session cookie, holding the OAuth `state`
    *  nonce for exactly as long as one login round-trip: set when we send the
@@ -81,7 +110,8 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private def authorizeUrl(state: String): String = {
     val encodedRedirect = URLEncoder.encode(redirectUri, "UTF-8")
     val encodedState = URLEncoder.encode(state, "UTF-8")
-    s"https://discord.com/api/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify&state=$encodedState"
+    val encodedScope = URLEncoder.encode(scope, "UTF-8")
+    s"https://discord.com/api/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=$encodedScope&state=$encodedState"
   }
 
   private def newState(): String = {
@@ -97,10 +127,10 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
       case _ => false
     }
 
-  private def sessionCookie(value: String): HttpCookie = HttpCookie(
+  private def sessionCookie(value: String, path: String): HttpCookie = HttpCookie(
     name = cookieName,
     value = value,
-    path = Some(mountPath),
+    path = Some(path),
     httpOnly = true,
     secure = true,
     maxAge = Some(sessionTtl.toSeconds),
@@ -150,9 +180,47 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
          |  </div>
          |</body></html>""".stripMargin))
 
-  /** Exchanges an OAuth `code` for the authenticated Discord user's id, via the
-   *  token endpoint then `/users/@me`. None on any failure (bad code, network,
-   *  malformed response) — the callback route treats that as a failed login. */
+  /** The visitor's guild ids, read once with the token we already hold.
+   *
+   *  Never fails the login: somebody who signs in but whose guild list could
+   *  not be fetched is still authenticated, and an empty set simply means the
+   *  dashboard shows them nothing until they sign in again. Refusing the whole
+   *  login over it would lock the owner out of the admin dashboard, which does
+   *  not use guilds at all. */
+  private def fetchGuildIds(accessToken: String): Future[Set[String]] = {
+    val request = HttpRequest(
+      uri = "https://discord.com/api/users/@me/guilds",
+      headers = List(akka.http.scaladsl.model.headers.Authorization(
+        akka.http.scaladsl.model.headers.OAuth2BearerToken(accessToken)))
+    )
+    Http().singleRequest(request).flatMap { response =>
+      if (response.status.isSuccess()) {
+        Unmarshal(response.entity).to[String].map { body =>
+          Try(body.parseJson.convertTo[List[JsValue]].flatMap(
+            _.asJsObject.fields.get("id").collect { case JsString(id) => id }).toSet)
+            .getOrElse {
+              logger.warn("Discord guild list was not the expected shape")
+              Set.empty[String]
+            }
+        }
+      } else {
+        response.discardEntityBytes()
+        logger.warn(s"Failed to read the visitor's guild list: ${response.status}")
+        Future.successful(Set.empty[String])
+      }
+    }.recover {
+      case ex: Throwable =>
+        logger.warn(s"Failed to read the visitor's guild list: ${ex.getMessage}")
+        Set.empty[String]
+    }
+  }
+
+  /** Exchanges an OAuth `code` for the authenticated Discord user's id and the
+   *  guilds they belong to, via the token endpoint then `/users/@me` and
+   *  `/users/@me/guilds`. None on any failure of the first two (bad code,
+   *  network, malformed response) — the callback route treats that as a failed
+   *  login. The access token is used here and then dropped: nothing stores it,
+   *  because nothing needs it after this point. */
   private def resolveUserId(code: String): Future[Option[String]] = {
     val tokenRequest = HttpRequest(
       method = HttpMethods.POST,
@@ -177,8 +245,18 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
               )
               Http().singleRequest(userRequest).flatMap { userResponse =>
                 if (userResponse.status.isSuccess()) {
-                  Unmarshal(userResponse.entity).to[String].map { userBody =>
-                    Try(userBody.parseJson.asJsObject.fields("id").convertTo[String]).toOption
+                  Unmarshal(userResponse.entity).to[String].flatMap { userBody =>
+                    Try(userBody.parseJson.asJsObject.fields("id").convertTo[String]).toOption match {
+                      case Some(userId) =>
+                        // Remembered against the id we just resolved, while the
+                        // token is still in scope — it is discarded with this
+                        // closure and never persisted.
+                        fetchGuildIds(accessToken).map { guildIds =>
+                          userGuilds.put(userId, guildIds)
+                          Some(userId)
+                        }
+                      case None => Future.successful(None)
+                    }
                   }
                 } else {
                   userResponse.discardEntityBytes()
@@ -209,17 +287,54 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
     optionalCookie(cookieName) { cookieOpt =>
       cookieOpt.flatMap(c => verifySession(c.value)) match {
         case Some(userId) => inner(Tuple1(userId))
-        case None => redirect(loginPath, StatusCodes.Found)
+        case None =>
+          // Carries which area was being asked for, so somebody who opens the
+          // admin dashboard cold is returned there rather than dropped on the
+          // member one. Matched against the known paths on the way back, never
+          // used as given.
+          extractMatchedPath { matched =>
+            val area = cookiePaths.find(p => matched.toString.startsWith(p))
+            redirect(area.fold(loginPath)(p => s"$loginPath?next=${URLEncoder.encode(p, "UTF-8")}"),
+              StatusCodes.Found)
+          }
       }
     }
   }
 
+  /** Sets the session for every gated area in one response, so a single login
+   *  covers them all without a root-scoped cookie. */
+  private def setSession(value: String): Directive0 =
+    cookiePaths.map(p => sessionCookie(value, p)) match {
+      case first :: rest => setCookie(first, rest: _*)
+      case Nil           => pass
+    }
+
+  /** Which area to land on after signing in, as an index into [[cookiePaths]].
+   *
+   *  An index rather than the path itself: it rides through the OAuth
+   *  round-trip inside the `state` value, and a bare number cannot be bent into
+   *  an off-site redirect however it comes back. Anything unrecognised falls
+   *  back to the primary mount, so a stale or hand-edited link lands somewhere
+   *  real instead of erroring. */
+  private def landingIndex(next: Option[String]): Int =
+    next.map(cookiePaths.indexOf).filter(_ >= 0).getOrElse(0)
+
+  private def landingPath(state: String): String =
+    state.split('.') match {
+      case Array(_, index) => Try(cookiePaths(index.toInt)).getOrElse(mountPath)
+      case _               => mountPath
+    }
+
   val routes: akka.http.scaladsl.server.Route =
     path("auth" / "login") {
       get {
-        val state = newState()
-        setCookie(stateCookie(state)) {
-          redirect(authorizeUrl(state), StatusCodes.Found)
+        parameter("next".optional) { next =>
+          // The nonce and the destination travel together, so the comparison on
+          // the way back still covers both and neither can be swapped alone.
+          val state = s"${newState()}.${landingIndex(next)}"
+          setCookie(stateCookie(state)) {
+            redirect(authorizeUrl(state), StatusCodes.Found)
+          }
         }
       }
     } ~
@@ -252,8 +367,12 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                   onComplete(resolveUserId(code)) {
                     case Success(Some(userId)) =>
                       val expiry = Instant.now().plusSeconds(sessionTtl.toSeconds).getEpochSecond
-                      setCookie(sessionCookie(signSession(userId, expiry))) {
-                        redirect(mountPath, StatusCodes.Found)
+                      // Back to whichever area sent them, which the state
+                      // carried and which has just been verified against the
+                      // cookie — so it can only ever be one of ours.
+                      val landing: String = stateCookieOpt.map(c => landingPath(c.value)).getOrElse(mountPath)
+                      setSession(signSession(userId, expiry)) {
+                        redirect(landing, StatusCodes.Found)
                       }
                     case Success(None) =>
                       loginProblem(StatusCodes.Unauthorized, "Discord sign-in failed.")
