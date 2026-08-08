@@ -56,6 +56,13 @@ class CachingTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
     def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = {
       sets += 1; lastTtl += (key -> ttl); store.put(key, value); Future.unit
     }
+    /** Real enough to be useful: wins only when nothing holds the key, which
+     *  is the property anything relying on this actually depends on. */
+    def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
+      synchronized {
+        if (store.contains(key)) Future.successful(false)
+        else { store(key) = value; Future.successful(true) }
+      }
     def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
     def close(): Unit = ()
   }

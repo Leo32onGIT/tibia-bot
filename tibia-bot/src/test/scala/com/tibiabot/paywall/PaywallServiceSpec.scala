@@ -1,6 +1,6 @@
 package com.tibiabot.paywall
 
-import com.tibiabot.discord.DiscordGateway
+import com.tibiabot.discord.{DiscordGateway, MemberAccess}
 import com.tibiabot.domain.{PatreonGrace, PatreonMember, PatreonSeat}
 import com.tibiabot.persistence.{PatreonGraceRepository, PatreonMemberRepository, PatreonSeatOverrideRepository, PatreonSeatRepository}
 import net.dv8tion.jda.api.entities.{Guild, User}
@@ -29,6 +29,9 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     def guildById(id: String): Guild = null
     def guilds: List[Guild] = Nil
     def retrieveUser(id: String): User = if (knownUsers.contains(id)) user else null
+    // Nothing in the paywall consults member permissions; the dashboard's
+    // access resolution is the only caller, and it has its own fake.
+    def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = None
     def selfUserId: String = "self"
     def selfUserName: String = "ViolentBot"
     def selfUserAvatarUrl: String = "https://example.com/avatar.png"

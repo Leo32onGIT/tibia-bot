@@ -40,6 +40,17 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
       case NonFatal(e) => logger.warn(s"redis PSETEX failed for '$key': ${e.getMessage}"); ()
     }
 
+  def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
+    // SET .. NX PX, which is one round trip and genuinely atomic. Lettuce
+    // answers null when NX declined, so a null is "somebody else has it".
+    commands.set(key, value, io.lettuce.core.SetArgs.Builder.nx().px(ttl.toMillis))
+      .asScala.map(_ != null).recover {
+        case NonFatal(e) =>
+          // Losing on error is the safe direction: the command simply is not
+          // run by this process, rather than run twice.
+          logger.warn(s"redis SET NX failed for '$key': ${e.getMessage}"); false
+      }
+
   def keysMatching(pattern: String): Future[List[String]] =
     commands.keys(pattern).asScala.map(_.asScala.toList).recover {
       case NonFatal(e) => logger.warn(s"redis KEYS failed for pattern '$pattern': ${e.getMessage}"); Nil

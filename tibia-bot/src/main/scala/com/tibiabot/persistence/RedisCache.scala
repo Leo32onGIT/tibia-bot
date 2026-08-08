@@ -11,6 +11,18 @@ import scala.concurrent.duration.FiniteDuration
 trait RedisCache {
   def get(key: String): Future[Option[String]]
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit]
+
+  /** Set `key` only if nothing holds it, answering whether this caller won.
+   *
+   *  The one primitive here that is not merely an optimisation: the respawn
+   *  command relay uses it to decide which process executes a command, and
+   *  "did I win" has to be atomic or the same claim could be performed twice.
+   *  Distinct from [[setEx]] for that reason — a get-then-set would have a
+   *  window between the two wide enough to lose in.
+   *
+   *  A cache that cannot answer must say `false` rather than `true`: refusing
+   *  to run a command is recoverable, running it twice is not. */
+  def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean]
   /** Discovers keys by prefix pattern (e.g. `tibia:secondary-status:*`) —
    *  used by a shared-world-cycle primary to find however many secondaries
    *  are currently publishing, without needing to know their names in
@@ -26,6 +38,10 @@ trait RedisCache {
 object NoopRedisCache extends RedisCache {
   def get(key: String): Future[Option[String]] = Future.successful(None)
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = Future.unit
+  /** Never wins: with no Redis there is nothing coordinating anything, and
+   *  claiming otherwise would let a relayed command run unguarded. */
+  def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
+    Future.successful(false)
   def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
   def close(): Unit = ()
 }
