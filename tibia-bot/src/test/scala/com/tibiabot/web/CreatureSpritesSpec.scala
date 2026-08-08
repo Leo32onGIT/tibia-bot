@@ -17,6 +17,21 @@ class CreatureSpritesSpec extends AnyWordSpec with Matchers {
       CreatureSprites.safeFileName("Lizard_High_Guard") shouldBe Some("Lizard_High_Guard.gif")
     }
 
+    // A creature is written the way a person writes it and the wiki names its
+    // file the way a wiki does. Missing this left two thirds of a real
+    // catalogue with no art at all, silently, since every rejection just shows
+    // the placeholder.
+    "write a spaced creature name the way the wiki files it" in {
+      CreatureSprites.safeFileName("Orc Warlord") shouldBe Some("Orc_Warlord.gif")
+      CreatureSprites.safeFileName("Minotaur Cult Follower") shouldBe Some("Minotaur_Cult_Follower.gif")
+      CreatureSprites.safeFileName("Mooh'Tah Warrior") shouldBe Some("Mooh'Tah_Warrior.gif")
+      CreatureSprites.safeFileName("Sign (Library)") shouldBe Some("Sign_(Library).gif")
+    }
+
+    "collapse a run of spaces, since no file is named with two" in {
+      CreatureSprites.safeFileName("Orc  Warlord") shouldBe Some("Orc_Warlord.gif")
+    }
+
     "trim surrounding whitespace" in {
       CreatureSprites.safeFileName("  Dragon  ") shouldBe Some("Dragon.gif")
     }
@@ -47,7 +62,7 @@ class CreatureSpritesSpec extends AnyWordSpec with Matchers {
 
     "refuse separators and shell or URL punctuation" in {
       List("Dragon/Lord", "Dragon\\Lord", "Dragon;rm", "Dragon|cat", "Dragon&whoami",
-           "Dragon?x=1", "Dragon#frag", "Dragon%2e%2e", "Dragon<script>", "Dragon Lord")
+           "Dragon?x=1", "Dragon#frag", "Dragon%2e%2e", "Dragon<script>")
         .foreach(name => withClue(s"'$name': ")(CreatureSprites.safeFileName(name) shouldBe None))
     }
 

@@ -11,10 +11,10 @@ package com.tibiabot.web
  *  done here instead.
  *
  *  The rule is an allow-list of characters rather than a search for bad ones.
- *  Every real wiki file name is covered by it — `Orc_Warlord`,
- *  `Sign_(Library)`, `Mooh'Tah_Warrior`, `Two-Headed_Turtle` — and anything
- *  outside it is refused rather than stripped, because silently rewriting an
- *  attacker's input into something that passes is how mistakes get made.
+ *  Every real creature name is covered by it — `Orc Warlord`, `Sign (Library)`,
+ *  `Mooh'Tah Warrior`, `Two-Headed Turtle` — and anything outside it is refused
+ *  rather than stripped, because silently rewriting an attacker's input into
+ *  something that passes is how mistakes get made.
  *
  *  Note the dot is *not* allowed. The extension is appended by us, so a name
  *  never needs one, and forbidding it outright means `..` cannot be expressed
@@ -30,13 +30,30 @@ object CreatureSprites {
     (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
       c == '_' || c == '-' || c == '(' || c == ')' || c == '\''
 
-  /** The sprite file name for a wiki file name, or None if it isn't one we are
-   *  willing to touch the filesystem with. */
-  def safeFileName(wikiName: String): Option[String] = {
-    val trimmed = wikiName.trim
-    if (trimmed.isEmpty || trimmed.length > MaxLength) None
-    else if (!trimmed.forall(allowed)) None
-    else Some(s"$trimmed.gif")
+  /** The sprite file name for a creature, or None if it isn't one we are willing
+   *  to touch the filesystem with.
+   *
+   *  A creature is written the way a person writes it — "Minotaur Cult
+   *  Follower" — and the wiki names its file the way a wiki does,
+   *  `Minotaur_Cult_Follower`. So spaces become underscores here, which is the
+   *  wiki's own convention rather than a liberty taken with the input: it is a
+   *  total mapping onto a character the allow-list already permits, and a space
+   *  can no more escape a directory than an underscore can.
+   *
+   *  Runs of spaces collapse, because "Orc  Warlord" names the same creature as
+   *  "Orc Warlord" and `Orc__Warlord.gif` is not a file anybody has. Only the
+   *  plain space folds: a tab or a newline in a creature name is junk, and
+   *  folding junk into something valid is the very thing the allow-list is for.
+   *
+   *  Everything outside the allow-list is still refused rather than stripped.
+   *  Refusing costs a placeholder; stripping is how an input gets quietly
+   *  rewritten into something that passes.
+   */
+  def safeFileName(creature: String): Option[String] = {
+    val name = creature.trim.replaceAll(" +", "_")
+    if (name.isEmpty || name.length > MaxLength) None
+    else if (!name.forall(allowed)) None
+    else Some(s"$name.gif")
   }
 
   /** Where a sprite is served from, or None when the name is not safe — in
