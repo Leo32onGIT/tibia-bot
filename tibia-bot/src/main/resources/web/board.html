@@ -194,8 +194,11 @@
   }
   .strip i { font-size: 14px; }
   .now-strip { background: rgba(255,255,255,0.02); }
-  .tz-pill { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 5px; background: rgba(255,255,255,0.05); color: var(--text); }
-  .tz-pill.server { background: rgba(224,169,62,0.14); color: #e8c887; }
+  .fold { cursor: pointer; user-select: none; }
+  .fold:hover { background: rgba(255,255,255,0.03); }
+  .fold-title { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
+  .fold-chevron { transition: transform 0.15s ease; }
+  .fold.open .fold-chevron { transform: rotate(180deg); }
   .field { display: flex; align-items: center; gap: 7px; }
   .field-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
   .live-bar { flex: 1; min-width: 80px; max-width: 220px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
@@ -309,6 +312,17 @@
   /* An evening the weekly rule will also take. Fainter than the one being
      picked, because it is a consequence rather than a choice. */
   .b-echo { background: rgba(167,139,250,0.14); opacity: 0.8; }
+  /* The foot of the selection, for dragging its length. Given a real target
+     height rather than a hairline, since it has to be grabbable with a mouse
+     and with a thumb. */
+  .stretch {
+    position: absolute; left: 0; right: 0; bottom: -3px; height: 9px;
+    cursor: ns-resize; touch-action: none; z-index: 4;
+  }
+  .stretch::after {
+    content: ''; position: absolute; left: 50%; bottom: 4px; width: 18px; height: 2px;
+    transform: translateX(-50%); border-radius: 1px; background: var(--purple); opacity: 0.85;
+  }
   /* A block clipped by local midnight keeps a flat edge, so it reads as
      continuing rather than as a booking that really stops there. */
   .clip-top { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
@@ -391,6 +405,11 @@ const SS_SERVER_HOUR = Number('<!--SERVER_SAVE_HOUR-->');
 const PLACEHOLDER = '/dashboard/images/avatar.png';
 
 const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
+// The shortest hunt worth starting — RespawnService.MinimumClaimMinutes. Below
+// a whole step the tank's remainder is offered exactly as it stands, because
+// eighteen minutes is still eighteen minutes of hunting and rounding it away
+// would refuse somebody a hunt to keep the numbers tidy.
+const MIN_CLAIM = 5;
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 const pad = n => String(n).padStart(2, '0');
@@ -498,7 +517,8 @@ const view = {
   days: new Set(),
   pick: null,
   answer: null,
-  busy: false
+  busy: false,
+  calendarOpen: false
 };
 
 let gridEl = null;
@@ -720,14 +740,19 @@ function openWindow(code) {
   view.answer = null;
   view.repeat = 'once';
   view.days = new Set();
+  view.calendarOpen = false;
   scrolledOnce = false;
   const l = limits();
   // Start at the guild's default, but never above what is actually claimable —
-  // a default of 2h is meaningless if only 30m of stamina is left.
-  view.duration = l ? Math.max(SLOT, Math.min(l.defaultDurationMinutes, l.claimableMinutes)) : null;
+  // a default of 2h is meaningless if only 18m of stamina is left, and a floor
+  // of half an hour would put the figure straight back above the ceiling.
+  view.duration = l ? Math.min(l.defaultDurationMinutes, l.claimableMinutes) : null;
   veil.classList.add('open');
   windowEl.classList.add('open');
   renderWindow();
+  // Fetched even while the week is folded away, because the header says how
+  // much is in it and a header that lied until you opened it would be worse
+  // than no header.
   loadSlots().then(renderWindow).catch(() => {});
 }
 
@@ -741,7 +766,10 @@ function closeWindow() {
 
 function setDuration(minutes) {
   const s = step();
-  view.duration = Math.max(s, Math.min(cap(), Math.round(minutes / s) * s));
+  // Half hours on the way up, but the ceiling wins: the last of a tank is
+  // claimable exactly as it stands, so the floor is a whole step only while
+  // there is a whole step to be had.
+  view.duration = Math.max(Math.min(s, cap()), Math.min(cap(), Math.round(minutes / s) * s));
   view.answer = null;
   renderWindow();
 }
@@ -771,7 +799,7 @@ function renderWindow() {
   if (view.answer) {
     body.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
   }
-  body.appendChild(calendar());
+  body.appendChild(calendarSection());
   if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
 
   wireWindow();
@@ -798,17 +826,17 @@ function nowStrip(spawn) {
   // Already holding it, or already standing in its queue, means there is
   // nothing to ask for — the service would refuse either way, and offering the
   // button anyway just invites a pointless round trip.
-  const canClaim = !spawn.mine && !spawn.queued && l && l.claimableMinutes >= step();
+  const canClaim = !spawn.mine && !spawn.queued && l && l.claimableMinutes >= MIN_CLAIM;
   if (canClaim) {
     strip.appendChild(el('span', 'field', `
       <span class="field-label">For</span>
       <span class="stepper">
-        <button data-claim-step="-1" ${view.duration <= step() ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
+        <button data-claim-step="-1" ${view.duration <= MIN_CLAIM ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
         <span class="dur-val">${fmtDur(view.duration)}</span>
         <button data-claim-step="1" ${view.duration >= cap() ? 'disabled' : ''} aria-label="Longer">+</button>
       </span>
       <span class="dur-cap">up to ${fmtDur(cap())} · ${esc(l.boundBy)}</span>`));
-  } else if (l && l.claimableMinutes < step() && !spawn.mine) {
+  } else if (l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
     strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
   }
 
@@ -837,9 +865,39 @@ function nowStrip(spawn) {
   return strip;
 }
 
-/** The week, shown by default rather than behind a button: when to hunt
- *  something is the same decision as whether to take it now, and the two belong
- *  in one view. */
+/** The week, folded away until it is wanted.
+ *
+ *  Most visits to a spawn are about right now — take it, or see who has it —
+ *  and a week of grid above the fold makes that ordinary case read as the
+ *  complicated one. So the header states what the week holds and opens it on
+ *  request, which is also where the first scroll-to-now happens: scrolling
+ *  something nobody has looked at yet is wasted work.
+ */
+function calendarSection() {
+  const wrap = el('div');
+  const booked = slots.filter(b => b.state !== 'claimed').length;
+  const summary = booked === 0 ? 'nothing booked this week'
+    : `${booked} booked this week`;
+
+  const head = el('div', 'strip fold' + (view.calendarOpen ? ' open' : ''), `
+    <i class="ti ti-calendar-month" aria-hidden="true"></i>
+    <span class="fold-title">Book a time</span>
+    <span class="muted">${summary}</span>
+    <span style="margin-left:auto"></span>
+    <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
+  head.setAttribute('role', 'button');
+  head.setAttribute('aria-expanded', String(view.calendarOpen));
+  head.addEventListener('click', () => {
+    view.calendarOpen = !view.calendarOpen;
+    if (!view.calendarOpen) view.pick = null;   // nothing to book while it is shut
+    scrolledOnce = false;
+    renderWindow();
+  });
+  wrap.appendChild(head);
+  if (view.calendarOpen) wrap.appendChild(calendar());
+  return wrap;
+}
+
 function calendar() {
   const wrap = el('div');
   const now = new Date();
@@ -873,17 +931,6 @@ function calendar() {
       </span>
       <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> Now</button>
     </span>`));
-
-  // --- the two clocks
-  const srvNow = serverParts(now);
-  const diff = (offsetMinutes(now, LOCAL_TZ) - offsetMinutes(now, SERVER_TZ)) / 60;
-  wrap.appendChild(el('div', 'strip', `
-    <i class="ti ti-clock" aria-hidden="true"></i>
-    Times in <span class="tz-pill">${esc(LOCAL_TZ)} · ${fmtLocal(now)}</span>
-    <span class="muted">· ${diff === 0 ? 'same as server' : `${diff > 0 ? '+' : ''}${diff}h vs server`}</span>
-    <span style="margin-left:auto"></span>
-    Server <span class="tz-pill server">${esc(SERVER_TZ.split('/').pop().replace('_', ' '))} · ${pad(srvNow.hour)}:${pad(srvNow.minute)}</span>
-    <span class="muted">· repeat days and server save follow this clock</span>`));
 
   wrap.appendChild(el('div', 'cal-legend', `
     <span><i class="swatch sw-claimed"></i>Being hunted</span>
@@ -975,6 +1022,10 @@ function calendar() {
         sel.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
         sel.innerHTML = `<span class="who">${p.label}</span>
           <span class="tm">${fmtLocal(p.at)}–${fmtLocal(pEnd)}</span>`;
+        // Only the block being booked takes a handle. An echo is a consequence
+        // of the rule rather than a thing to drag, and the piece below a
+        // midnight split is not where the hunt ends.
+        if (!p.echo && pEnd.getTime() <= colEnd) sel.appendChild(stretchHandle(sel));
         col.appendChild(sel);
       });
     }
@@ -1032,6 +1083,59 @@ function previews(start, day) {
   // The mask is in server weekdays, so which local column an echo belongs in is
   // a question about that instant, not about this column's heading.
   return covers(at) ? [{ at, echo: true, label: 'Repeats' }] : [];
+}
+
+/** Drag the foot of the selection to change how long the hunt is.
+ *
+ *  Snapped to half hours on the way, because that is the granularity a booking
+ *  is made at — an hour and seven minutes is not a slot anybody can have. The
+ *  block is resized directly during the drag rather than through a re-render:
+ *  rebuilding a hundred and seventy cells per frame fights the pointer.
+ */
+function stretchHandle(block) {
+  const handle = el('div', 'stretch');
+  handle.title = 'Drag to change how long';
+  let preview = view.duration;
+
+  handle.addEventListener('pointerdown', down => {
+    down.preventDefault();
+    down.stopPropagation();
+    // Capture keeps the drag alive when the pointer leaves the handle, which is
+    // most of a drag. It is not worth losing the drag over, though: a browser
+    // that refuses the capture should still resize, so the failure is allowed
+    // rather than left to abort the handler before its listeners are attached.
+    try { handle.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+    const fromY = down.clientY;
+    const fromDuration = view.duration;
+    const label = block.querySelector('.tm');
+    // Never below a whole step unless the tank itself is shorter than one, in
+    // which case the last of it is the only length on offer.
+    const floor = Math.min(SLOT, cap());
+
+    const move = ev => {
+      const minutes = fromDuration + ((ev.clientY - fromY) / ROW_H) * 60;
+      const next = Math.max(floor, Math.min(cap(), Math.round(minutes / SLOT) * SLOT));
+      if (next === preview) return;
+      preview = next;
+      block.style.height = Math.max(13, (next / 60) * ROW_H - 2) + 'px';
+      if (label) {
+        const end = new Date(view.pick.getTime() + next * 60000);
+        label.textContent = `${fmtLocal(view.pick)}–${fmtLocal(end)}`;
+      }
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      // One render at the end, which also redraws the echoes and the verdict
+      // against the length that was actually settled on.
+      if (preview !== view.duration) setDuration(preview); else renderWindow();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  return handle;
 }
 
 function readout() {
