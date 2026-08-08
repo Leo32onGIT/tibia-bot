@@ -42,6 +42,31 @@ final class CreatureSpriteCache(
    *  gained the file. */
   private val known404 = ConcurrentHashMap.newKeySet[String]()
 
+  /** Whether the cache can actually be written to, checked once at startup.
+   *
+   *  Worth doing eagerly because the failure it catches is a deployment
+   *  problem, not a runtime one: a directory the container's user cannot write
+   *  to fails identically for every sprite, forever, and saying so once — with
+   *  the path and the user — is the difference between a five-minute fix and a
+   *  log full of a hundred identical warnings that name only a temp file.
+   */
+  private def checkWritable(): Unit =
+    try {
+      Files.createDirectories(directory)
+      val probe = Files.createTempFile(directory, ".writable", ".probe")
+      Files.deleteIfExists(probe)
+      logger.info(s"Creature sprite cache ready at ${directory.toAbsolutePath}")
+    } catch {
+      case NonFatal(e) =>
+        logger.error(
+          s"Creature sprite cache at ${directory.toAbsolutePath} is not writable by " +
+            s"${sys.props.getOrElse("user.name", "this user")} (${describe(e)}). " +
+            "Sprites will fall back to the placeholder until it is. In Docker this usually " +
+            "means the directory was created by the daemon as root — see the mkdir in build.sbt.")
+    }
+
+  checkWritable()
+
   private def fileFor(safeName: String): Path = directory.resolve(safeName)
 
   /** The bytes if we already hold them. A miss starts a background fetch and
@@ -53,7 +78,7 @@ final class CreatureSpriteCache(
         try Some(Files.readAllBytes(file))
         catch {
           case NonFatal(e) =>
-            logger.warn(s"Could not read cached sprite '$safeName': ${e.getMessage}")
+            logger.warn(s"Could not read cached sprite '$safeName': ${describe(e)}")
             None
         }
       } else {
@@ -78,7 +103,7 @@ final class CreatureSpriteCache(
         }.recover {
           // A transient failure must not be remembered as a 404, or one bad
           // minute would blank a sprite until the next restart.
-          case NonFatal(e) => logger.warn(s"Could not fetch sprite '$safeName': ${e.getMessage}")
+          case NonFatal(e) => logger.warn(s"Could not fetch sprite '$safeName': ${describe(e)}")
         }.foreach(_ => inFlight.remove(safeName))
       }
     }
@@ -94,8 +119,20 @@ final class CreatureSpriteCache(
       Files.move(temp, fileFor(safeName), StandardCopyOption.REPLACE_EXISTING)
       logger.info(s"Cached creature sprite '$safeName' (${bytes.length} bytes)")
     } catch {
-      case NonFatal(e) => logger.warn(s"Could not cache sprite '$safeName': ${e.getMessage}")
+      case NonFatal(e) => logger.warn(s"Could not cache sprite '$safeName': ${describe(e)}")
     }
+
+  /** An exception as a line of log worth reading.
+   *
+   *  `getMessage` on a `java.nio.file.FileSystemException` is the path and
+   *  nothing else, so "Could not cache sprite 'X': cache/sprites/X.part" was
+   *  every bit as true of a full disk, a missing directory and a permission
+   *  problem — and told you which of the three it was in none of those cases.
+   */
+  private def describe(e: Throwable): String = {
+    val detail = Option(e.getMessage).filter(_.nonEmpty).getOrElse("no detail")
+    s"${e.getClass.getSimpleName}: $detail"
+  }
 
   private[web] def isCached(wikiName: String): Boolean =
     CreatureSprites.safeFileName(wikiName).exists(name => Files.isReadable(fileFor(name)))
