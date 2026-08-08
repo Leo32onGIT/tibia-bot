@@ -528,6 +528,12 @@ const view = {
 
 let gridEl = null;
 let scrolledOnce = false;
+/** code -> the card element and the pieces of it that change, so painting never
+ *  has to search the DOM for them. */
+const cardParts = new Map();
+/** The order the cards are in, so the list is only rearranged when it really
+ *  differs — reordering under somebody mid-click is its own kind of flicker. */
+let lastOrder = null;
 
 const limits = () => (board && board.limits) || null;
 const step = () => (limits() ? limits().step : SLOT);
@@ -563,18 +569,11 @@ function esc(s) {
 }
 
 // ---- The board ------------------------------------------------------------
+/** One card, built once. Everything that can change later is written by
+ *  paintCard, so this runs once per spawn rather than once per second. */
 function cardFor(spawn) {
-  // A spawn nobody has ever claimed has no lastActivity at all, which is the
-  // most dormant the ramp goes rather than an error.
-  const hours = hoursSince(spawn.lastActivity);
-  const fade = fadeFor(hours);
-  const state = spawn.state;
-
   const card = el('div', 'card');
-  card.style.opacity = fade.opacity;
-  card.style.setProperty('--drain', fade.drain);
-  card.style.setProperty('--edge', `var(--st-${state})`);
-  card.title = `${spawn.code} — ${spawn.name}${spawn.region ? ' · ' + spawn.region : ''}`;
+  card.dataset.code = spawn.code;
 
   const img = document.createElement('img');
   img.className = 'sprite' + (spawn.sprite ? '' : ' placeholder');
@@ -582,65 +581,176 @@ function cardFor(spawn) {
   img.alt = '';
   img.loading = 'lazy';
   // A sprite the cache has not fetched yet 404s; the fetch has just been started
-  // by that very request, so the next poll will have it.
+  // by that very request, so a later poll will have it.
   img.addEventListener('error', () => {
     img.src = PLACEHOLDER;
     img.classList.add('placeholder');
   });
   card.appendChild(img);
 
-  const tick = state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
-  const queue = spawn.queueLength > 0 ? `<span class="queue">+${spawn.queueLength} queued</span>` : '';
-
   const body = el('div', 'card-body', `
     <div class="card-top">
-      <span class="code-chip ${state === 'claimed' ? 'live' : ''}">${esc(spawn.code)}</span>
-      <span class="spawn-name">${esc(spawn.name)}</span>
-      <span class="age">${ageLabel(hours)}</span>
+      <span class="code-chip"></span>
+      <span class="spawn-name"></span>
+      <span class="age"></span>
     </div>
     <div class="card-state">
-      <span class="dot ${state}"></span>${tick}
-      <span class="who ${state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>
-      ${queue}
-    </div>`);
+      <span class="dot"></span>
+      <i class="ti ti-check tick" aria-hidden="true" hidden></i>
+      <span class="who"></span>
+      <span class="queue"></span>
+    </div>
+    <div class="card-bar" hidden><span></span></div>`);
+  card.appendChild(body);
 
-  if (state === 'claimed' && spawn.startsAt && spawn.endsAt) {
-    const start = new Date(spawn.startsAt).getTime();
-    const end = new Date(spawn.endsAt).getTime();
-    const done = Math.min(1, Math.max(0, (Date.now() - start) / Math.max(1, end - start)));
-    body.appendChild(el('div', 'card-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
-  }
+  // The pieces are held onto rather than looked up again later: painting runs
+  // every second across every card, and a querySelector per field per card
+  // would put back the cost this whole change exists to remove.
+  const parts = {
+    card, img,
+    chip: body.querySelector('.code-chip'),
+    name: body.querySelector('.spawn-name'),
+    age: body.querySelector('.age'),
+    dot: body.querySelector('.dot'),
+    tick: body.querySelector('.tick'),
+    who: body.querySelector('.who'),
+    queue: body.querySelector('.queue'),
+    bar: body.querySelector('.card-bar'),
+    fill: body.querySelector('.card-bar span')
+  };
+
+  // The only three things that never change while the page is open.
+  parts.chip.textContent = spawn.code;
+  parts.name.textContent = spawn.name;
+  card.title = `${spawn.code} — ${spawn.name}${spawn.region ? ' · ' + spawn.region : ''}`;
 
   card.addEventListener('click', () => openWindow(spawn.code));
-  card.appendChild(body);
+  cardParts.set(spawn.code, parts);
+  paintCard(spawn);
   return card;
+}
+
+/** Write the changeable parts of a card.
+ *
+ *  Assigning a string that is already there costs nothing — the browser does no
+ *  work and nothing repaints — which is what lets this run every second. The
+ *  version this replaces rebuilt all 285 cards once a second, so every image
+ *  element was thrown away and made again, and every hover and scroll position
+ *  went with them. That was the flicker.
+ */
+function paintCard(spawn) {
+  const p = cardParts.get(spawn.code);
+  if (!p) return;
+  const hours = hoursSince(spawn.lastActivity);
+  const fade = fadeFor(hours);
+  const state = spawn.state;
+
+  const opacity = String(fade.opacity);
+  if (p.card.style.opacity !== opacity) {
+    p.card.style.opacity = opacity;
+    p.card.style.setProperty('--drain', fade.drain);
+  }
+  const edge = `var(--st-${state})`;
+  if (p.card.style.getPropertyValue('--edge') !== edge) {
+    p.card.style.setProperty('--edge', edge);
+  }
+
+  const chipClass = 'code-chip' + (state === 'claimed' ? ' live' : '');
+  if (p.chip.className !== chipClass) p.chip.className = chipClass;
+
+  p.age.textContent = ageLabel(hours);
+
+  const dotClass = 'dot ' + state;
+  if (p.dot.className !== dotClass) p.dot.className = dotClass;
+  if (p.tick.hidden !== (state !== 'confirmed')) p.tick.hidden = state !== 'confirmed';
+
+  const whoClass = 'who' + (state === 'free' ? ' free' : '');
+  if (p.who.className !== whoClass) p.who.className = whoClass;
+  p.who.textContent = stateText(spawn);
+  p.queue.textContent = spawn.queueLength > 0 ? `+${spawn.queueLength} queued` : '';
+
+  if (state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    const from = new Date(spawn.startsAt).getTime();
+    const to = new Date(spawn.endsAt).getTime();
+    const done = Math.min(1, Math.max(0, (Date.now() - from) / Math.max(1, to - from)));
+    if (p.bar.hidden) p.bar.hidden = false;
+    p.fill.style.width = `${(done * 100).toFixed(1)}%`;
+  } else if (!p.bar.hidden) {
+    p.bar.hidden = true;
+  }
+}
+
+/** Which spawns are shown, and in what order. Most recently touched first, so
+ *  whatever is alive rises to the top; a spawn never claimed sorts last. */
+function shownSpawns() {
+  return board.spawns.filter(matches).slice().sort((a, b) => {
+    const ha = hoursSince(a.lastActivity), hb = hoursSince(b.lastActivity);
+    return (ha == null ? Infinity : ha) - (hb == null ? Infinity : hb);
+  });
+}
+
+/** Put the cards in the right order, making and removing only what changed.
+ *
+ *  Order is the one thing that cannot be patched into a card, so it is done by
+ *  moving the elements that already exist. They keep their images, and the
+ *  browser keeps what it had already decoded.
+ */
+function layoutBoard() {
+  const container = document.getElementById('cards');
+  const shown = shownSpawns();
+  const order = shown.map(s => s.code).join(',');
+  if (order === lastOrder) return;
+  lastOrder = order;
+
+  if (!shown.length) {
+    cardParts.clear();
+    container.innerHTML = `<div class="empty-note">${
+      board.spawns.length ? 'No spawns match that filter.' : 'This server has no spawns in its catalogue yet.'
+    }</div>`;
+    return;
+  }
+  const first = container.firstElementChild;
+  if (first && first.classList.contains('empty-note')) container.innerHTML = '';
+
+  const wanted = new Set(shown.map(s => s.code));
+  cardParts.forEach((p, code) => {
+    if (!wanted.has(code)) { p.card.remove(); cardParts.delete(code); }
+  });
+
+  let previous = null;
+  shown.forEach(spawn => {
+    const existing = cardParts.get(spawn.code);
+    const card = existing ? existing.card : cardFor(spawn);
+    const expected = previous ? previous.nextElementSibling : container.firstElementChild;
+    if (card !== expected) {
+      if (previous) previous.after(card); else container.prepend(card);
+    }
+    previous = card;
+  });
 }
 
 function renderBoard() {
   if (!board) return;
-  const cards = document.getElementById('cards');
-  cards.innerHTML = '';
-
-  // Most recently touched first, so whatever is alive rises to the top. A spawn
-  // never claimed sorts last rather than first.
-  const shown = board.spawns.filter(matches).slice().sort((a, b) => {
-    const ha = hoursSince(a.lastActivity), hb = hoursSince(b.lastActivity);
-    return (ha == null ? Infinity : ha) - (hb == null ? Infinity : hb);
-  });
-
-  if (!shown.length) {
-    cards.innerHTML = `<div class="empty-note">${
-      board.spawns.length ? 'No spawns match that filter.' : 'This server has no spawns in its catalogue yet.'
-    }</div>`;
-  } else {
-    shown.forEach(spawn => cards.appendChild(cardFor(spawn)));
-  }
+  layoutBoard();
+  board.spawns.forEach(paintCard);
 
   const live = board.spawns.filter(s => s.state === 'claimed').length;
   const booked = board.spawns.filter(s => ['booked', 'confirmed'].includes(s.state)).length;
-  document.getElementById('count').textContent =
-    `${board.spawns.length} spawns · ${live} being hunted · ${booked} booked`;
-  document.getElementById('sub').textContent = `${board.spawns.length} spawns · ${LOCAL_TZ}`;
+  setText(document.getElementById('count'),
+    `${board.spawns.length} spawns · ${live} being hunted · ${booked} booked`);
+  setText(document.getElementById('sub'), `${board.spawns.length} spawns · ${LOCAL_TZ}`);
+}
+
+function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+/** The once-a-second beat. Only a live hunt moves on its own — its countdown
+ *  and its progress bar — so only those cards are touched. Everything else
+ *  changes when the poll says it changed, and not before. */
+function tick() {
+  if (!board) return;
+  board.spawns.forEach(spawn => { if (spawn.state === 'claimed') paintCard(spawn); });
 }
 
 // ---- Data -----------------------------------------------------------------
@@ -1356,7 +1466,7 @@ refresh();
 setInterval(() => { if (!view.busy && !view.pick) refresh(); }, 10000);
 // The progress bars and "m left" move between polls, so redraw on a shorter beat
 // than the fetch — otherwise a hunt would visibly jump every ten seconds.
-setInterval(() => { if (board && !view.code) renderBoard(); }, 1000);
+setInterval(() => { if (board && !view.code) tick(); }, 1000);
 </script>
 </body>
 </html>
