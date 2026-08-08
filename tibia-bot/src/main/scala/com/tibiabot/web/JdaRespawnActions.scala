@@ -53,6 +53,14 @@ final class JdaRespawnActions(
       }
     }(blocking)
 
+  /** Whether this bot is the one that runs `guildId`'s respawns — the same
+   *  question [[withActableGuild]] asks, exposed so the router and the command
+   *  consumer decide it exactly the same way rather than each reimplementing it. */
+  def ownsGuild(guildId: String): Boolean =
+    Option(discordGateway.guildById(guildId)).exists { guild =>
+      respawnService.settings(guildId).exists(ownership.ownsRespawns(guild, _))
+    }
+
   /** The name to record against a claim. Resolved here rather than taken from
    *  the request, so it cannot be spoofed by whoever is posting — the audit log
    *  and the thread both show it. Falls back to the id, which is always true

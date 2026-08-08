@@ -1,0 +1,151 @@
+package com.tibiabot.web
+
+import com.tibiabot.persistence.RedisCache
+import com.typesafe.scalalogging.StrictLogging
+
+import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.control.NonFatal
+
+/** Performs writes that another bot's dashboard handed over.
+ *
+ *  Every bot runs one of these, and each only touches commands for guilds whose
+ *  respawns it runs — so exactly one process ever executes a given command, and
+ *  it is the one whose lifecycle sweep will go on to send the reminders and
+ *  handovers for it.
+ *
+ *  The lease is taken *before* the work, not after. That makes this at-most-once
+ *  rather than at-least-once: a process that dies mid-claim will not pick the
+ *  command up again on restart, and the person is told nothing was confirmed.
+ *  The other way round — execute, then mark done — would re-run a claim that had
+ *  already charged somebody's stamina, and stamina spent twice is not something
+ *  they can see or undo.
+ */
+final class RespawnCommandConsumer(
+  cache: RedisCache,
+  local: RespawnActionPort,
+  ownsGuild: String => Boolean,
+  selfId: String
+)(implicit ec: ExecutionContext) extends StrictLogging {
+
+  /** Ids finished in this process, so a reply still sitting in Redis is not
+   *  re-leased on the next sweep. The lease alone would cover it, but only until
+   *  the lease expires — this closes that window without lengthening it. */
+  private val handled = java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+
+  /** One pass: pick up whatever is waiting for guilds this bot runs. */
+  def sweep(): Future[Unit] =
+    cache.keysMatching(RespawnCommand.requestPattern).flatMap { keys =>
+      val mine = keys.flatMap(RespawnCommand.parseRequestKey)
+        .filterNot { case (_, id) => handled.contains(id) }
+        // Ownership is checked before leasing, never after. Leasing first and
+        // then discovering it is not ours would consume the command and answer
+        // "not mine" — stealing it from the bot that should have run it.
+        .filter { case (guildId, _) => ownsGuild(guildId) }
+      Future.traverse(mine) { case (guildId, id) => handle(guildId, id) }.map(_ => ())
+    }.recover {
+      case NonFatal(e) => logger.warn(s"Respawn command sweep failed: ${e.getMessage}")
+    }
+
+  private def handle(guildId: String, id: String): Future[Unit] =
+    cache.setIfAbsent(RespawnCommand.leaseKey(id), selfId, RespawnCommandConsumer.LeaseTtl).flatMap {
+      case false => Future.unit // somebody already has it
+      case true =>
+        handled.add(id)
+        cache.get(RespawnCommand.requestKey(guildId, id)).flatMap {
+          case None =>
+            // Expired between listing and reading. Nothing to do and nobody
+            // waiting by now.
+            Future.unit
+          case Some(raw) =>
+            RespawnCommand.fromJson(raw) match {
+              case None =>
+                logger.warn(s"Dropping unreadable respawn command '$id' for guild '$guildId'")
+                reply(id, ActionResult(ok = false, "That instruction could not be understood."))
+              case Some(command) =>
+                execute(command).flatMap(result => reply(id, result)).recoverWith {
+                  case NonFatal(e) =>
+                    logger.warn(s"Relayed '${command.action}' failed for guild '$guildId': ${e.getMessage}", e)
+                    reply(id, ActionResult(ok = false, "Something went wrong doing that."))
+                }
+            }
+        }
+    }.recover {
+      case NonFatal(e) => logger.warn(s"Could not handle respawn command '$id': ${e.getMessage}")
+    }
+
+  private def reply(id: String, result: ActionResult): Future[Unit] =
+    cache.setEx(RespawnCommand.replyKey(id), RespawnCommand.resultToJson(result),
+      RespawnCommandConsumer.ReplyTtl)
+
+  /** Maps a command onto the local port. Anything it cannot satisfy is answered
+   *  rather than ignored, so the caller learns why instead of timing out. */
+  private[web] def execute(command: RespawnCommand): Future[ActionResult] = {
+    val guildId = command.guildId
+    val actor = command.actorId
+    def missing(what: String) = Future.successful(ActionResult(ok = false, s"That instruction had no $what."))
+
+    command.action match {
+      case RespawnCommand.Claim =>
+        command.param("code").fold(missing("spawn"))(code =>
+          local.claim(guildId, actor, command.param("character").getOrElse(""), code, command.intParam("minutes")))
+
+      case RespawnCommand.Release =>
+        local.release(guildId, actor, command.param("code"))
+
+      case RespawnCommand.Extend =>
+        command.intParam("minutes").filter(_ > 0).fold(missing("length"))(local.extend(guildId, actor, _))
+
+      case RespawnCommand.Book =>
+        val parsed = for {
+          code <- command.param("code")
+          start <- command.param("startsAt")
+            .flatMap(s => scala.util.Try(java.time.Instant.parse(s).atZone(java.time.ZoneOffset.UTC)).toOption)
+          minutes <- command.intParam("minutes").filter(_ > 0)
+        } yield (code, start, minutes)
+        parsed.fold(missing("time to book")) { case (code, start, minutes) =>
+          local.book(guildId, actor, command.param("character").getOrElse(""), code, start, minutes,
+            command.intParam("days").getOrElse(com.tibiabot.domain.RespawnSchedule.OneOff))
+        }
+
+      case RespawnCommand.CancelBooking =>
+        command.longParam("scheduleId").fold(missing("booking"))(local.cancelBooking(guildId, actor, _))
+
+      case RespawnCommand.ForceLeave =>
+        command.param("code").fold(missing("spawn"))(local.forceLeave(guildId, actor, _))
+
+      case RespawnCommand.Reassign =>
+        (command.param("code"), command.param("toUserId")) match {
+          case (Some(code), Some(to)) => local.reassign(guildId, actor, code, to)
+          case _ => missing("spawn and recipient")
+        }
+
+      case RespawnCommand.GrantStamina =>
+        (command.param("userId"), command.intParam("minutes")) match {
+          case (Some(target), Some(minutes)) => local.grantStamina(guildId, actor, target, minutes)
+          case _ => missing("person and amount")
+        }
+
+      // Unreachable via fromJson, which refuses unknown actions — kept so a
+      // future action added to the set without a branch here fails loudly
+      // rather than silently doing nothing.
+      case other =>
+        logger.warn(s"No handler for relayed action '$other'")
+        Future.successful(ActionResult(ok = false, "This bot does not know how to do that yet."))
+    }
+  }
+}
+
+object RespawnCommandConsumer {
+  /** Held while a command runs. Comfortably longer than any single write, and
+   *  short enough that a process which died holding one does not block the id
+   *  forever — though nothing will retry it either, by design. */
+  val LeaseTtl: FiniteDuration = 2.minutes
+
+  /** A reply only has to outlive the caller's wait. */
+  val ReplyTtl: FiniteDuration = 2.minutes
+
+  /** How often to look. A relayed write costs about this much latency on top of
+   *  the work itself, which is why it is a second rather than five. */
+  val SweepEvery: FiniteDuration = 1.second
+}

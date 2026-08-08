@@ -308,8 +308,27 @@ object BotApp extends App with StrictLogging {
       thread.setDaemon(true)
       thread
     }))
-  private val respawnActions =
+  private val localRespawnActions =
     new web.JdaRespawnActions(discordGateway, respawnService, respawnOwnership)(respawnActionPool)
+  // A guild whose respawns another bot runs has its writes handed to that
+  // process through Redis; reads never relay, since every bot shares the
+  // guild's database.
+  private val relayedRespawnActions = new web.RelayedRespawnActions(
+    persistence.RedisCacheProvider.cache, actorSystem.scheduler)(respawnActionPool)
+  private val respawnActions = new web.RoutingRespawnActions(
+    localRespawnActions, relayedRespawnActions, localRespawnActions.ownsGuild)
+  // The other half: perform what somebody else's dashboard handed to us. Every
+  // bot runs one, and each only touches guilds it runs, so exactly one process
+  // executes any given command.
+  private val respawnCommandConsumer = new web.RespawnCommandConsumer(
+    persistence.RedisCacheProvider.cache, localRespawnActions,
+    localRespawnActions.ownsGuild, discordGateway.selfUserId)(respawnActionPool)
+  if (Config.Respawn.enabled && Config.redisEnabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      web.RespawnCommandConsumer.SweepEvery, web.RespawnCommandConsumer.SweepEvery
+    )(() => { respawnCommandConsumer.sweep(); () })(ex)
+    logger.info("Respawn command relay listening for writes from other bots' dashboards")
+  }
   private val respawnDashboardRoute =
     new web.RespawnDashboardRoute(discordAuth, dashboardAccessService, creatureSpriteCache,
       boardOf = guildId => respawnService.board(guildId),
