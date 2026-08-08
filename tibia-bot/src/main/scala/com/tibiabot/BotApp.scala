@@ -341,7 +341,7 @@ object BotApp extends App with StrictLogging {
           settings.defaultDurationMinutes,
           respawnService.nextStaminaReset())
       },
-      actions = respawnActions)
+      actions = respawnActions)(respawnActionPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.

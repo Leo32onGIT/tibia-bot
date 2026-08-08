@@ -29,7 +29,18 @@ final class RespawnDashboardRoute(
   boardOf: String => List[com.tibiabot.respawn.RespawnBoardEntry],
   limitsOf: (String, String) => Option[BoardLimits],
   actions: RespawnActionPort
-) extends StrictLogging {
+)(implicit blocking: scala.concurrent.ExecutionContext) extends StrictLogging {
+
+  /** Runs blocking work somewhere it cannot hurt.
+   *
+   *  Everything this route reads is blocking — Discord REST calls to resolve
+   *  access, database round trips for a board — and akka's HTTP dispatcher is a
+   *  small pool shared with every other request. One slow Discord call on that
+   *  pool does not just slow its own request; it takes a server thread out of
+   *  circulation for everybody. So reads go to the same pool the writes already
+   *  use, and the request simply is not completed until they answer. */
+  private def read[A](work: => A)(inner: A => Route): Route =
+    onSuccess(scala.concurrent.Future(work)(blocking))(inner)
 
   /** Same filesystem-override-then-classpath lookup as StatusRoute's, and for
    *  the same reason: editing the file in a volume-mounted `web/` takes effect
@@ -59,12 +70,20 @@ final class RespawnDashboardRoute(
     withAccessAs(guildId)((_, access) => inner(access))
 
   /** As [[withAccess]], but also hands over who is asking — which every write
-   *  needs and no read does. */
+   *  needs and no read does.
+   *
+   *  Answered from the last few seconds where it can be. Resolving this costs a
+   *  Discord REST call per candidate guild, and an open board asks six times a
+   *  minute — paying that on every poll is what made the dashboard feel slow.
+   *  Acting on somebody else's claim goes through [[withModerator]], which
+   *  never reads from that memory. */
   private def withAccessAs(guildId: String)(inner: (String, GuildAccess) => Route): Route =
     discordAuth.authenticatedUser { userId =>
-      accessService.accessFor(userId, guildIdsOf(userId)).find(_.guildId == guildId) match {
-        case Some(access) => inner(userId, access)
-        case None         => complete(StatusCodes.Forbidden -> "Forbidden")
+      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) { granted =>
+        granted.find(_.guildId == guildId) match {
+          case Some(access) => inner(userId, access)
+          case None         => complete(StatusCodes.Forbidden -> "Forbidden")
+        }
       }
     }
 
@@ -75,9 +94,16 @@ final class RespawnDashboardRoute(
    *  role a minute ago is refused on their next action rather than whenever a
    *  cache happens to expire. */
   private def withModerator(guildId: String)(inner: (String, GuildAccess) => Route): Route =
-    withAccessAs(guildId) { (userId, access) =>
-      if (access.tier.atLeast(AccessTier.Moderator)) inner(userId, access)
-      else complete(StatusCodes.Forbidden -> "Forbidden")
+    discordAuth.authenticatedUser { userId =>
+      // Deliberately not the remembered answer. These act on other people's
+      // claims, and somebody who lost the role a minute ago must be refused
+      // now rather than whenever a cache happens to expire.
+      read(accessService.accessFor(userId, guildIdsOf(userId))) { granted =>
+        granted.find(_.guildId == guildId) match {
+          case Some(access) if access.tier.atLeast(AccessTier.Moderator) => inner(userId, access)
+          case _ => complete(StatusCodes.Forbidden -> "Forbidden")
+        }
+      }
     }
 
   private def json(value: JsValue) =
@@ -160,7 +186,7 @@ final class RespawnDashboardRoute(
     pathEndOrSingleSlash {
       get {
         discordAuth.authenticatedUser { userId =>
-          accessService.entryFor(userId, guildIdsOf(userId)) match {
+          read(accessService.entryFor(userId, guildIdsOf(userId))) {
             case DashboardEntry.Nowhere            => html(nowhere)
             case DashboardEntry.Straight(access)   => html(board(access))
             case DashboardEntry.Choose(options)    => html(picker(options))
@@ -176,10 +202,10 @@ final class RespawnDashboardRoute(
     path("g" / Segment / "board") { guildId =>
       get {
         withAccessAs(guildId) { (userId, access) =>
-          complete(HttpEntity(ContentTypes.`application/json`,
-            RespawnDashboardRoute
-              .boardJson(boardOf(guildId), access.tier, userId, limitsOf(guildId, userId))
-              .compactPrint))
+          read((boardOf(guildId), limitsOf(guildId, userId))) { case (entries, limits) =>
+            complete(HttpEntity(ContentTypes.`application/json`,
+              RespawnDashboardRoute.boardJson(entries, access.tier, userId, limits).compactPrint))
+          }
         }
       }
     } ~
@@ -254,9 +280,10 @@ final class RespawnDashboardRoute(
             // Without a code, the caller's own bookings across every spawn;
             // with one, everybody's on that spawn, which is what the calendar
             // draws behind the picker.
-            val views = code.fold(actions.bookings(guildId, userId))(actions.bookingsOn(guildId, _))
-            json(JsObject(
-              "bookings" -> JsArray(views.map(RespawnDashboardRoute.bookingJson(_, userId)).toVector)))
+            read(code.fold(actions.bookings(guildId, userId))(actions.bookingsOn(guildId, _))) { views =>
+              json(JsObject(
+                "bookings" -> JsArray(views.map(RespawnDashboardRoute.bookingJson(_, userId)).toVector)))
+            }
           }
         }
       }
@@ -271,7 +298,7 @@ final class RespawnDashboardRoute(
             RespawnDashboardRoute.window(from, to) match {
               case None => badRequest("That is not a week I can show.")
               case Some((start, end)) =>
-                actions.calendar(guildId, code, start, end) match {
+                read(actions.calendar(guildId, code, start, end)) {
                   case None       => badRequest(s"No spawn matches '$code'.")
                   case Some(view) => json(RespawnDashboardRoute.calendarJson(view, userId))
                 }

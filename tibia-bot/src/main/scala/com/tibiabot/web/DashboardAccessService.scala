@@ -27,8 +27,30 @@ final class DashboardAccessService(
   discordGateway: DiscordGateway,
   respawnConfigured: String => Boolean,
   worldsOf: String => List[WorldChannel],
-  moderatorRoleOf: String => String
+  moderatorRoleOf: String => String,
+  cache: AccessCache = new AccessCache(AccessCache.DefaultTtl)
 ) extends com.typesafe.scalalogging.StrictLogging {
+
+  /** As [[accessFor]], but willing to answer from the last few seconds.
+   *
+   *  For reads, and for a member acting on their own claim. Working this out
+   *  costs a Discord REST call per candidate guild, and a board left open polls
+   *  every ten seconds — so without this, watching a page cost six round trips
+   *  a minute and put that latency on every one of them.
+   *
+   *  Anything that acts on somebody else's claim calls [[accessFor]] instead,
+   *  because the cost of a stale answer there is a moderator who lost the role
+   *  still being able to move people off spawns. The worst this can do is let
+   *  somebody read a board they were removed from moments ago.
+   */
+  def rememberedAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
+    val key = s"$userId:${userGuildIds.toList.sorted.mkString(",")}"
+    cache.get(key).getOrElse {
+      val fresh = accessFor(userId, userGuildIds)
+      cache.put(key, fresh)
+      fresh
+    }
+  }
 
   /** Every guild this visitor can use, resolved live.
    *
