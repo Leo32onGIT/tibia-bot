@@ -2,6 +2,7 @@ package com.tibiabot.paywall
 
 import com.tibiabot.discord.DiscordGateway
 import com.tibiabot.persistence.{PatreonGraceRepository, PatreonMemberRepository, PatreonSeatOverrideRepository, PatreonSeatRepository}
+import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Guild
 
 import java.time.ZonedDateTime
@@ -45,17 +46,49 @@ final class PaywallService(
   seatLimit: Int,
   graceDays: Int,
   ownerId: String
-) {
+) extends StrictLogging {
   private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
 
   /** Cheap, synchronous — consulted on every send-loop iteration in
    *  TibiaBot. Defaults true (fail-open): a (guild, world) pair not yet
    *  checked, or one whose check errored transiently, is never silently cut
-   *  off. That default also covers the window between startup and the first
-   *  [[refreshAll]] sweep; an expired grace timer is durable, so that sweep
-   *  puts an already-paused world straight back to inactive (quietly — see
-   *  `applyRefresh`'s `notified` handling). */
+   *  off. Pairs already past their grace deadline are seeded false at
+   *  construction (see [[hydrateFromGrace]]), so that default no longer
+   *  covers a paused world between startup and the first [[refreshAll]]
+   *  sweep. */
   def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
+
+  /** Being paused is durable — the grace row is — but the map above is not:
+   *  it's empty in a fresh process, and [[isActive]] fails open. Left
+   *  unseeded, every world whose grace period had already run out resumed
+   *  full tracking from boot until the first [[refreshAll]] sweep, which
+   *  lands ~31 minutes later (see BotApp's paywallCheckCounter). Deaths,
+   *  levels and online lists all posted again for the whole of that window,
+   *  and the harm outlived it: the online-list channel got renamed back to a
+   *  player count and the paused notice overwritten with real content, while
+   *  the sweep that re-paused it stayed silent (`applyRefresh` won't
+   *  re-announce an already-`notified` pause), so nothing ever put either
+   *  back.
+   *
+   *  Seeding closes that window at the source rather than by making the
+   *  sweep more eager: same expiry test `applyRefresh` uses, against the same
+   *  durable rows, so a restart resumes exactly the state it left. Only
+   *  *expired* timers are seeded — a world still inside its grace period is
+   *  meant to be active, which the fail-open default already gives it.
+   *
+   *  A failed read leaves everything fail-open, i.e. the old behaviour: a
+   *  database that isn't up yet must not be able to pause anyone, and the
+   *  first sweep will settle it either way. */
+  private def hydrateFromGrace(now: ZonedDateTime): Unit =
+    try {
+      val paused = patreonGraceRepository.allGrace().filterNot(_.started.plusDays(graceDays.toLong).isAfter(now))
+      paused.foreach(g => activeStatus.put((g.guildId, g.world), false))
+      if (paused.nonEmpty) logger.info(s"Paywall: restored ${paused.size} paused world(s) from the grace table at startup")
+    } catch {
+      case ex: Throwable => logger.warn("Paywall: could not read the grace table at startup — every world stays active until the first sweep", ex)
+    }
+
+  hydrateFromGrace(ZonedDateTime.now())
 
   /** The subscription check — the `/setup` command gate calls this directly;
    *  `refreshAll` calls it once per distinct seat owner.
@@ -302,9 +335,10 @@ final class PaywallService(
    *  fresh window and its own notice.
    *
    *  Announcing is gated on the persisted `notified` flag rather than on an
-   *  in-memory active -> inactive transition: the active-status map is empty
-   *  after a restart, so a transition test would re-announce every already
-   *  paused world on the first sweep after every deploy.
+   *  in-memory active -> inactive transition: the active-status map is
+   *  rebuilt from scratch every restart (see [[hydrateFromGrace]], which
+   *  fails open if it can't read), so a transition test would re-announce
+   *  already paused worlds after a deploy.
    *
    *  Pure aside from the map mutation and the grace repository, so the
    *  timing logic (the part worth getting right) is testable with a fake
@@ -340,8 +374,19 @@ final class PaywallService(
    *  that don't. Fires `onLapsed` once per pair whose grace period has just
    *  run out, never twice for the same lapse (see `applyRefresh`) — with
    *  the seat owner's id and username snapshot for the notice, both empty
-   *  when the world never had a seat at all and there's nobody to address. */
-  def refreshAll(setups: List[(String, String)])(onLapsed: (Guild, String, String, String) => Unit): Unit = {
+   *  when the world never had a seat at all and there's nobody to address.
+   *
+   *  `onStillLapsed` fires for every pair this sweep left paused *without*
+   *  announcing — the ones `onLapsed` deliberately stays quiet about. That's
+   *  not a second notification: it's the caller's chance to put back the
+   *  paused presentation (channel name, online-list notice) for a world that
+   *  lost it, which is possible for anything paused before a restart that
+   *  [[hydrateFromGrace]] couldn't seed. It fires on every sweep for as long
+   *  as a world stays paused, so the caller must make it idempotent. */
+  def refreshAll(setups: List[(String, String)])(
+    onLapsed: (Guild, String, String, String) => Unit,
+    onStillLapsed: (Guild, String) => Unit
+  ): Unit = {
     val seats = patreonSeatRepository.allSeats().map(s => (s.guildId, s.world) -> s).toMap
     // One REST lookup per distinct seat owner, not per seat: a supporter with
     // five worlds set up is one subscription, and the sweep now walks every
@@ -360,6 +405,17 @@ final class PaywallService(
       val userId = seat.map(_.userId).getOrElse("")
       val userName = seat.map(_.userName).getOrElse("")
       if (guild != null) onLapsed(guild, world, userId, userName)
+    }
+    // Read back off the map applyRefresh has just written rather than having it
+    // return a second list: after the sweep, `isActive` is the authoritative
+    // answer for every pair in `setups`, and "paused but not announced this
+    // sweep" is exactly the difference between that and `lapsed`.
+    val lapsedNow = lapsed.toSet
+    setups.foreach { case (guildId, world) =>
+      if (!lapsedNow.contains((guildId, world)) && !isActive(guildId, world)) {
+        val guild = discordGateway.guildById(guildId)
+        if (guild != null) onStillLapsed(guild, world)
+      }
     }
   }
 }

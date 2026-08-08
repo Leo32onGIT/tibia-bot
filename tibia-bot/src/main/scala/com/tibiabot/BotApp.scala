@@ -505,6 +505,16 @@ object BotApp extends App with StrictLogging {
   private var updateOnOdd = 0
   private var paywallCheckCounter = 0
 
+  /** (guildId, world) pairs whose paused online-list presentation has already
+   *  been applied in this process — the paywall sweep hands us every paused
+   *  world on every tick (see PaywallService.refreshAll's `onStillLapsed`),
+   *  and this is what keeps that from purging and reposting the same notice
+   *  every 30 minutes forever. Deliberately not persisted and never pruned:
+   *  one restore per paused world per process is the whole budget, and a
+   *  restart — the only thing that can knock the presentation out of sync in
+   *  the first place — clears it. */
+  private val pausedNoticeApplied = java.util.concurrent.ConcurrentHashMap.newKeySet[(String, String)]()
+
   val bossesFutures: Future[List[String]] = for {
     bosses <- bossFuture
   } yield bosses
@@ -665,7 +675,13 @@ object BotApp extends App with StrictLogging {
       paywallCheckCounter = 0
       try {
         val configuredSetups = worldsData.toList.flatMap { case (guildId, worlds) => worlds.map(w => (guildId, w.name)) }
-        paywallService.refreshAll(configuredSetups) { (guild, world, userId, userName) =>
+        paywallService.refreshAll(configuredSetups)(onLapsed = { (guild, world, userId, userName) =>
+          // This branch *is* the paused presentation being applied, so claim it
+          // before doing any of it — that leaves onStillLapsed below to repair
+          // only worlds paused in an earlier process, and keeps a guild with no
+          // admin channel (which falls through everything below) behaving as it
+          // always has rather than newly acquiring a notice.
+          pausedNoticeApplied.add((guild.getId, world))
           val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
           // Not routed through AdminLog.post — that helper's title ("a command
           // was run") is shared/fixed across every other caller, and this
@@ -691,7 +707,7 @@ object BotApp extends App with StrictLogging {
             pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\n$cause [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
             pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
             adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
-              postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
+              postPausedOnlineListNotice(guild, world, Some(adminMessage.getJumpUrl()))
             }
           }
 
@@ -723,7 +739,15 @@ object BotApp extends App with StrictLogging {
               }
             }
           }
-        }
+        }, onStillLapsed = { (guild, world) =>
+          // Paused before this process started, and announced back then — so no
+          // notice and no DM, only the online-list presentation, which a restart
+          // may have left showing a live player count and real content (see
+          // PaywallService.hydrateFromGrace for how that happened). At most once
+          // per world per process; postPausedOnlineListNotice skips a channel
+          // already carrying the paused name, so the usual case costs nothing.
+          if (pausedNoticeApplied.add((guild.getId, world))) postPausedOnlineListNotice(guild, world, None)
+        })
       } catch {
         case ex: Throwable => logger.warn("Failed to refresh Patreon paywall status", ex)
       }
@@ -1364,22 +1388,32 @@ object BotApp extends App with StrictLogging {
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
 
-  /** Called once, from the Patreon paywall's lapse handler: clears whatever
-   *  online-list content is currently posted for this world and replaces it
-   *  with a paused notice linking back to the admin-channel explanation.
-   *  Targets just the combined channel in combined mode, or all three
-   *  allies/neutrals/enemies channels that still exist in separate mode —
-   *  same channels/columns TibiaBot's own recurring online-list update
-   *  reads (see TibiaBot.onlineList). No explicit "resumed" cleanup is
-   *  needed: once the world's active again, that recurring update's normal
-   *  fetch-existing-bot-messages-and-edit-in-place logic (updateMultiFields)
-   *  naturally overwrites this embed with real content on its next tick.
+  /** Clears whatever online-list content is currently posted for this world
+   *  and replaces it with a paused notice. Targets just the combined channel
+   *  in combined mode, or all three allies/neutrals/enemies channels that
+   *  still exist in separate mode — same channels/columns TibiaBot's own
+   *  recurring online-list update reads (see TibiaBot.onlineList). No
+   *  explicit "resumed" cleanup is needed: once the world's active again,
+   *  that recurring update's normal fetch-existing-bot-messages-and-edit-in-
+   *  place logic (updateMultiFields) naturally overwrites this embed with
+   *  real content on its next tick.
    *
-   *  Called from inside the admin-message send's own .queue() callback, so
-   *  every JDA call here must stay non-blocking (.queue(), never
-   *  .complete()) — JDA refuses nested .complete() calls from a callback
-   *  thread as a deadlock guard. */
-  private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: String): Unit = {
+   *  Two callers, distinguished by `adminMessageUrl`. `Some` is the lapse
+   *  handler announcing a fresh pause, and the notice links back to the
+   *  admin-channel explanation it just posted. `None` is the repair path for
+   *  a world paused in an earlier process (see the sweep's `onStillLapsed`):
+   *  there is no fresh admin message to point at, and a channel already
+   *  carrying the paused name is already showing this notice, so it's left
+   *  untouched rather than purged and reposted. That check is deliberately
+   *  not applied to the announcing path, where the notice must land even if
+   *  a previous cycle's name is still on the channel — its link would
+   *  otherwise be stale.
+   *
+   *  The announcing path calls this from inside the admin-message send's own
+   *  .queue() callback, so every JDA call here must stay non-blocking
+   *  (.queue(), never .complete()) — JDA refuses nested .complete() calls
+   *  from a callback thread as a deadlock guard. */
+  private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: Option[String]): Unit = {
     val worldConfig = worldRetrieveConfig(guild, world)
     val combined = worldConfig.getOrElse("combined_online", "false") == "true"
     val channelIds =
@@ -1395,16 +1429,23 @@ object BotApp extends App with StrictLogging {
         // it's paywall-paused (TibiaBot's own online-list update is already
         // gated on paywallService.isActive and skips it entirely).
         val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-${presentation.OnlineListEmbeds.pausedSuffix}"
-        if (channel.getName != pausedName) {
+        val alreadyPaused = channel.getName == pausedName
+        if (!alreadyPaused) {
           channel.getManager.setName(pausedName).queue(null, (ex: Throwable) =>
             logger.warn(s"Failed to rename paused online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex))
         }
-        channel.getHistory.retrievePast(100).queue { history =>
+        // Nothing to repair on a channel that never lost the paused name — see
+        // the scaladoc; only the repair path (no admin message) gets to skip.
+        if (!(alreadyPaused && adminMessageUrl.isEmpty)) channel.getHistory.retrievePast(100).queue { history =>
           try {
             val existing = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
             if (!existing.isEmpty) channel.purgeMessages(existing)
             val pausedEmbed = new EmbedBuilder()
-            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently **[paused]($adminMessageUrl)**.")
+            // Linkless on the repair path: the admin-channel message announcing
+            // this pause went out in an earlier process and its jump URL wasn't
+            // kept, so the word is left plain rather than pointed somewhere wrong.
+            val pausedText = adminMessageUrl.fold("**paused**")(url => s"**[paused]($url)**")
+            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently $pausedText.")
             pausedEmbed.setThumbnail(Config.webHookAvatar)
             pausedEmbed.setColor(13773097)
             channel.sendMessageEmbeds(pausedEmbed.build()).queue()
