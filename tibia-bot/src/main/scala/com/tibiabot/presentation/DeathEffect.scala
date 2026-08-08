@@ -34,7 +34,8 @@ object DeathEffect {
     "fire"   -> resource("Fire.gif"),
     "holy"   -> resource("Holy_Effect.gif"),
     "invalid"   -> resource("Phantasmal_Ooze.gif"),
-    "life drain" -> resource("Red_Sparkles_Effect.gif")
+    "life drain" -> resource("Red_Sparkles_Effect.gif"),
+    "mushroom" -> resource("Mushroom.gif")
   )
 
   /** Damage-type killer names we have an effect animation for. Every one must be a
