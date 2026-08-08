@@ -37,9 +37,23 @@ final class DashboardAccessService(
    *  call — it grants nothing. Everything that decides access is read here,
    *  now, so a stale or tampered-with guild list can at worst make this do less
    *  work, never more.
+   *
+   *  An empty list therefore means "no hint", not "no guilds". It happens
+   *  whenever the cache has aged out or the process restarted, and treating it
+   *  as an answer would show somebody with a perfectly valid session an empty
+   *  dashboard until they signed in again. So every guild is considered
+   *  instead, and the checks below decide as they always do — a visitor who is
+   *  not in a guild, or cannot see any of its worlds, still resolves to no
+   *  access.
+   *
+   *  The cost of that is bounded by how many guilds have the respawn system set
+   *  up rather than by how many the bot is in, since `respawnConfigured` is a
+   *  cheap local read and dismisses the rest before any REST call.
    */
   def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
-    val candidates = discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
+    val candidates =
+      if (userGuildIds.isEmpty) discordGateway.guilds
+      else discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
     candidates.flatMap { guild =>
       val guildId = guild.getId
       // Checked before the REST call, because it is a cheap local read and a
