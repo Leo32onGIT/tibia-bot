@@ -99,27 +99,38 @@ final case class RespawnBoardEntry(
   reservations: List[RespawnClaim],
   lastActivity: Option[ZonedDateTime]
 ) {
-  /** The soonest booking, which is the one a card has room to talk about. */
-  def nextReservation: Option[RespawnClaim] = reservations.headOption
+  /** The soonest booking the card has anything to say about.
+   *
+   *  A slot with an unanswered request is skipped. The question is between two
+   *  people about a future evening, and the card is about now — its owner may
+   *  yet say they aren't hunting it, at which point it belongs to somebody
+   *  else. Neither answer changes anything about the spawn this minute, so the
+   *  card looks past it to the next booking that is actually settled, and says
+   *  "free" if there is none.
+   *
+   *  The request is still there, and the calendar still draws it in full: that
+   *  is the surface where a future evening is the subject.
+   */
+  def nextReservation: Option[RespawnClaim] =
+    reservations.find(_.requesterUserId.isEmpty)
 
   /** How this spawn reads on the board, as one of
-   *  [[RespawnBoardEntry.States]].
+   *  [[RespawnBoardEntry.States]] other than
+   *  [[RespawnBoardEntry.Asked]], which is a calendar state only.
    *
    *  Being hunted right now outranks anything booked for later: a card has one
    *  state, and "somebody is in there" is the one that matters.
    *
-   *  The three booked states come straight out of how a slot records having
-   *  been asked about (see `keepOccurrence`): `askedAt` is set the moment
-   *  somebody asks and never cleared, while the requester fields are cleared
-   *  once it is answered. So an untouched booking is open to being asked for, a
-   *  booking with a live requester is waiting on its owner, and one that has
-   *  been asked and answered is settled.
+   *  The two booked states come out of how a slot records having been asked
+   *  about (see `keepOccurrence`): `askedAt` is set the moment somebody asks
+   *  and never cleared, while the requester fields are cleared once it is
+   *  answered. So a booking nobody has queried and one that has been queried
+   *  and settled are both bookings — the second simply has its question closed.
    */
   def state: String =
     if (active.isDefined) RespawnBoardEntry.Claimed
     else nextReservation match {
       case None => RespawnBoardEntry.Free
-      case Some(slot) if slot.requesterUserId.isDefined => RespawnBoardEntry.Asked
       case Some(slot) if slot.askedAt.isEmpty => RespawnBoardEntry.Booked
       case Some(_) => RespawnBoardEntry.Confirmed
     }
@@ -138,9 +149,13 @@ object RespawnBoardEntry {
   val Claimed = "claimed"
   val Booked = "booked"
   val Confirmed = "confirmed"
+  /** A slot whose owner has been asked whether they are actually hunting it.
+   *  A calendar state only: it describes a question about a future evening, and
+   *  a board card describes now. */
   val Asked = "asked"
 
-  val States: Set[String] = Set(Free, Claimed, Booked, Confirmed, Asked)
+  /** What a board card can read as. Deliberately without [[Asked]]. */
+  val States: Set[String] = Set(Free, Claimed, Booked, Confirmed)
 }
 
 /** The result of a slot owner answering "are you hunting tonight?". */

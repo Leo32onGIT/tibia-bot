@@ -110,8 +110,9 @@ class RespawnBoardSpec extends AnyWordSpec with Matchers {
     def entry(active: Option[RespawnClaim] = None, reservations: List[RespawnClaim] = Nil) =
       RespawnBoardEntry(spawn(1, "415"), active, Nil, reservations, None)
 
-    def reserved(askedAt: Option[ZonedDateTime] = None, requester: Option[String] = None) =
-      claim(1, 1, RespawnClaim.StatusReserved, startsAt = Some(now.plusHours(2)))
+    def reserved(askedAt: Option[ZonedDateTime] = None, requester: Option[String] = None,
+                 startsAt: Option[ZonedDateTime] = Some(now.plusHours(2))) =
+      claim(1, 1, RespawnClaim.StatusReserved, startsAt = startsAt)
         .copy(askedAt = askedAt, requesterUserId = requester)
 
     "read as free with nothing on it" in {
@@ -133,9 +134,20 @@ class RespawnBoardSpec extends AnyWordSpec with Matchers {
       entry(reservations = List(reserved())).state shouldBe RespawnBoardEntry.Booked
     }
 
-    "read a booking with somebody waiting on an answer as asked" in {
+    // A question between two people about a future evening, which the card is
+    // not the place for: whichever way it is answered, nothing about the spawn
+    // this minute changes. The calendar still draws it.
+    "look straight past a booking somebody is waiting on an answer for" in {
       entry(reservations = List(reserved(askedAt = Some(now), requester = Some("u2")))).state shouldBe
-        RespawnBoardEntry.Asked
+        RespawnBoardEntry.Free
+    }
+
+    "fall through to the next settled booking rather than to free" in {
+      val contested = reserved(askedAt = Some(now), requester = Some("u2"))
+      val settled = reserved(startsAt = Some(now.plusHours(6)))
+      val card = entry(reservations = List(contested, settled))
+      card.state shouldBe RespawnBoardEntry.Booked
+      card.nextReservation.flatMap(_.startsAt) shouldBe settled.startsAt
     }
 
     // keepOccurrence clears the requester but deliberately leaves asked_at, so

@@ -82,7 +82,6 @@
   .sw.claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
   .sw.booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
   .sw.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
-  .sw.asked { border-color: var(--st-asked); background: rgba(224,169,62,0.28); }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 10px; padding: 14px 16px; }
   .card {
@@ -130,7 +129,6 @@
   .dot.claimed { border-color: var(--st-claimed); background: var(--st-claimed); }
   .dot.booked { border-color: var(--st-booked); background: transparent; }
   .dot.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
-  .dot.asked { border-color: var(--st-asked); background: var(--st-asked); }
   .who { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who.free { color: var(--st-free); }
   .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
@@ -374,7 +372,6 @@
       <span><i class="sw claimed"></i>Being hunted</span>
       <span><i class="sw booked"></i>Booked</span>
       <span><i class="sw confirmed"></i>Booked &amp; confirmed</span>
-      <span><i class="sw asked"></i>Asked</span>
     </div>
     <div class="cards" id="cards"></div>
   </div>
@@ -459,12 +456,20 @@ function minutesLeft(endsAt) {
   return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
 }
 
+/** How a card reads its state, and never a crash if it meets one it does not
+ *  know. A missing branch here took the whole render down once before, and a
+ *  board that has just learnt a new word should degrade to that word rather
+ *  than to a blank page. */
+function stateText(spawn) {
+  const text = STATE_TEXT[spawn.state];
+  return text ? text(spawn) : spawn.state;
+}
+
 const STATE_TEXT = {
   free: () => 'free',
   claimed: s => `${s.holder || 'someone'}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
   booked: s => `${s.holder || 'someone'} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
   confirmed: s => `${s.holder || 'someone'} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
-  asked: s => `${s.holder || 'someone'} — asked`
 };
 
 // ---- Timezone -------------------------------------------------------------
@@ -595,7 +600,7 @@ function cardFor(spawn) {
     </div>
     <div class="card-state">
       <span class="dot ${state}"></span>${tick}
-      <span class="who ${state === 'free' ? 'free' : ''}">${esc(STATE_TEXT[state](spawn))}</span>
+      <span class="who ${state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>
       ${queue}
     </div>`);
 
@@ -632,7 +637,7 @@ function renderBoard() {
   }
 
   const live = board.spawns.filter(s => s.state === 'claimed').length;
-  const booked = board.spawns.filter(s => ['booked', 'confirmed', 'asked'].includes(s.state)).length;
+  const booked = board.spawns.filter(s => ['booked', 'confirmed'].includes(s.state)).length;
   document.getElementById('count').textContent =
     `${board.spawns.length} spawns · ${live} being hunted · ${booked} booked`;
   document.getElementById('sub').textContent = `${board.spawns.length} spawns · ${LOCAL_TZ}`;
@@ -814,7 +819,7 @@ function nowStrip(spawn) {
   const strip = el('div', 'strip now-strip');
   const tick = spawn.state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
   strip.innerHTML = `<span class="dot ${spawn.state}"></span>${tick}
-    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(STATE_TEXT[spawn.state](spawn))}</span>
+    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>
     ${spawn.queueLength ? `<span class="queue">+${spawn.queueLength} queued</span>` : ''}`;
 
   if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
@@ -852,7 +857,7 @@ function nowStrip(spawn) {
   if (canClaim) {
     // Wording follows what will actually happen, so nobody presses "Claim" and
     // is surprised to find themselves in a queue. Only a *live hunt* produces a
-    // queue: booked, confirmed and asked all mean nobody is on it right now, so
+    // queue: booked and confirmed both mean nobody is on it right now, so
     // claiming succeeds — cut short by the booking, which the answer explains.
     actions.appendChild(button(spawn.state === 'claimed' ? 'Join queue' : 'Claim now', 'btn',
       () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration })));
