@@ -497,15 +497,61 @@ final class ChannelService(
       // no-op if the guild's database already exists (initGuild checks first)
       createConfigDatabase(guild)
 
+      // touch the worlds config so listWorlds runs its ALTER TABLE column
+      // migrations on older databases before /setup reads or writes the table
+      worldConfig(guild)
+
+      // Answered before any role or channel work is attempted. A world that is
+      // already configured needs none of it, and on a bot missing Manage Roles
+      // the role creation below throws a PermissionException — which would bury
+      // the seat prompts under a "grant me permissions" reply, for a server that
+      // only ever needed a database write.
+      val worldConfigData = worldRetrieveConfig(guild, world)
+      if (worldConfigData.nonEmpty) {
+        if (!paywallService.isActive(guild.getId, world)) {
+          // channels already exist, but tracking is paused — offer to hand the
+          // seat to this caller instead of the plain "already been setup" reply
+          if (paywallService.canReassignSeat(event.getUser.getId, guild.getId, world)) {
+            buttons = List(
+              Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
+              Button.secondary("paywall_reassign_no", "Cancel")
+            )
+            // A paused world with no seat is a legacy setup that ran out its
+            // grace period, not a lapsed subscription — there was never one to
+            // lapse, so don't claim there was.
+            val reason =
+              if (paywallService.hasSeat(guild.getId, world)) "the Patreon subscription tied to it lapsed"
+              else "it isn't tied to a Patreon subscription"
+            s":warning: Tracking for **$world** is currently paused — $reason.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
+          } else {
+            s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
+          }
+        } else if (!paywallService.hasSeat(guild.getId, world)) {
+          // channels exist and tracking is active, but this (guild, world) was
+          // never tied to a seat — a legacy setup from before the seat system
+          // existed. isActive's grandfather rule leaves it running either way,
+          // but offer to claim it onto one of the caller's seats rather than
+          // leaving it ungated forever.
+          if (paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+            buttons = List(
+              Button.success(s"paywall_claim_yes_$world", "Assign as a seat"),
+              Button.secondary("paywall_claim_no", "Cancel")
+            )
+            s":warning: The channels for **$world** already exist, but this world isn't tied to one of your Patreon seats yet.\nAssign this world to a seat now?"
+          } else {
+            s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+          }
+        } else {
+          // channels already exist
+          logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
+          s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+        }
+      } else {
       val botRole = guild.getBotRole
       val fullblessRole = getOrCreateRole(guild, s"$world Fullbless", new Color(0, 156, 70))
       val nemesisRole = getOrCreateRole(guild, s"$world Rare Boss", new Color(164, 76, 230))
       val allyPkRole = getOrCreateRole(guild, s"$world PVP", new Color(220, 0, 0))
       val masslogRole = getOrCreateRole(guild, s"$world Masslog", new Color(219, 175, 72))
-
-      // touch the worlds config so listWorlds runs its ALTER TABLE column
-      // migrations on older databases before /setup writes to the table
-      worldConfig(guild)
 
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
@@ -567,12 +613,9 @@ final class ChannelService(
           postBoostedNotifications(boostedChannel, guild, world)
         }
       }
-      // check if world has already been setup
-      val worldConfigData = worldRetrieveConfig(guild, world)
-      if (worldConfigData.isEmpty) {
-        if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
-          s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
-        } else {
+      if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+        s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
+      } else {
         // captured before worldCreateConfig runs below, since afterward this
         // would never be empty — gates the one-time command-set expansion
         val isFirstWorldForGuild = worldConfig(guild).isEmpty
@@ -654,43 +697,6 @@ final class ChannelService(
 
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*$respawnNote"
         }
-      } else if (!paywallService.isActive(guild.getId, world)) {
-        // channels already exist, but tracking is paused — offer to hand the
-        // seat to this caller instead of the plain "already been setup" reply
-        if (paywallService.canReassignSeat(event.getUser.getId, guild.getId, world)) {
-          buttons = List(
-            Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
-            Button.secondary("paywall_reassign_no", "Cancel")
-          )
-          // A paused world with no seat is a legacy setup that ran out its
-          // grace period, not a lapsed subscription — there was never one to
-          // lapse, so don't claim there was.
-          val reason =
-            if (paywallService.hasSeat(guild.getId, world)) "the Patreon subscription tied to it lapsed"
-            else "it isn't tied to a Patreon subscription"
-          s":warning: Tracking for **$world** is currently paused — $reason.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
-        } else {
-          s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
-        }
-      } else if (!paywallService.hasSeat(guild.getId, world)) {
-        // channels exist and tracking is active, but this (guild, world) was
-        // never tied to a seat — a legacy setup from before the seat system
-        // existed. isActive's grandfather rule leaves it running either way,
-        // but offer to claim it onto one of the caller's seats rather than
-        // leaving it ungated forever.
-        if (paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
-          buttons = List(
-            Button.success(s"paywall_claim_yes_$world", "Assign as a seat"),
-            Button.secondary("paywall_claim_no", "Cancel")
-          )
-          s":warning: The channels for **$world** already exist, but this world isn't tied to one of your Patreon seats yet.\nAssign this world to a seat now?"
-        } else {
-          s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
-        }
-      } else {
-        // channels already exist
-        logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
-        s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
       }
       } else {
         s"${Config.noEmoji} This is not a valid World on Tibia."
