@@ -296,7 +296,7 @@
     { "code": "1703", "region": "Issavi",      "name": "Issavi Sphinxs",                         "creature": "Crypt Warden" },
     { "code": "1704", "region": "Issavi",      "name": "Soulwar - Claustrophobic Inferno",       "creature": "Brachiodemon" },
     { "code": "1705", "region": "Issavi",      "name": "Soulwar - Ebb and Flow",                 "creature": "Bony Sea Devil" },
-    { "code": "1706", "region": "Issavi",      "name": "Soulwar - Furious Crater",               "creature": "Cloak of Terror" },
+    { "code": "1706", "region": "Issavi",      "name": "Soulwar - Furious Crater",               "creature": "Cloak Of Terror" },
     { "code": "1707", "region": "Issavi",      "name": "Soulwar - Mirrored Nightmare",           "creature": "Many Faces" },
     { "code": "1708a","region": "Issavi",      "name": "Soulwar - Rotten Wasteland North",       "creature": "Rotten Golem" },
     { "code": "1708b","region": "Issavi",      "name": "Soulwar - Rotten Wasteland South",       "creature": "Branchy Crawler" },
