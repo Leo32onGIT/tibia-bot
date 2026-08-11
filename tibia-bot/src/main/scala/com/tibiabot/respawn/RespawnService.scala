@@ -1738,8 +1738,19 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the post to redraw the card and never closed it again. So a spawn's post
    *  stayed open on every path but one. Tying it to `active` instead makes the
    *  post's state a function of the claim state, like the card and the tag are. */
-  def refreshThread(guild: Guild, respawn: Respawn, config: RespawnSettings): Option[ThreadChannel] =
-    RespawnThreads.findForum(guild, config).flatMap { forum =>
+  def refreshThread(guild: Guild, respawn: Respawn, config: RespawnSettings): Option[ThreadChannel] = {
+    // A forum this bot cannot see used to end the whole refresh in silence: the
+    // claim landed, the reply said so, and nothing in Discord moved — with
+    // nothing anywhere to say why. Every other way this can fail already says
+    // so, and it is the one that leaves a guild's posts permanently stale, so
+    // it says so too.
+    val forum = RespawnThreads.findForum(guild, config)
+    if (forum.isEmpty) {
+      logger.warn(s"No respawn forum to update for '${respawn.code}' in guild '${guild.getId}': " +
+        s"configured channel '${config.forumChannel}' is not one this bot can see. " +
+        "Claims and bookings will keep working; their posts will not change.")
+    }
+    forum.flatMap { forum =>
       val guildId = guild.getId
       val active = repository.activeClaim(guildId, respawn.id)
       // The person holding an unanswered offer is still shown at the head of the
@@ -1791,6 +1802,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       }
       opened.map(_.thread)
     }
+  }
 
   /** Booked slots on a spawn that haven't started yet. */
   def reservationsFor(guildId: String, respawnId: Long,
