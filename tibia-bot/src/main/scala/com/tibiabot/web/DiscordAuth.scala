@@ -37,7 +37,14 @@ import scala.util.{Failure, Success, Try}
  * (this app's domain also serves an unrelated, unauthenticated landing page).
  */
 final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: String, redirectUri: String,
-                        mountPath: String, extraCookiePaths: List[String] = Nil)
+                        mountPath: String, extraCookiePaths: List[String] = Nil,
+                        /** Whether the session and state cookies are marked
+                         *  `Secure`. True everywhere this is deployed; false
+                         *  only for a local run over a plain-HTTP port forward,
+                         *  where a `Secure` cookie is dropped by the browser and
+                         *  the login loops. Decided from the origin rather than
+                         *  set by hand — see `Config.Web.secureCookies`. */
+                        secureCookies: Boolean = true)
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
 
   /** Every area this session is good for. `mountPath` is where the auth routes
@@ -132,7 +139,7 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
     value = value,
     path = Some(path),
     httpOnly = true,
-    secure = true,
+    secure = secureCookies,
     maxAge = Some(sessionTtl.toSeconds),
     // Lax, not Strict: the request right after the callback is the browser
     // following our redirect to `mountPath`, still part of the redirect chain
@@ -154,7 +161,7 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
     value = value,
     path = Some(mountPath),
     httpOnly = true,
-    secure = true,
+    secure = secureCookies,
     maxAge = Some(stateTtl.toSeconds),
     extension = Some("SameSite=Lax")
   )

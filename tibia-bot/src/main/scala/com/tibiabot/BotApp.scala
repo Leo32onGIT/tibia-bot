@@ -274,9 +274,10 @@ object BotApp extends App with StrictLogging {
     clientId = botUser,
     clientSecret = Config.Web.discordClientSecret,
     sessionSecret = Config.Web.sessionSecret,
-    redirectUri = s"https://${Config.Web.statusDomain}$dashboardMountPath/auth/callback",
+    redirectUri = s"${Config.Web.baseUrl}$dashboardMountPath/auth/callback",
     mountPath = dashboardMountPath,
-    extraCookiePaths = List(adminMountPath)
+    extraCookiePaths = List(adminMountPath),
+    secureCookies = Config.Web.secureCookies
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,

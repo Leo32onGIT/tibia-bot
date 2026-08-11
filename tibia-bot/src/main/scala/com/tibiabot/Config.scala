@@ -115,6 +115,30 @@ object Config {
     val sessionSecret: String = web.getString("session-secret")
     val statusDomain: String = web.getString("status-domain")
     val statusPort: Int = web.getInt("status-port")
+
+    /** Where a browser actually reaches this bot, as a scheme and authority
+     *  with no trailing slash — the origin the OAuth redirect URI is built on.
+     *
+     *  Derived from `status-domain` unless overridden, so production needs no
+     *  new setting and gets exactly the string it had before. The override
+     *  exists for local runs: there the bot is reached through a plain-HTTP
+     *  port forward on localhost, and an `https://` redirect URI is one Discord
+     *  will send a browser to and the browser cannot load. Discord allows
+     *  `http://` redirect URIs for localhost specifically, which is what makes
+     *  signing in locally possible at all. */
+    val baseUrl: String = {
+      val configured = web.getString("base-url").trim.stripSuffix("/")
+      if (configured.nonEmpty) configured else s"https://$statusDomain"
+    }
+
+    /** Whether session cookies may be marked `Secure`.
+     *
+     *  Tied to the origin rather than configured separately, so it cannot drift
+     *  from it: a `Secure` cookie is dropped outright over plain HTTP, which
+     *  would leave a local login succeeding at Discord and then landing on a
+     *  dashboard that sees no session and bounces straight back. Anything
+     *  served over HTTPS — which is every deployment — is unaffected. */
+    val secureCookies: Boolean = baseUrl.startsWith("https://")
   }
 
   /** Patreon paywall: how many (guild, world) seats each subscriber gets, and
