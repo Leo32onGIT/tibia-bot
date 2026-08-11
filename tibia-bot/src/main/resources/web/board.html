@@ -254,10 +254,24 @@
   .btn.small { font-size: 11px; padding: 4px 10px; }
   .btn.mod-btn { background: transparent; color: var(--purple); border-color: rgba(167,139,250,0.4); }
   .btn.mod-btn:hover:not([disabled]) { background: rgba(167,139,250,0.12); }
+  /* Claiming is green here because it is green in Discord — Button.success on
+     the same action, wearing the same emoji. Somebody who has used the one
+     should recognise the other without reading it. */
+  .btn.claim {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--st-free); border-color: var(--st-free); color: #06301a;
+  }
+  .btn.claim[disabled] { background: transparent; border-color: var(--panel-border); }
+  .btn-emoji { width: 15px; height: 15px; flex-shrink: 0; }
+  .btn[disabled] .btn-emoji { opacity: 0.4; filter: grayscale(1); }
 
-  .answer { padding: 10px 20px; font-size: 12.5px; line-height: 1.5; border-bottom: 1px solid var(--panel-border); }
+  .answer { padding: 10px 20px; font-size: 12.5px; line-height: 1.5; }
   .answer.ok { color: var(--st-free); }
   .answer.no { color: var(--st-asked); }
+  /* Sized by its content and never scrolled away, so an answer cannot be left
+     off the bottom of a panel whose body happens to be taller than the window. */
+  .win-foot { position: relative; flex-shrink: 0; border-top: 1px solid var(--panel-border); }
+  .win-foot[hidden] { display: none; }
 
   /* Moderator tools, walled off from the member ones. Acting on somebody else's
      claim is a different kind of act from taking a free spawn, and a strip that
@@ -417,6 +431,11 @@
     <button class="win-close" id="win-close" aria-label="Close">&times;</button>
   </div>
   <div class="win-body" id="win-body"></div>
+  <!-- What the bot said back. Outside the scrolling body on purpose: it is the
+       reply to something just pressed, and it belongs in one fixed place at the
+       foot of the panel rather than wherever the body's current contents happen
+       to push it. -->
+  <div class="win-foot" id="win-foot" hidden></div>
 </div>
 
 <script>
@@ -429,6 +448,9 @@ const TIER = '<!--TIER-->';
 const SERVER_TZ = '<!--SERVER_TZ-->';
 const SS_SERVER_HOUR = Number('<!--SERVER_SAVE_HOUR-->');
 const PLACEHOLDER = '/dashboard/images/avatar.png';
+// The guild's `daily-emoji`, resolved to its CDN image server-side. Empty when
+// it is not a custom emoji, in which case Claim goes without a face.
+const CLAIM_EMOJI = '<!--CLAIM_EMOJI-->';
 
 const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
 // The shortest hunt worth starting — RespawnService.MinimumClaimMinutes. Below
@@ -1141,15 +1163,97 @@ function renderWindow() {
   const body = document.getElementById('win-body');
   body.innerHTML = '';
   body.appendChild(nowStrip(spawn));
-  if (view.answer) {
-    body.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
-  }
   body.appendChild(calendarSection());
   if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
+
+  // The bot's reply, always at the foot of the panel and never inside the part
+  // that scrolls. It used to sit under the top strip, which put it in a
+  // different place relative to the button that caused it depending on whether
+  // the week was open — and, with the week open, well away from the button at
+  // the bottom that had just been pressed.
+  const foot = document.getElementById('win-foot');
+  foot.innerHTML = '';
+  foot.hidden = !view.answer;
+  if (view.answer) {
+    foot.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
+  }
 
   wireWindow();
   if (keepScroll !== null && gridEl) gridEl.scrollTop = keepScroll;
   else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
+}
+
+/** Already holding it, or already standing in its queue, means there is nothing
+ *  to ask for — the service would refuse either way, and offering the button
+ *  anyway just invites a pointless round trip. */
+function canClaimNow(spawn) {
+  const l = limits();
+  return !spawn.mine && !spawn.queued && !!l && l.claimableMinutes >= MIN_CLAIM;
+}
+
+/** The Discord emoji the Claim button wears there, worn here too. */
+function claimEmojiImg() {
+  if (!CLAIM_EMOJI) return null;
+  const img = document.createElement('img');
+  img.className = 'btn-emoji';
+  img.src = CLAIM_EMOJI;
+  img.alt = '';
+  // A CDN that will not answer should cost the label nothing — better a button
+  // that reads "Claim" than one with a broken image nailed to the front of it.
+  img.addEventListener('error', () => img.remove());
+  return img;
+}
+
+/** The one thing this panel is most likely to be asked to do, whatever that
+ *  currently is.
+ *
+ *  A time picked on the grid means booking it; nothing picked means claiming the
+ *  spawn right now. They are the same decision at different moments, so they are
+ *  one button rather than two competing ones — and it sits wherever the reader
+ *  is already looking: in the strip at the top while the week is folded away,
+ *  and at the foot of the week beside the verdict once it is open.
+ *
+ *  Returns nothing when there is nothing to offer, which is the case for
+ *  somebody who already holds the spawn or is already queued for it.
+ */
+function primaryAction(spawn) {
+  if (view.pick) {
+    const verdict = judge(view.pick);
+    const book = button(view.busy ? 'Working…' : verdict.type === 'ask' ? 'Book & ask' : 'Book', 'btn', doBook);
+    book.disabled = !canBook();
+    return book;
+  }
+  if (!canClaimNow(spawn)) return null;
+
+  // Wording follows what will actually happen, so nobody presses "Claim" and is
+  // surprised to find themselves in a queue. Only a *live hunt* produces a
+  // queue: booked and confirmed both mean nobody is on it right now, so claiming
+  // succeeds — cut short by the booking, which the answer explains.
+  const joining = spawn.state === 'claimed';
+  const claim = button(joining ? 'Join queue' : 'Claim', joining ? 'btn' : 'btn claim',
+    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
+      if (joining) {
+        // Behind whoever is on it. The position is theirs to know, so the count
+        // moves and nothing claims to know where in the line they are.
+        s.queued = true;
+        s.queueLength = (s.queueLength || 0) + 1;
+      } else {
+        // Theirs from now until the duration runs out — subject to a booking or
+        // a tank the server knows more about, which the answer corrects.
+        s.state = 'claimed';
+        s.mine = true;
+        s.holder = 'you';
+        s.startsAt = new Date().toISOString();
+        s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
+        s.lastActivity = s.startsAt;
+      }
+    }));
+  // Joining a queue is not the claim action and does not borrow its face.
+  if (!joining) {
+    const face = claimEmojiImg();
+    if (face) claim.insertBefore(face, claim.firstChild);
+  }
+  return claim;
 }
 
 /** What is happening on this spawn right now, and what can be done about it
@@ -1168,10 +1272,7 @@ function nowStrip(spawn) {
     strip.appendChild(el('span', 'live-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
   }
 
-  // Already holding it, or already standing in its queue, means there is
-  // nothing to ask for — the service would refuse either way, and offering the
-  // button anyway just invites a pointless round trip.
-  const canClaim = !spawn.mine && !spawn.queued && l && l.claimableMinutes >= MIN_CLAIM;
+  const canClaim = canClaimNow(spawn);
   if (canClaim) {
     strip.appendChild(el('span', 'field', `
       <span class="field-label">For</span>
@@ -1194,30 +1295,11 @@ function nowStrip(spawn) {
       <span class="pending" style="width:${(Math.min(view.duration || 0, left) / budget * 100).toFixed(1)}%"></span>`));
     actions.appendChild(el('span', 'stamina-val', `${fmtDur(left)} left`));
   }
-  if (canClaim) {
-    // Wording follows what will actually happen, so nobody presses "Claim" and
-    // is surprised to find themselves in a queue. Only a *live hunt* produces a
-    // queue: booked and confirmed both mean nobody is on it right now, so
-    // claiming succeeds — cut short by the booking, which the answer explains.
-    const joining = spawn.state === 'claimed';
-    actions.appendChild(button(joining ? 'Join queue' : 'Claim now', 'btn',
-      () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
-        if (joining) {
-          // Behind whoever is on it. The position is theirs to know, so the
-          // count moves and nothing claims to know where in the line they are.
-          s.queued = true;
-          s.queueLength = (s.queueLength || 0) + 1;
-        } else {
-          // Theirs from now until the duration runs out — subject to a booking
-          // or a tank the server knows more about, which the answer corrects.
-          s.state = 'claimed';
-          s.mine = true;
-          s.holder = 'you';
-          s.startsAt = new Date().toISOString();
-          s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
-          s.lastActivity = s.startsAt;
-        }
-      })));
+  // While the week is open the primary action lives at the foot of it instead,
+  // next to the verdict on what is selected — see primaryAction.
+  if (!view.calendarOpen) {
+    const primary = primaryAction(spawn);
+    if (primary) actions.appendChild(primary);
   }
   if (spawn.mine || spawn.queued) {
     const holding = spawn.mine;
@@ -1543,9 +1625,16 @@ function stretchHandle(block) {
 
 function readout() {
   const out = el('div', 'readout');
+  const spawn = openSpawn();
   if (!view.pick) {
+    // Nothing picked, so the offer is the spawn as it stands right now. The
+    // button is here rather than in the strip above for as long as the week is
+    // open, so that pressing one thing does not mean looking in two places.
     out.innerHTML = '<span class="muted">Pick a start time on the grid to book it, '
-      + 'or click one of your own bookings to cancel it.</span>';
+      + 'or click one of your own bookings to cancel it. Right-click a selection to clear it.</span>'
+      + '<span style="margin-left:auto"></span>';
+    const primary = spawn && primaryAction(spawn);
+    if (primary) out.appendChild(primary);
     return out;
   }
 
@@ -1572,9 +1661,10 @@ function readout() {
     <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}
     <span style="margin-left:auto"></span>`;
 
-  const book = button(view.busy ? 'Working…' : v.type === 'ask' ? 'Book & ask' : 'Book', 'btn', doBook);
-  book.disabled = !canBook();
-  out.appendChild(book);
+  // The same button that offers Claim when nothing is picked; a selection is
+  // what turns it into Book, and clearing one turns it back.
+  const primary = spawn && primaryAction(spawn);
+  if (primary) out.appendChild(primary);
 
   // Cancelling is offered on the slot itself: picking a block of your own is how
   // you reach it, which is the same gesture as picking a time.

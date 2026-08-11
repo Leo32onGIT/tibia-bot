@@ -241,6 +241,12 @@ final class RespawnDashboardRoute(
       .replace("<!--SERVER_TZ-->", com.tibiabot.domain.time.Clock.Berlin.getId)
       .replace("<!--SERVER_SAVE_HOUR-->",
         com.tibiabot.scheduler.ServerSaveSchedule.serverSaveTime.getHour.toString)
+      // The face on the Claim button, taken from the same `daily-emoji` setting
+      // the Discord one wears (RespawnThreads.claimEmoji) so the two buttons
+      // read as the same action in both places. Empty when it is not a custom
+      // emoji, which the page treats as "no image".
+      .replace("<!--CLAIM_EMOJI-->",
+        RespawnDashboardRoute.emojiImageUrl(com.tibiabot.Config.dailyEmoji).getOrElse(""))
       // Escaped for a JS string literal, not for markup: it lands inside quotes
       // in a script, where an apostrophe or backslash would break out.
       .replace("<!--GUILD_ID-->", a.guildId.replace("\\", "\\\\").replace("'", "\\'"))
@@ -504,6 +510,24 @@ object RespawnDashboardRoute {
       case (key, JsString(value)) => key -> value
       case (key, JsNumber(value)) => key -> value.toBigInt.toString
     }
+
+  /** The CDN image behind a configured `<:name:id>` (or `<a:name:id>`) emoji.
+   *
+   *  So the dashboard's Claim button can wear the same face as the Discord one
+   *  without the id being written down twice — it is configuration, and a guild
+   *  that repoints `daily-emoji` should not have to remember there is a copy of
+   *  it baked into a web page.
+   *
+   *  Nothing but a custom emoji resolves: a unicode emoji, an empty setting, or
+   *  anything malformed gives None and the button simply goes without a face,
+   *  which is better than the page carrying a broken image. The id is matched as
+   *  digits only, so what lands in the URL — and therefore in a JS string
+   *  literal on the page — cannot escape either.
+   */
+  private[web] def emojiImageUrl(formatted: String): Option[String] =
+    """^<(a?):[A-Za-z0-9_]{2,32}:(\d{1,32})>$""".r
+      .findFirstMatchIn(formatted.trim)
+      .map(m => s"https://cdn.discordapp.com/emojis/${m.group(2)}.${if (m.group(1).isEmpty) "png" else "gif"}")
 
   /** How much calendar one request may ask for. Generous enough for a month
    *  view and mean enough that a hand-edited `to` cannot ask the schedule walker
