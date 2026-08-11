@@ -53,13 +53,13 @@ object RespawnEmbeds {
    *  followed by the Discord mention so they can actually be pinged. */
   private def claimantLabel(claim: RespawnClaim): String =
     if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
-    else s"`${claim.userId}`"
+    else s"${claim.userName}"
 
   /** The same, for a booking that has not produced a slot row yet — the rule
    *  carries the character too, so it names its owner identically. */
   private def scheduleLabel(schedule: RespawnSchedule): String =
     if (schedule.characterName.nonEmpty) s"**${schedule.characterName}** (<@${schedule.userId}>)"
-    else s"`${schedule.userId}`"
+    else s"`${schedule.userName}`"
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
    *  uses, and always hollow here: a card is one shared post rather than a reply
