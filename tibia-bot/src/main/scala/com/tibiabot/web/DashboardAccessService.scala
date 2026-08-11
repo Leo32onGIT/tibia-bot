@@ -28,6 +28,10 @@ final class DashboardAccessService(
   respawnConfigured: String => Boolean,
   worldsOf: String => List[WorldChannel],
   moderatorRoleOf: String => String,
+  /** The bot's own support Discord, which is kept out of the guild picker —
+   *  see [[DashboardAccess.entryFor]]. Empty means there is no such guild, and
+   *  every guild counts. */
+  demoGuildId: String = "",
   cache: AccessCache = new AccessCache(AccessCache.DefaultTtl)
 ) extends com.typesafe.scalalogging.StrictLogging {
 
@@ -113,7 +117,16 @@ final class DashboardAccessService(
 
   /** Where to send this visitor when they arrive. */
   def entryFor(userId: String, userGuildIds: Set[String]): DashboardEntry =
-    DashboardAccess.entryFor(accessFor(userId, userGuildIds))
+    entryOf(accessFor(userId, userGuildIds))
+
+  /** The same decision over guilds already resolved.
+   *
+   *  Split out because the landing page needs both halves — where to send them,
+   *  and the list itself, which is what tells the board's header whether there
+   *  is anywhere to switch to — and resolving access twice costs a Discord REST
+   *  call per candidate guild. */
+  def entryOf(accesses: List[GuildAccess]): DashboardEntry =
+    DashboardAccess.entryFor(accesses, demoGuildId)
 
   /** Whether a request may act on `guildId` at `required` or better.
    *

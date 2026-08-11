@@ -90,13 +90,32 @@ object DashboardAccess {
   /** Where to send someone, given everything they can reach.
    *
    *  Sorted by guild name so a picker is stable between visits rather than
-   *  reflecting whatever order the guilds happened to be resolved in. */
-  def entryFor(accesses: List[GuildAccess]): DashboardEntry =
-    accesses.sortBy(_.guildName.toLowerCase) match {
-      case Nil            => DashboardEntry.Nowhere
-      case single :: Nil  => DashboardEntry.Straight(single)
-      case many           => DashboardEntry.Choose(many)
+   *  reflecting whatever order the guilds happened to be resolved in.
+   *
+   *  `demoGuildId` is the bot's own support Discord, which almost everybody who
+   *  uses the bot has joined and almost nobody hunts in. Counting it would put a
+   *  picker in front of every single member of one community — a question with
+   *  one real answer — so it is set aside: somebody with one community of their
+   *  own goes straight there, and the choice is only asked when there are two
+   *  communities to choose between.
+   *
+   *  It is set aside rather than removed. Somebody whose *only* respawn forum is
+   *  the support server has come to look at the thing, and taking them straight
+   *  to it is the demo. Nothing here grants access — every guild in `accesses`
+   *  was already resolved against the live guild — so this only decides where a
+   *  visitor lands, and the support server stays reachable by its own URL either
+   *  way. */
+  def entryFor(accesses: List[GuildAccess], demoGuildId: String = ""): DashboardEntry = {
+    val sorted = accesses.sortBy(_.guildName.toLowerCase)
+    val theirs = if (demoGuildId.isEmpty) sorted else sorted.filterNot(_.guildId == demoGuildId)
+    theirs match {
+      case Nil =>
+        // Only the demo left, if anything.
+        sorted.headOption.fold[DashboardEntry](DashboardEntry.Nowhere)(DashboardEntry.Straight)
+      case single :: Nil => DashboardEntry.Straight(single)
+      case many          => DashboardEntry.Choose(many)
     }
+  }
 
   /** Whether a request for `guildId` may proceed at `required` or better.
    *

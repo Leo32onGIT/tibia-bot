@@ -288,7 +288,12 @@ object BotApp extends App with StrictLogging {
     respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
     worldsOf = guildId => worldConfigRepository.listWorlds(guildId)
       .map(w => web.WorldChannel(w.name, w.category)),
-    moderatorRoleOf = moderatorRoleId
+    moderatorRoleOf = moderatorRoleId,
+    // Nearly everybody who uses the bot is in the support Discord, so counting
+    // it would ask almost every visitor to choose between their own community
+    // and ours. It is still reachable, and it is where somebody with no
+    // community of their own lands.
+    demoGuildId = Config.Patreon.supportGuildId
   )
   // Fetched on this host, which can reach the wiki even where the people
   // looking at the dashboard cannot, and served back from our own domain.

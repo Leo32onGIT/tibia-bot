@@ -85,6 +85,39 @@ class DashboardAccessSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    // Nearly everybody who uses the bot has joined the support Discord, so
+    // counting it would put a picker in front of every member of one community
+    // — a question with one real answer.
+    "take somebody with one community of their own straight there, ignoring the support server" in {
+      val demo = access("support", "Violent Bot")
+      val theirs = access("g1", "Antica Hunters")
+      DashboardAccess.entryFor(List(demo, theirs), demoGuildId = "support") shouldBe
+        DashboardEntry.Straight(theirs)
+    }
+
+    // Somebody with no community of their own came to look at the thing, and
+    // the support server's board is what there is to look at.
+    "take somebody with nothing but the support server straight into it, as the demo" in {
+      val demo = access("support", "Violent Bot")
+      DashboardAccess.entryFor(List(demo), demoGuildId = "support") shouldBe DashboardEntry.Straight(demo)
+    }
+
+    "ask only once there are two communities of their own to choose between" in {
+      val demo = access("support", "Violent Bot")
+      val a = access("g1", "Antica Hunters")
+      val b = access("g2", "Belobra Bois")
+      DashboardAccess.entryFor(List(demo, a, b), demoGuildId = "support") match {
+        // And the support server is not among the options: it is not what they
+        // are choosing between.
+        case DashboardEntry.Choose(options) => options.map(_.guildId) shouldBe List("g1", "g2")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    "still send somebody with nothing at all to the empty state" in {
+      DashboardAccess.entryFor(Nil, demoGuildId = "support") shouldBe DashboardEntry.Nowhere
+    }
+
     // A picker that reorders itself between visits is one nobody builds muscle
     // memory for.
     "order the picker by name, case-insensitively, whatever order it was given" in {

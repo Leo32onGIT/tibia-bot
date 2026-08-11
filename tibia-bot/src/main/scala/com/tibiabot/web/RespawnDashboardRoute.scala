@@ -87,6 +87,20 @@ final class RespawnDashboardRoute(
       }
     }
 
+  /** As [[withAccess]], but also hands over everything else the visitor can
+   *  reach. Only the board page needs it, and only to decide whether its server
+   *  chip is a switcher or a label — there is no point offering a choice to
+   *  somebody with one server. */
+  private def withAccessAmong(guildId: String)(inner: (GuildAccess, List[GuildAccess]) => Route): Route =
+    discordAuth.authenticatedUser { userId =>
+      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) { granted =>
+        granted.find(_.guildId == guildId) match {
+          case Some(access) => inner(access, granted)
+          case None         => complete(StatusCodes.Forbidden -> "Forbidden")
+        }
+      }
+    }
+
   /** As [[withAccessAs]], but also requires the moderator tier in *this* guild.
    *
    *  Separate from the page's own hiding of these tools: that is convenience,
@@ -192,6 +206,23 @@ final class RespawnDashboardRoute(
        |  <span class="tier tier-${a.tier.name}">${a.tier.name}</span>
        |</a>""".stripMargin
 
+  /** Which Discord this board belongs to, in the masthead.
+   *
+   *  Every code, claim and booking on the page belongs to exactly one server,
+   *  and somebody in two communities that both run the bot has two boards that
+   *  look alike — so the page says which one it is rather than leaving it to be
+   *  inferred from the tab.
+   *
+   *  A link only when there is somewhere to go: a chevron on the page of
+   *  somebody with one server would offer a choice that does not exist. */
+  private def serverChip(a: GuildAccess, switchable: Boolean): String = {
+    val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
+    if (switchable)
+      s"""<a class="server" href="/dashboard/choose" title="Switch server">$glyph${esc(a.guildName)}""" +
+        """<i class="ti ti-chevron-down chev" aria-hidden="true"></i></a>"""
+    else s"""<span class="server">$glyph${esc(a.guildName)}</span>"""
+  }
+
   /** The board for one guild. Its own page rather than the shared shell,
    *  because it carries a script and fetches its own data.
    *
@@ -199,10 +230,10 @@ final class RespawnDashboardRoute(
    *  arrives from `/board`, so the page is served once and then polls. The tier
    *  is presentation only: it decides which tools are drawn, never whether they
    *  are permitted, which every route re-checks for itself. */
-  private def board(a: GuildAccess): String =
+  private def board(a: GuildAccess, among: List[GuildAccess]): String =
     page("board.html")
       .replace("<!--TITLE-->", esc(a.guildName))
-      .replace("<!--GUILD_NAME-->", esc(a.guildName))
+      .replace("<!--SERVER-->", serverChip(a, switchable = among.size > 1))
       .replace("<!--TIER-->", esc(a.tier.name))
       // The clock a booking's weekdays and the stamina reset are read in. The
       // page draws a local axis and has to say where the server's day falls on
@@ -218,17 +249,35 @@ final class RespawnDashboardRoute(
     pathEndOrSingleSlash {
       get {
         discordAuth.authenticatedUser { userId =>
-          read(accessService.entryFor(userId, guildIdsOf(userId))) {
-            case DashboardEntry.Nowhere            => html(nowhere)
-            case DashboardEntry.Straight(access)   => html(board(access))
-            case DashboardEntry.Choose(options)    => html(picker(options))
+          // Resolved once and used twice: where to send them, and — if that is
+          // straight to a board — whether its header has anywhere to switch to.
+          read(accessService.accessFor(userId, guildIdsOf(userId))) { granted =>
+            accessService.entryOf(granted) match {
+              case DashboardEntry.Nowhere          => html(nowhere)
+              case DashboardEntry.Straight(access) => html(board(access, granted))
+              case DashboardEntry.Choose(options)  => html(picker(options))
+            }
+          }
+        }
+      }
+    } ~
+    // The picker on demand, for somebody who is already on a board and wants a
+    // different one. Everything they can reach, including the support server —
+    // it is left out of the *landing* decision because it would ask nearly
+    // everybody a question with one answer, not because it is off limits.
+    path("choose") {
+      get {
+        discordAuth.authenticatedUser { userId =>
+          read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) {
+            case Nil     => html(nowhere)
+            case granted => html(picker(granted.sortBy(_.guildName.toLowerCase)))
           }
         }
       }
     } ~
     path("g" / Segment) { guildId =>
       get {
-        withAccess(guildId)(access => html(board(access)))
+        withAccessAmong(guildId)((access, among) => html(board(access, among)))
       }
     } ~
     // The part of a board that does not change: what the spawns are called and

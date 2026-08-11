@@ -113,7 +113,7 @@ class AccessCacheSpec extends AnyWordSpec with Matchers {
   private def service(gateway: DiscordGateway, clock: Clock) =
     new DashboardAccessService(gateway, _ => true,
       _ => List(WorldChannel("Antica", "cat")), _ => "0",
-      new AccessCache(Duration.ofSeconds(45), now = clock))
+      cache = new AccessCache(Duration.ofSeconds(45), now = clock))
 
 
   "the access service" should {
