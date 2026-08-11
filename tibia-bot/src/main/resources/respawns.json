@@ -85,13 +85,12 @@
     { "code": "507",  "region": "Venore",      "name": "Pits of Inferno - Ashfalor",             "creature": "Undead Dragon" },
     { "code": "508",  "region": "Venore",      "name": "Pits of Inferno - Dragon Lord Lair",     "creature": "Dragon Lord" },
     { "code": "509",  "region": "Venore",      "name": "Venore Flimsies",                        "creature": "Flimsy Lost Soul" },
-    { "code": "510",  "region": "Venore",      "name": "Stonerefiners",                          "creature": "Stonerefiner" },
-
     { "code": "510",  "region": "Venore",      "name": "Ripper Spectres",                        "creature": "Ripper Spectre" },
     { "code": "511a", "region": "Venore",      "name": "Buried Cathedral -1 & -2",               "creature": "Arachnophobica" },
     { "code": "511c", "region": "Venore",      "name": "Buried Cathedral -3",                    "creature": "Arachnophobica" },
     { "code": "512a", "region": "Venore",      "name": "Bulltaur Lair -1",                       "creature": "Bulltaur Alchemist" },
     { "code": "512b", "region": "Venore",      "name": "Bulltaur Lair -2",                       "creature": "Bulltaur Brute" },
+    { "code": "513",  "region": "Venore",      "name": "Stonerefiners",                          "creature": "Stonerefiner" },
 
     { "code": "601",  "region": "Darashia",    "name": "Drefia Grim Reapers",                    "creature": "Grim Reaper" },
     { "code": "602",  "region": "Darashia",    "name": "Drefia Wyrms",                           "creature": "Wyrm" },
