@@ -268,10 +268,12 @@
   .answer { padding: 10px 20px; font-size: 12.5px; line-height: 1.5; }
   .answer.ok { color: var(--st-free); }
   .answer.no { color: var(--st-asked); }
-  /* Sized by its content and never scrolled away, so an answer cannot be left
-     off the bottom of a panel whose body happens to be taller than the window. */
-  .win-foot { position: relative; flex-shrink: 0; border-top: 1px solid var(--panel-border); }
+  /* Sized by its content and never scrolled away, so neither the button nor an
+     answer can be left off the bottom of a panel whose body is taller than the
+     window. Its children carry their own top borders, so it adds none. */
+  .win-foot { position: relative; flex-shrink: 0; }
   .win-foot[hidden] { display: none; }
+  .win-foot .answer { border-top: 1px solid var(--panel-border); }
 
   /* Moderator tools, walled off from the member ones. Acting on somebody else's
      claim is a different kind of act from taking a free spawn, and a strip that
@@ -378,7 +380,13 @@
     background: var(--bad); border-radius: 3px; padding: 1px 4px; font-variant-numeric: tabular-nums;
   }
 
-  .readout { padding: 12px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 10px; font-size: 12.5px; flex-wrap: wrap; min-height: 48px; }
+  .readout { padding: 12px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 10px; font-size: 12.5px; min-height: 48px; }
+  /* Two columns that never trade places: the text gives way and wraps within
+     itself, and the buttons keep the corner they are in. Before this the row
+     simply wrapped, so a long enough verdict pushed the button onto its own
+     line and away from the right-hand edge it is supposed to hold. */
+  .readout-text { flex: 1 1 0; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .readout i { font-size: 15px; }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
   .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
@@ -1166,17 +1174,18 @@ function renderWindow() {
   body.appendChild(calendarSection());
   if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
 
-  // The bot's reply, always at the foot of the panel and never inside the part
-  // that scrolls. It used to sit under the top strip, which put it in a
-  // different place relative to the button that caused it depending on whether
-  // the week was open — and, with the week open, well away from the button at
-  // the bottom that had just been pressed.
+  // The foot of the panel: what pressing the button would do, the button itself,
+  // and whatever the bot last said back. Outside the part that scrolls, so all
+  // three sit in the same corner however tall the body above them happens to be
+  // and whether or not the week is open.
   const foot = document.getElementById('win-foot');
   foot.innerHTML = '';
-  foot.hidden = !view.answer;
+  const action = readout();
+  if (action) foot.appendChild(action);
   if (view.answer) {
     foot.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
   }
+  foot.hidden = !foot.firstChild;
 
   wireWindow();
   if (keepScroll !== null && gridEl) gridEl.scrollTop = keepScroll;
@@ -1295,12 +1304,9 @@ function nowStrip(spawn) {
       <span class="pending" style="width:${(Math.min(view.duration || 0, left) / budget * 100).toFixed(1)}%"></span>`));
     actions.appendChild(el('span', 'stamina-val', `${fmtDur(left)} left`));
   }
-  // While the week is open the primary action lives at the foot of it instead,
-  // next to the verdict on what is selected — see primaryAction.
-  if (!view.calendarOpen) {
-    const primary = primaryAction(spawn);
-    if (primary) actions.appendChild(primary);
-  }
+  // Claim and Book are not here at all: they live in the panel's footer, in one
+  // fixed corner — see readout. Releasing stays, because it is the opposite of
+  // the thing that button offers and never appears at the same time as it.
   if (spawn.mine || spawn.queued) {
     const holding = spawn.mine;
     actions.appendChild(button(holding ? 'Release' : 'Leave queue', 'btn danger',
@@ -1533,7 +1539,9 @@ function calendar() {
   body.appendChild(grid);
   wrap.appendChild(body);
   gridEl = body;
-  wrap.appendChild(readout());
+  // The verdict and the button that acts on it live in the panel's footer, not
+  // here — see readout. They were part of the week once, which is what made them
+  // move when it was folded away.
   return wrap;
 }
 
@@ -1623,20 +1631,48 @@ function stretchHandle(block) {
   return handle;
 }
 
+/** The panel's action row: what pressing the button would do, and the button.
+ *
+ *  Anchored to the foot of the panel whether or not the week is open, rather
+ *  than drawn wherever the panel currently happens to end. Folding the week away
+ *  used to move the button from the bottom corner up into the strip at the top,
+ *  so the one control somebody presses over and over was in a different place
+ *  depending on something unrelated to it.
+ *
+ *  Nothing at all when there is neither a verdict to give nor a button to offer
+ *  — an empty bar across the bottom of the panel is worse than no bar.
+ */
 function readout() {
-  const out = el('div', 'readout');
   const spawn = openSpawn();
+  const primary = spawn ? primaryAction(spawn) : null;
+
+  // Text on the left, buttons on the right, always in that order and always in
+  // those two columns. The text column is the one that gives way when there is
+  // too much of it — a verdict long enough to fill the row must wrap inside its
+  // own column rather than shoulder the button onto a line of its own, which is
+  // how the button ended up on the left of the panel instead of the right.
+  const row = () => {
+    const out = el('div', 'readout');
+    const text = el('div', 'readout-text');
+    const actions = el('div', 'readout-actions');
+    out.appendChild(text);
+    out.appendChild(actions);
+    return { out, text, actions };
+  };
+
   if (!view.pick) {
-    // Nothing picked, so the offer is the spawn as it stands right now. The
-    // button is here rather than in the strip above for as long as the week is
-    // open, so that pressing one thing does not mean looking in two places.
-    out.innerHTML = '<span class="muted">Pick a start time on the grid to book it, '
-      + 'or click one of your own bookings to cancel it. Right-click a selection to clear it.</span>'
-      + '<span style="margin-left:auto"></span>';
-    const primary = spawn && primaryAction(spawn);
-    if (primary) out.appendChild(primary);
+    if (!primary) return null;
+    const { out, text, actions } = row();
+    // The grid hint only means anything while the grid is on screen.
+    if (view.calendarOpen) {
+      text.innerHTML = '<span class="muted">Pick a start time on the grid to book it, '
+        + 'or click one of your own bookings to cancel it. Right-click a selection to clear it.</span>';
+    }
+    actions.appendChild(primary);
     return out;
   }
+
+  const { out, text, actions } = row();
 
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
@@ -1657,20 +1693,18 @@ function readout() {
     ? `<span class="srv-note">· repeats on ${[...view.days].sort().map(d => DAY_NAMES[d]).join(', ')}, so the first slot is not this ${srv.weekday}</span>`
     : '';
 
-  out.innerHTML = `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
-    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}
-    <span style="margin-left:auto"></span>`;
+  text.innerHTML = `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
+    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}`;
 
   // The same button that offers Claim when nothing is picked; a selection is
   // what turns it into Book, and clearing one turns it back.
-  const primary = spawn && primaryAction(spawn);
-  if (primary) out.appendChild(primary);
+  if (primary) actions.appendChild(primary);
 
   // Cancelling is offered on the slot itself: picking a block of your own is how
   // you reach it, which is the same gesture as picking a time.
   const mine = slots.find(b => b.mine && b.scheduleId != null && b.start.getTime() === view.pick.getTime());
   if (mine) {
-    out.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
+    actions.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
       () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
   }
   return out;

@@ -1763,11 +1763,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
       // Re-read after a possible create so the row carries the new thread id;
       // the create callback writes it, but the local `respawn` is a snapshot.
-      val thread = RespawnThreads.openThread(guild, forum, respawn, card, buttons,
+      val opened = RespawnThreads.openThread(guild, forum, respawn, card, buttons,
         threadId => repository.setThreadId(guildId, respawn.id, threadId))
 
-      thread.foreach { channel =>
-        RespawnThreads.applyTag(forum, channel, RespawnThreads.tagFor(claimed = active.isDefined))
+      opened.foreach { post =>
+        // Card, tag and sleep together, in that order — see RespawnThreads.settle
+        // for why they cannot be asked for side by side.
+        //
         // Archived, not locked: people can still leave notes on a spawn between
         // hunts, and reviving it doesn't need a moderator. Archiving is what keeps
         // the forum's front page to the spawns people are actually on — a free
@@ -1778,9 +1780,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // still nobody's hunt, and its diary is on the card for whoever opens it.
         // `active` covers a claim in limbo, so a post stays awake for the whole of
         // a handover rather than flickering shut between two hunts.
-        if (active.isEmpty) RespawnThreads.archive(channel)
+        RespawnThreads.settle(forum, post.thread,
+          if (post.created) None else Some(card -> buttons),
+          RespawnThreads.tagFor(claimed = active.isDefined),
+          sleep = active.isEmpty)
       }
-      thread
+      opened.map(_.thread)
     }
 
   /** Booked slots on a spawn that haven't started yet. */

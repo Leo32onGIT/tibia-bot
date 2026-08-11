@@ -10,6 +10,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, Th
 import net.dv8tion.jda.api.entities.channel.forums.{ForumTag, ForumTagData, ForumTagSnowflake}
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed, Role}
+import net.dv8tion.jda.api.managers.channel.concrete.ThreadChannelManager
 import net.dv8tion.jda.api.utils.FileUpload
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
 
@@ -425,7 +426,7 @@ object RespawnThreads extends StrictLogging {
    *  it on the catalogue row; it isn't called when an existing post is reused.
    */
   def openThread(guild: Guild, forum: ForumChannel, respawn: Respawn, card: MessageEmbed,
-                 buttons: ActionRow, onCreated: String => Unit): Option[ThreadChannel] = {
+                 buttons: ActionRow, onCreated: String => Unit): Option[OpenedThread] = {
     val existing = resolveThread(guild, forum, respawn.threadId)
     existing match {
       case Some(thread) =>
@@ -434,8 +435,7 @@ object RespawnThreads extends StrictLogging {
             logger.warn(s"Could not un-archive respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
           }
         }
-        updateCard(thread, card, buttons)
-        Some(thread)
+        Some(OpenedThread(thread, created = false))
 
       case None =>
         Try {
@@ -443,7 +443,7 @@ object RespawnThreads extends StrictLogging {
           val post = forum.createForumPost(respawn.displayName, message).complete()
           val thread = post.getThreadChannel
           onCreated(thread.getId)
-          thread
+          OpenedThread(thread, created = true)
         }.toOption.orElse {
           logger.warn(s"Could not create a respawn thread for '${respawn.code}' in guild '${guild.getId}'")
           None
@@ -451,50 +451,75 @@ object RespawnThreads extends StrictLogging {
     }
   }
 
-  /** Rewrite a spawn's claim card in place. A forum post's starter message
-   *  shares the thread's id, so this needs no extra fetch to find it. */
-  def updateCard(thread: ThreadChannel, card: MessageEmbed, buttons: ActionRow): Unit =
+  /** A spawn's post, and whether it had to be made. A post created a moment ago
+   *  already carries the card it was created with, so there is nothing to
+   *  rewrite on it. */
+  final case class OpenedThread(thread: ThreadChannel, created: Boolean)
+
+  /** Bring a spawn's post into line with what has just happened: its card, its
+   *  status tag, and whether it should be awake.
+   *
+   *  These go out as one ordered chain rather than three requests fired side by
+   *  side. Every one of them is asynchronous and each takes a different REST
+   *  route, so nothing ordered them against one another — and Discord refuses to
+   *  edit a message in, or retag, a thread that has already been archived.
+   *  Queued alongside the edit, the archive could overtake it, and the post
+   *  would be left showing the state from before whatever had just happened.
+   *
+   *  It only ever bit a spawn nobody holds, because that is the only time a post
+   *  is put to sleep. Claiming one leaves it held and so always looked right;
+   *  booking one leaves it unheld, which is why a booking was the thing that
+   *  went missing from the card.
+   *
+   *  `card` is None for a post that was just created with it.
+   */
+  def settle(forum: ForumChannel, thread: ThreadChannel, card: Option[(MessageEmbed, ActionRow)],
+             tagName: String, sleep: Boolean): Unit = {
     // Handed over rather than waited on. The card is the thing a person is
-    // looking at, so it wants to be quick — but nothing this method's caller
-    // goes on to do depends on the edit having landed, and waiting for it put a
-    // whole Discord round trip between a button press and the reply to it.
-    Try(thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons).queue(
-      _ => (),
-      error => logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
-    )).failed.foreach { error =>
-      logger.warn(s"Could not send the claim card update for thread '${thread.getId}'", error)
-    }
-
-  /** Put the spawn's post to sleep once nobody holds it, so the forum's front
-   *  page stays the spawns people are actually on. Not locked — a locked thread
-   *  needs MANAGE_THREADS to reopen and would also stop people leaving notes on
-   *  a spawn between hunts. */
-  def archive(thread: ThreadChannel): Unit =
-    Try(thread.getManager.setArchived(true).queue(
-      _ => (),
-      error => logger.warn(s"Could not archive respawn thread '${thread.getId}'", error)
-    )).failed.foreach { error =>
-      logger.warn(s"Could not ask to archive respawn thread '${thread.getId}'", error)
-    }
-
-  /** Swap a post's status tag. Tags are looked up by name on the parent forum,
-   *  so a guild that deleted them just gets no tag rather than an error. */
-  def applyTag(forum: ForumChannel, thread: ThreadChannel, tagName: String): Unit = {
-    val tag: Option[ForumTag] = forum.getAvailableTags.asScala.find(_.getName.equalsIgnoreCase(tagName))
-    tag.foreach { found =>
-      // Skip when the thread already carries exactly this tag. Applying it again
-      // is a REST call that changes nothing, and the card is refreshed far more
-      // often than a spawn actually flips between taken and free. The current
-      // tags come from JDA's cache, so the check itself costs nothing.
-      val alreadyApplied = thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId)
-      if (!alreadyApplied) {
-        Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).queue(
-          _ => (),
-          error => logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
-        )).failed.foreach { error =>
-          logger.warn(s"Could not ask for the '$tagName' tag on thread '${thread.getId}'", error)
-        }
+    // looking at, so it wants to be quick — but nothing the caller goes on to do
+    // depends on the edit having landed, and waiting for it put a whole Discord
+    // round trip between a button press and the reply to it.
+    val failed: java.util.function.Consumer[_ >: Throwable] = (error: Throwable) =>
+      logger.warn(s"Could not settle respawn thread '${thread.getId}'", error)
+    Try {
+      (card, postState(forum, thread, tagName, sleep)) match {
+        case (Some((embed, buttons)), Some(state)) =>
+          editCard(thread, embed, buttons).flatMap((_: net.dv8tion.jda.api.entities.Message) => state)
+            .queue(_ => (), failed)
+        case (Some((embed, buttons)), None) => editCard(thread, embed, buttons).queue(_ => (), failed)
+        case (None, Some(state))            => state.queue(_ => (), failed)
+        case (None, None)                   => ()
       }
+    }.failed.foreach { error =>
+      logger.warn(s"Could not ask to settle respawn thread '${thread.getId}'", error)
+    }
+  }
+
+  /** A spawn's claim card, rewritten in place. A forum post's starter message
+   *  shares the thread's id, so this needs no extra fetch to find it. */
+  private def editCard(thread: ThreadChannel, card: MessageEmbed, buttons: ActionRow) =
+    thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons)
+
+  /** The post's own state — its tag, and whether it sleeps — as a single
+   *  request, or nothing at all when it is already as it should be. Both live on
+   *  the same manager, so asking for both costs one PATCH rather than two.
+   *
+   *  A tag that is already exactly right is skipped: applying it again is a REST
+   *  call that changes nothing, and the card is refreshed far more often than a
+   *  spawn actually flips between taken and free. Tags come from JDA's cache, so
+   *  the check itself costs nothing. A guild that deleted them just gets no tag
+   *  rather than an error.
+   */
+  private def postState(forum: ForumChannel, thread: ThreadChannel,
+                        tagName: String, sleep: Boolean): Option[ThreadChannelManager] = {
+    val retag = forum.getAvailableTags.asScala
+      .find(_.getName.equalsIgnoreCase(tagName))
+      .filterNot(found => thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId))
+    if (retag.isEmpty && !sleep) None
+    else {
+      val base = thread.getManager
+      val tagged = retag.fold(base)(found => base.setAppliedTags(ForumTagSnowflake.fromId(found.getId)))
+      Some(if (sleep) tagged.setArchived(true) else tagged)
     }
   }
 
