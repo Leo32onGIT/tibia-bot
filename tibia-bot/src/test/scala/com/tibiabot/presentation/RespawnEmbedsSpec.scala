@@ -194,6 +194,44 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked.length should be <= 1024
   }
 
+  // A booking's slot row is only written once its start comes within the
+  // look-ahead, so a booking made for later in the week has nothing but the rule
+  // behind it for days. The card has to show it anyway: booking from the
+  // dashboard's week grid and finding the thread unchanged reads as the booking
+  // having failed.
+  test("a booking with no slot row yet is still on the card") {
+    val thursday = RespawnSchedule(7L, 1L, "99", "someone", "Galarzaa", now.plusDays(4),
+      RespawnSchedule.Daily, 90, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(thursday), now))("Booked")
+
+    booked should include("Galarzaa")
+    booked should include(s"<t:${now.plusDays(4).toInstant.getEpochSecond}:f>")
+    booked should include("1h 30m")
+  }
+
+  test("a repeating booking with no row yet shows its next evening, once, and says it repeats") {
+    val weekly = RespawnSchedule(8L, 1L, "99", "someone", "", now.plusDays(3),
+      RespawnSchedule.Daily, 60, active = true, createdAt = now,
+      daysOfWeek = RespawnSchedule.maskOf(List(now.plusDays(3).getDayOfWeek)))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(weekly), now))("Booked")
+
+    // One line, not every occurrence from here to eternity.
+    booked.linesIterator.count(_.contains("<@99>")) shouldBe 1
+    booked should include(weekly.repeatLabel)
+  }
+
+  test("rows and rules are one list, in time order") {
+    val tonight = reserved("77", now.plusHours(3))
+    val thursday = RespawnSchedule(9L, 1L, "99", "someone", "", now.plusDays(4),
+      RespawnSchedule.Daily, 60, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, List(tonight), settings,
+      image(cultOrcs), List(thursday), now))("Booked")
+
+    booked.linesIterator.toList.map(line => line.contains("<@77>")) shouldBe List(true, false)
+  }
+
   test("a long list is cut to fit the field, and owns up to it once") {
     // Ten rows of very long names would run past Discord's 1024, which is
     // rejected outright rather than trimmed — it would take the whole card edit

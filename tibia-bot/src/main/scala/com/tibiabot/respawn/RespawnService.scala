@@ -1743,8 +1743,22 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // are next — and what makes an offer going out change nothing on the card,
       // so it needs no edit at all.
       val queue = repository.offeredClaim(guildId, respawn.id).toList ++ repository.queueFor(guildId, respawn.id)
-      val reservations = repository.reservationsFor(guildId, respawn.id, ZonedDateTime.now())
-      val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config, imageFor(respawn))
+      val now = ZonedDateTime.now()
+      val reservations = repository.reservationsFor(guildId, respawn.id, now)
+      // Bookings that exist only as a rule so far. A slot is written when its
+      // start comes within the look-ahead, so anything booked further out than
+      // that has nothing to show for itself for days — and the card would have
+      // read "nothing booked" straight after somebody booked it, which is what
+      // the dashboard's week-wide grid made easy to hit and Discord's own
+      // half-day picker never could.
+      //
+      // Only rules with no slot at all. A repeating booking whose next evening is
+      // already written down is on the card once through that row; adding its
+      // rule as well would list the same booking twice.
+      val written = reservations.flatMap(_.scheduleId).toSet
+      val upcoming = repository.schedulesForRespawn(guildId, respawn.id).filterNot(s => written.contains(s.id))
+      val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config,
+        imageFor(respawn), upcoming, now)
       val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
 
       // Re-read after a possible create so the row carries the new thread id;

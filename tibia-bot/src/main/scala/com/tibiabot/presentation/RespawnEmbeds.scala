@@ -55,6 +55,18 @@ object RespawnEmbeds {
     if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
     else s"<@${claim.userId}>"
 
+  /** The same, for a booking that has not produced a slot row yet — the rule
+   *  carries the character too, so it names its owner identically. */
+  private def scheduleLabel(schedule: RespawnSchedule): String =
+    if (schedule.characterName.nonEmpty) s"**${schedule.characterName}** (<@${schedule.userId}>)"
+    else s"<@${schedule.userId}>"
+
+  /** One line of the Booked field. The hollow marker is the one the Book panel
+   *  uses, and always hollow here: a card is one shared post rather than a reply
+   *  to somebody, so it has no reader whose rows could be filled in. */
+  private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
+    s"▹ ${dateTime(when)} · ${humanDuration(minutes)} — $who$note"
+
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted
    *  creature posts use. Falls back to a neutral sign for the many catalogue
@@ -75,7 +87,8 @@ object RespawnEmbeds {
    *  chatter below it. */
   def claimCard(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
                 reservations: List[RespawnClaim], settings: RespawnSettings,
-                imageUrl: String): MessageEmbed = {
+                imageUrl: String, upcoming: List[RespawnSchedule] = Nil,
+                now: ZonedDateTime = ZonedDateTime.now()): MessageEmbed = {
     val embed = new EmbedBuilder()
     embed.setTitle(respawn.displayName)
     embed.setImage(imageUrl)
@@ -107,21 +120,36 @@ object RespawnEmbeds {
       embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", cappedField(shown, queue.size), false)
     }
 
-    if (reservations.nonEmpty) {
-      // Booked slots that haven't started. Shown whether or not the spawn is free
-      // right now, because the point of booking ahead is that people can plan
-      // around it.
-      val shown = reservations.take(RowsPerField).map { slot =>
-        val when = slot.startsAt.map(dateTime).getOrElse("?")
-        // Somebody is waiting on an answer — worth showing, since until it is
-        // given the slot may or may not still belong to the name beside it.
-        val pending = if (slot.requestPending) " · *asked*" else ""
-        // The same hollow marker the Book panel uses, and always hollow here: a
-        // card is one shared post rather than a reply to somebody, so it has no
-        // reader whose rows could be filled in.
-        s"▹ $when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+    // Booked windows that haven't started. Shown whether or not the spawn is free
+    // right now, because the point of booking ahead is that people can plan
+    // around it.
+    //
+    // Two sources, because a booking exists before its slot does. A slot row is
+    // only written once its start comes within the look-ahead, so a booking made
+    // for Thursday has nothing but the rule behind it for days — and a card that
+    // showed only rows would answer "nothing booked" to somebody who had just
+    // booked it. `upcoming` is the rules with no row yet, and the caller is what
+    // decides that, since only it can see both.
+    val booked =
+      reservations.flatMap { slot =>
+        slot.startsAt.map { start =>
+          // Somebody is waiting on an answer — worth showing, since until it is
+          // given the slot may or may not still belong to the name beside it.
+          val pending = if (slot.requestPending) " · *asked*" else ""
+          start -> bookedRow(start, slot.durationMinutes, claimantLabel(slot), pending)
+        }
+      } ++ upcoming.flatMap { schedule =>
+        // Only the next one. A weekly booking has occurrences forever, and a card
+        // listing every Tuesday from now on would say the same thing ten times.
+        schedule.nextStartAtOrAfter(now).map { start =>
+          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+          start -> bookedRow(start, schedule.durationMinutes, scheduleLabel(schedule), repeat)
+        }
       }
-      embed.addField("Booked", cappedField(shown, reservations.size), false)
+
+    if (booked.nonEmpty) {
+      val ordered = booked.sortBy(_._1.toInstant).map(_._2)
+      embed.addField("Booked", cappedField(ordered.take(RowsPerField), ordered.size), false)
     }
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
