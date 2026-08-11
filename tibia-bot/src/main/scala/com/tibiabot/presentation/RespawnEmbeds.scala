@@ -37,7 +37,7 @@ object RespawnEmbeds {
 
   /** Short date *and* time, for the audit log — its entries span days, where a
    *  bare clock time would be ambiguous. */
-  private def dateTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:f>"
+  private def dateTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:s>"
 
   /** "2h", "45m", "1h 30m" — durations read better than a raw minute count in
    *  an embed field. */
@@ -53,19 +53,19 @@ object RespawnEmbeds {
    *  followed by the Discord mention so they can actually be pinged. */
   private def claimantLabel(claim: RespawnClaim): String =
     if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
-    else s"<@${claim.userId}>"
+    else s"`${claim.userId}`"
 
   /** The same, for a booking that has not produced a slot row yet — the rule
    *  carries the character too, so it names its owner identically. */
   private def scheduleLabel(schedule: RespawnSchedule): String =
     if (schedule.characterName.nonEmpty) s"**${schedule.characterName}** (<@${schedule.userId}>)"
-    else s"<@${schedule.userId}>"
+    else s"`${schedule.userId}`"
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
    *  uses, and always hollow here: a card is one shared post rather than a reply
    *  to somebody, so it has no reader whose rows could be filled in. */
   private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
-    s"▹ ${dateTime(when)} · ${humanDuration(minutes)} — $who$note"
+    s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **—** $who$note"
 
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted
