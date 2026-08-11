@@ -193,7 +193,14 @@
   .win-region { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
   .win-close:hover { color: var(--text-strong); }
-  .win-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  /* A column, so the week inside it can be handed whatever height is left over
+     rather than guessing at it. `min-height: 0` on each link of that chain is
+     what lets a flex child be *shorter* than its contents — without it every
+     one of them sizes to the full grid and the panel grows past the window,
+     which is the scrolling this is meant to do away with. */
+  .win-body { flex: 1; min-height: 0; display: flex; flex-direction: column;
+              overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .cal-section.open, .cal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .win-body::-webkit-scrollbar { width: 10px; }
   .win-body::-webkit-scrollbar-track { background: transparent; }
   .win-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
@@ -244,7 +251,12 @@
   .btn {
     background: var(--accent); border: 1px solid var(--accent); border-radius: 6px;
     color: var(--bg); font-size: 12.5px; font-weight: 600; padding: 6px 15px; cursor: pointer;
+    /* Inline-flex so a button that carries an icon spaces it from its label
+       without every such button having to say so itself. A button with only a
+       label is laid out exactly as it was. */
+    display: inline-flex; align-items: center; gap: 6px;
   }
+  .btn > i { font-size: 14px; line-height: 1; }
   .btn:hover:not([disabled]) { filter: brightness(1.08); }
   .btn[disabled] { background: transparent; color: var(--muted); border-color: var(--panel-border); cursor: not-allowed; }
   .btn.ghost { background: transparent; color: var(--text); border-color: var(--panel-border); }
@@ -257,10 +269,7 @@
   /* Claiming is green here because it is green in Discord — Button.success on
      the same action, wearing the same emoji. Somebody who has used the one
      should recognise the other without reading it. */
-  .btn.claim {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--st-free); border-color: var(--st-free); color: #06301a;
-  }
+  .btn.claim { background: var(--st-free); border-color: var(--st-free); color: #06301a; }
   .btn.claim[disabled] { background: transparent; border-color: var(--panel-border); }
   .btn-emoji { width: 15px; height: 15px; flex-shrink: 0; }
   .btn[disabled] .btn-emoji { opacity: 0.4; filter: grayscale(1); }
@@ -299,7 +308,11 @@
   /* Sized off the viewport rather than fixed, so on a laptop screen the grid
      gives ground to the strips above and below it instead of pushing the
      booking controls off the bottom of the window. */
-  .wk-body { position: relative; height: clamp(200px, calc(100vh - 430px), 430px); overflow-y: auto; margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  /* The one thing on the panel that scrolls. It takes the height left after the
+     strips above and below have had theirs, rather than the viewport arithmetic
+     this used to do — which had to be re-guessed whenever anything around it
+     changed height, and was wrong on a phone. */
+  .wk-body { position: relative; flex: 1; min-height: 120px; overflow-y: auto; margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
   .wk-body::-webkit-scrollbar { width: 10px; }
   .wk-body::-webkit-scrollbar-track { background: transparent; }
   .wk-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
@@ -352,6 +365,9 @@
      Real enough to plan around, not yet real enough for its owner to be asked. */
   .b-predicted { opacity: 0.62; }
   .b-pick { background: rgba(167,139,250,0.34); border: 1px dashed var(--purple); color: #ddd0ff; z-index: 3; }
+  /* The selection is the one block on the grid you can pick up and move. */
+  .b-drag { cursor: grab; touch-action: none; }
+  .b-drag.dragging { cursor: grabbing; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
   /* An evening the weekly rule will also take. Fainter than the one being
      picked, because it is a consequence rather than a choice. */
   .b-echo { background: rgba(167,139,250,0.14); opacity: 0.8; }
@@ -396,9 +412,23 @@
     main { padding: 18px 12px 50px; }
     .masthead-right { margin-left: 0; width: 100%; }
     .filter { flex: 1; width: auto; }
-    .window { width: 100vw; height: 100vh; border-radius: 0; }
+    /* dvh, not vh: on a phone `100vh` is the viewport with the browser's own
+       chrome pretended away, so a full-height panel is taller than the screen
+       actually showing it and the whole thing scrolls by exactly the height of
+       the address bar. dvh is the height there really is. The vh line stays
+       ahead of it for anything too old to know the unit. */
+    .window { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
     .wk { padding: 0 10px; }
     .wk-body { margin: 0 10px; }
+    /* Nothing outside the week scrolls: it is the part that is too big for a
+       phone, and everything else earns its place by being small enough. */
+    .win-body { overflow-y: hidden; }
+    /* Tighter, so the grid keeps as much of a short screen as it can. */
+    .win-head { padding: 11px 14px 9px; }
+    .strip { padding: 8px 14px; }
+    .readout { padding: 9px 14px; min-height: 0; }
+    .answer { padding: 8px 14px; }
+    .cal-legend { display: none; }
   }
 </style>
 </head>
@@ -461,6 +491,11 @@ const PLACEHOLDER = '/dashboard/images/avatar.png';
 const CLAIM_EMOJI = '<!--CLAIM_EMOJI-->';
 
 const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
+// What dragging a selection about snaps to. Finer than SLOT, which is the step a
+// hunt's *length* moves in: a quarter of an hour is a start time somebody means,
+// and being made to choose between 20:00 and 20:30 for the sake of one number
+// governing both is a worse answer than having two.
+const DRAG_SNAP = 15;
 // The shortest hunt worth starting — RespawnService.MinimumClaimMinutes. Below
 // a whole step the tank's remainder is offered exactly as it stands, because
 // eighteen minutes is still eighteen minutes of hunting and rounding it away
@@ -1255,7 +1290,8 @@ function claimEmojiImg() {
 function primaryAction(spawn) {
   if (view.pick) {
     const verdict = judge(view.pick);
-    const book = button(view.busy ? 'Working…' : verdict.type === 'ask' ? 'Book & ask' : 'Book', 'btn', doBook);
+    const book = button(view.busy ? 'Working…' : verdict.type === 'ask' ? 'Book & ask' : 'Book',
+      'btn', doBook, 'ti-calendar-plus');
     book.disabled = !canBook();
     return book;
   }
@@ -1264,7 +1300,10 @@ function primaryAction(spawn) {
   // holding a spawn or queueing for it is exactly what stops you claiming it.
   if (spawn.mine || spawn.queued) {
     const holding = spawn.mine;
-    return button(holding ? 'Release' : 'Leave queue', 'btn danger',
+    // "Leave" either way, and the same word the Discord post's own button uses
+    // — giving a spawn back and standing out of its queue are the same act to
+    // somebody doing it, and only one of the two is ever on offer at a time.
+    return button(holding ? 'Leave' : 'Leave queue', 'btn danger',
       () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
         if (holding) {
           s.mine = false;
@@ -1279,7 +1318,7 @@ function primaryAction(spawn) {
           s.queued = false;
           s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
         }
-      }));
+      }), 'ti-logout');
   }
 
   if (!canClaimNow(spawn)) return null;
@@ -1367,7 +1406,10 @@ function nowStrip(spawn) {
  *  something nobody has looked at yet is wasted work.
  */
 function calendarSection() {
-  const wrap = el('div');
+  // `open` is what lets the week claim the height left over in the panel — see
+  // the flex chain in the stylesheet. Folded away it must not, or the fold
+  // header would be pushed about by space it is not using.
+  const wrap = el('div', 'cal-section' + (view.calendarOpen ? ' open' : ''));
   const booked = slots.filter(b => b.state !== 'claimed').length;
   // A week we have not read yet, or could not, says so. "Nothing booked" is a
   // claim about the week, and it is not one to make on no information.
@@ -1402,7 +1444,7 @@ function calendarSection() {
 }
 
 function calendar() {
-  const wrap = el('div');
+  const wrap = el('div', 'cal');
   const now = new Date();
   const start = weekStart();
 
@@ -1544,12 +1586,17 @@ function calendar() {
         // hunt for the original block to be rid of them would be a puzzle.
         // Before this there was no way to unpick at all short of shutting the
         // week — picking somewhere else was the only move.
-        sel.title = 'Right-click to clear this selection';
+        sel.title = p.echo
+          ? 'Right-click to clear this selection'
+          : 'Drag to move it · drag its foot to change how long · right-click to clear';
         sel.addEventListener('contextmenu', e => { e.preventDefault(); clearPick(); });
-        // Only the block being booked takes a handle, and only on the piece that
-        // carries its end — an echo is a consequence of the rule rather than a
-        // thing to drag, and the half above a midnight split is not where the
-        // hunt finishes.
+        // Only the real selection is draggable. An echo is a consequence of the
+        // rule rather than a thing to take hold of, and moving one would have to
+        // mean moving the anchor it is derived from — which is the block the
+        // reader is not pointing at.
+        if (!p.echo) { sel.classList.add('b-drag'); dragSelection(sel, p.at, start, day); }
+        // The handle goes only on the piece carrying the hunt's end — the half
+        // above a midnight split is not where it finishes.
         if (!p.echo && pEnd.getTime() <= colEnd) sel.appendChild(stretchHandle(sel));
         col.appendChild(sel);
       });
@@ -1621,6 +1668,81 @@ function previews(start) {
     }
   }
   return out;
+}
+
+/** Take hold of the selection and move it — up and down for the time, across for
+ *  the day.
+ *
+ *  Picking a time by clicking lands you on the half hour, which is the right
+ *  first guess and the wrong final one often enough to be annoying: the way to
+ *  say "no, twenty past" was to click again somewhere else and hope. Dragging
+ *  snaps to a quarter of an hour, so the block is nudged rather than re-aimed.
+ *
+ *  Moved by writing straight to the element rather than through a re-render, for
+ *  the same reason the stretch handle is: rebuilding a hundred and seventy cells
+ *  per frame fights the pointer. Sideways movement is a transform rather than a
+ *  reparent into the neighbouring column — the same picture, without touching
+ *  the DOM's shape — and the real render at the end puts it where it belongs,
+ *  clipped and echoed properly.
+ */
+function dragSelection(block, at, weekStart, day) {
+  block.addEventListener('pointerdown', down => {
+    // The primary button only: right-click clears the selection, and the foot of
+    // the block belongs to the stretch handle, which stops the event itself.
+    if (down.button > 0) return;
+    down.preventDefault();
+    try { block.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+
+    const column = block.parentElement.getBoundingClientRect().width;
+    const fromX = down.clientX, fromY = down.clientY;
+    const startMinutes = at.getHours() * 60 + at.getMinutes();
+    const label = block.querySelector('.tm');
+    let moved = false;
+    let landing = at;
+
+    const move = ev => {
+      const dx = ev.clientX - fromX, dy = ev.clientY - fromY;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;   // a click, not a drag
+      moved = true;
+      block.classList.add('dragging');
+
+      // Never off the week on either axis: the grid shows seven days, and a
+      // start dragged past midnight belongs to the next column rather than to
+      // the bottom of this one.
+      const days = Math.min(6, Math.max(0, day + Math.round(dx / column))) - day;
+      const raw = startMinutes + (dy / ROW_H) * 60;
+      const snapped = Math.min(DAY_MS / 60000 - DRAG_SNAP,
+        Math.max(0, Math.round(raw / DRAG_SNAP) * DRAG_SNAP));
+
+      landing = dayStart(weekStart, day + days);
+      landing.setHours(Math.floor(snapped / 60), snapped % 60, 0, 0);
+
+      block.style.transform = days ? `translateX(${days * column}px)` : '';
+      block.style.top = (snapped / 60) * ROW_H + 'px';
+      if (label) {
+        const ends = new Date(landing.getTime() + view.duration * 60000);
+        label.textContent = `${fmtLocal(landing)}–${fmtLocal(ends)}`;
+      }
+    };
+
+    const up = () => {
+      block.removeEventListener('pointermove', move);
+      block.removeEventListener('pointerup', up);
+      block.removeEventListener('pointercancel', up);
+      block.classList.remove('dragging');
+      // A press that never moved is not a drag and must leave the selection
+      // exactly as it was — including its verdict, which a re-render would
+      // rebuild for no reason.
+      if (!moved) return;
+      view.pick = landing;
+      view.answer = null;
+      renderWindow();
+    };
+
+    block.addEventListener('pointermove', move);
+    block.addEventListener('pointerup', up);
+    block.addEventListener('pointercancel', up);
+  });
 }
 
 /** Drag the foot of the selection to change how long the hunt is.
@@ -1804,10 +1926,18 @@ function modTools(body, spawn) {
   body.appendChild(box);
 }
 
-function button(label, className, onClick) {
+/** `icon` is a Tabler class, drawn before the label. Appended as a text node
+ *  rather than set through textContent, which would throw the icon away. */
+function button(label, className, onClick, icon) {
   const b = document.createElement('button');
   b.className = className;
-  b.textContent = label;
+  if (icon) {
+    const glyph = document.createElement('i');
+    glyph.className = 'ti ' + icon;
+    glyph.setAttribute('aria-hidden', 'true');
+    b.appendChild(glyph);
+  }
+  b.appendChild(document.createTextNode(label));
   b.disabled = view.busy;
   b.addEventListener('click', onClick);
   return b;
