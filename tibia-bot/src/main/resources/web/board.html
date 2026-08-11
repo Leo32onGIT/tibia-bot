@@ -640,6 +640,8 @@ const view = {
   pick: null,
   answer: null,
   busy: false,
+  // Set for real by openWindow, which opens the week — this only covers the
+  // moment before any spawn has been opened at all.
   calendarOpen: false
 };
 
@@ -797,21 +799,24 @@ function paintCard(spawn) {
   }
 }
 
-/** Which spawns are shown, and in what order.
+/** Which spawns are shown, and in what order: most recently claimed first, and
+ *  a spawn nobody has ever claimed last.
  *
- *  Spawns somebody is actually on come first, then everything else by how
- *  recently it was touched; a spawn never claimed sorts last. This is the rule
- *  Discord's forum already follows — a post is bumped while it is held and put
- *  to sleep when it is let go — so the two read the same way round.
+ *  The same rule Discord's forum follows — a post is bumped when somebody takes
+ *  the spawn and keeps that place until something else is taken, so letting a
+ *  spawn go does not cost you the top of the list. Whether it is *currently*
+ *  held is deliberately not part of the order: a hunt claimed three hours ago
+ *  and still running is older news than one claimed a minute ago and finished.
  *
- *  Being *touched* is not the same as being held, which is where the two used to
- *  part company: sorting on activity alone floated a spawn somebody had just
- *  released above one somebody was still hunting.
+ *  This briefly sorted held spawns into a group of their own, which looked like
+ *  the fix for claiming not reaching the top. It was not: a booked slot's
+ *  starts_at counted as activity that had already happened, so a spawn booked
+ *  for tomorrow outranked everything until tomorrow — see lastActivityByRespawn,
+ *  where that is now excluded until the slot actually comes round.
  */
 function shownSpawns() {
-  const held = s => (s.state === 'claimed' ? 0 : 1);
   const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
-  return board.spawns.filter(matches).slice().sort((a, b) => held(a) - held(b) || since(a) - since(b));
+  return board.spawns.filter(matches).slice().sort((a, b) => since(a) - since(b));
 }
 
 /** Put the cards in the right order, making and removing only what changed.
@@ -1103,7 +1108,11 @@ function openWindow(code) {
   view.answer = null;
   view.repeat = 'once';
   view.days = new Set();
-  view.calendarOpen = false;
+  // Open on the week rather than on a fold that has to be found and pressed.
+  // It is also where the length of a hunt is set now that the strip above has no
+  // stepper of its own, so a spawn opened straight to a claim would otherwise
+  // offer no way to change how long it runs for.
+  view.calendarOpen = true;
   scrolledOnce = false;
   const l = limits();
   // Start at the guild's default, but never above what is actually claimable —

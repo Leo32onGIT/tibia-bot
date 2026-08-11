@@ -614,13 +614,22 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     try {
       // GREATEST over the three, because a spawn's last activity is whichever
       // happened most recently: a claim that ended, one still running, or a
-      // booking made for later. COALESCE inside so a NULL column — a claim that
-      // never ended, a row from before ended_at existed — doesn't swallow the
-      // whole result, which is what GREATEST does with a NULL argument.
+      // booked window that has since come round. COALESCE inside so a NULL
+      // column — a claim that never ended, a row from before ended_at existed —
+      // doesn't swallow the whole result, which is what GREATEST does with a
+      // NULL argument.
+      //
+      // A slot that has *not* come round yet is deliberately not counted. Its
+      // starts_at is in the future, and a future timestamp read as "when this
+      // last happened" sorts a spawn above everything that really did just
+      // happen — so booking a spawn for tomorrow pinned it to the top of the
+      // dashboard until tomorrow, over spawns being hunted right now. The
+      // comparison also covers starts_at being NULL, which is not > now and so
+      // falls to claimed_at exactly as it did before.
       val result = statement.executeQuery(
         """SELECT respawn_id,
           |       MAX(GREATEST(COALESCE(ended_at, claimed_at),
-          |                    COALESCE(starts_at, claimed_at),
+          |                    CASE WHEN starts_at <= now() THEN starts_at ELSE claimed_at END,
           |                    claimed_at)) AS last_seen
           |FROM respawn_claims
           |GROUP BY respawn_id;""".stripMargin)
