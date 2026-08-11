@@ -40,7 +40,7 @@
     { "code": "311",  "region": "Kazordoon",   "name": "Warzone 7",                              "creature": "Blemished Spawn" },
     { "code": "312",  "region": "Kazordoon",   "name": "Warzone 8",                              "creature": "Lavafungus" },
     { "code": "313",  "region": "Kazordoon",   "name": "Warzone 9",                              "creature": "Varnished Diremaw" },
-    { "code": "314",  "region": "Kazordoon",   "name": "Gnome Deep Hub - Lava Lurkers",          "creature": "Ravenous Lava Lurker" },
+    { "code": "314",  "region": "Kazordoon",   "name": "Lava Lurkers",          "creature": "Ravenous Lava Lurker" },
     { "code": "315",  "region": "Kazordoon",   "name": "Gloom Wolf Cave",                        "creature": "Gloom Wolf" },
 
     { "code": "401",  "region": "Edron",       "name": "Cyclopolis Behemoths",                   "creature": "Behemoth" },
