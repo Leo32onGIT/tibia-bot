@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
+import com.tibiabot.presentation.Names
 
 /** The buttons on a respawn's forum post, its board, and the DMs the system
  *  sends: Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
@@ -110,9 +111,9 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.yesEmoji} **${respawn.displayName}** stays yours — " +
                   "I've let them know you're hunting it.")
                 clearOfferButtons(event)
-              case SlotAnswer.Passed(respawn, toUserId) =>
+              case SlotAnswer.Passed(respawn, toUserName) =>
                 respond.text(s"${Config.yesEmoji} **${respawn.displayName}** has gone to " +
-                  s"<@$toUserId> for that slot. Your booking still stands for the days after.")
+                  s"${Names.user(toUserName)} for that slot. Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.PassedUnclaimed(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've given up that slot on " +
@@ -428,7 +429,7 @@ object RespawnButtons extends StrictLogging {
                     respond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**.")
                   case Some(holder) =>
                     respond.text(s"${Config.yesEmoji} Freed **${respawn.displayName}** from " +
-                      s"<@${holder.userId}>. They keep their unused stamina, and whoever is next " +
+                      s"${Names.user(holder.userName)}. They keep their unused stamina, and whoever is next " +
                       "has been offered it.")
                 }
 
@@ -545,7 +546,7 @@ object RespawnButtons extends StrictLogging {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
       val refund = if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
       val handover = offered
-        .map(claim => s" <@${claim.userId}> has been asked if they want it — it stays yours until they answer.")
+        .map(claim => s" ${Names.user(claim.userName)} has been asked if they want it — it stays yours until they answer.")
         .getOrElse("")
       s"${Config.yesEmoji} You've released **${respawn.displayName}**.$refund$handover"
     case ReleaseOutcome.LeftQueue(respawn) =>

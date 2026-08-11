@@ -11,6 +11,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.{ForumChannel, ThreadChanne
 
 import java.time.ZonedDateTime
 import scala.util.Try
+import com.tibiabot.presentation.Names
 
 /** What a claim attempt did, for the command/button layer to render. Modelled
  *  as a result type rather than the handler poking at the repository itself, so
@@ -168,8 +169,10 @@ sealed trait SlotAnswer
 object SlotAnswer {
   /** They are hunting it, so the request is refused and the slot stays theirs. */
   final case class Kept(respawn: Respawn) extends SlotAnswer
-  /** They are not, so it passes to whoever asked. */
-  final case class Passed(respawn: Respawn, toUserId: String) extends SlotAnswer
+  /** They are not, so it passes to whoever asked. Carries the asker's name
+   *  rather than their id: the only thing done with it is naming them in the
+   *  reply, and the row already knows what they are called. */
+  final case class Passed(respawn: Respawn, toUserName: String) extends SlotAnswer
   /** They are not — but the asker had booked a longer window than the slot they
    *  asked about, and the rest of it is somebody else's now. The slot is given up
    *  all the same; it simply goes back to being free rather than to them. */
@@ -807,7 +810,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (remaining > 0 &&
                 !repository.reserveStamina(guildId, toUserId, remaining, config.staminaMinutes, boundary)) {
               val tank = repository.stamina(guildId, toUserId, config.staminaMinutes, boundary)
-              Left(s"<@$toUserId> has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
+              Left(s"${Names.user(toUserName)} has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
                 s"stamina left, and the rest of this hunt needs " +
                 s"**${RespawnEmbeds.humanDuration(remaining)}**.")
             } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName) match {
@@ -816,7 +819,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 if (remaining > 0) repository.refundStamina(guildId, claim.userId, remaining, boundary)
                 RespawnThreads.dm(guild, claim.userId,
                   RespawnEmbeds.dmEmbed("Your hunt was reassigned",
-                    RespawnEmbeds.claimReassignedFrom(respawn, toUserId), imageFor(respawn),
+                    RespawnEmbeds.claimReassignedFrom(respawn, toUserName), imageFor(respawn),
                     RespawnEmbeds.RedColor))
                 RespawnThreads.dm(guild, toUserId,
                   RespawnEmbeds.dmEmbed("The hunt is yours",
@@ -1000,13 +1003,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def clashMessage(schedules: List[RespawnSchedule], slots: List[RespawnClaim],
                            now: ZonedDateTime): String = {
     val (who, when, minutes) = slots.headOption match {
-      case Some(slot) => (slot.userId, slot.startsAt, slot.durationMinutes)
+      case Some(slot) => (slot.userName, slot.startsAt, slot.durationMinutes)
       case None =>
         val schedule = schedules.head
-        (schedule.userId, schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
+        (schedule.userName, schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
     }
     val at = when.map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
-    s"That clashes with <@$who>'s slot on this respawn ($at for ${RespawnEmbeds.humanDuration(minutes)})."
+    s"That clashes with ${Names.user(who)}'s slot on this respawn " +
+      s"($at for ${RespawnEmbeds.humanDuration(minutes)})."
   }
 
   /** Booked slots on a spawn that any occurrence of `candidate` would run over.
@@ -1187,7 +1191,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               RespawnEmbeds.dmEmbed("The hunt is yours",
                 RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
-            SlotAnswer.Passed(respawn, requester)
+            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""))
           }
       }
     }

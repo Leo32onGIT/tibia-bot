@@ -15,6 +15,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
+import com.tibiabot.presentation.Names
 
 /**
  * Per-world setting slash commands: auto-hunt detection, deaths/levels
@@ -129,7 +130,7 @@ final class WorldSettingsService(
       alreadySetMessage = s"${Config.noEmoji} **Automatic enemy detection** is already set to **$settingOption** for the world **$worldFormal**.",
       nowSetMessage = s":gear: **Automatic enemy detection** is now set to **$settingOption** for the world **$worldFormal**.",
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
-      adminLogMessage = s"<@$commandUser> set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.",
       adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif"
     )
   }
@@ -186,7 +187,7 @@ final class WorldSettingsService(
       alreadySetMessage = s"${Config.noEmoji} The **$channelType** channel is already set to **$setting $playerType** for the world **$worldFormal**.",
       nowSetMessage = s":gear: The **$channelType** channel is now set to **$setting $playerType** for the world **$worldFormal**.",
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
-      adminLogMessage = s"<@$commandUser> set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.",
       adminLogThumbnail = s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif"
     )
   }
@@ -207,7 +208,7 @@ final class WorldSettingsService(
       alreadySetMessage = s"${Config.noEmoji} The **exiva list on deaths** is already set to **$settingOption** for the world **$worldFormal**.",
       nowSetMessage = s":gear: **exiva list on deaths** is now set to **$settingOption** for the world **$worldFormal**.",
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
-      adminLogMessage = s"<@$commandUser> set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.",
       adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Find_Person.gif"
     )
   }
@@ -224,7 +225,7 @@ final class WorldSettingsService(
       alreadySetMessage = s"${Config.noEmoji} The minimum level for the **$levelsOrDeaths channel**\nis already set to `$level` for the world **$worldFormal**.",
       nowSetMessage = s":gear: The minimum level for the **$levelsOrDeaths channel**\nis now set to `$level` for the world **$worldFormal**.",
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
-      adminLogMessage = s"<@$commandUser> changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.",
       adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif"
     )
   }
@@ -274,7 +275,7 @@ final class WorldSettingsService(
             }
           }
         }
-        AdminLog.post(adminChannel, s"<@$commandUser> changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
+        AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
 
         embedBuild.setDescription(s":gear: The level to poke for **enemy fullblesses**\nis now set to **$level** for the world **$worldFormal**.")
         embedBuild.build()
@@ -522,7 +523,7 @@ final class WorldSettingsService(
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannelId = if (discordConfig.nonEmpty) discordConfig("admin_channel") else ""
         val adminChannel: TextChannel = guild.getTextChannelById(adminChannelId)
-        AdminLog.post(adminChannel, s"<@$commandUser> set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer", s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
+        AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} set the online list channel to **$setting** for the world **$worldFormal**.\n$disclaimer", s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif")
 
         embedBuild.setDescription(s":gear: The online list channel is now set to **$setting** for the world **$worldFormal**.\n$disclaimer")
         embedBuild.build()

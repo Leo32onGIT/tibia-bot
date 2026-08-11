@@ -24,6 +24,7 @@ import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
+import com.tibiabot.presentation.Names
 
 /** createChannels' result: an embed always, plus confirm/cancel buttons only
  *  when it's prompting to reassign a paused world's seat (see
@@ -693,7 +694,7 @@ final class ChannelService(
 
         // matches the audit pattern used by /repair and /remove
         val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
-        com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+        com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*$respawnNote"
         }
@@ -1171,7 +1172,7 @@ final class ChannelService(
           discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "", worldFormal)
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
-        com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+        com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
       // Recreate the moderator role if it was deleted, and re-store its id. Not
@@ -1315,7 +1316,7 @@ final class ChannelService(
           if (adminCategory != null) adminCategory.delete().complete()
         } else {
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
-          com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/remove` on the world **$world** and deleted its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+          com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/remove` on the world **$world** and deleted its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         }
 
         s":gear: The world **$world** has been removed."

@@ -22,6 +22,7 @@ import scala.collection.immutable.ListMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
+import com.tibiabot.presentation.Names
 
 /**
  * Per-guild hunted/allied player and guild list CRUD, plus the shared
@@ -50,6 +51,20 @@ final class HuntedAlliedService(
 
   def vocEmoji(char: CharacterResponse): String =
     com.tibiabot.presentation.Emojis.vocEmoji(char.character.character.vocation)
+
+  /** Who added an entry, by name.
+   *
+   *  The row keeps only their Discord id, because these lines used to be
+   *  mentions and an id was all a mention needed. The name comes from the
+   *  guild's own member cache, so it costs no request; somebody who has since
+   *  left the server, or who simply is not cached, reads as "someone" rather
+   *  than as a bare id, which tells a reader nothing at all.
+   */
+  private def addedByName(guild: Guild, userId: String): String =
+    scala.util.Try(Option(userId).filter(_.nonEmpty).flatMap(id => Option(guild.getMemberById(id))))
+      .toOption.flatten
+      .map(member => Names.user(member.getUser.getName))
+      .getOrElse("**`someone`**")
 
   /** Fetch a character and reduce it to the (name, world, vocation-emoji, level)
    *  summary the add/remove player commands render. On lookup failure yields the
@@ -123,7 +138,7 @@ final class HuntedAlliedService(
             val gUser = gData.addedBy
             val gNameFormal = com.tibiabot.presentation.Names.capitalizeWords(subOptionValueLower)
             val gLink = guildUrl(gNameFormal)
-            embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** <@$gUser>\n **reason:** $gText"
+            embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** ${addedByName(guild, gUser)}\n **reason:** $gText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted guild details:")
@@ -144,7 +159,7 @@ final class HuntedAlliedService(
             val pUser = pData.addedBy
             val pNameFormal = com.tibiabot.presentation.Names.capitalizeWords(subOptionValueLower)
             val pLink = charUrl(pNameFormal)
-            embedText = s"**Player:** [$pNameFormal]($pLink)\n **added by:** <@$pUser>\n **reason:** $pText"
+            embedText = s"**Player:** [$pNameFormal]($pLink)\n **added by:** ${addedByName(guild, pUser)}\n **reason:** $pText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: hunted player details:")
@@ -178,7 +193,7 @@ final class HuntedAlliedService(
             val gUser = gData.addedBy
             val gNameFormal = com.tibiabot.presentation.Names.capitalizeWords(subOptionValueLower)
             val gLink = guildUrl(gNameFormal)
-            embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** <@$gUser>\n **reason:** $gText"
+            embedText = s"**Guild:** [$gNameFormal]($gLink)\n **added by:** ${addedByName(guild, gUser)}\n **reason:** $gText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied guild details:")
@@ -199,7 +214,7 @@ final class HuntedAlliedService(
             val pUser = pData.addedBy
             val pNameFormal = com.tibiabot.presentation.Names.capitalizeWords(subOptionValueLower)
             val pLink = charUrl(pNameFormal)
-            embedText = s"**Player: [$pNameFormal]($pLink)**\n **added by:** <@$pUser>\n **reason:** $pText"
+            embedText = s"**Player: [$pNameFormal]($pLink)**\n **added by:** ${addedByName(guild, pUser)}\n **reason:** $pText"
 
             val embed = new EmbedBuilder()
             embed.setTitle(s":gear: allied player details:")
@@ -483,7 +498,7 @@ final class HuntedAlliedService(
               addHuntedToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the hunted list."
 
-              AdminLog.post(adminChannel, s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} added the guild **[$guildName](${guildUrl(guildName)})** to the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               guildMembers.foreach { member =>
                 val guildPlayers = streamState.activityData.getOrElse(guildId, List())
@@ -518,7 +533,7 @@ final class HuntedAlliedService(
               addHuntedToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the hunted list."
 
-              AdminLog.post(adminChannel, s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -574,7 +589,7 @@ final class HuntedAlliedService(
               addAllyToDatabase(guild, "guild", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been added to the allies list."
 
-              AdminLog.post(adminChannel, s"<@$commandUser> added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} added the guild **[$guildName](${guildUrl(guildName)})** to the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               guildMembers.foreach { member =>
                 val guildPlayers = streamState.activityData.getOrElse(guildId, List())
@@ -609,7 +624,7 @@ final class HuntedAlliedService(
               addAllyToDatabase(guild, "player", subOptionValueLower, reason, subOptionReason, commandUser)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been added to the allies list."
 
-              AdminLog.post(adminChannel, s"<@$commandUser> added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} added the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nto the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -683,7 +698,7 @@ final class HuntedAlliedService(
                 removePlayerActivityfromDatabase(guild, filterPlayer.name)
               }
 
-              AdminLog.post(adminChannel, s"<@$commandUser> removed guild **$guildString** from the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed guild **$guildString** from the hunted list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedText = s":gear: The guild **$guildString** was removed from the hunted list."
               embedBuild.setDescription(embedText)
@@ -728,7 +743,7 @@ final class HuntedAlliedService(
               streamState.modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower))))
               removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
-              AdminLog.post(adminChannel, s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed the player\n$vocation **$level** — **$playerString**\nfrom the hunted list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif")
 
               embedText = s":gear: The player **$playerString** was removed from the hunted list."
               embedBuild.setDescription(embedText)
@@ -781,7 +796,7 @@ final class HuntedAlliedService(
               streamState.modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.guild.equalsIgnoreCase(subOptionValueLower))))
               removeGuildActivityfromDatabase(guild, subOptionValueLower)
 
-              AdminLog.post(adminChannel, s"<@$commandUser> removed **$guildString** from the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed **$guildString** from the allies list.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedText = s":gear: The guild **$guildString** was removed from the allies list."
               embedBuild.setDescription(embedText)
@@ -810,7 +825,7 @@ final class HuntedAlliedService(
               streamState.modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(subOptionValueLower))))
               removePlayerActivityfromDatabase(guild, subOptionValueLower)
 
-              AdminLog.post(adminChannel, s"<@$commandUser> removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed the player\n$vocation **$level** — **$playerString**\nfrom the allies list for **$world**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif")
 
               embedText = s":gear: The player **$playerString** was removed from the allies list."
               embedBuild.setDescription(embedText)

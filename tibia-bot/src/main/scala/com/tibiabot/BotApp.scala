@@ -24,6 +24,7 @@ import java.time.ZoneId
 import scala.util.Random
 import scala.concurrent.Await
 import com.tibiabot.presentation.Embeds.BrandColor
+import com.tibiabot.presentation.Names
 
 object BotApp extends App with StrictLogging {
 
@@ -239,6 +240,9 @@ object BotApp extends App with StrictLogging {
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = discordGateway.selfUserId
+  // ...and what it is called, which is what those messages actually show. A
+  // mention would ping the bot's own role in every guild it logs to.
+  val botUserName: String = discordGateway.selfUserName
   // the application owner = the bot creator (used to gate /admin)
   val botOwner: String = discordGateway.applicationOwnerId
 
@@ -694,13 +698,11 @@ object BotApp extends App with StrictLogging {
           // isn't a command audit, it's a system-triggered notice.
           if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
             // userName is a snapshot taken at /setup time — empty for seats
-            // assigned before that field existed. An empty `` `` `` pair
-            // breaks the rest of this message's markdown (Discord treats the
-            // next stray backtick, in "`/setup`" below, as its closing one),
-            // so the username only renders when non-empty; the mention is
-            // always current regardless of username staleness.
-            val mention = s"<@$userId>"
-            val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
+            // assigned before that field existed, which Names.user renders as
+            // "someone" rather than leaving an empty `` `` `` pair to break the
+            // rest of this message's markdown (Discord would treat the next
+            // stray backtick, in "`/setup`" below, as its closing one).
+            val subscriber = Names.user(userName)
             // An empty userId means this world never had a seat at all (a
             // legacy setup whose grace period ran out) — there's no
             // subscription to describe as lapsed and nobody to name, so say

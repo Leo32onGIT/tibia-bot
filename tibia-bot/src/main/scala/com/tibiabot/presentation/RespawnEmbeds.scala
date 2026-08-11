@@ -49,17 +49,24 @@ object RespawnEmbeds {
     else s"${remainder}m"
   }
 
-  /** How a claimant is named: their Tibia character when they gave one, always
-   *  followed by the Discord mention so they can actually be pinged. */
+  /** How a claimant is named: their Tibia character when they gave one, followed
+   *  by the Discord name the claim was made under. Both are plain text — see
+   *  [[Names.user]] for why none of these read as a mention. */
   private def claimantLabel(claim: RespawnClaim): String =
-    if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
-    else s"${claim.userName}"
+    (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
+      case (true, true)  => s"**${claim.characterName}** (${Names.user(claim.userName)})"
+      case (true, false) => s"**${claim.characterName}**"
+      case _             => Names.user(claim.userName)
+    }
 
   /** The same, for a booking that has not produced a slot row yet — the rule
    *  carries the character too, so it names its owner identically. */
   private def scheduleLabel(schedule: RespawnSchedule): String =
-    if (schedule.characterName.nonEmpty) s"**${schedule.characterName}** (<@${schedule.userId}>)"
-    else s"`${schedule.userName}`"
+    (schedule.characterName.nonEmpty, schedule.userName.nonEmpty) match {
+      case (true, true)  => s"**${schedule.characterName}** (${Names.user(schedule.userName)})"
+      case (true, false) => s"**${schedule.characterName}**"
+      case _             => Names.user(schedule.userName)
+    }
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
    *  uses, and always hollow here: a card is one shared post rather than a reply
@@ -242,17 +249,16 @@ object RespawnEmbeds {
     // way to ask; the plainer opening survives for a request that was already in
     // flight when the Request button was removed, and for nothing else.
     //
-    // The asker is a mention rather than a name: Discord resolves it by id, so it
-    // reads as their current display name in a DM they are not part of, and it
-    // notifies nobody — they are not a recipient of this channel. "Someone" is
-    // the fallback for a row written before the id was recorded.
-    val asker = slot.requesterUserId.map(id => s"<@$id>").getOrElse("Someone")
+    // The name recorded on the request rather than a mention — see Names.user.
+    // "Someone" is the fallback for a row written before the name was kept.
+    // Already emphasised, so the sentences below interpolate it bare.
+    val asker = slot.requesterUserName.filter(_.nonEmpty).map(Names.user).getOrElse("**Someone**")
     val opening = wanted match {
       case Some((start, minutes)) =>
-        s"**$asker** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
+        s"$asker wants to book **${respawn.displayName}** from ${clockTime(start)} " +
           s"for ${humanDuration(minutes)}, which runs over your slot at $window."
       case None =>
-        s"**$asker** would like **${respawn.displayName}** at $window."
+        s"$asker would like **${respawn.displayName}** at $window."
     }
     s"$opening\nIf you don't answer by ${relative(deadline)} the slot goes to them."
   }
@@ -268,7 +274,7 @@ object RespawnEmbeds {
       case _                        => ""
     }
     val booking = if (slot.requestedSlot.isDefined) " Your booking wasn't made." else ""
-    s"<@${slot.userId}> has confirmed they are hunting **${respawn.displayName}**$when, " +
+    s"${Names.user(slot.userName)} has confirmed they are hunting **${respawn.displayName}**$when, " +
       s"so it stays theirs.$booking"
   }
 
@@ -339,7 +345,7 @@ object RespawnEmbeds {
 
   /** DM'd when a booked slot arrives to find somebody already hunting. */
   def slotOccupied(respawn: Respawn, holder: Option[RespawnClaim]): String = {
-    val who = holder.map(c => s" by <@${c.userId}>").getOrElse("")
+    val who = holder.map(c => s" by ${Names.user(c.userName)}").getOrElse("")
     val until = holder.flatMap(_.endsAt).map(end => s" until ${clockTime(end)}").getOrElse("")
     s"**${respawn.displayName}** was already being hunted$who$until when your slot came round, " +
       "so you're first in the queue and I'll offer it to you the moment they finish."
@@ -376,7 +382,7 @@ object RespawnEmbeds {
       }.sortBy { case (start, _, _) => start.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue) }
 
       embed.setDescription(truncateLines(dated.map { case (start, schedule, respawn) =>
-        val who = if (everyones) s" · <@${schedule.userId}>" else ""
+        val who = if (everyones) s" · ${Names.user(schedule.userName)}" else ""
         start match {
           case Some(from) =>
             // A repeat says which days and needs no date. A one-off is one
@@ -467,14 +473,14 @@ object RespawnEmbeds {
    *  claim time from the same getName a lookup would return, so showing it costs
    *  nothing where retrieving each entry's user would be a REST call per person
    *  per render. The trade is that it does not follow a later rename and cannot
-   *  be clicked; the mention is kept only as a last resort, for old rows that
-   *  predate the column and have no name to show at all. */
+   *  be clicked. An old row that predates the column has no name to show at all,
+   *  and says so rather than falling back to a raw id nobody can read. */
   private def logName(claim: RespawnClaim): String =
     (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)   => s"${claim.characterName} (${claim.userName})"
       case (true, false)  => claim.characterName
       case (false, true)  => claim.userName
-      case (false, false) => s"<@${claim.userId}>"
+      case (false, false) => "someone"
     }
 
   /** Who held it and how it went — the part that reads the same wherever an
@@ -650,8 +656,8 @@ object RespawnEmbeds {
   /** DM'd to somebody a moderator has taken a hunt from. Says who has it now, so
    *  the answer to "why did my hunt stop" is in the message rather than in a
    *  card they would have to go and read. */
-  def claimReassignedFrom(respawn: Respawn, toUserId: String): String =
-    s"A moderator has given your hunt on **${respawn.displayName}** to <@$toUserId>."
+  def claimReassignedFrom(respawn: Respawn, toUserName: String): String =
+    s"A moderator has given your hunt on **${respawn.displayName}** to ${Names.user(toUserName)}."
 
   /** DM'd to whoever a moderator has given a hunt to. */
   def claimReassignedTo(respawn: Respawn, claim: RespawnClaim): String = {

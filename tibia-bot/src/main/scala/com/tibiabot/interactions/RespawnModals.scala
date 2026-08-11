@@ -16,6 +16,7 @@ import net.dv8tion.jda.api.modals.Modal
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
+import com.tibiabot.presentation.Names
 
 /** The two modals behind the board post's buttons.
  *
@@ -458,7 +459,7 @@ object RespawnModals extends StrictLogging {
             // for them, and telling somebody they have a slot they may not get
             // is worse than making them wait for the answer.
             case Right(ScheduleResult.Requested(_, slot, deadline)) =>
-              reply(event, s"${Config.yesEmoji} That time is <@${slot.userId}>'s, so I've asked " +
+              reply(event, s"${Config.yesEmoji} That time is ${Names.user(slot.userName)}'s, so I've asked " +
                 "whether they're actually hunting it.\nIf they say no, or don't answer by " +
                 s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
                 s"booked for you from <t:$startEpoch:t> for " +
@@ -524,7 +525,7 @@ object RespawnModals extends StrictLogging {
         val reassigned = giveTo match {
           case None       => Right(None)
           case Some(user) => service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName)
-                               .map(_ => Some(user.getId))
+                               .map(_ => Some(user.getId -> user.getName))
         }
 
         reassigned match {
@@ -532,19 +533,24 @@ object RespawnModals extends StrictLogging {
           case Right(movedTo) =>
             // Whose claim the length applies to: whoever now holds it after any
             // handover, or the caller when they came through their own Config.
-            val target =
-              if (!forHolder) Some(event.getUser.getId)
-              else movedTo.orElse(service.holderOf(event.getGuild.getId, respawnId).map(_.userId))
+            // Carried with their name, since the reply names them and every
+            // source of it already knows what they are called.
+            val target: Option[(String, String)] =
+              if (!forHolder) Some(event.getUser.getId -> event.getUser.getName)
+              else movedTo.orElse(
+                service.holderOf(event.getGuild.getId, respawnId).map(c => c.userId -> c.userName))
 
             target match {
               case None =>
                 reply(event, s"${Config.noEmoji} Nobody is holding that respawn any more.")
-              case Some(userId) =>
+              case Some((userId, userName)) =>
                 service.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
                   case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
                   case Right((respawn, applied)) =>
-                    val whose = if (forHolder && userId != event.getUser.getId) s" for <@$userId>" else ""
-                    val moved = movedTo.map(id => s"\nIt's <@$id>'s hunt now.").getOrElse("")
+                    val whose =
+                      if (forHolder && userId != event.getUser.getId) s" for ${Names.user(userName)}" else ""
+                    val moved = movedTo.map { case (_, name) => s"\nIt's ${Names.user(name)}'s hunt now." }
+                      .getOrElse("")
                     val note =
                       if (applied != minutes)
                         s"\nThe hunt had already run longer than that, so it's set to " +
@@ -578,7 +584,7 @@ object RespawnModals extends StrictLogging {
             val tank = BotApp.respawnService.grantStamina(guild.getId, user.getId, minutes, config)
             val verb = if (minutes > 0) "Gave" else "Took"
             reply(event, s"${Config.yesEmoji} $verb **${RespawnEmbeds.humanDuration(math.abs(minutes))}** " +
-              s"${if (minutes > 0) "to" else "from"} <@${user.getId}> — they now have " +
+              s"${if (minutes > 0) "to" else "from"} ${Names.user(user.getName)} — they now have " +
               s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
               s"${RespawnEmbeds.humanDuration(config.staminaMinutes)} left.")
         }

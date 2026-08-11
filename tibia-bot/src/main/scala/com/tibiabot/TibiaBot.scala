@@ -476,7 +476,7 @@ class TibiaBot(
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
                               if (adminTextChannel.canTalk() || (!Config.prod)) {
-                                val commandUser = s"<@${BotApp.botUser}>"
+                                val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                                 val adminEmbed = new EmbedBuilder()
                                 adminEmbed.setTitle(":robot: enemy joined an allied guild:")
                                 adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(they left a hunted guild & joined an allied one)*.")
@@ -496,7 +496,7 @@ class TibiaBot(
                             val adminTextChannel = guild.getTextChannelById(adminChannel)
                             if (adminTextChannel != null) {
                               if (adminTextChannel.canTalk() || (!Config.prod)) {
-                                val commandUser = s"<@${BotApp.botUser}>"
+                                val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                                 val adminEmbed = new EmbedBuilder()
                                 adminEmbed.setTitle(":robot: enemy automatically detected:")
                                 adminEmbed.setDescription(s"$commandUser added the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nto the hunted list for **$world**\n*(they left a hunted guild, so they will remain hunted)*.")
@@ -525,7 +525,7 @@ class TibiaBot(
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
                             if (adminTextChannel.canTalk() || (!Config.prod)) {
-                              val commandUser = s"<@${BotApp.botUser}>"
+                              val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: hunted list cleanup:")
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
@@ -540,7 +540,7 @@ class TibiaBot(
                           val adminTextChannel = guild.getTextChannelById(adminChannel)
                           if (adminTextChannel != null) {
                             if (adminTextChannel.canTalk() || (!Config.prod)) {
-                              val commandUser = s"<@${BotApp.botUser}>"
+                              val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: hunted list cleanup:")
                               adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
@@ -595,7 +595,7 @@ class TibiaBot(
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
                         if (adminTextChannel.canTalk() || (!Config.prod)) {
-                          val commandUser = s"<@${BotApp.botUser}>"
+                          val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: hunted list cleanup:")
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the hunted list for **$world**\n*(because they have joined an enemy guild and will be tracked that way)*.")
@@ -613,7 +613,7 @@ class TibiaBot(
                       val adminTextChannel = guild.getTextChannelById(adminChannel)
                       if (adminTextChannel != null) {
                         if (adminTextChannel.canTalk() || (!Config.prod)) {
-                          val commandUser = s"<@${BotApp.botUser}>"
+                          val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                           val adminEmbed = new EmbedBuilder()
                           adminEmbed.setTitle(":robot: allied list cleanup:")
                           adminEmbed.setDescription(s"$commandUser removed the player\n$charVocation **$charLevel** — **[$charName](${charUrl(charName)})**\nfrom the allied list for **$world**\n*(because they have joined an allied guild and will be tracked that way)*.")
@@ -1015,7 +1015,7 @@ class TibiaBot(
                             BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             // add them to the database
                             BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
-                            val commandUser = s"<@${BotApp.botUser}>"
+                            val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                             val adminEmbed = new EmbedBuilder()
                             adminEmbed.setTitle(":robot: enemy automatically detected:")
                             adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")

@@ -63,11 +63,15 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     second should not include "()"
   }
 
-  test("a row too old to carry a username falls back to a mention rather than naming nobody") {
-    // user_name arrived with a DEFAULT '' , so the earliest rows have none.
+  test("a row too old to carry a username says so rather than showing a raw id") {
+    // user_name arrived with a DEFAULT '', so the earliest rows have none. This
+    // used to fall back to a mention; nothing in the log is a mention any more,
+    // and an id on its own tells a reader nothing, so the line owns up instead.
     val second = RespawnEmbeds
       .logEntry(claim(character = "").copy(userName = ""), None).split("\n")(1)
-    second should include("<@123456789012345678>")
+    second should include("someone")
+    second should not include "123456789012345678"
+    second should not include "<@"
   }
 
   test("a character name survives a row with no username") {

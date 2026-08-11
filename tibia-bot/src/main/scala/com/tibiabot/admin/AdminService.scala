@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
+import com.tibiabot.presentation.Names
 
 
 /**
@@ -53,7 +54,7 @@ final class AdminService(
     } else {
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       postCreatorLog(adminChannel,
-        s"<@$botUserId> has left your discord because of the following reason:\n> $reason",
+        s"${Names.user(discordGateway.selfUserName)} has left your discord because of the following reason:\n> $reason",
         "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
       embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
     }
@@ -95,7 +96,7 @@ final class AdminService(
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       if (adminChannel != null) {
         postCreatorLog(adminChannel,
-          s"<@$botUserId> has forwarded a message from the bot's creator:\n> $message",
+          s"${Names.user(discordGateway.selfUserName)} has forwarded a message from the bot's creator:\n> $message",
           "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Letter.gif")
         embedMessage = s":gear: The bot has left a message for the Guild: **${guild.getName()}**."
       } else {

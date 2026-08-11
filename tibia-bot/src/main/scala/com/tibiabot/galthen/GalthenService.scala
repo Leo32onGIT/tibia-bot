@@ -13,6 +13,7 @@ import net.dv8tion.jda.api.components.buttons.Button
 import java.sql.Timestamp
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
+import com.tibiabot.presentation.Names
 
 /**
  * Galthen's Satchel cooldown tracking: CRUD over the satchel table plus the
@@ -51,7 +52,7 @@ final class GalthenService(
           user.openPrivateChannel().queue { privateChannel =>
             val embed = new EmbedBuilder()
             if (tagId.nonEmpty) embed.setFooter(s"Tag: ${tagId.toLowerCase}")
-            val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else s"<@$userId>"
+            val displayTag = if (tagId.nonEmpty) s"**`$tagId`**" else Names.user(user.getName)
             embed.setColor(178877)
             embed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
             embed.setDescription(s"<:satchel:1030348072577945651> cooldown for $displayTag expired <t:$cooldown:R>\n\nMark it as **Collected** and I will message you when the 30 day cooldown expires.")
