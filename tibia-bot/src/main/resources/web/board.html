@@ -797,13 +797,21 @@ function paintCard(spawn) {
   }
 }
 
-/** Which spawns are shown, and in what order. Most recently touched first, so
- *  whatever is alive rises to the top; a spawn never claimed sorts last. */
+/** Which spawns are shown, and in what order.
+ *
+ *  Spawns somebody is actually on come first, then everything else by how
+ *  recently it was touched; a spawn never claimed sorts last. This is the rule
+ *  Discord's forum already follows — a post is bumped while it is held and put
+ *  to sleep when it is let go — so the two read the same way round.
+ *
+ *  Being *touched* is not the same as being held, which is where the two used to
+ *  part company: sorting on activity alone floated a spawn somebody had just
+ *  released above one somebody was still hunting.
+ */
 function shownSpawns() {
-  return board.spawns.filter(matches).slice().sort((a, b) => {
-    const ha = hoursSince(a.lastActivity), hb = hoursSince(b.lastActivity);
-    return (ha == null ? Infinity : ha) - (hb == null ? Infinity : hb);
-  });
+  const held = s => (s.state === 'claimed' ? 0 : 1);
+  const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
+  return board.spawns.filter(matches).slice().sort((a, b) => held(a) - held(b) || since(a) - since(b));
 }
 
 /** Put the cards in the right order, making and removing only what changed.
@@ -1180,11 +1188,16 @@ function renderWindow() {
   // and whether or not the week is open.
   const foot = document.getElementById('win-foot');
   foot.innerHTML = '';
-  const action = readout();
-  if (action) foot.appendChild(action);
+  // The answer goes above the action row, not below it. Below, every reply the
+  // bot gave changed the height of the thing under the button and shifted the
+  // button itself; above, the reply grows upward into the panel and the button
+  // keeps the corner it had. Whether there is an answer at all is then the one
+  // thing that cannot move it.
   if (view.answer) {
     foot.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
   }
+  const action = readout();
+  if (action) foot.appendChild(action);
   foot.hidden = !foot.firstChild;
 
   wireWindow();
@@ -1216,14 +1229,19 @@ function claimEmojiImg() {
 /** The one thing this panel is most likely to be asked to do, whatever that
  *  currently is.
  *
- *  A time picked on the grid means booking it; nothing picked means claiming the
- *  spawn right now. They are the same decision at different moments, so they are
- *  one button rather than two competing ones — and it sits wherever the reader
- *  is already looking: in the strip at the top while the week is folded away,
- *  and at the foot of the week beside the verdict once it is open.
+ *  Every way of taking this spawn on or letting it go is the same decision at a
+ *  different moment, so they are one button in one corner rather than several
+ *  competing ones scattered around the panel. In order of precedence:
  *
- *  Returns nothing when there is nothing to offer, which is the case for
- *  somebody who already holds the spawn or is already queued for it.
+ *    - a time picked on the grid means booking it, even for a spawn already
+ *      held — booking a later evening and hunting one now are different acts,
+ *      and the pick is the reader saying which they meant;
+ *    - holding it offers giving it back, and standing in its queue offers
+ *      leaving that queue;
+ *    - otherwise it offers taking the spawn now.
+ *
+ *  Nothing at all when none of those apply — no stamina left, say — which the
+ *  strip above explains rather than leaving a dead button to be pressed.
  */
 function primaryAction(spawn) {
   if (view.pick) {
@@ -1232,6 +1250,29 @@ function primaryAction(spawn) {
     book.disabled = !canBook();
     return book;
   }
+
+  // Giving it up outranks taking it on, and the two can never both apply:
+  // holding a spawn or queueing for it is exactly what stops you claiming it.
+  if (spawn.mine || spawn.queued) {
+    const holding = spawn.mine;
+    return button(holding ? 'Release' : 'Leave queue', 'btn danger',
+      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
+        if (holding) {
+          s.mine = false;
+          // Free unless somebody is waiting, in which case it passes to them.
+          // Who that is, is not ours to guess — naming the wrong person for a
+          // second is worse than saying "someone" until the poll says.
+          s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
+          delete s.holder;
+          delete s.startsAt;
+          delete s.endsAt;
+        } else {
+          s.queued = false;
+          s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
+        }
+      }));
+  }
+
   if (!canClaimNow(spawn)) return null;
 
   // Wording follows what will actually happen, so nobody presses "Claim" and is
@@ -1283,14 +1324,11 @@ function nowStrip(spawn) {
 
   const canClaim = canClaimNow(spawn);
   if (canClaim) {
-    strip.appendChild(el('span', 'field', `
-      <span class="field-label">For</span>
-      <span class="stepper">
-        <button data-claim-step="-1" ${view.duration <= MIN_CLAIM ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
-        <span class="dur-val">${fmtDur(view.duration)}</span>
-        <button data-claim-step="1" ${view.duration >= cap() ? 'disabled' : ''} aria-label="Longer">+</button>
-      </span>
-      <span class="dur-cap">up to ${fmtDur(cap())} · ${esc(l.boundBy)}</span>`));
+    // How long is set on the week's slider and nowhere else. There used to be a
+    // stepper here as well, which meant two controls for one number — this says
+    // only what the ceiling is and which rule imposes it.
+    strip.appendChild(el('span', 'field',
+      `<span class="dur-cap">up to ${fmtDur(cap())} · ${esc(l.boundBy)}</span>`));
   } else if (l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
     strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
   }
@@ -1304,28 +1342,9 @@ function nowStrip(spawn) {
       <span class="pending" style="width:${(Math.min(view.duration || 0, left) / budget * 100).toFixed(1)}%"></span>`));
     actions.appendChild(el('span', 'stamina-val', `${fmtDur(left)} left`));
   }
-  // Claim and Book are not here at all: they live in the panel's footer, in one
-  // fixed corner — see readout. Releasing stays, because it is the opposite of
-  // the thing that button offers and never appears at the same time as it.
-  if (spawn.mine || spawn.queued) {
-    const holding = spawn.mine;
-    actions.appendChild(button(holding ? 'Release' : 'Leave queue', 'btn danger',
-      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
-        if (holding) {
-          s.mine = false;
-          // Free unless somebody is waiting, in which case it passes to them.
-          // Who that is, is not ours to guess — naming the wrong person for a
-          // second is worse than saying "someone" until the poll says.
-          s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
-          delete s.holder;
-          delete s.startsAt;
-          delete s.endsAt;
-        } else {
-          s.queued = false;
-          s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
-        }
-      })));
-  }
+  // No buttons here at all. Claim, Book, Release and Leave queue are all the
+  // same decision about this spawn at different moments, so they are one button
+  // in one corner of the panel — see primaryAction.
   strip.appendChild(actions);
   return strip;
 }
@@ -1440,6 +1459,11 @@ function calendar() {
   }
   grid.appendChild(el('div', 'wk-hours', hourRows.join('')));
 
+  // Worked out once for the week rather than once per column: the answer does
+  // not depend on which column is being drawn, and each entry may well belong
+  // in two of them.
+  const selection = view.duration ? previews(start) : [];
+
   for (let day = 0; day < 7; day++) {
     const col = el('div', 'wk-col');
     const colStart = dayStart(start, day).getTime(), colEnd = colStart + DAY_MS;
@@ -1489,8 +1513,13 @@ function calendar() {
     // weekly booking, every evening it will actually take, not only the one that
     // was clicked. A rule that quietly recurs on days the reader never saw is
     // how somebody ends up holding four evenings they meant to hold one of.
-    if (view.duration) {
-      previews(start, day).forEach(p => {
+    //
+    // Clipped to this column exactly as the bookings above are, so a hunt
+    // running past local midnight is drawn as two pieces — the tail of one day
+    // and the head of the next — rather than stopping at the bottom of the
+    // column it started in.
+    {
+      selection.forEach(p => {
         const pEnd = new Date(p.at.getTime() + view.duration * 60000);
         if (p.at.getTime() >= colEnd || colStart >= pEnd.getTime()) return;
         const from = Math.max(p.at.getTime(), colStart), to = Math.min(pEnd.getTime(), colEnd);
@@ -1508,9 +1537,10 @@ function calendar() {
         // week — picking somewhere else was the only move.
         sel.title = 'Right-click to clear this selection';
         sel.addEventListener('contextmenu', e => { e.preventDefault(); clearPick(); });
-        // Only the block being booked takes a handle. An echo is a consequence
-        // of the rule rather than a thing to drag, and the piece below a
-        // midnight split is not where the hunt ends.
+        // Only the block being booked takes a handle, and only on the piece that
+        // carries its end — an echo is a consequence of the rule rather than a
+        // thing to drag, and the half above a midnight split is not where the
+        // hunt finishes.
         if (!p.echo && pEnd.getTime() <= colEnd) sel.appendChild(stretchHandle(sel));
         col.appendChild(sel);
       });
@@ -1545,32 +1575,43 @@ function calendar() {
   return wrap;
 }
 
-/** Where the selection should be drawn on `day` of the week starting `start`.
+/** Every instant the selection occupies in the week starting `start`.
  *
  *  One entry for the slot that was actually picked, and — when the booking
  *  repeats — an echo on every other day the mask names, at the same local time
  *  of day. The echoes are a preview of the rule, not slots that exist: the bot
  *  produces them from the anchor plus whole days, so a local daylight saving
  *  change between here and there would move one by an hour.
+ *
+ *  The whole week at once, rather than one column's worth. Each entry is a start
+ *  and the caller clips it to whichever columns it runs through, so a hunt begun
+ *  before local midnight is drawn in both the day it starts and the day it ends.
+ *  Asking per column could only ever produce the piece that began there, which
+ *  is why the far side of midnight went missing.
  */
-function previews(start, day) {
+function previews(start) {
   if (!view.pick) return [];
-  const at = dayStart(start, day);
-  at.setHours(view.pick.getHours(), view.pick.getMinutes(), 0, 0);
   const weekly = view.repeat === 'week' && view.days.size > 0;
   const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
-  if (at.getTime() === new Date(view.pick).setSeconds(0, 0)) {
-    // The day that was clicked is only a slot if the mask names it. When it does
-    // not, the click was just the time of day — drawing it as a booking there
-    // would promise an evening nobody is going to get.
-    return weekly && !covers(view.pick)
-      ? [{ at: view.pick, echo: true, label: 'Start time' }]
-      : [{ at: view.pick, echo: false, label: 'You' }];
+  const picked = new Date(view.pick).setSeconds(0, 0);
+  const out = [];
+  for (let day = 0; day < 7; day++) {
+    const at = dayStart(start, day);
+    at.setHours(view.pick.getHours(), view.pick.getMinutes(), 0, 0);
+    if (at.getTime() === picked) {
+      // The day that was clicked is only a slot if the mask names it. When it
+      // does not, the click was just the time of day — drawing it as a booking
+      // there would promise an evening nobody is going to get.
+      out.push(weekly && !covers(view.pick)
+        ? { at: view.pick, echo: true, label: 'Start time' }
+        : { at: view.pick, echo: false, label: 'You' });
+    } else if (weekly && covers(at)) {
+      // The mask is in server weekdays, so which local column an echo belongs in
+      // is a question about that instant, not about this column's heading.
+      out.push({ at, echo: true, label: 'Repeats' });
+    }
   }
-  if (!weekly) return [];
-  // The mask is in server weekdays, so which local column an echo belongs in is
-  // a question about that instant, not about this column's heading.
-  return covers(at) ? [{ at, echo: true, label: 'Repeats' }] : [];
+  return out;
 }
 
 /** Drag the foot of the selection to change how long the hunt is.
@@ -1775,8 +1816,6 @@ function scrollToNow(smooth) {
 function wireWindow() {
   const body = document.getElementById('win-body');
 
-  body.querySelectorAll('[data-claim-step]').forEach(btn =>
-    btn.addEventListener('click', () => setDuration(view.duration + Number(btn.dataset.claimStep) * step())));
   body.querySelectorAll('[data-step]').forEach(btn =>
     btn.addEventListener('click', () => setDuration(view.duration + Number(btn.dataset.step) * SLOT)));
 
