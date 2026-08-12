@@ -67,7 +67,7 @@
      on the page belongs to exactly one of them — so the name is stated rather
      than left to be inferred from the tab. The Discord glyph is what says the
      name is a server's and not the board's. */
-  .brand .server { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
+  .brand .server { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
   .brand .server i { font-size: 13px; color: var(--muted); }
   /* Which page of the bot this is, in the same muted voice /status wears after
      the bot's name — so the two mastheads read as the same family. */
@@ -80,9 +80,22 @@
      RespawnDashboardRoute.serverChip — and only when there is more than one
      server to switch to; the single-server case stays the plain label above and
      never grows a chevron. */
-  .sw { position: relative; display: inline-flex; }
+  .sw { position: relative; display: inline-flex; min-width: 0; }
+  /* The server's name, given a ceiling and cut with an ellipsis rather than
+     allowed to set the masthead's width.
+     Without one it wrapped: the button is inline-flex and the name was a bare
+     anonymous item with nothing telling it to stay on one line, so a long name
+     broke across three of them and painted up out of the header and over the
+     page behind it. A fixed width and a clean cut is the whole of the fix —
+     the full name is on the row in the menu below, and in the title. */
+  /* `flex: 0 0 auto` and not a bare max-width: as a flex item it would
+     otherwise be free to shrink, and on a narrow screen — where the row beside
+     it takes the full width — it shrank all the way to nothing and the name
+     disappeared entirely. This takes its content's width up to the ceiling, and
+     gives up none of it. */
+  .sw-title { flex: 0 0 auto; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sw-btn {
-    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0;
     background: transparent; border: 1px solid transparent; border-radius: 7px;
     padding: 4px 8px; margin: -4px -8px;
     color: inherit; font-family: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit;
@@ -646,6 +659,9 @@
     main { padding: 18px 12px 50px; }
     .masthead-right { margin-left: 0; width: 100%; }
     .filter { flex: 1; width: auto; }
+    /* Less room to give it, so it is cut sooner rather than pushing the
+       avatar and the chevron off the row. */
+    .sw-title { max-width: 150px; }
     /* dvh, not vh: on a phone `100vh` is the viewport with the browser's own
        chrome pretended away, so a full-height panel is taller than the screen
        actually showing it and the whole thing scrolls by exactly the height of
@@ -795,6 +811,9 @@ const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches;
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 const pad = n => String(n).padStart(2, '0');
+/** An hour of the day as a twelve-hour clock reads it. Midnight and noon are
+ *  12, not 0 — "0 AM" is not a time anybody writes. */
+const twelveHour = h => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
 const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const fmtDur = m =>
   m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
@@ -1013,7 +1032,36 @@ const limits = () => (board && board.limits) || null;
 const step = () => (limits() ? limits().step : SLOT);
 /** The longest claim that can actually be made: the shorter of the guild's
  *  ceiling and what is left in the tank, already snapped to the step. */
-const cap = () => { const l = limits(); return l ? l.claimableMinutes : 0; };
+/** The longest hunt that could start at `when`.
+ *
+ *  Stamina is an allowance per server-save day, and it is spent when a hunt
+ *  *starts*, not when it is arranged — so a slot booked for after the next
+ *  server save is paid out of that day's allowance rather than out of what is
+ *  left of this one. Measuring a booking against today's remainder made a spent
+ *  tank shrink what could be booked for tomorrow, and at nothing left it barred
+ *  booking a future day at all: the ceiling reached zero, the length with it,
+ *  and Book was refused for a hunt the server would have accepted quite happily.
+ *
+ *  A day yet to begin is worth the guild's whole allowance, since that is what
+ *  the tank refills to — the true figure is unknowable from here anyway, being
+ *  whatever they have not spent by the time it comes round.
+ */
+function capAt(when) {
+  const l = limits();
+  if (!l) return 0;
+  const resets = l.resetsAt ? new Date(l.resetsAt).getTime() : null;
+  if (when && resets && when.getTime() >= resets) {
+    return l.budgetMinutes == null
+      ? l.maxDurationMinutes
+      : Math.max(0, Math.min(l.maxDurationMinutes, l.budgetMinutes));
+  }
+  return l.claimableMinutes;
+}
+
+/** The ceiling for the hunt currently being arranged: the selected slot if
+ *  there is one, otherwise a claim starting now. One length serves both, so it
+ *  is measured against whichever the button is about to do. */
+const cap = () => capAt(view.pick);
 const openSpawn = () => (board && view.code ? board.spawns.find(s => s.code === view.code) : null);
 
 function hoursSince(iso) {
@@ -1539,6 +1587,29 @@ function setDuration(minutes) {
   renderWindow();
 }
 
+/** Keep the chosen length inside what the hunt being arranged can actually run
+ *  for.
+ *
+ *  The ceiling moves with the selection — a slot after the next server save is
+ *  paid from that day's allowance — so a length that was impossible a moment ago
+ *  may have become possible, and one that was fine may now be too long. Only
+ *  ever raised from below the floor, never from a length somebody chose: picking
+ *  half an hour deliberately and finding it stretched to two would be the page
+ *  overruling them.
+ */
+function fitDuration() {
+  const l = limits();
+  if (!l) return;
+  const ceiling = cap();
+  if (ceiling <= 0) { view.duration = 0; return; }
+  const floor = Math.min(SLOT, ceiling);
+  if (!view.duration || view.duration < floor) {
+    view.duration = Math.min(l.defaultDurationMinutes, ceiling);
+  } else if (view.duration > ceiling) {
+    view.duration = ceiling;
+  }
+}
+
 /** The three quantities the duration control is drawn against.
  *
  *  `span` is what the whole bar is worth. With stamina switched off there is no
@@ -1696,6 +1767,7 @@ function clearPick() {
 function renderWindow() {
   const spawn = openSpawn();
   if (!spawn) { closeWindow(); return; }
+  fitDuration();
   // Both axes: on a phone the week is wider than the screen as well as taller,
   // and a render that put the hours back but not the days would jump the reader
   // to Monday every time the selection moved.
@@ -2070,13 +2142,16 @@ function calendar() {
   // Built as one string and written once. Appending to innerHTML in the loop
   // made the browser reserialise and reparse the whole gutter twenty-four times
   // over, for a run of markup that is the same shape every hour of every week.
-  const probe = dayStart(start, 3);
+  //
+  // The same local hour said twice, twelve-hour over twenty-four. This used to
+  // carry the server's hour underneath instead; the axis is the reader's own
+  // clock either way, and which of the two ways of writing it they think in is
+  // the thing that actually varies between people. Server time has not gone
+  // from the page — the readout gives it for whatever is selected, and server
+  // save is still drawn where it falls.
   const hourRows = [];
   for (let h = 0; h < 24; h++) {
-    // Read on a midweek day so the echo is not skewed by a changeover at either
-    // end of the week.
-    probe.setHours(h, 0, 0, 0);
-    hourRows.push(`<div class="wk-hour">${pad(h)}:00<span class="srv">${pad(serverParts(probe).hour)} srv</span></div>`);
+    hourRows.push(`<div class="wk-hour">${twelveHour(h)}<span class="srv">${pad(h)}:00</span></div>`);
   }
   const hours = el('div', 'wk-hours', hourRows.join(''));
   rows.appendChild(hours);

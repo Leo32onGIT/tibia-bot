@@ -502,7 +502,11 @@ object RespawnDashboardRoute {
   private[web] def serverChip(a: GuildAccess, among: List[GuildAccess]): String = {
     val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
     val suffix = """<span class="brand-suffix">/dashboard</span>"""
-    if (among.size <= 1) s"""<span class="server">$glyph${esc(a.guildName)}$suffix</span>"""
+    // The name is wrapped rather than written bare, so it can be given a width
+    // and cut when it is longer than the masthead has room for — see .sw-title.
+    // `title` carries the whole of it for anyone who wants to read it.
+    def named(name: String) = s"""<span class="sw-title" title="${esc(name)}">${esc(name)}</span>"""
+    if (among.size <= 1) s"""<span class="server">$glyph${named(a.guildName)}$suffix</span>"""
     else {
       // The server's own face, and what the viewer is on it. A row of identical
       // Discord glyphs told you nothing you could pick a server by; an avatar is
@@ -527,7 +531,7 @@ object RespawnDashboardRoute {
       s"""<span class="sw" id="server-switch">""" +
         s"""<button class="sw-btn" id="server-switch-btn" type="button" """ +
         s"""aria-haspopup="true" aria-expanded="false" title="Switch server">""" +
-        s"""$glyph${esc(a.guildName)}$suffix""" +
+        s"""$glyph${named(a.guildName)}$suffix""" +
         s"""<i class="ti ti-chevron-down chev" aria-hidden="true"></i></button>""" +
         s"""<span class="sw-menu"><span class="sw-label">Your servers</span>$items</span></span>"""
     }
