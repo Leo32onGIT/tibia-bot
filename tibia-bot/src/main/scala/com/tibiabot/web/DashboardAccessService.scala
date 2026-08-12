@@ -91,12 +91,16 @@ final class DashboardAccessService(
         // it is dropped rather than treated as visible to everyone.
         val worlds = worldsOf(guildId).filter(_.categoryId.nonEmpty)
         if (worlds.isEmpty) None
-        else resolveGuild(userId, guild.getId, guild.getName, worlds)
+        // The icon is read here because this is the only place holding the JDA
+        // guild; it is null for a guild that never set one, which Option turns
+        // into an absence the page can fall back from.
+        else resolveGuild(userId, guild.getId, guild.getName, Option(guild.getIconUrl), worlds)
       }
     }
   }
 
   private def resolveGuild(userId: String, guildId: String, guildName: String,
+                           iconUrl: Option[String],
                            worlds: List[WorldChannel]): Option[GuildAccess] =
     discordGateway.memberAccess(guildId, userId, worlds.map(_.categoryId)).flatMap { member =>
       val visibleWorlds = worlds.filter(w => member.visibleChannelIds.contains(w.categoryId)).map(_.name)
@@ -110,7 +114,8 @@ final class DashboardAccessService(
         Some(GuildAccess(
           guildId, guildName,
           AccessTier.of(member.hasManageServer, hasRole),
-          visibleWorlds
+          visibleWorlds,
+          iconUrl
         ))
       }
     }

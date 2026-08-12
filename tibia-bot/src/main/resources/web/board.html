@@ -69,11 +69,70 @@
      name is a server's and not the board's. */
   .brand .server { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
   .brand .server i { font-size: 13px; color: var(--muted); }
-  /* Only when there is somewhere to switch to — a chevron on a page with one
-     server would offer a choice that does not exist. */
-  .brand a.server:hover { color: var(--accent); }
-  .brand a.server:hover i { color: var(--accent); }
-  .brand .server .chev { font-size: 11px; opacity: 0.7; }
+  /* Which page of the bot this is, in the same muted voice /status wears after
+     the bot's name — so the two mastheads read as the same family. */
+  .brand-suffix { color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  /* ---- Switching server --------------------------------------------------
+     A menu under the name rather than a link to a page of choices: swapping
+     server is a thing you do from a board, and throwing that board away to be
+     asked a question is a poor trade for one press. Drawn server-side — see
+     RespawnDashboardRoute.serverChip — and only when there is more than one
+     server to switch to; the single-server case stays the plain label above and
+     never grows a chevron. */
+  .sw { position: relative; display: inline-flex; }
+  .sw-btn {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    background: transparent; border: 1px solid transparent; border-radius: 7px;
+    padding: 4px 8px; margin: -4px -8px;
+    color: inherit; font-family: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit;
+  }
+  .sw-btn > i { font-size: 13px; color: var(--muted); }
+  .sw-btn:hover { background: rgba(255,255,255,0.04); border-color: var(--panel-border); }
+  .sw-btn .chev { font-size: 11px; opacity: 0.7; transition: transform 0.15s ease; }
+  .sw.open .sw-btn { background: rgba(255,255,255,0.05); border-color: var(--panel-border); }
+  .sw.open .sw-btn .chev { transform: rotate(180deg); }
+  .sw-menu {
+    position: absolute; top: calc(100% + 7px); left: -8px; z-index: 30;
+    min-width: 260px; max-width: 340px;
+    background: var(--panel); border: 1px solid #2a3142; border-radius: 10px;
+    box-shadow: 0 18px 44px rgba(0,0,0,0.6); padding: 5px; display: none;
+    max-height: 320px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
+  }
+  .sw.open .sw-menu { display: block; }
+  .sw-label {
+    display: block; font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--muted); padding: 7px 10px 5px;
+  }
+  .sw-item {
+    display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px;
+    color: var(--text); text-decoration: none; font-family: var(--sans); font-weight: 400;
+  }
+  .sw-item:hover { background: rgba(255,255,255,0.05); }
+  .sw-item.on { background: rgba(91,140,255,0.13); }
+  /* The server's own face. Sized to the row rather than to the brand mark above
+     — this is a list to pick from, not a masthead — and squared off with the
+     same radius the bot's own avatar wears.
+     Written as `.sw-item .sw-icon` and not `.sw-icon`, because the menu lives
+     inside .brand and `.brand img` would otherwise win on specificity and blow
+     every avatar up to the masthead's 32px. */
+  .sw-item .sw-icon {
+    width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+    object-fit: cover; background: rgba(255,255,255,0.05);
+  }
+  /* What a guild with no icon of its own gets, in exactly the space the icon
+     would have taken — same width so the names line up down the column, same
+     height so the rows do. */
+  .sw-glyph {
+    width: 22px; height: 22px; font-size: 14px; line-height: 22px;
+    color: var(--muted); flex-shrink: 0; text-align: center;
+  }
+  .sw-item.on .sw-glyph { color: var(--accent); }
+  .sw-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Reusing the masthead's tier colours, so what "moderator" looks like is one
+     thing across the page. */
+  .sw-item .tier { flex-shrink: 0; }
+  .sw-check { color: var(--accent); font-size: 14px; flex-shrink: 0; }
   .tier { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; border-radius: 4px; padding: 2px 7px; }
   .tier-member { background: rgba(255,255,255,0.06); color: var(--muted); }
   .tier-moderator { background: rgba(91,140,255,0.15); color: var(--accent); }
@@ -2640,6 +2699,29 @@ function doBook() {
 document.getElementById('win-close').addEventListener('click', closeWindow);
 veil.addEventListener('click', closeWindow);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWindow(); });
+
+/** The server menu. Present only when there is more than one server to switch
+ *  to — the markup for it is not drawn otherwise — so everything here is behind
+ *  that one check.
+ *
+ *  The whole menu is server-rendered and its items are ordinary links, so this
+ *  only has to open it, shut it, and shut it again on the two things every menu
+ *  must answer to: a press somewhere else, and Escape. */
+const switcher = document.getElementById('server-switch');
+if (switcher) {
+  const switchBtn = document.getElementById('server-switch-btn');
+  const showMenu = open => {
+    switcher.classList.toggle('open', open);
+    switchBtn.setAttribute('aria-expanded', String(open));
+  };
+  switchBtn.addEventListener('click', e => {
+    // Or the document listener below would shut it in the same breath.
+    e.stopPropagation();
+    showMenu(!switcher.classList.contains('open'));
+  });
+  document.addEventListener('click', () => showMenu(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') showMenu(false); });
+}
 
 // The tank places its markers and its two figures by measuring itself, so a
 // phone turned on its side has to be told to look again.

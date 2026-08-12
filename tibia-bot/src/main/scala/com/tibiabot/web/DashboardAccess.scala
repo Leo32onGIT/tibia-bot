@@ -52,7 +52,14 @@ final case class GuildAccess(
   guildId: String,
   guildName: String,
   tier: AccessTier,
-  worlds: List[String]
+  worlds: List[String],
+  /** The guild's own icon on Discord's CDN, when it has set one. Absent for a
+   *  guild that never did, which is common enough that every surface showing it
+   *  needs a fallback rather than a broken image.
+   *
+   *  Defaulted so that the many places constructing this for a test — where the
+   *  icon is beside the point — need say nothing about it. */
+  iconUrl: Option[String] = None
 )
 
 /** Where a visitor lands after signing in. */

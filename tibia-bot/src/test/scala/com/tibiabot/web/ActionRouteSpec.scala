@@ -31,6 +31,8 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       (_, method, _) => method.getName match {
         case "getId" => id
         case "getName" => name
+        // Null is what JDA gives for a guild that never set an icon.
+        case "getIconUrl" => null
         case other => throw new UnsupportedOperationException(other)
       }).asInstanceOf[Guild]
 

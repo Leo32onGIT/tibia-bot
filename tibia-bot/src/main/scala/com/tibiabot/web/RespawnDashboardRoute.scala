@@ -31,6 +31,11 @@ final class RespawnDashboardRoute(
   actions: RespawnActionPort
 )(implicit blocking: scala.concurrent.ExecutionContext) extends StrictLogging {
 
+  // Pure renderers, kept on the companion so they can be read back in a test
+  // without standing a whole route up. Imported rather than forwarded, so every
+  // call site below reads exactly as it did.
+  import RespawnDashboardRoute.{esc, serverChip}
+
   /** Runs blocking work somewhere it cannot hurt.
    *
    *  Everything this route reads is blocking — Discord REST calls to resolve
@@ -171,12 +176,6 @@ final class RespawnDashboardRoute(
   private def html(body: String) =
     complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, body))
 
-  /** Escapes text that came from Discord — a guild name is chosen by somebody
-   *  else and lands in our markup, so it is never interpolated raw. */
-  private def esc(s: String): String =
-    s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-      .replace("\"", "&quot;").replace("'", "&#39;")
-
   private def shell(title: String, inner: String): String =
     page("respawn.html").replace("<!--TITLE-->", esc(title)).replace("<!--BODY-->", inner)
 
@@ -206,23 +205,6 @@ final class RespawnDashboardRoute(
        |  <span class="tier tier-${a.tier.name}">${a.tier.name}</span>
        |</a>""".stripMargin
 
-  /** Which Discord this board belongs to, in the masthead.
-   *
-   *  Every code, claim and booking on the page belongs to exactly one server,
-   *  and somebody in two communities that both run the bot has two boards that
-   *  look alike — so the page says which one it is rather than leaving it to be
-   *  inferred from the tab.
-   *
-   *  A link only when there is somewhere to go: a chevron on the page of
-   *  somebody with one server would offer a choice that does not exist. */
-  private def serverChip(a: GuildAccess, switchable: Boolean): String = {
-    val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
-    if (switchable)
-      s"""<a class="server" href="/dashboard/choose" title="Switch server">$glyph${esc(a.guildName)}""" +
-        """<i class="ti ti-chevron-down chev" aria-hidden="true"></i></a>"""
-    else s"""<span class="server">$glyph${esc(a.guildName)}</span>"""
-  }
-
   /** The board for one guild. Its own page rather than the shared shell,
    *  because it carries a script and fetches its own data.
    *
@@ -233,7 +215,7 @@ final class RespawnDashboardRoute(
   private def board(a: GuildAccess, among: List[GuildAccess]): String =
     page("board.html")
       .replace("<!--TITLE-->", esc(a.guildName))
-      .replace("<!--SERVER-->", serverChip(a, switchable = among.size > 1))
+      .replace("<!--SERVER-->", serverChip(a, among))
       .replace("<!--TIER-->", esc(a.tier.name))
       // The clock a booking's weekdays and the stamina reset are read in. The
       // page draws a local axis and has to say where the server's day falls on
@@ -489,6 +471,68 @@ final class RespawnDashboardRoute(
 }
 
 object RespawnDashboardRoute {
+
+  /** Escapes text that came from Discord — a guild name is chosen by somebody
+   *  else and lands in our markup, so it is never interpolated raw. */
+  private[web] def esc(s: String): String =
+    s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+      .replace("\"", "&quot;").replace("'", "&#39;")
+
+  /** Which Discord this board belongs to, in the masthead, and the way to leave
+   *  it for another.
+   *
+   *  Every code, claim and booking on the page belongs to exactly one server,
+   *  and somebody in two communities that both run the bot has two boards that
+   *  look alike — so the page says which one it is rather than leaving it to be
+   *  inferred from the tab. `/dashboard` follows it the way `/status` follows
+   *  the bot's name on the owner page, so the two mastheads read alike.
+   *
+   *  A menu only when there is somewhere to go: a chevron on the page of
+   *  somebody with one server would offer a choice that does not exist, so that
+   *  case stays a plain label.
+   *
+   *  Rendered here rather than fetched, because the caller already holds every
+   *  server this viewer can reach — it is what decides whether the chevron is
+   *  drawn at all — so the menu costs one substitution and no round trip. The
+   *  items are ordinary links: switching rebuilds the board against another
+   *  guild, which is a page load however it is dressed. The full picker at
+   *  `/dashboard/choose` stays as the landing answer and for anyone who arrives
+   *  there directly.
+   */
+  private[web] def serverChip(a: GuildAccess, among: List[GuildAccess]): String = {
+    val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
+    val suffix = """<span class="brand-suffix">/dashboard</span>"""
+    if (among.size <= 1) s"""<span class="server">$glyph${esc(a.guildName)}$suffix</span>"""
+    else {
+      // The server's own face, and what the viewer is on it. A row of identical
+      // Discord glyphs told you nothing you could pick a server by; an avatar is
+      // the thing people actually recognise a community from. Guilds that never
+      // set one fall back to the glyph rather than to a broken image.
+      //
+      // The tier travels because a board you moderate and a board you are a
+      // member of are very different places, and knowing which before you land
+      // saves a page load to find out.
+      val items = among.map { g =>
+        val here = g.guildId == a.guildId
+        val tick = if (here) """<i class="ti ti-check sw-check" aria-hidden="true"></i>""" else ""
+        val face = g.iconUrl match {
+          case Some(url) => s"""<img class="sw-icon" src="${esc(url)}" alt="" loading="lazy">"""
+          case None      => """<i class="ti ti-brand-discord sw-glyph" aria-hidden="true"></i>"""
+        }
+        s"""<a class="sw-item${if (here) " on" else ""}" href="/dashboard/g/${esc(g.guildId)}">""" +
+          face +
+          s"""<span class="sw-name">${esc(g.guildName)}</span>""" +
+          s"""<span class="tier tier-${g.tier.name}">${g.tier.name}</span>$tick</a>"""
+      }.mkString
+      s"""<span class="sw" id="server-switch">""" +
+        s"""<button class="sw-btn" id="server-switch-btn" type="button" """ +
+        s"""aria-haspopup="true" aria-expanded="false" title="Switch server">""" +
+        s"""$glyph${esc(a.guildName)}$suffix""" +
+        s"""<i class="ti ti-chevron-down chev" aria-hidden="true"></i></button>""" +
+        s"""<span class="sw-menu"><span class="sw-label">Your servers</span>$items</span></span>"""
+    }
+  }
+
   /** A month. The file behind a given creature name is immutable in practice,
    *  and a stale sprite is the mildest possible wrongness. */
   /** How long a catalogue may be reused without asking. Long enough that

@@ -105,9 +105,11 @@ class AccessCacheSpec extends AnyWordSpec with Matchers {
     java.lang.reflect.Proxy.newProxyInstance(
       classOf[Guild].getClassLoader, Array(classOf[Guild]),
       (_, method, _) => method.getName match {
-        case "getId"   => "g1"
-        case "getName" => "Violent"
-        case other     => throw new UnsupportedOperationException(other)
+        case "getId"      => "g1"
+        case "getName"    => "Violent"
+        // Null is what JDA gives for a guild that never set an icon.
+        case "getIconUrl" => null
+        case other        => throw new UnsupportedOperationException(other)
       }).asInstanceOf[Guild]
 
   private def service(gateway: DiscordGateway, clock: Clock) =

@@ -7,16 +7,21 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
 
-  /** A stand-in `Guild` answering only the two things the service asks it.
+  /** A stand-in `Guild` answering only the three things the service asks it.
    *  A proxy rather than a hand-written class because JDA's Guild is a very
-   *  large interface and the service touches none of the rest of it. */
-  private def guildStub(id: String, name: String): Guild =
+   *  large interface and the service touches none of the rest of it.
+   *
+   *  `icon` is null by default, which is what JDA returns for a guild that never
+   *  set one — the common case, and the one the dashboard has to fall back
+   *  from. */
+  private def guildStub(id: String, name: String, icon: String = null): Guild =
     java.lang.reflect.Proxy.newProxyInstance(
       classOf[Guild].getClassLoader, Array(classOf[Guild]),
       (_, method, _) => method.getName match {
-        case "getId"   => id
-        case "getName" => name
-        case other     => throw new UnsupportedOperationException(s"Guild.$other is not stubbed")
+        case "getId"      => id
+        case "getName"    => name
+        case "getIconUrl" => icon
+        case other        => throw new UnsupportedOperationException(s"Guild.$other is not stubbed")
       }
     ).asInstanceOf[Guild]
 
@@ -28,8 +33,11 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
      *  show the REST call was skipped rather than merely ignored. */
     var lookups: List[String] = Nil
 
-    def guilds: List[Guild] = botGuilds.map { case (id, name) => guildStub(id, name) }
-    def guildById(id: String): Guild = botGuilds.find(_._1 == id).map { case (i, n) => guildStub(i, n) }.orNull
+    /** Set to give every stub guild an icon, for the one test that cares. */
+    var iconUrl: String = null
+
+    def guilds: List[Guild] = botGuilds.map { case (id, name) => guildStub(id, name, iconUrl) }
+    def guildById(id: String): Guild = botGuilds.find(_._1 == id).map { case (i, n) => guildStub(i, n, iconUrl) }.orNull
     def retrieveUser(id: String): User = null
     def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
       lookups = lookups :+ guildId
@@ -72,6 +80,20 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       val (_, svc) = service()
       svc.accessFor("u1", Set("g1")) shouldBe
         List(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica")))
+    }
+
+    "carry the guild's own icon through, for the server menu to wear" in {
+      val (gateway, svc) = service()
+      gateway.iconUrl = "https://cdn.discordapp.com/icons/g1/abc.png"
+      svc.accessFor("u1", Set("g1")).head.iconUrl shouldBe
+        Some("https://cdn.discordapp.com/icons/g1/abc.png")
+    }
+
+    // JDA answers null rather than throwing, and an absence is what every
+    // surface showing it falls back from.
+    "report no icon at all for a guild that never set one" in {
+      val (_, svc) = service()
+      svc.accessFor("u1", Set("g1")).head.iconUrl shouldBe None
     }
 
     // The cached guild list narrows the work; it must not be able to widen it.
