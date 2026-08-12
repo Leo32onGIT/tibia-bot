@@ -189,7 +189,21 @@
   .mod-panel-head[aria-expanded="true"] { border-bottom: 1px solid var(--panel-border); }
   .mod-panel-head[aria-expanded="true"] .fold-chevron { transform: rotate(180deg); }
   .mod-panel-peek { color: var(--muted); font-size: 11.5px; }
-  .mod-panel-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .mod-panel-body { display: flex; flex-direction: column; }
+  /* One band per job. The panel does two unrelated things, and a heading with a
+     ground of its own is what makes each read as a section — a hairline between
+     them only ever said "something ends here". */
+  .mod-band { padding: 13px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .mod-band.alt { border-top: 1px solid var(--panel-border); background: rgba(255,255,255,0.012); }
+  .mod-section { display: flex; align-items: baseline; gap: 8px; }
+  .mod-section-title {
+    font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--purple); display: flex; align-items: center; gap: 6px;
+  }
+  /* The shield the panel's own header wears, quarter size, so a band reads as
+     part of it rather than as a heading that wandered in. */
+  .mod-section-title::before { content: '◈'; font-size: 10px; }
+  .mod-section-hint { color: var(--muted); font-size: 11px; margin-left: auto; }
   /* One field per column while there is room, stacking on a narrow screen. The
      code is the short one and gets the narrow track. */
   .mod-form { display: grid; grid-template-columns: 110px 1fr 1fr 1fr; gap: 10px; align-items: end; }
@@ -206,15 +220,20 @@
   .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
   .mod-note code { font-family: var(--mono); color: var(--text); }
   .mod-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .mod-actions .mod-note { flex: 1 1 220px; min-width: 0; }
   /* The answer sits with the button that caused it, not at the top of the page:
      this panel is its own little form and its reply belongs inside it. */
-  .mod-answer { font-size: 12px; flex: 1 1 220px; min-width: 0; }
+  /* Always the last thing in the panel, whatever said it. Bordered off, so a
+     reply reads as the panel answering rather than as a caption on whichever
+     control happens to sit above it. */
+  .mod-answer { font-size: 12px; min-width: 0; }
+  .mod-answer:not(:empty) { border-top: 1px solid var(--panel-border); padding: 11px 16px; }
   .mod-answer.ok { color: var(--st-free); }
   .mod-answer.no { color: var(--st-claimed); }
   /* What this server added, and the way back out. Scrolls rather than growing
      without limit: a guild fifty codes deep should not push the board itself off
      the screen every time this panel is opened. */
-  .mod-owned { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--panel-border); padding-top: 12px; }
+  .mod-owned { display: flex; flex-direction: column; gap: 7px; }
   .mod-list { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
               scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
   .mod-list-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(31,36,48,0.6); }
@@ -231,12 +250,19 @@
 
   /* Handing somebody minutes in their tank. A person and an amount, side by side
      while there is room and stacked when there is not. */
-  .mod-stamina { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px; }
-  .mod-give { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: center; }
+  /* Two labelled controls side by side, aligned on their labels rather than
+     centred: the boxes under them are within a pixel of each other, and centring
+     unequal ones puts the two labels on different lines. */
+  .mod-give { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
   .mod-who { position: relative; }
-  .mod-amount { display: flex; align-items: center; gap: 10px; }
-  .mod-amount input[type="range"] { flex: 1; min-width: 0; accent-color: var(--purple); }
-  .mod-amount-out { font-family: var(--mono); font-size: 13px; color: var(--text-strong); min-width: 4ch; text-align: right; }
+  /* Chips rather than a slider. The amounts are a short known list — a hunt's
+     worth and its fractions — and a slider asks somebody to aim at a value they
+     could have named. Built on the shared .seg, so only what differs is set
+     here: equal widths, a thumb-sized target, and the panel's purple for the
+     chosen one where the board's own segments use blue. */
+  .mod-give .seg { width: 100%; }
+  .mod-give .seg button { flex: 1; padding: 7px 0; }
+  .mod-give .seg button[aria-pressed="true"] { color: var(--purple); background: rgba(167,139,250,0.14); }
   /* Over the content rather than pushing it down: a list that grows moves the
      buttons under it, and a moderator who is halfway to pressing one should not
      have it walk away as they type. */
@@ -2843,7 +2869,17 @@ function setUpModPanel() {
   const body = document.getElementById('mod-panel-body');
   panel.hidden = false;
 
-  body.innerHTML = `
+  // Two bands, each titled, rather than one column of controls with hairlines
+  // between them. The panel does two unrelated jobs — curating the server's
+  // codes, and topping up one person's tank — and a rule says "something ends
+  // here" without saying what begins. A heading and a ground of its own is what
+  // makes a section read as one.
+  const spawns = el('div', 'mod-band');
+  spawns.innerHTML = `
+    <div class="mod-section">
+      <span class="mod-section-title">Spawn codes</span>
+      <span class="mod-section-hint" id="ms-count"></span>
+    </div>
     <div class="mod-form">
       <div class="mod-field">
         <label class="field-label" for="ms-code">Code</label>
@@ -2862,26 +2898,35 @@ function setUpModPanel() {
         <input id="ms-creature" type="text" maxlength="64" placeholder="Moonstone Excavator" autocomplete="off">
       </div>
     </div>`;
+  body.appendChild(spawns);
 
-  const answer = el('div', 'mod-answer');
   const actions = el('div', 'mod-actions');
   const add = button('Add spawn', 'btn mod-btn', () => submit(), 'ti-plus');
   actions.appendChild(add);
-  actions.appendChild(answer);
-  body.appendChild(actions);
+  actions.appendChild(el('span', 'mod-note',
+    'Creature is the wiki name of the monster and sets the picture on the card — leave it empty for none.'));
+  spawns.appendChild(actions);
 
   // What this server has added, and the only way back out again. Redrawn from
   // the catalogue on every open and after every write, so it never disagrees
   // with the board below it.
   const owned = el('div', 'mod-owned');
-  body.appendChild(owned);
+  spawns.appendChild(owned);
 
   // Handing somebody stamina. Here rather than on a spawn's card, where it used
   // to sit: a tank belongs to a person and not to a respawn, and reaching it
   // through whichever spawn they happened to be holding meant a moderator could
   // only ever top up somebody who was mid-hunt.
-  const stamina = el('div', 'mod-stamina');
+  const stamina = el('div', 'mod-band alt');
   body.appendChild(stamina);
+
+  // One place for whatever the bot said back, whichever tool above said it, and
+  // always the last thing in the panel. Answers used to sit beside the button
+  // that caused them, which put the reply to adding a spawn in a different part
+  // of the panel from the reply to giving stamina — so where to look depended on
+  // what had just been pressed.
+  const answer = el('div', 'mod-answer');
+  body.appendChild(answer);
 
   const field = id => document.getElementById(id);
   const inputs = ['ms-code', 'ms-name', 'ms-region', 'ms-creature'].map(field);
@@ -2915,11 +2960,18 @@ function setUpModPanel() {
       ? [...catalogue.values()].filter(s => s.custom)
           .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }))
       : [];
+    // The count belongs to the section, not to the list: it is what the heading
+    // is about, and it is still true when the list is empty.
+    const counted = document.getElementById('ms-count');
+    if (counted) {
+      counted.textContent = mine.length
+        ? `${mine.length} added here` : 'none added here yet';
+    }
     if (!mine.length) {
-      owned.appendChild(el('p', 'mod-note', 'Nothing added yet. Codes you add here appear in this list.'));
+      owned.appendChild(el('p', 'mod-note',
+        'Codes you add appear here, with a way to take them back out. Bot updates never rename or remove them.'));
       return;
     }
-    owned.appendChild(el('div', 'field-label', `Added here (${mine.length})`));
     const list = el('div', 'mod-list');
     mine.forEach(spawn => {
       const row = el('div', 'mod-list-row', `<span class="code-chip">${esc(spawn.code)}</span>
@@ -2987,53 +3039,63 @@ function setUpModPanel() {
   let people = null;
   let picked = null;
 
-  /** Minutes to give, on a scale that matches how the number is actually
-   *  chosen. A moderator is replacing what somebody lost, so the interesting
-   *  figures are a hunt's worth and its fractions, not every value in between —
-   *  and a slider stepping in half hours reaches all of them in a flick where a
-   *  text box asks for arithmetic. */
-  const STAMINA_STEPS = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360];
+  /** The amounts worth offering, and the whole of what may be given.
+   *
+   *  A moderator gives stamina to replace what somebody lost, so the figure is a
+   *  hunt's worth or a fraction of one rather than an arbitrary number of
+   *  minutes. That makes it a short known list, and a slider is the wrong
+   *  instrument for a short known list — it asks somebody to aim at a value they
+   *  could have named. These are pressed once, land exactly, work under a thumb,
+   *  and can be read back afterwards without interpreting where a handle sits.
+   */
+  const STAMINA_STEPS = [15, 30, 60, 120, 240];
+  let staminaMinutes = 30;
 
   function drawStamina() {
     stamina.innerHTML = `
-      <div class="field-label">Give stamina</div>
+      <div class="mod-section">
+        <span class="mod-section-title">Stamina</span>
+        <span class="mod-section-hint">resets at server save</span>
+      </div>
       <div class="mod-give">
         <div class="mod-field mod-who">
+          <label class="field-label" for="ms-who">Who</label>
           <input id="ms-who" type="text" autocomplete="off" spellcheck="false"
                  placeholder="Search a name, or paste a Discord ID">
           <div class="mod-suggest" id="ms-suggest" hidden></div>
         </div>
-        <div class="mod-field mod-amount">
-          <input id="ms-minutes" type="range" min="0" max="${STAMINA_STEPS.length - 1}" step="1" value="1"
-                 aria-label="How much stamina">
-          <span class="mod-amount-out" id="ms-amount">30m</span>
+        <div class="mod-field">
+          <span class="field-label">How much</span>
+          <div class="seg" id="ms-amount" role="group" aria-label="How much stamina">
+            ${STAMINA_STEPS.map(m =>
+              `<button type="button" data-minutes="${m}" aria-pressed="${m === staminaMinutes}">${fmtDur(m)}</button>`
+            ).join('')}
+          </div>
         </div>
       </div>
-      <p class="mod-note" id="ms-picked">Nobody picked yet.</p>`;
+      `;
 
     const who = document.getElementById('ms-who');
     const suggest = document.getElementById('ms-suggest');
-    const slider = document.getElementById('ms-minutes');
     const amount = document.getElementById('ms-amount');
-    const chosen = document.getElementById('ms-picked');
+    amount.addEventListener('click', e => {
+      const hit = e.target.closest('button');
+      if (!hit) return;
+      staminaMinutes = Number(hit.dataset.minutes);
+      amount.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === hit)));
+    });
 
     const give = button('Give stamina', 'btn mod-btn', () => grant(1), 'ti-battery-charging');
-    const take = button('Take back', 'btn mod-btn small', () => grant(-1), 'ti-battery-off');
+    const take = button('Remove stamina', 'btn mod-btn small', () => grant(-1), 'ti-battery-off');
     const row = el('div', 'mod-actions');
     row.appendChild(give);
     row.appendChild(take);
     stamina.appendChild(row);
 
-    const minutes = () => STAMINA_STEPS[Number(slider.value)];
-    const paint = () => { amount.textContent = fmtDur(minutes()); };
-    slider.addEventListener('input', paint);
-    paint();
-
     function choose(person) {
       picked = person;
       who.value = personLabel(person);
       suggest.hidden = true;
-      chosen.textContent = `Giving to ${personLabel(person)}.`;
     }
 
     // A pasted Discord id is a person too. Nobody knows their own snowflake, but
@@ -3047,7 +3109,6 @@ function setUpModPanel() {
 
     who.addEventListener('input', () => {
       picked = null;
-      chosen.textContent = 'Nobody picked yet.';
       const text = who.value.trim().toLowerCase();
       const matches = !text ? [] : (people || []).filter(p =>
         p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
@@ -3070,7 +3131,7 @@ function setUpModPanel() {
       give.disabled = take.disabled = true;
       say(sign > 0 ? 'Giving…' : 'Taking back…');
       const result = await send(`/dashboard/g/${GUILD_ID}/grant-stamina`,
-        { userId: person.id, minutes: sign * minutes() });
+        { userId: person.id, minutes: sign * staminaMinutes });
       give.disabled = take.disabled = false;
       say(result.message, result.ok ? 'ok' : 'no');
       // Their tank may be the reader's own, and it feeds the length control on
