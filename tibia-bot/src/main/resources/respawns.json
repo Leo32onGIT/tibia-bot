@@ -65,7 +65,7 @@
     { "code": "418",  "region": "Edron",       "name": "Bounac Crypt Warriors",                  "creature": "Crypt Warrior" },
     { "code": "419",  "region": "Edron",       "name": "Bounac Carnasylvans",                    "creature": "Hulking Carnisylvan" },
     { "code": "420",  "region": "Edron",       "name": "Gnomprona - Monster Graveyard",          "creature": "Undertaker" },
-    { "code": "421",  "region": "Edron",       "name": "Gnomprona - Sparkling Pools",            "creature": "Prehemoth" },
+    { "code": "421",  "region": "Edron",       "name": "Gnomprona - Sparkling Pools",            "creature": "Hulking Prehemoth" },
     { "code": "422",  "region": "Edron",       "name": "Gnomprona - Crystal Enigma",             "creature": "Mantosaurus" },
     { "code": "423",  "region": "Edron",       "name": "Azzilon Surface & Basement",             "creature": "Gorger Inferniarch" },
     { "code": "424",  "region": "Edron",       "name": "Azzilon Walls (+2 & +3)",                "creature": "Broodrider Inferniarch" },
