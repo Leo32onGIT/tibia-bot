@@ -9,10 +9,11 @@ import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of RespawnRepository against a guild's own database.
  *
- *  Every entry point calls `ensureTables` first. `SchemaInitializer.initGuild`
- *  only creates tables when it creates the database, so guilds that existed
- *  before this feature would otherwise never get them — the same
- *  create-on-read approach `JdbcGalthenRepository` uses for `satchel`.
+ *  The schema is checked on a guild's first use in this process, and not again
+ *  — see [[ensureSchema]]. `SchemaInitializer.initGuild` only creates tables
+ *  when it creates the database, so guilds that existed before this feature
+ *  would otherwise never get them; this is the same create-on-read approach
+ *  `JdbcGalthenRepository` uses for `satchel`, just not repeated per query.
  *
  *  Timestamps are `TIMESTAMPTZ`, not the plain `TIMESTAMP` the older tables
  *  use. Everything here is a deadline that has to survive a container timezone
@@ -24,11 +25,51 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   private def connect(guildId: String): () => Connection = () => connectionProvider.guild(guildId)
 
-  private def withGuild[A](guildId: String)(use: Connection => A): A =
-    JdbcSupport.withConnection(connect(guildId)) { conn => ensureTables(conn); use(conn) }
+  /** Guilds whose schema this process has already brought up to date.
+   *
+   *  [[ensureTables]] is thirty-two statements — six tables, six indexes and
+   *  twenty columns added if missing — and it ran before *every* read and write.
+   *  Measured against a live database that is around 13ms a call, against 1.6ms
+   *  for all seven queries a dashboard board actually needs: better than nine
+   *  tenths of the time went on establishing that tables which already exist
+   *  still exist. It is paid once per guild now.
+   *
+   *  Once per *process*, not once ever, which is what makes this safe to do at
+   *  all: a build that adds a column is a new process, so it re-runs on first
+   *  touch and the column appears exactly as before.
+   */
+  private val schemaReady = new java.util.concurrent.ConcurrentHashMap[String, java.lang.Boolean]()
 
-  private def withGuildTransaction[A](guildId: String)(use: Connection => A): A =
-    JdbcSupport.withTransaction(connect(guildId)) { conn => ensureTables(conn); use(conn) }
+  /** Runs the schema check for a guild the first time it is touched.
+   *
+   *  `computeIfAbsent` rather than a check-then-set: it holds the key while the
+   *  work runs, so a second caller arriving on a guild whose tables are still
+   *  being created waits for them rather than querying a table that does not
+   *  exist yet. A throw records nothing, so the next caller tries again instead
+   *  of inheriting a database that was never set up.
+   *
+   *  On its own connection, deliberately. Run inside a caller's transaction it
+   *  would be rolled back with it — Postgres DDL being transactional — and this
+   *  would have remembered doing work that had been undone, leaving every later
+   *  query on that guild to fail against tables that are no longer there.
+   */
+  private def ensureSchema(guildId: String): Unit = {
+    schemaReady.computeIfAbsent(guildId, _ => {
+      JdbcSupport.withConnection(connect(guildId))(ensureTables)
+      java.lang.Boolean.TRUE
+    })
+    ()
+  }
+
+  private def withGuild[A](guildId: String)(use: Connection => A): A = {
+    ensureSchema(guildId)
+    JdbcSupport.withConnection(connect(guildId))(use)
+  }
+
+  private def withGuildTransaction[A](guildId: String)(use: Connection => A): A = {
+    ensureSchema(guildId)
+    JdbcSupport.withTransaction(connect(guildId))(use)
+  }
 
   private def ensureTables(conn: Connection): Unit = {
     val statement = conn.createStatement()
