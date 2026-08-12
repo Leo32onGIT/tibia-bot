@@ -1697,9 +1697,14 @@ function judge(start) {
     if (live) {
       const who = live.mine ? 'You are' : `${nameOf(live)} is`;
       const verb = live.state === 'claimed' ? 'hunting' : 'booked for';
+      // The advice names whatever the button is currently offering, which for
+      // your own hunt is giving it back rather than booking anything.
+      const next = live.mine && live.state === 'claimed'
+        ? 'Leave to give it back, or pick a later time to book it.'
+        : 'Pick a later time to book it.';
       return {
         type: 'info',
-        text: `${who} ${verb} this until ${fmtClock12(live.end)}. Pick a later time to book it.`
+        text: `${who} ${verb} this until ${fmtClock12(live.end)}. ${next}`
       };
     }
     return { type: 'no', text: 'That start time has already passed.' };
@@ -2066,6 +2071,32 @@ function claimEmojiImg() {
   return img;
 }
 
+/** Giving a spawn back, or standing out of its queue.
+ *
+ *  "Leave" either way, and the same word the Discord post's own button uses —
+ *  giving a spawn back and standing out of its queue are the same act to
+ *  somebody doing it, and only one of the two is ever on offer at a time.
+ */
+function leaveButton(spawn) {
+  const holding = spawn.mine;
+  return button(holding ? 'Leave' : 'Leave queue', 'btn danger',
+    () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
+      if (holding) {
+        s.mine = false;
+        // Free unless somebody is waiting, in which case it passes to them. Who
+        // that is, is not ours to guess — naming the wrong person for a second
+        // is worse than saying "someone" until the poll says.
+        s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
+        delete s.holder;
+        delete s.startsAt;
+        delete s.endsAt;
+      } else {
+        s.queued = false;
+        s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
+      }
+    }), 'ti-logout');
+}
+
 /** The one thing this panel is most likely to be asked to do, whatever that
  *  currently is.
  *
@@ -2084,6 +2115,14 @@ function claimEmojiImg() {
  *  strip above explains rather than leaving a dead button to be pressed.
  */
 function primaryAction(spawn) {
+  // Clicking your own hunt on the grid is not picking a time to book. The block
+  // starts in the past, so nothing could ever be booked from it — which left a
+  // Book button that was permanently dead. What somebody wants from their own
+  // running hunt is the thing they always want from it, so the pick is ignored
+  // and the ordinary Leave falls through.
+  const own = view.pick && runningAt(view.pick);
+  if (own && own.mine && own.state === 'claimed') return leaveButton(spawn);
+
   if (view.pick) {
     const verdict = judge(view.pick);
     const book = button(view.busy ? 'Working…' : verdict.type === 'ask' ? 'Book & ask' : 'Book',
@@ -2094,28 +2133,7 @@ function primaryAction(spawn) {
 
   // Giving it up outranks taking it on, and the two can never both apply:
   // holding a spawn or queueing for it is exactly what stops you claiming it.
-  if (spawn.mine || spawn.queued) {
-    const holding = spawn.mine;
-    // "Leave" either way, and the same word the Discord post's own button uses
-    // — giving a spawn back and standing out of its queue are the same act to
-    // somebody doing it, and only one of the two is ever on offer at a time.
-    return button(holding ? 'Leave' : 'Leave queue', 'btn danger',
-      () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
-        if (holding) {
-          s.mine = false;
-          // Free unless somebody is waiting, in which case it passes to them.
-          // Who that is, is not ours to guess — naming the wrong person for a
-          // second is worse than saying "someone" until the poll says.
-          s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
-          delete s.holder;
-          delete s.startsAt;
-          delete s.endsAt;
-        } else {
-          s.queued = false;
-          s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
-        }
-      }), 'ti-logout');
-  }
+  if (spawn.mine || spawn.queued) return leaveButton(spawn);
 
   if (!canClaimNow(spawn)) return null;
 
