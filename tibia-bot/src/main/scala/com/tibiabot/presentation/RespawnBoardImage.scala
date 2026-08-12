@@ -205,6 +205,34 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
     Some(bytes.toByteArray)
   }
 
+  /** A fingerprint of everything this image would show, so a caller can tell
+   *  whether a board already posted is still the right one.
+   *
+   *  Redrawing costs a REST edit per guild and the board changes on the order of
+   *  once a month, so a bot that redrew on every boot would spend its rate limit
+   *  reposting an identical picture. Comparing fingerprints makes the redraw
+   *  follow the catalogue instead of the restart.
+   *
+   *  Over exactly the three fields that are drawn — a code, its city and its name
+   *  — and no others. Creature is deliberately absent: it decides the sprite on
+   *  the dashboard and appears nowhere on this image, so a curated creature
+   *  change must not trigger a redraw that would look identical. Sorted, because
+   *  the row order out of the database is not promised and reordering alone
+   *  changes nothing about what is drawn.
+   */
+  def digestOf(spawns: List[Respawn]): String = {
+    // The three fields are separated by a character a spawn name cannot hold,
+    // so moving a letter from the end of one to the start of the next is a
+    // different fingerprint rather than the same concatenation.
+    val canonical = spawns
+      .map(spawn => s"${spawn.code.trim}${spawn.region.trim}${spawn.name.trim}")
+      .sorted
+      .mkString("")
+    val bytes = java.security.MessageDigest.getInstance("SHA-256")
+      .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    bytes.take(16).map(b => f"${b & 0xff}%02x").mkString
+  }
+
   /** The attachment's name, which is also what Discord shows if the image fails
    *  to load. */
   val FileName: String = "respawn-codes.png"

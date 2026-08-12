@@ -233,6 +233,42 @@ final class JdaRespawnActions(
             s"${displayName(targetUserId)} now has ${tank.remainingMinutes} minutes left today.")
       }
     }
+
+  def addSpawn(guildId: String, actorId: String, code: String, region: String,
+               name: String, creature: String): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.settings(guildId) match {
+        case None => ActionResult(ok = false, "The respawn system is not set up on this server.")
+        case Some(settings) =>
+          respawnService.addCustomSpawn(guildId, actorId, code, region, name, creature) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(added) =>
+              // The board post *is* the list of codes — a spawn nobody can read
+              // off it is one nobody will ever claim — so the picture is put
+              // right here rather than waiting for the next restart.
+              respawnService.redrawBoardIfChanged(guild, settings)
+              ActionResult(ok = true, s"Added ${added.displayName}.")
+          }
+      }
+    }
+
+  def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.settings(guildId) match {
+        case None => ActionResult(ok = false, "The respawn system is not set up on this server.")
+        case Some(settings) =>
+          respawnService.removeCustomSpawn(guildId, code) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(removed) =>
+              logger.info(s"Dashboard: '$actorId' removed ${removed.code} from guild '$guildId'")
+              // The post goes with the code. Left behind, it would offer a Claim
+              // button for a spawn nothing can resolve any more.
+              com.tibiabot.respawn.RespawnThreads.deleteThread(guild, settings, removed.threadId)
+              respawnService.redrawBoardIfChanged(guild, settings)
+              ActionResult(ok = true, s"Removed ${removed.displayName}.")
+          }
+      }
+    }
 }
 
 object JdaRespawnActions {
@@ -265,6 +301,7 @@ object JdaRespawnActions {
     val hunting = active.toList.flatMap { claim =>
       for { start <- claim.startsAt; end <- claim.endsAt if start.isBefore(to) && end.isAfter(from) }
         yield CalendarSlot(None, claim.userId, label(claim.userName, claim.characterName),
+          claim.userName, claim.nickname,
           start, end, RespawnBoardEntry.Claimed,
           repeats = false, daysOfWeek = RespawnSchedule.OneOff, predicted = false)
     }
@@ -276,6 +313,8 @@ object JdaRespawnActions {
           scheduleId = slot.scheduleId,
           ownerId = slot.userId,
           owner = label(slot.userName, slot.characterName),
+          account = slot.userName,
+          nickname = slot.nickname,
           startsAt = start,
           endsAt = start.plusMinutes(slot.durationMinutes.toLong),
           // A slot somebody has been asked about is `asked` until it is
@@ -298,6 +337,7 @@ object JdaRespawnActions {
         .filterNot(start => written.contains(schedule.id -> start.toInstant))
         .map(start => CalendarSlot(Some(schedule.id), schedule.userId,
           label(schedule.userName, schedule.characterName),
+          schedule.userName, schedule.nickname,
           start, schedule.endOf(start), RespawnBoardEntry.Booked,
           schedule.repeats, schedule.daysOfWeek, predicted = true))
     }
@@ -311,4 +351,3 @@ object JdaRespawnActions {
   private def label(userName: String, characterName: String): String =
     if (characterName.nonEmpty) characterName else userName
 }
-

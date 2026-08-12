@@ -30,6 +30,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // belong to the member rather than the setup — so those are cleared here
     // instead, or a run against a database a previous run touched would see them.
     repo.listRespawns(guildId).foreach(r => repo.removeRespawn(guildId, r.id))
+    repo.setBoardDigest(guildId, "")
     repo.activeSchedules(guildId).foreach(schedule => repo.deactivateSchedule(guildId, schedule.id))
     List("u1", "u2", "u3", "holder").foreach { user =>
       repo.saveUserPrefs(guildId, RespawnUserPrefs(user, None, None))
@@ -52,6 +53,22 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.updateChannels(g, "111", "222")
     repo.settings(g).map(s => (s.forumChannel, s.boardThread)) shouldBe Some(("111", "222"))
     repo.settings(g).map(_.queueLimit) shouldBe Some(5) // untouched
+  }
+
+  test("the board digest is remembered, and absent until something is drawn") {
+    // What decides whether a restart redraws the pinned board post in Discord.
+    // It has to survive the process, which is the whole reason it is in the
+    // database rather than in memory.
+    val (repo, g) = freshRepo()
+    repo.boardDigest(g) shouldBe None
+
+    repo.setBoardDigest(g, "abc123")
+    repo.boardDigest(g) shouldBe Some("abc123")
+
+    // An upsert on a fixed id, like the settings row: a second write replaces
+    // the digest rather than leaving two rows for the read to choose between.
+    repo.setBoardDigest(g, "def456")
+    repo.boardDigest(g) shouldBe Some("def456")
   }
 
   test("catalogue: add, find by code and id, edit one field, remove") {

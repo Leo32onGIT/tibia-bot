@@ -20,8 +20,8 @@ class NamesSpec extends AnyFunSuite with Matchers {
     Names.capitalizeWords("") shouldBe ""
   }
 
-  test("a user reads as the name they go by here, then the account it belongs to") {
-    Names.user("Beams", "violentbeams") shouldBe "**@Beams** (**`violentbeams`**)"
+  test("a user reads as the account they are, then the name they go by here") {
+    Names.user("Beams", "violentbeams") shouldBe "**`violentbeams`** (**@Beams**)"
   }
 
   test("no nickname falls back to the account name alone, rather than an empty @") {
@@ -31,7 +31,7 @@ class NamesSpec extends AnyFunSuite with Matchers {
 
   test("a nickname that merely repeats the username is not said twice") {
     // Most people never set one, and Discord hands back the username in its
-    // place — "**@bob** (**`bob`**)" is noise, not information.
+    // place — "**`bob`** (**@bob**)" is noise, not information.
     Names.user("violentbeams", "violentbeams") shouldBe "**`violentbeams`**"
     Names.user("ViolentBeams", "violentbeams") shouldBe "**`violentbeams`**"
   }
@@ -39,8 +39,8 @@ class NamesSpec extends AnyFunSuite with Matchers {
   test("neither half can break out of its own formatting") {
     // A nickname is free text, unlike a username: it may hold backticks and
     // asterisks, and either would otherwise reach into the markdown around it.
-    Names.user("ev*il`", "violentbeams") shouldBe "**@evil** (**`violentbeams`**)"
-    Names.user("Beams", "vio`lent") shouldBe "**@Beams** (**`violent`**)"
+    Names.user("ev*il`", "violentbeams") shouldBe "**`violentbeams`** (**@evil**)"
+    Names.user("Beams", "vio`lent") shouldBe "**`violent`** (**@Beams**)"
   }
 
   test("a user with neither name still reads as somebody") {

@@ -73,7 +73,7 @@ object RespawnEmbeds {
    *  uses, and always hollow here: a card is one shared post rather than a reply
    *  to somebody, so it has no reader whose rows could be filled in. */
   private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
-    s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **—** $who$note"
+    s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **·** $who$note"
 
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted

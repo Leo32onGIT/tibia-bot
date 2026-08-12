@@ -87,6 +87,17 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |handover_minutes INT NOT NULL DEFAULT 10
           |);""".stripMargin)
 
+      // What the pinned board post was last drawn from. Not a setting a guild
+      // tunes, which is why it is not in `respawn_settings` alongside things
+      // like the claim length: it is this process's note of what a message in
+      // Discord currently shows, and the only thing that reads it is the check
+      // that decides whether to redraw.
+      statement.executeUpdate(
+        """CREATE TABLE IF NOT EXISTS respawn_board_state (
+          |id INT PRIMARY KEY,
+          |digest VARCHAR(64) NOT NULL DEFAULT ''
+          |);""".stripMargin)
+
       statement.executeUpdate(
         """CREATE TABLE IF NOT EXISTS respawns (
           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -396,6 +407,27 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     try {
       statement.setString(1, forumChannel)
       statement.setString(2, boardThread)
+      statement.executeUpdate()
+    } finally statement.close()
+  }
+
+  def boardDigest(guildId: String): Option[String] = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement("SELECT digest FROM respawn_board_state WHERE id = 1;")
+    try {
+      val result = statement.executeQuery()
+      // An empty digest is treated as none rather than as a fingerprint nothing
+      // will ever match — the column's default, meaning the row exists but has
+      // never been written.
+      if (result.next()) Option(result.getString("digest")).filter(_.nonEmpty) else None
+    } finally statement.close()
+  }
+
+  def setBoardDigest(guildId: String, digest: String): Unit = withGuild(guildId) { conn =>
+    val statement = conn.prepareStatement(
+      """INSERT INTO respawn_board_state (id, digest) VALUES (1, ?)
+        |ON CONFLICT (id) DO UPDATE SET digest = EXCLUDED.digest;""".stripMargin)
+    try {
+      statement.setString(1, digest)
       statement.executeUpdate()
     } finally statement.close()
   }
@@ -1496,6 +1528,10 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate("DELETE FROM respawn_claims;")
       statement.executeUpdate("DELETE FROM respawns;")
       statement.executeUpdate("DELETE FROM respawn_settings;")
+      // The note of what the pinned board post shows goes with the post: the
+      // forum is being torn down, and a digest left behind would tell a guild
+      // that set the bot up again that its brand-new board was already correct.
+      statement.executeUpdate("DELETE FROM respawn_board_state;")
       // respawn_user_prefs is left alone alongside respawn_stamina: both belong
       // to the member rather than to this particular setup, and someone who
       // chose a 3h default claim shouldn't silently lose it because an admin

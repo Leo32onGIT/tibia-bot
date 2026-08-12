@@ -100,6 +100,14 @@ final class RelayedRespawnActions(
     send(guildId, actorId, RespawnCommand.GrantStamina,
       Map("userId" -> targetUserId, "minutes" -> minutes.toString))
 
+  def addSpawn(guildId: String, actorId: String, code: String, region: String,
+               name: String, creature: String): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.AddSpawn,
+      Map("code" -> code, "region" -> region, "name" -> name, "creature" -> creature))
+
+  def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.RemoveSpawn, Map("code" -> code))
+
   /** Reads never relay — every bot shares the guild's database, so this
    *  implementation is only ever used for writes and these are unreachable. */
   def bookings(guildId: String, userId: String): List[BookingView] = Nil

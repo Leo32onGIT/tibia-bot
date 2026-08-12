@@ -281,7 +281,12 @@ object BotApp extends App with StrictLogging {
     redirectUri = s"${Config.Web.baseUrl}$dashboardMountPath/auth/callback",
     mountPath = dashboardMountPath,
     extraCookiePaths = List(adminMountPath),
-    secureCookies = Config.Web.secureCookies
+    secureCookies = Config.Web.secureCookies,
+    // So a dashboard link pasted into Discord unfurls as this bot rather than as
+    // Discord itself, which is what the crawler found at the end of the sign-in
+    // redirect it was following. Built from the configured origin, so it names
+    // whichever domain this deployment actually answers on.
+    linkPreview = Some(web.LinkPreview.default(Config.Web.baseUrl))
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
@@ -650,13 +655,29 @@ object BotApp extends App with StrictLogging {
       try {
         respawnService.settings(guild.getId)
           .filter(respawnOwnership.ownsRespawns(guild, _))
-          .foreach { _ =>
+          .foreach { config =>
             val changed = respawnService.syncSeedCreatures(guild.getId)
             if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
+            // The codes themselves, for the same reason: this is the moment an
+            // edited respawns.json reaches a guild that already exists. It used
+            // to take somebody remembering to run /repair, which meant a code
+            // added to the bundled file simply never appeared on servers that
+            // had been set up before it.
+            val sync = respawnService.syncSeed(guild.getId)
+            if (sync.changedAnything)
+              logger.info(s"Respawn catalogue in guild '${guild.getId}': ${sync.added} added, " +
+                s"${sync.updated} corrected, ${sync.retired} retired" +
+                (if (sync.inUse > 0) s", ${sync.inUse} kept because somebody is on them" else ""))
+            // And the picture of them, which is what anybody actually reads a
+            // code off. A no-op unless the catalogue really differs from what
+            // the pinned post was last drawn from, so a plain restart costs
+            // nothing.
+            if (respawnService.redrawBoardIfChanged(guild, config))
+              logger.info(s"Redrew the respawn board in guild '${guild.getId}' — its codes had changed")
           }
       } catch {
         case ex: Throwable =>
-          logger.warn(s"Could not sync respawn creature images for guild '${guild.getId}'", ex)
+          logger.warn(s"Could not bring the respawn catalogue up to date for guild '${guild.getId}'", ex)
       }
     }
 

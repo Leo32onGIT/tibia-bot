@@ -126,6 +126,22 @@ final class RespawnCommandConsumer(
           case _ => missing("person and amount")
         }
 
+      case RespawnCommand.AddSpawn =>
+        (command.param("code"), command.param("name")) match {
+          case (Some(code), Some(name)) =>
+            // Region and creature are genuinely optional — a spawn with no city
+            // is grouped under "Elsewhere" and one with no creature simply has
+            // no picture — so an absent field becomes empty rather than a
+            // refusal. Blank values are dropped on the way out (see
+            // RelayedRespawnActions.send), which is why they arrive as absent.
+            local.addSpawn(guildId, actor, code,
+              command.param("region").getOrElse(""), name, command.param("creature").getOrElse(""))
+          case _ => missing("code and name")
+        }
+
+      case RespawnCommand.RemoveSpawn =>
+        command.param("code").fold(missing("spawn"))(local.removeSpawn(guildId, actor, _))
+
       // Unreachable via fromJson, which refuses unknown actions — kept so a
       // future action added to the set without a branch here fails loudly
       // rather than silently doing nothing.

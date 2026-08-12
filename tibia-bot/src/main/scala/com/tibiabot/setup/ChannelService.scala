@@ -385,11 +385,16 @@ final class ChannelService(
             val boardId = com.tibiabot.respawn.RespawnThreads.postBoard(existing, settings,
               respawnService.listRespawns(guild.getId))
             respawnService.updateChannels(guild.getId, existing.getId, boardId)
+            respawnService.recordBoardDrawn(guild.getId)
             s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its board post was " +
               s"missing, so I've recreated it. ${seedSummary(sync)}"
           } else {
             val redrawn = com.tibiabot.respawn.RespawnThreads
               .redrawBoard(guild, settings, respawnService.listRespawns(guild.getId))
+            // Noted so the next boot does not redraw what was just drawn. Repair
+            // itself redraws whatever the fingerprint says, since a board can be
+            // wrong in ways the catalogue cannot show — deleted, or never posted.
+            if (redrawn) respawnService.recordBoardDrawn(guild.getId)
             if (redrawn)
               s"${Config.yesEmoji} Redrew the board on <#${existing.getId}>. ${seedSummary(sync)}"
             else
@@ -415,6 +420,7 @@ final class ChannelService(
             com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings,
               ensureModeratorRole(guild), respawnService.listRespawns(guild.getId))
           respawnService.updateChannels(guild.getId, forumId, boardId)
+          respawnService.recordBoardDrawn(guild.getId)
 
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           com.tibiabot.presentation.AdminLog.post(adminChannel,

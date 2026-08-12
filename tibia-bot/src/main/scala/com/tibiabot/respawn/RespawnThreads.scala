@@ -235,6 +235,24 @@ object RespawnThreads extends StrictLogging {
       }
     }
 
+  /** Delete the post that represents a spawn, for a spawn that no longer exists.
+   *
+   *  Archiving is what happens when a spawn merely goes free; this is for a code
+   *  removed from the catalogue outright, where leaving the post would offer a
+   *  Claim button for something nothing can resolve.
+   *
+   *  Best effort, and says so in the log rather than to the caller: the spawn is
+   *  gone from the catalogue either way, and a post that outlives it is untidy
+   *  rather than broken. */
+  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit =
+    if (threadId.nonEmpty) {
+      findForum(guild, settings).flatMap(forum => resolveThread(guild, forum, threadId)).foreach { thread =>
+        Try(thread.delete().complete()).failed.foreach { error =>
+          logger.warn(s"Could not delete the post for a removed spawn in guild '${guild.getId}'", error)
+        }
+      }
+    }
+
   /** Give the guild's moderator role a working set of powers over the spawns
    *  forum: see it, talk in a claim, and manage or delete posts when a thread
    *  needs cleaning up.

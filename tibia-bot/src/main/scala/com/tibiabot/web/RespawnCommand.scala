@@ -46,12 +46,15 @@ object RespawnCommand {
   val ForceLeave = "force-leave"
   val Reassign = "reassign"
   val GrantStamina = "grant-stamina"
+  val AddSpawn = "add-spawn"
+  val RemoveSpawn = "remove-spawn"
 
   /** Every action a relayed command may name. An unrecognised one is answered
    *  rather than executed, so a newer build asking for something this one has
    *  never heard of fails visibly instead of silently doing nothing. */
   val Actions: Set[String] =
-    Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina)
+    Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina,
+        AddSpawn, RemoveSpawn)
 
   /** None on anything malformed. A command that cannot be read is dropped by
    *  the consumer and times out for the caller, which is the right outcome:

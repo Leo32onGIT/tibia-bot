@@ -34,6 +34,17 @@ trait RespawnRepository {
   /** Point the guild at a (re)created forum channel and board post. */
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit
 
+  /** The fingerprint of the catalogue the pinned board post was last drawn from,
+   *  or None if it has never been recorded — which is every guild the first time
+   *  a build that keeps it runs, and reads as "redraw it".
+   *
+   *  Persisted rather than held in memory precisely because the question is
+   *  asked at boot: what is being remembered is the state of a message in
+   *  Discord, which outlives this process. */
+  def boardDigest(guildId: String): Option[String]
+
+  def setBoardDigest(guildId: String, digest: String): Unit
+
   // --- catalogue ----------------------------------------------------------
 
   def listRespawns(guildId: String): List[Respawn]

@@ -35,6 +35,14 @@
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
+  /* `hidden` means hidden, whatever else an element is styled as.
+     The attribute works through a browser default of `display: none`, which any
+     author `display:` on the same element silently beats — so a flex or grid
+     component that sets its own display is shown regardless of the attribute,
+     and the script toggling it appears to do nothing. That caught the foot of
+     the spawn window once and the moderator panel again; this rule ends the
+     class of bug rather than patching each instance as it turns up. */
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px;
     background-image:
@@ -167,6 +175,62 @@
   }
   .panel-title::before { content: '##'; color: var(--accent); letter-spacing: normal; }
   .panel-title .right { margin-left: auto; text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 11px; }
+
+  /* Moderator tools for the catalogue itself. Purple throughout, the same hue
+     the per-spawn moderator block and the admin tier chip already use, so
+     "something only some people can do" looks like one thing across the page. */
+  .mod-panel { margin-bottom: 16px; border-color: rgba(167,139,250,0.28); }
+  .mod-panel-head {
+    width: 100%; background: none; border: 0; cursor: pointer; color: inherit; text-align: left;
+    padding: 11px 16px; display: flex; align-items: center; gap: 8px; font-family: inherit;
+  }
+  .mod-panel-head:hover { background: rgba(167,139,250,0.06); }
+  .mod-panel-head > i:first-child { color: var(--purple); font-size: 15px; }
+  .mod-panel-head[aria-expanded="true"] { border-bottom: 1px solid var(--panel-border); }
+  .mod-panel-head[aria-expanded="true"] .fold-chevron { transform: rotate(180deg); }
+  .mod-panel-peek { color: var(--muted); font-size: 11.5px; }
+  .mod-panel-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  /* One field per column while there is room, stacking on a narrow screen. The
+     code is the short one and gets the narrow track. */
+  .mod-form { display: grid; grid-template-columns: 110px 1fr 1fr 1fr; gap: 10px; align-items: end; }
+  .mod-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .mod-field input {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 7px 9px; width: 100%;
+  }
+  .mod-field input::placeholder { color: var(--muted); font-family: var(--sans); }
+  .mod-field input:focus { outline: none; border-color: var(--purple); }
+  .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .mod-note code { font-family: var(--mono); color: var(--text); }
+  .mod-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* The answer sits with the button that caused it, not at the top of the page:
+     this panel is its own little form and its reply belongs inside it. */
+  .mod-answer { font-size: 12px; flex: 1 1 220px; min-width: 0; }
+  .mod-answer.ok { color: var(--st-free); }
+  .mod-answer.no { color: var(--st-claimed); }
+  /* What this server added, and the way back out. Scrolls rather than growing
+     without limit: a guild fifty codes deep should not push the board itself off
+     the screen every time this panel is opened. */
+  .mod-owned { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--panel-border); padding-top: 12px; }
+  .mod-list { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+              scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .mod-list-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(31,36,48,0.6); }
+  .mod-list-row:last-child { border-bottom: 0; }
+  .mod-list-name { color: var(--spawn-name); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-list-region { color: var(--muted); font-size: 11px; margin-left: auto; padding-left: 8px;
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-list-row .btn { flex-shrink: 0; }
+  /* Purple until it is pointed at, red once it is armed: removal takes the
+     spawn's claims and bookings with it, so the second press should not look
+     like the first. */
+  .btn.danger-hover:hover:not([disabled]) { color: var(--st-claimed); border-color: rgba(210,51,105,0.5); background: rgba(210,51,105,0.1); }
+  .btn.mod-btn.armed { color: var(--st-claimed); border-color: rgba(210,51,105,0.65); background: rgba(210,51,105,0.14); }
+  @media (max-width: 720px) {
+    .mod-form { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 460px) {
+    .mod-form { grid-template-columns: 1fr; }
+  }
 
   .legend { display: flex; gap: 15px; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--panel-border); }
   .legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
@@ -319,14 +383,6 @@
   .fold-title { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
   .fold-chevron { transition: transform 0.15s ease; margin-left: auto; }
   .fold.open .fold-chevron { transform: rotate(180deg); }
-  /* The standing instructions, belonging to the heading above them rather than to
-     the top of the panel: same block, no rule between, indented to the title so
-     they read as its second line. Which also means they go with the week when it
-     is folded away, along with everything they are about. */
-  .fold-hint {
-    border-bottom: 1px solid var(--panel-border); padding: 0 20px 9px 46px;
-    margin-top: -3px; font-size: 11.5px; line-height: 1.45; color: var(--muted);
-  }
 
   /* ---- Up next -----------------------------------------------------------
      What is actually coming to this spawn, which "+2 queued" never said. The
@@ -364,7 +420,9 @@
   /* Fixed tracks throughout, and a width on the trailing one: a column that only
      some rows fill is a column that moves. */
   .up-row {
-    display: grid; grid-template-columns: 58px 14px minmax(0, 1fr) 44px;
+    /* The time track holds "≈11:30pm" — the widest an hour of the day gets once
+       it carries am/pm — without the day label under it wrapping. */
+    display: grid; grid-template-columns: 66px 14px minmax(0, 1fr) 44px;
     gap: 8px; align-items: center; padding: 5px 0; line-height: 1.4;
   }
   .up-when { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; }
@@ -506,11 +564,14 @@
   .foot-msg > i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
   .foot-msg.ok { color: var(--st-free); }
   .foot-msg.no { color: var(--st-asked); }
+  /* Standing advice rather than news, so it is quieter than either — it is what
+     the row holds when there is nothing to report. */
+  .foot-msg.hint-msg { color: var(--muted); font-size: 11.5px; }
+  .foot-msg.hint-msg > i { font-size: 14px; opacity: 0.75; }
   /* Sized by its content and never scrolled away, so neither the button nor a
      reply can be left off the bottom of a panel whose body is taller than the
      window. Its children carry their own top borders, so it adds none. */
   .win-foot { position: relative; flex-shrink: 0; }
-  .win-foot[hidden] { display: none; }
 
   /* Moderator tools, walled off from the member ones. Acting on somebody else's
      claim is a different kind of act from taking a free spawn, and a strip that
@@ -600,6 +661,14 @@
   /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
      half on the next is not a shorter label, it is a wrong-looking one. */
   .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; display: block; white-space: nowrap; }
+  /* Who the character on the first line belongs to. Quieter than either of the
+     lines above it: it answers a question about the block rather than saying
+     what the block is, and it is the line that may be cut when the name is
+     longer than the column. */
+  .wk-block .acct {
+    display: block; opacity: 0.6; font-size: 8.5px; margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   /* State decides the colour; whose it is decides how loud. Two hues would have
      meant a booking of yours and a booking of theirs looked like different
      kinds of thing, which they are not. */
@@ -683,7 +752,6 @@
     .foot-msg { padding: 8px 14px; }
     .up-head { padding: 8px 14px; }
     .up-list { padding: 5px 14px 8px; max-height: 168px; }
-    .fold-hint { padding: 0 14px 8px 37px; }
     .cal-legend { display: none; }
 
     /* ---- Four days, not seven -------------------------------------------
@@ -745,6 +813,20 @@
       <span class="stale-note" id="stale"></span>
       <input class="filter" id="filter" type="search" placeholder="Filter by code or name…" aria-label="Filter spawns">
     </div>
+  </div>
+
+  <!-- Moderator tools that belong to the catalogue rather than to any one spawn.
+       Shut until asked for, and above the list because what it does — adding a
+       code — changes the list underneath it. Drawn only for a moderator, and
+       removed outright otherwise: see modPanel(). -->
+  <div class="panel mod-panel" id="mod-panel" hidden>
+    <button class="mod-panel-head" id="mod-panel-head" type="button" aria-expanded="false" aria-controls="mod-panel-body">
+      <i class="ti ti-shield-half" aria-hidden="true"></i>
+      <span class="fold-title">Moderator</span>
+      <span class="mod-panel-peek">Tools & Config</span>
+      <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>
+    </button>
+    <div class="mod-panel-body" id="mod-panel-body" hidden></div>
   </div>
 
   <div class="panel">
@@ -819,6 +901,17 @@ const pad = n => String(n).padStart(2, '0');
  *  12, not 0 — "0 AM" is not a time anybody writes. */
 const twelveHour = h => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
 const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** A time of day on a twelve-hour clock, minutes and all.
+ *
+ *  For the times somebody reads one at a time and out of context — when their
+ *  turn comes, when a booking starts — where "9:30pm" is the way they would say
+ *  it out loud. The grid keeps the 24-hour form: a column of times read against
+ *  each other wants every one the same width, and am/pm is a suffix that makes
+ *  them ragged. Midnight is 12:00am, not 0:00, for the same reason as
+ *  [[twelveHour]].
+ */
+const fmtClock12 = d =>
+  `${d.getHours() % 12 === 0 ? 12 : d.getHours() % 12}:${pad(d.getMinutes())}${d.getHours() < 12 ? 'am' : 'pm'}`;
 const fmtDur = m =>
   m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
 
@@ -847,10 +940,13 @@ function fadeFor(hours) {
 
 
 /** Rendered in the reader's own zone — every time on the wire is an absolute
- *  instant precisely so this can be done here. */
+ *  instant precisely so this can be done here.
+ *
+ *  Twelve-hour, like the "Up next" rows: this is the same fact — when the next
+ *  booking is due — said on the card instead of in the list, and one page
+ *  writing one instant two ways reads as two different times. */
 function clockTime(iso) {
-  const d = new Date(iso);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return fmtClock12(new Date(iso));
 }
 
 function minutesLeft(endsAt) {
@@ -880,6 +976,30 @@ function dayLabel(at) {
   if (days === 1) return 'Tomorrow';
   const d = new Date(at);
   return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()}`;
+}
+
+/** Who a block's owner actually is, under whatever name is on the front of it.
+ *
+ *  A block is labelled with a Tibia character nine times in ten, and a character
+ *  name is no use to somebody who wants to go and ask about the slot — so the
+ *  Discord account goes underneath, with the server's own nickname beside it.
+ *  Said in that order, and nowhere as a `<@id>` mention: it matches how the bot
+ *  names people in Discord (`Names.user`), so the same person reads the same way
+ *  in the thread and on the grid.
+ *
+ *  Everything that would merely repeat the line above is dropped. A block with
+ *  no character on it is already labelled with the account, so only the nickname
+ *  is left to add; a nickname equal to the account name is not a second fact.
+ *  Empty when there is nothing to say — most bookings made before nicknames were
+ *  recorded — and the caller then draws no line at all rather than a blank one.
+ */
+function accountLine(b) {
+  const acct = (b.account || '').trim();
+  const nick = (b.nickname || '').trim();
+  const shown = (b.owner || '').trim().toLowerCase();
+  const at = nick && nick.toLowerCase() !== acct.toLowerCase() ? `@${nick}` : '';
+  if (!acct || acct.toLowerCase() === shown) return at;
+  return at ? `${acct} (${at})` : acct;
 }
 
 /** How a card reads its state, and never a crash if it meets one it does not
@@ -1292,7 +1412,14 @@ function tick() {
  *  this only refetches when a spawn turns up that we have never heard of.
  */
 async function loadCatalogue() {
-  const res = await fetch(`/dashboard/g/${GUILD_ID}/catalogue`, { headers: { 'Accept': 'application/json' } });
+  // `reload` rather than a plain fetch: the catalogue is served with a two-minute
+  // max-age, which is right for the ordinary case and exactly wrong for the two
+  // that get here — a code has just been added, or one has turned up that we
+  // have never heard of. Both mean the copy in the browser's cache is the one
+  // thing we know to be out of date. The ETag still saves the body when nothing
+  // has really changed.
+  const res = await fetch(`/dashboard/g/${GUILD_ID}/catalogue`,
+    { headers: { 'Accept': 'application/json' }, cache: 'reload' });
   if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
   const data = await res.json();
   catalogue = new Map(data.spawns.map(s => [s.code, s]));
@@ -2007,7 +2134,7 @@ function upNextSection(spawn) {
     const hidden = total - shown.length;
     const list = el('div', 'up-list', shown.map(r => `
       <div class="up-row up-${r.kind}">
-        <span class="up-when">${r.projected ? '≈' : ''}${fmtLocal(new Date(r.at))}<small>${esc(dayLabel(r.at))}</small></span>
+        <span class="up-when">${r.projected ? '≈' : ''}${fmtClock12(new Date(r.at))}<small>${esc(dayLabel(r.at))}</small></span>
         <span class="up-rail"><span class="up-pip"></span></span>
         <span class="up-body">
           <span class="up-who">${esc(r.who)}</span>
@@ -2062,19 +2189,11 @@ function calendarSection() {
     if (view.calendarOpen) showWeek(); else renderWindow();
   });
   wrap.appendChild(head);
-  // The standing instructions, belonging to this heading rather than to the top
-  // of the panel: no rule between them, indented to the title. They are about
-  // the grid, so they are drawn only while there is a grid and only while there
-  // is nothing picked — once there is, the foot has a verdict to give about the
-  // actual selection, and the two never appear together.
-  if (view.calendarOpen && !view.pick) {
-    head.style.borderBottom = 'none';
-    head.style.paddingBottom = '5px';
-    wrap.appendChild(el('div', 'fold-hint', TOUCH
-      ? 'Tap a start time on the grid to book it, or tap one of your own bookings to cancel it.'
-      : 'Pick a start time on the grid to book it, or click one of your own bookings to cancel it. '
-        + 'Right-click a selection to clear it.'));
-  }
+  // The standing instructions used to sit here, under this heading. They have
+  // moved into the message row at the foot — see footMessage — because they and
+  // the verdict on a selection are the same row's job at different moments, and
+  // giving them a row of their own meant the panel carried two strips of text
+  // where one would do.
   if (view.calendarOpen) wrap.appendChild(calendar());
   return wrap;
 }
@@ -2184,11 +2303,19 @@ function calendar() {
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
         + (b.start.getTime() < colStart ? ' clip-top' : '')
         + (b.end.getTime() > colEnd ? ' clip-bottom' : ''));
+      // The third line only goes on a block with room for a whole one. A block is
+      // as tall as its hunt is long, and half a line of clipped text under the
+      // time would read as a rendering fault rather than as information.
+      const height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2);
+      const account = accountLine(b);
       block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
-      block.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+      block.style.height = height + 'px';
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
-        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(b.end)}</span>`;
-      block.title = `${b.owner} · ${fmtLocal(b.start)}–${fmtLocal(b.end)} your time`
+        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(b.end)}</span>`
+        + (account && height >= 40 ? `<span class="acct">${esc(account)}</span>` : '');
+      // The tooltip carries it whatever the block's height, so a half-hour
+      // booking is not the one block you cannot find out who owns.
+      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(b.end)} your time`
         + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '');
       block.addEventListener('click', e => {
         e.stopPropagation();
@@ -2447,15 +2574,23 @@ function stretchHandle(block) {
 
 /** Everything the panel has to say, on the row above the one you act on.
  *
- *  A verdict about the slot selected and a reply to something just pressed are
- *  the same kind of thing at different moments, so they share a row rather than
- *  stacking two of them — and the reply wins while there is one, being the newer
- *  news. After a booking lands, the verdict on the slot still selected would be
- *  about a slot you now own: true, and not what anybody wants to read.
+ *  Three things want to be said in that spot and never two at once, so one row
+ *  serves all of them in order of how much they are worth reading:
  *
- *  Nothing at all when there is neither, which is the ordinary opening state:
- *  the instructions under "Book a time" are doing that job, and an empty bar
- *  above the button would be worse than none.
+ *  A reply to something just pressed wins outright, being the newer news — after
+ *  a booking lands, the verdict on the slot still selected would be about a slot
+ *  you now own: true, and not what anybody wants to read. Then the verdict on
+ *  whatever is selected. Then, with neither of those, how to select anything at
+ *  all — which is only worth saying while the grid is open to be clicked.
+ *
+ *  Those instructions had a row of their own under "Book a time" and were
+ *  drawn under exactly the same condition this branch is. Two strips of text
+ *  taking turns in different places is worse than one place that always holds
+ *  whatever there is to say.
+ *
+ *  Nothing at all when there is none of the three — a spawn panel with the week
+ *  folded away and nothing pressed — where an empty bar above the button would
+ *  be worse than no bar.
  */
 function footMessage() {
   if (view.answer) {
@@ -2463,21 +2598,29 @@ function footMessage() {
       `<i class="ti ${view.answer.ok ? 'ti-circle-check' : 'ti-alert-triangle'}" aria-hidden="true"></i>
        <span>${esc(view.answer.message)}</span>`);
   }
-  if (!view.pick) return null;
+  if (!view.pick) {
+    if (!view.calendarOpen) return null;
+    // Muted and without the verdict's icon: this is standing advice, not news
+    // about anything, and dressing it like an answer would have it read as one.
+    return el('div', 'foot-msg hint-msg', `<i class="ti ti-info-circle" aria-hidden="true"></i>
+      <span>${TOUCH
+        ? 'Tap a start time on the grid to book it, or tap one of your own bookings to cancel it.'
+        : 'Pick a start time on the grid to book it, or click one of your own bookings to cancel it. '
+          + 'Right-click a selection to clear it.'}</span>`);
+  }
 
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
-  const localDay = DAY_NAMES[(view.pick.getDay() + 6) % 7];
   const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop' : 'ti-alert-triangle';
   const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask' : 'verdict-no';
-  // Only when the two clocks disagree about the *day*, because that is the only
-  // time the server's reading changes what gets booked — a weekly rule repeats
-  // on the server's weekday, not on the one in the column. When they agree the
-  // server clock is a second number that answers no question anybody has, so it
-  // is not offered at all.
-  const dayNote = srv.weekday !== localDay
-    ? `<span class="srv-note">· ${pad(srv.hour)}:${pad(srv.minute)} ${srv.weekday} server time${view.repeat === 'week' ? ` — a weekly booking repeats on ${srv.weekday}s` : ''}</span>`
-    : '';
+  // The server's own clock used to be echoed here whenever it disagreed with the
+  // reader's about the day. It is gone: the grid is drawn on the reader's clock,
+  // the times in this line are on the reader's clock, and a second reading of
+  // the same moment beside them was one more number to reconcile rather than an
+  // answer to anything. Where the server's weekday genuinely changes what gets
+  // booked, it is said in words below instead of left to be inferred from a
+  // timestamp.
+  //
   // A weekly booking anchored on a day its own mask excludes is legal — the
   // anchor gives the time of day and the mask gives the days — but it means the
   // first slot is not the evening that was clicked, which nobody expects unless
@@ -2488,7 +2631,7 @@ function footMessage() {
     : '';
 
   return el('div', 'foot-msg', `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
-    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}`);
+    <span class="${cls}">${esc(v.text)}</span>${offMask}`);
 }
 
 /** The panel's action row: how long, and the thing that acts on it.
@@ -2561,12 +2704,16 @@ function modTools(body, spawn) {
   box.appendChild(el('div', 'mod-title', `<i class="ti ti-shield-half" aria-hidden="true"></i>Moderator`));
 
   const row = el('div', 'mod-row');
-  row.appendChild(button('Move them off', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code })));
-  // Giving the time back is the usual companion to moving somebody off: they
-  // paid for a window up front and are losing the rest of it.
-  row.appendChild(button('Refund 30m', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/grant-stamina`, { userId: holder, minutes: 30 })));
+  const remove = button('Remove Claim', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
+  remove.title = `Take ${spawn.code} off whoever is holding it`;
+  row.appendChild(remove);
+  // Giving the time back is the usual companion to taking a spawn away: they
+  // paid for the window up front and are losing the rest of it.
+  const refund = button('Give Stamina - 30m', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/grant-stamina`, { userId: holder, minutes: 30 }));
+  refund.title = 'Put 30 minutes back in their tank for today';
+  row.appendChild(refund);
   box.appendChild(row);
 
   // Handing over needs somebody to hand to, and the people already waiting for
@@ -2584,6 +2731,193 @@ function modTools(body, spawn) {
     box.appendChild(give);
   }
   body.appendChild(box);
+}
+
+/** The moderator panel above the board: tools that act on the catalogue rather
+ *  than on any one claim.
+ *
+ *  Built once at startup and left in the document, folded shut. It is reference
+ *  rather than what anybody came here for, and an open form above the spawn list
+ *  would push the list itself off a phone screen.
+ *
+ *  Removed outright for a member, not merely hidden — there is nothing here they
+ *  could use, and leaving the markup in the page would invite the impression
+ *  that unhiding it would do something. It would not: `/spawns` re-resolves the
+ *  visitor's tier against the live guild on every request, so the control is
+ *  there and this is only tidiness.
+ */
+function setUpModPanel() {
+  const panel = document.getElementById('mod-panel');
+  if (TIER !== 'moderator' && TIER !== 'admin') { panel.remove(); return; }
+
+  const head = document.getElementById('mod-panel-head');
+  const body = document.getElementById('mod-panel-body');
+  panel.hidden = false;
+
+  body.innerHTML = `
+    <div class="mod-form">
+      <div class="mod-field">
+        <label class="field-label" for="ms-code">Code</label>
+        <input id="ms-code" type="text" maxlength="16" placeholder="2104" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-name">Name</label>
+        <input id="ms-name" type="text" maxlength="60" placeholder="Cult Orcs" autocomplete="off">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-region">City</label>
+        <input id="ms-region" type="text" maxlength="40" placeholder="Thalassara" autocomplete="off">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-creature">Creature Name (Image)</label>
+        <input id="ms-creature" type="text" maxlength="64" placeholder="Moonstone Excavator" autocomplete="off">
+      </div>
+    </div>`;
+
+  const answer = el('div', 'mod-answer');
+  const actions = el('div', 'mod-actions');
+  const add = button('Add spawn', 'btn mod-btn', () => submit(), 'ti-plus');
+  actions.appendChild(add);
+  actions.appendChild(answer);
+  body.appendChild(actions);
+
+  // What this server has added, and the only way back out again. Redrawn from
+  // the catalogue on every open and after every write, so it never disagrees
+  // with the board below it.
+  const owned = el('div', 'mod-owned');
+  body.appendChild(owned);
+
+  const field = id => document.getElementById(id);
+  const inputs = ['ms-code', 'ms-name', 'ms-region', 'ms-creature'].map(field);
+  // Enter submits from any field. A four-box form where the only way to send it
+  // is to reach for the mouse is a form people fill in wrong twice.
+  inputs.forEach(input => input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+  }));
+
+  function say(text, kind) {
+    answer.textContent = text;
+    answer.className = 'mod-answer' + (kind ? ' ' + kind : '');
+  }
+
+  /** The spawns this server added, each with the way to take it back out.
+   *
+   *  Only ever the custom ones. A seed code has no button because removing one
+   *  is refused server-side — it would come back on the next boot — and offering
+   *  a button that always fails is worse than offering none.
+   *
+   *  Two presses, not one. Removal takes the spawn's claims, bookings and forum
+   *  post with it, which is not something to hand to a stray click on a list of
+   *  small buttons; the second press is the confirmation, and moving away resets
+   *  it.
+   */
+  function drawOwned() {
+    owned.innerHTML = '';
+    const mine = catalogue
+      // Read the way a person reads a code — 101 before 1001, and 411a before
+      // 411b — matching how the board image orders them (RespawnCatalogue.sortKey).
+      ? [...catalogue.values()].filter(s => s.custom)
+          .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }))
+      : [];
+    if (!mine.length) {
+      owned.appendChild(el('p', 'mod-note', 'Nothing added yet. Codes you add here appear in this list.'));
+      return;
+    }
+    owned.appendChild(el('div', 'field-label', `Added here (${mine.length})`));
+    const list = el('div', 'mod-list');
+    mine.forEach(spawn => {
+      const row = el('div', 'mod-list-row', `<span class="code-chip">${esc(spawn.code)}</span>
+        <span class="mod-list-name">${esc(spawn.name)}</span>
+        <span class="mod-list-region">${esc(spawn.region || '')}</span>`);
+      let armed = false;
+      const drop = button('Remove', 'btn mod-btn small danger-hover', () => {
+        if (!armed) {
+          armed = true;
+          drop.textContent = 'Sure?';
+          drop.classList.add('armed');
+          return;
+        }
+        remove(spawn.code);
+      }, 'ti-trash');
+      drop.title = `Remove ${spawn.code} from this server's catalogue`;
+      // Anywhere else, and the question is withdrawn. An armed button left
+      // sitting on the page is one somebody presses later meaning something else.
+      drop.addEventListener('blur', () => {
+        if (!armed) return;
+        armed = false;
+        drop.textContent = 'Remove';
+        drop.classList.remove('armed');
+      });
+      row.appendChild(drop);
+      list.appendChild(row);
+    });
+    owned.appendChild(list);
+  }
+
+  async function remove(code) {
+    say('Removing…');
+    const result = await send(`/dashboard/g/${GUILD_ID}/remove-spawn`, { code });
+    say(result.message, result.ok ? 'ok' : 'no');
+    if (result.ok) await reread();
+  }
+
+  /** One write, with the two failures that are not answers of their own. */
+  async function send(path, payload) {
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return await res.json().catch(() => ({ ok: false, message: 'That did not go through.' }));
+    } catch (e) {
+      return { ok: false, message: 'Could not reach the server.' };
+    }
+  }
+
+  /** The catalogue has changed, so everything drawn from it is stale: this list,
+   *  and the board underneath. `loadCatalogue` bypasses the browser cache, which
+   *  `refresh` on its own would not. */
+  async function reread() {
+    await loadCatalogue().catch(() => {});
+    drawOwned();
+    await refresh();
+  }
+
+  async function submit() {
+    const payload = {
+      code: field('ms-code').value.trim(),
+      name: field('ms-name').value.trim(),
+      region: field('ms-region').value.trim(),
+      creature: field('ms-creature').value.trim()
+    };
+    // Checked here only to save a round trip on the obvious case; the server
+    // decides for real, and says so in its own words.
+    if (!payload.code || !payload.name) { say('A spawn needs a code and a name.', 'no'); return; }
+
+    add.disabled = true;
+    say('Adding…');
+    const result = await send(`/dashboard/g/${GUILD_ID}/spawns`, payload);
+    add.disabled = false;
+    say(result.message, result.ok ? 'ok' : 'no');
+
+    if (result.ok) {
+      // Cleared so the next one can be typed straight in — adding spawns is
+      // something done in a run of five, not once.
+      inputs.forEach(input => (input.value = ''));
+      field('ms-code').focus();
+      await reread();
+    }
+  }
+
+  head.addEventListener('click', () => {
+    const open = head.getAttribute('aria-expanded') === 'true';
+    head.setAttribute('aria-expanded', String(!open));
+    body.hidden = open;
+    // Drawn on the way open rather than kept up to date while shut: the list is
+    // only ever read here, and the catalogue may well have moved since last time.
+    if (!open) { drawOwned(); field('ms-code').focus(); }
+  });
 }
 
 /** `icon` is a Tabler class, drawn before the label. Appended as a text node
@@ -2803,6 +3137,7 @@ document.getElementById('filter').addEventListener('input', e => {
   renderBoard();
 });
 
+setUpModPanel();
 refresh();
 // The board keeps up on its own. The open window is left alone while somebody is
 // mid-decision: rebuilding the grid under a half-made selection would throw it

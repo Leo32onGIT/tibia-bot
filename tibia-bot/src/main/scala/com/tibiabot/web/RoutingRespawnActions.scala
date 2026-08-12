@@ -48,6 +48,13 @@ final class RoutingRespawnActions(
   def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult] =
     port(guildId).grantStamina(guildId, actorId, targetUserId, minutes)
 
+  def addSpawn(guildId: String, actorId: String, code: String, region: String,
+               name: String, creature: String): Future[ActionResult] =
+    port(guildId).addSpawn(guildId, actorId, code, region, name, creature)
+
+  def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
+    port(guildId).removeSpawn(guildId, actorId, code)
+
   def bookings(guildId: String, userId: String): List[BookingView] = local.bookings(guildId, userId)
   def calendar(guildId: String, code: String,
                from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] =

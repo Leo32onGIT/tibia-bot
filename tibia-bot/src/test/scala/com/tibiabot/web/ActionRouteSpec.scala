@@ -76,7 +76,8 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
                  to: java.time.ZonedDateTime): Option[CalendarView] = {
       calendarWindows = calendarWindows :+ (from.toInstant.toString, to.toInstant.toString)
       if (code == "415") Some(CalendarView("415", "Cult Orcs", "Orc", List(
-        CalendarSlot(Some(3L), "user-1", "Bubble", from.plusHours(20), from.plusHours(22),
+        CalendarSlot(Some(3L), "user-1", "Bubble", "violentbeams", "",
+          from.plusHours(20), from.plusHours(22),
           "booked", repeats = false, daysOfWeek = 0, predicted = false))))
       else None
     }
@@ -88,6 +89,13 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     }
     def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"grant:$targetUserId:$minutes"; result
+    }
+    def addSpawn(guildId: String, actorId: String, code: String, region: String,
+                 name: String, creature: String): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"add:$code:$region:$name:$creature"; result
+    }
+    def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"remove:$code"; result
     }
   }
 
@@ -304,7 +312,9 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     List(
       ("/dashboard/g/g1/force-leave", """{"code":"415"}"""),
       ("/dashboard/g/g1/reassign", """{"code":"415","toUserId":"u9"}"""),
-      ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}""")
+      ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}"""),
+      ("/dashboard/g/g1/spawns", """{"code":"999","name":"Somewhere"}"""),
+      ("/dashboard/g/g1/remove-spawn", """{"code":"999"}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path: ")(status shouldBe StatusCodes.Forbidden)
@@ -325,7 +335,46 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Post("/dashboard/g/g1/grant-stamina", body("""{"userId":"u9","minutes":60}""")) ~> signedIn ~> r ~> check {
       status shouldBe StatusCodes.OK
     }
-    actions.moderatorCalls shouldBe List("forceLeave:415", "reassign:415->u9", "grant:u9:60")
+    Post("/dashboard/g/g1/spawns",
+      body("""{"code":"999","name":"Deep Cave","region":"Edron","creature":"Orc Warlord"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/remove-spawn", body("""{"code":"999"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe List(
+      "forceLeave:415", "reassign:415->u9", "grant:u9:60",
+      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999")
+  }
+
+  test("a removal with no code is refused before it reaches the catalogue") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    List("""{}""", """{"code":"   "}""").foreach { payload =>
+      Post("/dashboard/g/g1/remove-spawn", body(payload)) ~> signedIn ~> r ~> check {
+        withClue(s"$payload: ")(status shouldBe StatusCodes.BadRequest)
+      }
+    }
+    actions.moderatorCalls shouldBe empty
+  }
+
+  test("a spawn with no code or no name is refused before it reaches the catalogue") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    List("""{"name":"Deep Cave"}""", """{"code":"999"}""", """{"code":"  ","name":"Deep Cave"}""").foreach { payload =>
+      Post("/dashboard/g/g1/spawns", body(payload)) ~> signedIn ~> r ~> check {
+        withClue(s"$payload: ")(status shouldBe StatusCodes.BadRequest)
+      }
+    }
+    actions.moderatorCalls shouldBe empty
+  }
+
+  test("a spawn may be added without a city or a creature") {
+    // Both are genuinely optional in the bundled file too: no city groups it
+    // under "Elsewhere", and no creature simply means no picture.
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    Post("/dashboard/g/g1/spawns", body("""{"code":"999","name":"Deep Cave"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe List("add:999::Deep Cave:")
   }
 
   test("a booking is parsed into an instant, a length and a weekday mask") {

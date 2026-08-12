@@ -69,6 +69,15 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
     def forceLeave(guildId: String, actorId: String, code: String): Future[ActionResult] = result
     def reassign(guildId: String, actorId: String, code: String, toUserId: String): Future[ActionResult] = result
     def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult] = result
+    def addSpawn(guildId: String, actorId: String, code: String, region: String,
+                 name: String, creature: String): Future[ActionResult] = {
+      lastAdd = Some((code, region, name, creature)); result
+    }
+    var lastAdd: Option[(String, String, String, String)] = None
+    def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = {
+      lastRemove = Some(code); result
+    }
+    var lastRemove: Option[String] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -107,6 +116,40 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       consumer(cache, local).sweep().futureValue
       pending.futureValue.ok shouldBe true
       local.lastBooking shouldBe Some(("415", "2026-08-09T19:00:00Z", 120, 5))
+    }
+
+    // A catalogue change is a write like any other, and for a reason worth
+    // stating: the insert itself would work from any bot, but the board post it
+    // has to redraw afterwards belongs to whichever bot owns the forum.
+    "hand a new spawn code to the bot that owns the forum" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val pending = relay(cache).addSpawn("g1", "mod-1", "999", "Edron", "Deep Cave", "Orc Warlord")
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastAdd shouldBe Some(("999", "Edron", "Deep Cave", "Orc Warlord"))
+    }
+
+    // Empty values are dropped on the way out, so the far side has to read an
+    // absent optional field as empty rather than refusing the whole command.
+    "add a spawn that was given no city and no creature" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val pending = relay(cache).addSpawn("g1", "mod-1", "999", "", "Deep Cave", "")
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastAdd shouldBe Some(("999", "", "Deep Cave", ""))
+    }
+
+    "hand a removal to the bot that owns the forum too" in {
+      // Removing a code deletes the spawn's forum post as well as its row, so
+      // this has even less business running anywhere else than adding one does.
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val pending = relay(cache).removeSpawn("g1", "mod-1", "999")
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastRemove shouldBe Some("999")
     }
 
     // The thing the whole lease design exists to prevent.

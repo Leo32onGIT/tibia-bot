@@ -3,7 +3,7 @@ package com.tibiabot.respawn
 import com.tibiabot.Config
 import com.tibiabot.domain.{ClashVerdict, Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
 import com.tibiabot.persistence.{RespawnRepository, SeedSync}
-import com.tibiabot.presentation.RespawnEmbeds
+import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Guild
@@ -11,6 +11,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.{ForumChannel, ThreadChanne
 
 import java.time.ZonedDateTime
 import scala.util.Try
+import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
 
 /** What a claim attempt did, for the command/button layer to render. Modelled
@@ -386,6 +387,127 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  edit to respawns.json reaches a guild that was set up before it. */
   def syncSeed(guildId: String): SeedSync =
     repository.syncSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
+
+  /** Put the pinned board post back in step with the catalogue, if it isn't.
+   *
+   *  The board post *is* the catalogue — every code somebody can claim is on
+   *  that image and nowhere else — so a catalogue that has changed and a board
+   *  that has not is a list of codes people will type and be refused for.
+   *
+   *  Called at boot, which is the moment a new `respawns.json` reaches a guild
+   *  that already exists, and again whenever a moderator adds a code. Guarded by
+   *  a fingerprint rather than run unconditionally: a redraw is a REST edit per
+   *  guild, restarts are frequent and catalogue changes are not, so it follows
+   *  the codes rather than the process. A board post that has gone missing is
+   *  reposted instead, since there is nothing left to edit.
+   *
+   *  Returns whether Discord was actually touched. Nothing here is fatal — a
+   *  board that fails to redraw is out of date, not broken — and the digest is
+   *  only recorded on success, so a failure is retried on the next boot rather
+   *  than remembered as done.
+   */
+  /** Add a spawn a guild wants that the bundled list does not have.
+   *
+   *  The same four fields `respawns.json` carries, because it is the same thing:
+   *  a code to claim by, the city it is in, what it is called and which monster
+   *  represents it. Written as a `custom` row, which is what keeps `syncSeed`
+   *  off it — the bundled file has no opinion about a code it never shipped, and
+   *  must not retire one because of that.
+   *
+   *  Refusals are worded for the person typing, since this is reached from a
+   *  form rather than from code. A code already in the catalogue is the common
+   *  one and is refused rather than overwritten: quietly rewriting an existing
+   *  spawn would rename whatever people are already claiming under that code.
+   */
+  def addCustomSpawn(guildId: String, addedBy: String, code: String, region: String,
+                     name: String, creature: String): Either[String, Respawn] = {
+    val trimmedCode = code.trim
+    val trimmedName = name.trim
+    val trimmedRegion = region.trim
+    val trimmedCreature = creature.trim
+
+    RespawnService.spawnFault(trimmedCode, trimmedRegion, trimmedName, trimmedCreature) match {
+      case Some(fault) => Left(fault)
+      case None => repository.findByCode(guildId, trimmedCode) match {
+        case Some(existing) =>
+          Left(s"${existing.displayName} already uses that code.")
+        case None =>
+          val added = repository.addRespawn(guildId, trimmedCode, trimmedName, trimmedCreature,
+            trimmedRegion, world = "", mapperLink = "", source = Respawn.SourceCustom, addedBy = addedBy)
+          logger.info(s"'$addedBy' added respawn '${added.code}' (${added.name}) to guild '$guildId'")
+          Right(added)
+      }
+    }
+  }
+
+  /** Take a spawn a guild added back out of its catalogue.
+   *
+   *  Only a `custom` row. A seed code cannot be removed this way and is refused
+   *  rather than quietly ignored: the bundled file is the authority on those, so
+   *  deleting one would last until the next boot and then reappear, which looks
+   *  like the button not working.
+   *
+   *  Refused, too, while anybody is holding, waiting for or has booked it.
+   *  `removeRespawn` deletes those rows along with the spawn, and somebody's
+   *  evening disappearing because a moderator was tidying up is not a trade
+   *  worth making silently — the same guard `syncSeed` applies to a retired
+   *  code. Free it first and the removal goes through.
+   */
+  def removeCustomSpawn(guildId: String, code: String): Either[String, Respawn] =
+    resolve(guildId, code) match {
+      case None => Left(s"No spawn matches '$code'.")
+      case Some(respawn) if respawn.source != Respawn.SourceCustom =>
+        Left(s"${respawn.displayName} comes from the bundled list, so it can't be removed here.")
+      case Some(respawn) =>
+        val now = ZonedDateTime.now()
+        val busy = repository.activeClaim(guildId, respawn.id).isDefined ||
+          repository.queueFor(guildId, respawn.id).nonEmpty ||
+          repository.reservationsFor(guildId, respawn.id, now).nonEmpty ||
+          repository.schedulesForRespawn(guildId, respawn.id).nonEmpty
+        if (busy)
+          Left(s"${respawn.displayName} is claimed, queued for or booked. " +
+            "Clear those first — removing it would take somebody's hunt with it.")
+        else {
+          repository.removeRespawn(guildId, respawn.id)
+          logger.info(s"Removed custom respawn '${respawn.code}' (${respawn.name}) from guild '$guildId'")
+          Right(respawn)
+        }
+    }
+
+  /** Note that the board post now shows the catalogue as it currently stands.
+   *
+   *  For the paths that redraw unconditionally — `/repair`, whose whole job is
+   *  to fix a board that may be missing or wrong whatever a fingerprint says.
+   *  Without this the next boot would find no record of that redraw and do it
+   *  again. */
+  def recordBoardDrawn(guildId: String): Unit =
+    repository.setBoardDigest(guildId, RespawnBoardImage.digestOf(repository.listRespawns(guildId)))
+
+  def redrawBoardIfChanged(guild: Guild, config: RespawnSettings): Boolean = {
+    val guildId = guild.getId
+    val spawns = repository.listRespawns(guildId)
+    val digest = RespawnBoardImage.digestOf(spawns)
+    if (repository.boardDigest(guildId).contains(digest)) false
+    else RespawnThreads.findForum(guild, config).exists { forum =>
+      val drawn = RespawnThreads.resolveThread(guild, forum, config.boardThread) match {
+        case Some(_) => RespawnThreads.redrawBoard(guild, config, spawns)
+        case None =>
+          // The channel survived and the post did not. Nothing to edit, so it is
+          // posted afresh and the guild pointed at the new thread.
+          Try {
+            val boardId = RespawnThreads.postBoard(forum, config, spawns)
+            repository.updateChannels(guildId, forum.getId, boardId)
+            logger.info(s"Reposted the missing respawn board in guild '$guildId'")
+            true
+          }.recover { case NonFatal(error) =>
+            logger.warn(s"Could not repost the respawn board in guild '$guildId'", error)
+            false
+          }.get
+      }
+      if (drawn) repository.setBoardDigest(guildId, digest)
+      drawn
+    }
+  }
 
   // --- stamina ------------------------------------------------------------
 
@@ -1908,6 +2030,50 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 }
 
 object RespawnService {
+
+  /** Limits on a spawn somebody adds by hand.
+   *
+   *  Well under what the columns hold. They are about what stays readable rather
+   *  than what fits: a code is typed to claim by and shown on a chip, and every
+   *  name is drawn in full on the board image, so one absurdly long entry makes
+   *  the picture wider for every other guild member who opens it.
+   */
+  val MaxCodeLength: Int = 16
+  val MaxSpawnNameLength: Int = 60
+  val MaxRegionLength: Int = 40
+
+  /** What is wrong with a spawn somebody typed, or None if nothing is.
+   *
+   *  Everything about the fields themselves, which is everything that can be
+   *  decided without asking the guild's catalogue anything — so the rules can be
+   *  read back in a test without a database. Whether the code is already taken
+   *  is the caller's question, since only it can answer that.
+   *
+   *  Expects the four fields already trimmed. Worded for whoever typed them,
+   *  because a form is the only way in.
+   */
+  def spawnFault(code: String, region: String, name: String, creature: String): Option[String] =
+    if (code.isEmpty) Some("A spawn needs a code — it is what people type to claim it.")
+    // Letters, digits and hyphens: what the bundled codes look like, and a code
+    // travels in a URL and in a thread title, so it stays to characters that
+    // mean the same thing everywhere.
+    else if (!code.forall(c => c.isLetterOrDigit || c == '-'))
+      Some(s"'$code' has characters I can't use in a code — letters, numbers and hyphens only.")
+    else if (code.length > MaxCodeLength)
+      Some(s"That code is longer than $MaxCodeLength characters.")
+    else if (name.isEmpty) Some("A spawn needs a name, so the code means something on the board.")
+    else if (name.length > MaxSpawnNameLength)
+      Some(s"That name is longer than $MaxSpawnNameLength characters. The board post draws every " +
+        "name in full, so a long one pushes the whole image wider.")
+    else if (region.length > MaxRegionLength)
+      Some(s"That city is longer than $MaxRegionLength characters.")
+    // Checked here rather than left to fail quietly: an unusable creature name
+    // costs nothing at all until somebody wonders why their spawn is the only
+    // one on the board without a picture.
+    else if (creature.nonEmpty && com.tibiabot.web.CreatureSprites.safeFileName(creature).isEmpty)
+      Some(s"I can't fetch a picture for '$creature'. Use the creature's wiki name, " +
+        "or leave it empty and the spawn goes without one.")
+    else None
 
   /** How long a claim actually runs for, given what a booking leaves and what
    *  is in the tank.

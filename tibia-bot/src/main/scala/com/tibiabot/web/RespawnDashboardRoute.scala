@@ -457,6 +457,44 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    // Adding a code, which is a change to what the whole server can claim rather
+    // than to one claim — so it is a moderator tool like the three above, and
+    // gated the same way.
+    path("g" / Segment / "spawns") { guildId =>
+      post {
+        withModerator(guildId) { (userId, _) =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            // Only the two that a spawn cannot do without are required here. The
+            // rest of the checking — the shape of a code, whether it is already
+            // taken, whether a creature has a picture — belongs to the service,
+            // which is where the same rules apply to every way in.
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("name").map(_.trim).filter(_.nonEmpty)) match {
+              case (Some(code), Some(name)) =>
+                actionResult(guildId, actions.addSpawn(guildId, userId, code,
+                  fields.getOrElse("region", "").trim, name, fields.getOrElse("creature", "").trim))
+              case _ => badRequest("A spawn needs at least a code and a name.")
+            }
+          }
+        }
+      }
+    } ~
+    // Its own path rather than a DELETE on the one above: the page sends JSON
+    // bodies everywhere else, and one endpoint with a different shape is how a
+    // caller ends up sending a body nobody reads.
+    path("g" / Segment / "remove-spawn") { guildId =>
+      post {
+        withModerator(guildId) { (userId, _) =>
+          entity(as[String]) { body =>
+            RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty) match {
+              case Some(code) => actionResult(guildId, actions.removeSpawn(guildId, userId, code))
+              case None       => badRequest("Which spawn?")
+            }
+          }
+        }
+      }
+    } ~
     path("images" / Segment) { filename =>
       get {
         discordAuth.authenticatedUser { _ =>
@@ -643,6 +681,12 @@ object RespawnDashboardRoute {
   private def slotJson(slot: CalendarSlot, viewerId: String): JsValue = JsObject(
     Map[String, JsValue](
       "owner" -> JsString(slot.owner),
+      // Who that actually is, for a grid where most blocks are labelled with a
+      // Tibia character. Sent as two plain fields rather than one composed
+      // string: the page has to decide what to draw from how much room the block
+      // has, and cannot take a sentence apart again.
+      "account" -> JsString(slot.account),
+      "nickname" -> JsString(slot.nickname),
       // As on the board, whose block it is turns on the account and never on the
       // name: two people can hunt on characters called the same thing.
       "mine" -> JsBoolean(slot.ownerId == viewerId),
@@ -696,7 +740,12 @@ object RespawnDashboardRoute {
         "id" -> JsNumber(spawn.id),
         "code" -> JsString(spawn.code),
         "name" -> JsString(spawn.name),
-        "region" -> JsString(spawn.region)
+        "region" -> JsString(spawn.region),
+        // Whether this guild added it, which is the only kind a moderator may
+        // remove — the bundled ones come back on the next boot. Sent to
+        // everybody, because it belongs to the spawn rather than to the viewer,
+        // and this payload is shared by every visitor and cached as one thing.
+        "custom" -> JsBoolean(spawn.source == com.tibiabot.domain.Respawn.SourceCustom)
       ) ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue)))
     }.toVector))
 

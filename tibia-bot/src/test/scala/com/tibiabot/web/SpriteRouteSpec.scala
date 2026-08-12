@@ -67,6 +67,9 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def forceLeave(guildId: String, actorId: String, code: String): Future[ActionResult] = no
     def reassign(guildId: String, actorId: String, code: String, toUserId: String): Future[ActionResult] = no
     def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult] = no
+    def addSpawn(guildId: String, actorId: String, code: String, region: String,
+                 name: String, creature: String): Future[ActionResult] = no
+    def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = no
   }
 
   /** Enough gateway to construct the access service; no test here reaches it. */

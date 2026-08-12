@@ -96,6 +96,21 @@ trait RespawnActionPort {
 
   /** Give somebody back (or take away) stamina for the rest of the day. */
   def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult]
+
+  /** Add a spawn to the guild's catalogue that the bundled list does not carry.
+   *
+   *  The same four fields `respawns.json` has. Relayed like every other write
+   *  even though most of the work is a database insert every bot could do: the
+   *  board post in Discord has to be redrawn afterwards, and only the bot that
+   *  owns the forum can touch it. */
+  def addSpawn(guildId: String, actorId: String, code: String, region: String,
+               name: String, creature: String): Future[ActionResult]
+
+  /** Take a spawn the guild added back out of its catalogue.
+   *
+   *  Only ever one it added itself — a code from the bundled list is refused,
+   *  since removing one would last until the next boot brought it back. */
+  def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult]
 }
 
 /** One booking as the calendar shows it. Times are absolute instants for the
@@ -136,6 +151,14 @@ final case class CalendarSlot(
   scheduleId: Option[Long],
   ownerId: String,
   owner: String,
+  /** The Discord account behind [[owner]], and what the server calls them.
+   *
+   *  Both travel because [[owner]] is a Tibia character most of the time, and a
+   *  character name says nothing about who to go and talk to. Empty when there
+   *  is none to give: a nickname was not recorded before today, and every block
+   *  booked until now has none. */
+  account: String,
+  nickname: String,
   startsAt: java.time.ZonedDateTime,
   endsAt: java.time.ZonedDateTime,
   /** `claimed`, `booked`, `asked` or `confirmed` — the board's own words. */

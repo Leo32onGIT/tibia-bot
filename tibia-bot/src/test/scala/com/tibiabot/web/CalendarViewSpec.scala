@@ -210,7 +210,8 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
   }
 
   "the calendar JSON" should {
-    val slot = CalendarSlot(Some(3L), "u2", "Bubble", at(1, 20), at(1, 22), "booked",
+    val slot = CalendarSlot(Some(3L), "u2", "Bubble", "violentbeams", "Violent Beams",
+      at(1, 20), at(1, 22), "booked",
       repeats = true, daysOfWeek = 3, predicted = false)
     val view = CalendarView("415", "Cult Orcs", "Orc", List(slot))
 
@@ -234,6 +235,17 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
       RespawnDashboardRoute.calendarJson(live, "u1")
         .fields("slots").asInstanceOf[spray.json.JsArray].elements.head.asJsObject
         .fields.keySet should not contain "scheduleId"
+    }
+
+    // A block is labelled with a Tibia character, which tells the reader nothing
+    // about who to go and ask. The account and the nickname travel beside it so
+    // the page can say who that is.
+    "carry the account behind the name on the block" in {
+      val fields = RespawnDashboardRoute.calendarJson(view, "u1")
+        .fields("slots").asInstanceOf[spray.json.JsArray].elements.head.asJsObject.fields
+      fields("owner") shouldBe spray.json.JsString("Bubble")
+      fields("account") shouldBe spray.json.JsString("violentbeams")
+      fields("nickname") shouldBe spray.json.JsString("Violent Beams")
     }
 
     "point the sprite at our own domain, never at the wiki" in {

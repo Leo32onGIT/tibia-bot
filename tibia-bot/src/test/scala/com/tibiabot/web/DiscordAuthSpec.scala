@@ -32,6 +32,33 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     extraCookiePaths = List(adminPath)
   )(system, executor)
 
+  /** The same auth, told what to show a crawler. Separate so every existing
+   *  test goes on proving the plain redirect is untouched. */
+  private def previewing = new DiscordAuth(
+    clientId = "1234",
+    clientSecret = "secret",
+    sessionSecret = "session-secret",
+    redirectUri = s"https://example.test$mountPath/auth/callback",
+    mountPath = mountPath,
+    extraCookiePaths = List(adminPath),
+    linkPreview = Some(LinkPreview.default("https://violentbot.xyz"))
+  )(system, executor)
+
+  /** How Discord's unfurler actually introduces itself: a browser-shaped string
+   *  with its name buried in the middle, which is why the test for it is a
+   *  substring search rather than a prefix. */
+  private val DiscordUnfurler = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"
+
+  /** A session cookie signed the way the class signs its own, so a test can be
+   *  authenticated without going through Discord. */
+  private def signedSession(userId: String): String = {
+    val payload = s"$userId.${java.time.Instant.now().plusSeconds(3600).getEpochSecond}"
+    val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+    mac.init(new javax.crypto.spec.SecretKeySpec("session-secret".getBytes("UTF-8"), "HmacSHA256"))
+    s"$payload.${java.util.Base64.getUrlEncoder.withoutPadding
+      .encodeToString(mac.doFinal(payload.getBytes("UTF-8")))}"
+  }
+
   private def routes = pathPrefix("dashboard")(auth.routes)
 
   /** The nonce the login redirect just minted, read back out of the two places
@@ -119,6 +146,40 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Get(s"$mountPath/thing") ~> guarded ~> check {
       status shouldBe StatusCodes.Found
       header("Location").get.value() shouldBe s"$mountPath/auth/login?next=%2Fdashboard"
+    }
+  }
+
+  // A crawler follows the redirect to Discord's OAuth screen and reports what it
+  // finds there — which is how a link to this dashboard came to unfurl as an
+  // advert for Discord.
+  test("a link crawler is given a page to read instead of the sign-in redirect") {
+    val guarded = pathPrefix("dashboard")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
+    Get(s"$mountPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~> guarded ~> check {
+      status shouldBe StatusCodes.OK
+      responseAs[String] should include("""content="Violent Bot" property="og:title"""")
+      responseAs[String] should include("A Discord bot for the online MMORPG Tibia")
+    }
+  }
+
+  test("everybody else still gets the redirect, crawler page or not") {
+    val guarded = pathPrefix("dashboard")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
+    val browser = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
+    List(Some(browser), None).foreach { agent =>
+      val request = agent.fold(Get(s"$mountPath/thing"))(a => Get(s"$mountPath/thing") ~> addHeader("User-Agent", a))
+      request ~> guarded ~> check {
+        withClue(s"$agent: ")(status shouldBe StatusCodes.Found)
+      }
+    }
+  }
+
+  // The preview replaces only the bounce to Discord. Somebody who is signed in
+  // must still get the page they asked for, whatever they claim to be.
+  test("a signed-in request is served even when it looks like a crawler") {
+    val guarded = pathPrefix("dashboard")(path("thing")(previewing.authenticatedUser(id => complete(id))))
+    Get(s"$mountPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~>
+      Cookie("vb_session" -> signedSession("user-1")) ~> guarded ~> check {
+      status shouldBe StatusCodes.OK
+      responseAs[String] shouldBe "user-1"
     }
   }
 
