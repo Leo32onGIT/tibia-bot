@@ -37,6 +37,13 @@ object AccessTier {
     if (hasManageServer) Admin
     else if (hasModeratorRole) Moderator
     else Member
+
+  val All: List[AccessTier] = List(Member, Moderator, Admin)
+
+  /** A tier back from the name it travels under between processes. None for
+   *  anything unrecognised, so a build that learns a fourth tier is ignored by
+   *  one that has not rather than being read as some arbitrary third. */
+  def byName(name: String): Option[AccessTier] = All.find(_.name == name)
 }
 
 /** One guild a visitor may use the respawn dashboard in, and the worlds within

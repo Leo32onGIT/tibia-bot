@@ -32,7 +32,15 @@ final class DashboardAccessService(
    *  see [[DashboardAccess.entryFor]]. Empty means there is no such guild, and
    *  every guild counts. */
   demoGuildId: String = "",
-  cache: AccessCache = new AccessCache(AccessCache.DefaultTtl)
+  cache: AccessCache = new AccessCache(AccessCache.DefaultTtl),
+  /** Guilds another bot in this fleet runs, which this process cannot resolve
+   *  for itself — see [[RemoteGuildAccess]]. Absent on a deployment with no
+   *  Redis or no other bots, where it costs nothing and contributes nothing. */
+  remote: Option[RemoteGuildAccess] = None,
+  /** How long to let the other bots answer before rendering without them. Kept
+   *  a little above [[RemoteGuildAccess.DefaultTimeout]] so the wait is decided
+   *  there, by the part that can say which guild gave up, rather than here. */
+  remoteWait: java.time.Duration = java.time.Duration.ofSeconds(4)
 ) extends com.typesafe.scalalogging.StrictLogging {
 
   /** As [[accessFor]], but willing to answer from the last few seconds.
@@ -78,7 +86,46 @@ final class DashboardAccessService(
    *  empty wants fixing where it happens — by outliving a restart — rather than
    *  by scanning everything each time it does.
    */
-  def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
+  def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
+    localAccessFor(userId, userGuildIds) ++ remoteAccessFor(userId, userGuildIds)
+
+  /** Guilds another bot runs, resolved by asking it.
+   *
+   *  A visitor's tier is their roles and what channels they can see, and only a
+   *  bot in the guild can be told either — so a guild run elsewhere could never
+   *  be resolved here and was left out of the picker entirely, however plainly
+   *  the visitor belonged to it.
+   *
+   *  Blocking, unlike everything it calls: this whole service is already run on
+   *  the blocking pool by the routes above (see `RespawnDashboardRoute.read`),
+   *  and every caller is shaped around getting a list rather than a promise of
+   *  one. The wait is bounded twice over — once per guild inside, once here —
+   *  and a timeout yields no guilds rather than an error, so the worst it can
+   *  do is show a picker one server short.
+   */
+  private def remoteAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
+    remote.fold(List.empty[GuildAccess]) { resolver =>
+      try scala.concurrent.Await.result(
+        resolver.accessFor(userId, userGuildIds),
+        scala.concurrent.duration.Duration.fromNanos(remoteWait.toNanos))
+      catch {
+        case scala.util.control.NonFatal(e) =>
+          logger.warn(s"Gave up waiting on other bots for dashboard access: ${e.getMessage}")
+          Nil
+      }
+    }
+
+  /** One guild, resolved here and never by asking anyone else.
+   *
+   *  What [[AccessQueryConsumer]] answers with. It must not be the full
+   *  [[accessFor]]: that asks the other bots in turn, so answering a question
+   *  with it would have two processes asking each other the same one until both
+   *  timed out.
+   */
+  def localAccessIn(userId: String, guildId: String): Option[GuildAccess] =
+    localAccessFor(userId, Set(guildId)).headOption
+
+  private def localAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
     val candidates = discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
     candidates.flatMap { guild =>
       val guildId = guild.getId

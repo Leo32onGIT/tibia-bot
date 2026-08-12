@@ -288,6 +288,16 @@ object BotApp extends App with StrictLogging {
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)
+  // Guilds another bot in the fleet runs. This one cannot resolve a visitor
+  // there — roles and channel visibility can only be read by a bot actually in
+  // the guild — so it asks, over the same Redis the write relay uses. Absent
+  // without Redis, where there is no fleet to ask.
+  private val remoteGuildAccess =
+    if (Config.redisEnabled)
+      Some(new web.RemoteGuildAccess(
+        persistence.RedisCacheProvider.cache, actorSystem.scheduler,
+        isLocal = guildId => discordGateway.guildById(guildId) != null)(ex))
+    else None
   private val dashboardAccessService = new web.DashboardAccessService(
     discordGateway,
     respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
@@ -298,7 +308,8 @@ object BotApp extends App with StrictLogging {
     // it would ask almost every visitor to choose between their own community
     // and ours. It is still reachable, and it is where somebody with no
     // community of their own lands.
-    demoGuildId = Config.Patreon.supportGuildId
+    demoGuildId = Config.Patreon.supportGuildId,
+    remote = remoteGuildAccess
   )
   // Fetched on this host, which can reach the wiki even where the people
   // looking at the dashboard cannot, and served back from our own domain.
@@ -338,6 +349,53 @@ object BotApp extends App with StrictLogging {
       web.RespawnCommandConsumer.SweepEvery, web.RespawnCommandConsumer.SweepEvery
     )(() => { respawnCommandConsumer.sweep(); () })(ex)
     logger.info("Respawn command relay listening for writes from other bots' dashboards")
+  }
+  // The other side of the access relay: answer what somebody else's dashboard
+  // asks about a guild this bot is in. Resolved locally on purpose — going back
+  // out over Redis here would have two bots asking each other the same question
+  // until both timed out.
+  private val accessQueryConsumer = new web.AccessQueryConsumer(
+    persistence.RedisCacheProvider.cache,
+    resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId),
+    canSee = guildId => discordGateway.guildById(guildId) != null)(ex)
+
+  /** Republished well inside its own TTL, so a missed beat or two never drops
+   *  this bot's guilds out of anybody's picker. */
+  private val guildRosterPublishEvery = 30.seconds
+  private val guildRosterTtl = 2.minutes
+
+  /** The guilds this bot could answer about, so the others know to ask.
+   *
+   *  Only guilds with the respawn system set up: the dashboard has nothing to
+   *  show for the rest, and naming them would have other bots asking questions
+   *  whose answer is always no. Republished rather than kept, so a bot that dies
+   *  falls out of everyone's picker within the TTL instead of being asked about
+   *  forever.
+   */
+  private def publishGuildRoster(): Unit =
+    try {
+      val guilds = discordGateway.guilds
+        .filter(g => respawnService.settings(g.getId).isDefined)
+        .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
+      persistence.RedisCacheProvider.cache.setEx(
+        web.GuildRoster.key(discordGateway.selfUserId),
+        web.GuildRoster(discordGateway.selfUserId, guilds).toJson,
+        guildRosterTtl
+      ).recover { case e: Throwable => logger.warn(s"Failed to publish guild roster: ${e.getMessage}") }(ex)
+    } catch {
+      case e: Throwable => logger.warn("Failed to build guild roster", e)
+    }
+
+  if (Config.Respawn.enabled && Config.redisEnabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      web.AccessQueryConsumer.SweepEvery, web.AccessQueryConsumer.SweepEvery
+    )(() => { accessQueryConsumer.sweep(); () })(ex)
+    // Published straight away as well as on the beat, so a bot restarting does
+    // not drop out of everybody else's server picker for half a minute.
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      scala.concurrent.duration.Duration.Zero, guildRosterPublishEvery
+    )(() => publishGuildRoster())(ex)
+    logger.info("Dashboard access relay listening for questions from other bots' dashboards")
   }
   private val respawnDashboardRoute =
     new web.RespawnDashboardRoute(discordAuth, dashboardAccessService, creatureSpriteCache,
