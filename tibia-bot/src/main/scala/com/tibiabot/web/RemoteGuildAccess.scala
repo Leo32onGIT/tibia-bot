@@ -53,20 +53,32 @@ final class RemoteGuildAccess(
         Nil
     }
 
-  /** Guild ids somebody else runs that this visitor is in. */
-  private def foreignGuilds(userGuildIds: Set[String]): Future[List[String]] =
-    cache.keysMatching(GuildRoster.pattern).flatMap { keys =>
+  /** Who runs what, as last read. Rosters are republished every thirty seconds
+   *  and change only when a bot joins or leaves a guild, so re-reading them per
+   *  request buys nothing — and costs a great deal: `keysMatching` is Redis
+   *  `KEYS`, which walks the whole keyspace and stalls the server while it
+   *  does. Read on a page load it ran against every online-list snapshot and
+   *  character cache the bot holds. */
+  @volatile private var rosterCache: (Long, List[String]) = (0L, Nil)
+
+  private def rosterGuilds(): Future[List[String]] = {
+    val (readAt, known) = rosterCache
+    if (System.nanoTime() - readAt < RemoteGuildAccess.RosterMaxAge.toNanos) Future.successful(known)
+    else cache.keysMatching(GuildRoster.pattern).flatMap { keys =>
       Future.traverse(keys)(cache.get).map { values =>
-        values.flatten
-          .flatMap(GuildRoster.fromJson)
-          .flatMap(_.guilds.map(_.id))
-          .filter(userGuildIds.contains)
-          // A guild this process is in needs no asking — it resolved it itself,
-          // and asking would invite a second, possibly different answer for it.
-          .filterNot(isLocal)
-          .distinct
+        val ids = values.flatten.flatMap(GuildRoster.fromJson).flatMap(_.guilds.map(_.id)).distinct
+        rosterCache = (System.nanoTime(), ids)
+        ids
       }
     }
+  }
+
+  /** Guild ids somebody else runs that this visitor is in. */
+  private def foreignGuilds(userGuildIds: Set[String]): Future[List[String]] =
+    rosterGuilds().map(_.filter(userGuildIds.contains)
+      // A guild this process is in needs no asking — it resolved it itself, and
+      // asking would invite a second, possibly different answer for it.
+      .filterNot(isLocal))
 
   private def ask(guildId: String, userId: String): Future[Option[GuildAccess]] = {
     val id = newId()
@@ -105,7 +117,19 @@ final class RemoteGuildAccess(
 object RemoteGuildAccess {
   /** Shorter than a relayed write's, and deliberately: a write is somebody
    *  waiting on a button they pressed, where this is a page that must render.
-   *  Two seconds covers a sweep that has only just been missed. */
-  val DefaultTimeout: FiniteDuration = 2500.millis
-  val DefaultPoll: FiniteDuration = 150.millis
+   *
+   *  Cut from two and a half seconds after it started timing out in the wild.
+   *  A bot that has not answered in a second is not about to make the page
+   *  pleasant, and the cost of waiting is paid on a pool of four threads — so
+   *  a handful of visitors waiting on a bot that is gone is enough to hold up
+   *  everybody else's requests too. A roster outlives the bot that published it
+   *  by up to two minutes, so a deploy guarantees a window where exactly that
+   *  happens.
+   */
+  val DefaultTimeout: FiniteDuration = 1.second
+  val DefaultPoll: FiniteDuration = 100.millis
+
+  /** How long the who-runs-what listing is reused. Rosters are republished
+   *  every thirty seconds and only change when a bot joins or leaves a guild. */
+  val RosterMaxAge: FiniteDuration = 30.seconds
 }

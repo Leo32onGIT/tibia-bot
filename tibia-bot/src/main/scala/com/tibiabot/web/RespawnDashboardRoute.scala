@@ -121,7 +121,11 @@ final class RespawnDashboardRoute(
       // Deliberately not the remembered answer. These act on other people's
       // claims, and somebody who lost the role a minute ago must be refused
       // now rather than whenever a cache happens to expire.
-      read(accessService.accessFor(userId, guildIdsOf(userId))) { granted =>
+      //
+      // Only the guild being acted on is resolved. Resolving every guild the
+      // visitor is in made a force-leave wait on the other bots about servers
+      // that had nothing to do with it.
+      read(accessService.accessIn(userId, guildIdsOf(userId), guildId)) { granted =>
         granted.find(_.guildId == guildId) match {
           case Some(access) if access.tier.atLeast(AccessTier.Moderator) => inner(userId, access)
           case _ => complete(StatusCodes.Forbidden -> "Forbidden")

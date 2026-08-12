@@ -39,8 +39,12 @@ final class DashboardAccessService(
   remote: Option[RemoteGuildAccess] = None,
   /** How long to let the other bots answer before rendering without them. Kept
    *  a little above [[RemoteGuildAccess.DefaultTimeout]] so the wait is decided
-   *  there, by the part that can say which guild gave up, rather than here. */
-  remoteWait: java.time.Duration = java.time.Duration.ofSeconds(4)
+   *  there, by the part that can say which guild gave up, rather than here.
+   *
+   *  This is a backstop and should not be what fires. When it did, it meant a
+   *  page load held one of four blocking threads for its whole duration — so
+   *  the ceiling matters more than the guild it was waiting on. */
+  remoteWait: java.time.Duration = java.time.Duration.ofSeconds(2)
 ) extends com.typesafe.scalalogging.StrictLogging {
 
   /** As [[accessFor]], but willing to answer from the last few seconds.
@@ -187,5 +191,18 @@ final class DashboardAccessService(
    *  role a minute ago must not still be able to move somebody else's claim.
    */
   def permits(userId: String, userGuildIds: Set[String], guildId: String, required: AccessTier): Boolean =
-    DashboardAccess.permits(accessFor(userId, userGuildIds), guildId, required)
+    DashboardAccess.permits(accessIn(userId, userGuildIds, guildId), guildId, required)
+
+  /** Access in one named guild, resolved fresh.
+   *
+   *  Whoever asks this already knows which guild they mean, so the other bots
+   *  are only troubled when the answer can actually come from one of them.
+   *  Going through the full [[accessFor]] made every moderator action — a
+   *  force-leave, a reassign — wait on Redis and on however many bots had
+   *  published a roster, for guilds that had nothing to do with the action.
+   */
+  def accessIn(userId: String, userGuildIds: Set[String], guildId: String): List[GuildAccess] =
+    if (!userGuildIds.contains(guildId)) Nil
+    else if (discordGateway.guildById(guildId) != null) localAccessFor(userId, Set(guildId))
+    else remoteAccessFor(userId, Set(guildId))
 }

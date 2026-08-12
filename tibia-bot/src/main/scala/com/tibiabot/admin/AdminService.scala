@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
+import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
 
 
@@ -46,21 +47,33 @@ final class AdminService(
   /** Leave a guild, posting the reason to its admin channel first. */
   def leave(guildId: String, reason: String): MessageEmbed = {
     val guild = discordGateway.guildById(guildId)
-    val discordInfo = retrieveConfig(guild)
-    var embedMessage = ""
 
-    if (discordInfo.isEmpty) {
-      embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner."
-    } else {
-      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      postCreatorLog(adminChannel,
-        s"${Names.user(discordGateway.selfUserName)} has left your discord because of the following reason:\n> $reason",
-        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
-      embedMessage = s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
-    }
+    // Reading the guild's config can fail outright, and the notice is not worth
+    // staying for. A guild that never ran /setup has no database of its own, so
+    // this read throws rather than coming back empty — and it used to throw
+    // before the leave below, which meant the bot never left, tried again on
+    // the next prune, and warned about it for ever. The message to the owner is
+    // a courtesy; leaving is the thing that was asked for.
+    val notice = scala.util.Try {
+      val discordInfo = retrieveConfig(guild)
+      val adminChannel = discordInfo.get("admin_channel").map(guild.getTextChannelById).orNull
+      if (adminChannel == null) false
+      else {
+        postCreatorLog(adminChannel,
+          s"${Names.user(discordGateway.selfUserName)} has left your discord because of the following reason:\n> $reason",
+          "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Abacus.gif")
+        true
+      }
+    }.recover {
+      case NonFatal(e) =>
+        logger.info(s"No parting message left in guild '$guildId' — its config could not be read: ${e.getMessage}")
+        false
+    }.getOrElse(false)
 
     guild.leave().queue()
-    com.tibiabot.presentation.Embeds.response(embedMessage)
+    com.tibiabot.presentation.Embeds.response(
+      if (notice) s":gear: The bot has left the Guild: **${guild.getName()}** and left a message for the owner."
+      else s":gear: The bot has left the Guild: **${guild.getName()}** without leaving a message for the owner.")
   }
 
   /** Re-fetch the Dream Courts boss-of-the-day per world. */

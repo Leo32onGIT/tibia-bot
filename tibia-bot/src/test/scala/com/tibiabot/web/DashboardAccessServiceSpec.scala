@@ -74,6 +74,37 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     ))
   }
 
+  "accessIn" should {
+
+    "resolve a guild this bot is in without troubling the other bots" in {
+      // The relay is the slow part — Redis, then however many bots have
+      // published a roster — and a moderator acting on a guild we are in has no
+      // need of it. Going through accessFor made every force-leave wait on it.
+      var asked = false
+      val gateway = new FakeGateway(List("g1" -> "Violent"), Map(("g1", "u1") -> member()))
+      val svc = new DashboardAccessService(
+        gateway,
+        respawnConfigured = Set("g1").contains,
+        worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+        moderatorRoleOf = _ => "0",
+        remote = Some(new RemoteGuildAccess(
+          com.tibiabot.persistence.NoopRedisCache, akka.actor.ActorSystem(
+            "access-in-spec", com.typesafe.config.ConfigFactory.defaultReference()).scheduler,
+          isLocal = _ => { asked = true; false })(scala.concurrent.ExecutionContext.global)))
+
+      svc.accessIn("u1", Set("g1"), "g1") shouldBe
+        List(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica")))
+      asked shouldBe false
+    }
+
+    "answer nothing for a guild the visitor is not even in, without asking anybody" in {
+      val (gateway, svc) = service()
+      svc.accessIn("u1", Set("g1"), "g-elsewhere") shouldBe Nil
+      // Not a member lookup either: the guild list rules it out on its own.
+      gateway.lookups shouldBe Nil
+    }
+  }
+
   "accessFor" should {
 
     "give a member access to a guild whose world they can see" in {
