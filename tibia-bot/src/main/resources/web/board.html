@@ -188,7 +188,6 @@
   .mod-panel-head > i:first-child { color: var(--purple); font-size: 15px; }
   .mod-panel-head[aria-expanded="true"] { border-bottom: 1px solid var(--panel-border); }
   .mod-panel-head[aria-expanded="true"] .fold-chevron { transform: rotate(180deg); }
-  .mod-panel-peek { color: var(--muted); font-size: 11.5px; }
   .mod-panel-body { display: flex; flex-direction: column; }
   /* One band per job. The panel does two unrelated things, and a heading with a
      ground of its own is what makes each read as a section — a hairline between
@@ -879,8 +878,7 @@
   <div class="panel mod-panel" id="mod-panel" hidden>
     <button class="mod-panel-head" id="mod-panel-head" type="button" aria-expanded="false" aria-controls="mod-panel-body">
       <i class="ti ti-shield-half" aria-hidden="true"></i>
-      <span class="fold-title">Moderator</span>
-      <span class="mod-panel-peek">Tools & Config</span>
+      <span class="fold-title">Moderator Tools</span>
       <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>
     </button>
     <div class="mod-panel-body" id="mod-panel-body" hidden></div>
@@ -2985,11 +2983,7 @@ function setUpModPanel() {
       counted.textContent = mine.length
         ? `${mine.length} added here` : 'none added here yet';
     }
-    if (!mine.length) {
-      owned.appendChild(el('p', 'mod-note',
-        'Codes you add appear here, with a way to take them back out. Bot updates never rename or remove them.'));
-      return;
-    }
+    if (!mine.length) return;
     const list = el('div', 'mod-list');
     mine.forEach(spawn => {
       const row = el('div', 'mod-list-row', `<span class="code-chip">${esc(spawn.code)}</span>
