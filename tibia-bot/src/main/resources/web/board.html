@@ -170,11 +170,16 @@
 
   .legend { display: flex; gap: 15px; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--panel-border); }
   .legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-  .sw { width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0; border: 1.5px solid; }
-  .sw.free { border-color: var(--st-free); background: rgba(46,204,113,0.26); }
-  .sw.claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
-  .sw.booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
-  .sw.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  /* The board legend's colour key. Named `key`, not `sw`, which the server
+     switcher above already owns: two unrelated components sharing that class
+     meant this rule — being the later one — sized the switcher to 12 by 12,
+     its contents spilled out of a box that small, and the tier chip beside it
+     was laid out on top of them. */
+  .key { width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0; border: 1.5px solid; }
+  .key-free { border-color: var(--st-free); background: rgba(46,204,113,0.26); }
+  .key-claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
+  .key-booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
+  .key-confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 10px; padding: 14px 16px; }
   .card {
@@ -746,10 +751,10 @@
   <div class="panel">
     <div class="panel-title">Spawns <span class="right" id="count"></span></div>
     <div class="legend">
-      <span><i class="sw free"></i>Free</span>
-      <span><i class="sw claimed"></i>Being hunted</span>
-      <span><i class="sw booked"></i>Booked</span>
-      <span><i class="sw confirmed"></i>Booked &amp; confirmed</span>
+      <span><i class="key key-free"></i>Free</span>
+      <span><i class="key key-claimed"></i>Being hunted</span>
+      <span><i class="key key-booked"></i>Booked</span>
+      <span><i class="key key-confirmed"></i>Booked &amp; confirmed</span>
     </div>
     <div class="cards" id="cards"></div>
   </div>

@@ -397,9 +397,13 @@ object BotApp extends App with StrictLogging {
     )(() => publishGuildRoster())(ex)
     logger.info("Dashboard access relay listening for questions from other bots' dashboards")
   }
+  // One read of a guild's board answers every tab watching it — see
+  // BoardSnapshotCache. Cleared by a dashboard write so whoever made it sees it
+  // straight away; everything else shows up within the few seconds it holds.
+  private val boardSnapshots = new web.BoardSnapshotCache(guildId => respawnService.board(guildId))
   private val respawnDashboardRoute =
     new web.RespawnDashboardRoute(discordAuth, dashboardAccessService, creatureSpriteCache,
-      boardOf = guildId => respawnService.board(guildId),
+      boardOf = guildId => boardSnapshots.board(guildId),
       // None when the guild never set the respawn system up, which is the same
       // condition that leaves it out of the access funnel in the first place.
       limitsOf = (guildId, userId) => respawnService.settings(guildId).map { settings =>
@@ -409,7 +413,8 @@ object BotApp extends App with StrictLogging {
           settings.defaultDurationMinutes,
           respawnService.nextStaminaReset())
       },
-      actions = respawnActions)(respawnActionPool)
+      actions = respawnActions,
+      boardChanged = boardSnapshots.invalidate)(respawnActionPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.

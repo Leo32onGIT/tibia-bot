@@ -28,7 +28,11 @@ final class RespawnDashboardRoute(
   spriteCache: CreatureSpriteCache,
   boardOf: String => List[com.tibiabot.respawn.RespawnBoardEntry],
   limitsOf: (String, String) => Option[BoardLimits],
-  actions: RespawnActionPort
+  actions: RespawnActionPort,
+  /** Told which guild a write has just changed, so a board held for a few
+   *  seconds is not what the person who made it is shown next. Does nothing by
+   *  default — the board is correct either way, only a little later. */
+  boardChanged: String => Unit = _ => ()
 )(implicit blocking: scala.concurrent.ExecutionContext) extends StrictLogging {
 
   // Pure renderers, kept on the companion so they can be read back in a test
@@ -163,8 +167,14 @@ final class RespawnDashboardRoute(
   /** Completes once the action has actually been performed — which for a guild
    *  another bot runs means once that process has answered. Nothing is parked
    *  waiting: the request simply is not completed until the Future is. */
-  private def actionResult(result: scala.concurrent.Future[ActionResult]): Route =
+  /** Every write the dashboard performs comes through here, which is why the
+   *  board is forgotten here rather than in each of the eight places that make
+   *  one. Forgotten on a refusal as well as on a success: a refusal often means
+   *  the board was not what the page thought it was, which is exactly when a
+   *  held copy is worth throwing away. */
+  private def actionResult(guildId: String, result: scala.concurrent.Future[ActionResult]): Route =
     onSuccess(result) { answer =>
+      boardChanged(guildId)
       json(JsObject("ok" -> JsBoolean(answer.ok), "message" -> JsString(answer.message)))
     }
 
@@ -299,7 +309,7 @@ final class RespawnDashboardRoute(
               case None => badRequest("Which spawn?")
               case Some(code) =>
                 val minutes = fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption)
-                actionResult(actions.claim(
+                actionResult(guildId, actions.claim(
                   guildId, userId, fields.getOrElse("character", "").trim, code, minutes))
             }
           }
@@ -311,7 +321,7 @@ final class RespawnDashboardRoute(
         withAccessAs(guildId) { (userId, _) =>
           entity(as[String]) { body =>
             val code = RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty)
-            actionResult(actions.release(guildId, userId, code))
+            actionResult(guildId, actions.release(guildId, userId, code))
           }
         }
       }
@@ -321,7 +331,7 @@ final class RespawnDashboardRoute(
         withAccessAs(guildId) { (userId, _) =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption) match {
-              case Some(extra) if extra > 0 => actionResult(actions.extend(guildId, userId, extra))
+              case Some(extra) if extra > 0 => actionResult(guildId, actions.extend(guildId, userId, extra))
               case _ => badRequest("How much longer?")
             }
           }
@@ -347,7 +357,7 @@ final class RespawnDashboardRoute(
                 val days = fields.get("days").flatMap(d => scala.util.Try(d.toInt).toOption)
                   .filter(d => d >= 0 && d <= com.tibiabot.domain.RespawnSchedule.EveryDay)
                   .getOrElse(com.tibiabot.domain.RespawnSchedule.OneOff)
-                actionResult(actions.book(
+                actionResult(guildId, actions.book(
                   guildId, userId, fields.getOrElse("character", "").trim, code, start, minutes, days))
             }
           }
@@ -393,7 +403,7 @@ final class RespawnDashboardRoute(
         withAccessAs(guildId) { (userId, _) =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("scheduleId").flatMap(s => scala.util.Try(s.toLong).toOption) match {
-              case Some(id) => actionResult(actions.cancelBooking(guildId, userId, id))
+              case Some(id) => actionResult(guildId, actions.cancelBooking(guildId, userId, id))
               case None     => badRequest("Which booking?")
             }
           }
@@ -407,7 +417,7 @@ final class RespawnDashboardRoute(
         withModerator(guildId) { (userId, _) =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty) match {
-              case Some(code) => actionResult(actions.forceLeave(guildId, userId, code))
+              case Some(code) => actionResult(guildId, actions.forceLeave(guildId, userId, code))
               case None       => badRequest("Which spawn?")
             }
           }
@@ -421,7 +431,7 @@ final class RespawnDashboardRoute(
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("code").map(_.trim).filter(_.nonEmpty),
              fields.get("toUserId").map(_.trim).filter(_.nonEmpty)) match {
-              case (Some(code), Some(to)) => actionResult(actions.reassign(guildId, userId, code, to))
+              case (Some(code), Some(to)) => actionResult(guildId, actions.reassign(guildId, userId, code, to))
               case _ => badRequest("A reassignment needs a spawn and somebody to give it to.")
             }
           }
@@ -436,7 +446,7 @@ final class RespawnDashboardRoute(
             (fields.get("userId").map(_.trim).filter(_.nonEmpty),
              fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption)) match {
               case (Some(target), Some(minutes)) =>
-                actionResult(actions.grantStamina(guildId, userId, target, minutes))
+                actionResult(guildId, actions.grantStamina(guildId, userId, target, minutes))
               case _ => badRequest("A grant needs somebody and an amount.")
             }
           }
