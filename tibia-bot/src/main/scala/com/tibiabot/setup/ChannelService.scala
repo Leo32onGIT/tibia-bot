@@ -126,7 +126,7 @@ final class ChannelService(
         .grant(Permission.MESSAGE_HISTORY)
         .grant(Permission.MANAGE_THREADS)
         .grant(Permission.MANAGE_CHANNEL)
-        .grant(Permission.MANAGE_MESSAGES)
+        .grant(Permission.MESSAGE_MANAGE)
         .grant(Permission.MANAGE_PERMISSIONS)
         .complete()
     } catch {
