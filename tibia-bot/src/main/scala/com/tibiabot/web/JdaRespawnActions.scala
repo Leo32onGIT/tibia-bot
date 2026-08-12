@@ -69,11 +69,20 @@ final class JdaRespawnActions(
     try Option(discordGateway.retrieveUser(userId)).map(_.getName).filter(_.nonEmpty).getOrElse(userId)
     catch { case NonFatal(_) => userId }
 
+  /** What this person is called in the guild, from its own member cache — free,
+   *  where retrieving them would be a REST call per claim. Empty when they are
+   *  not cached or have left, which the row renders as the account name. */
+  private def nicknameIn(guild: Guild, userId: String): String =
+    try Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse("")
+    catch { case NonFatal(_) => "" }
+
+
   def claim(guildId: String, userId: String, characterName: String,
             code: String, minutes: Option[Int]): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       RespawnActions.describe(
-        respawnService.claim(guild, userId, displayName(userId), characterName, code, minutes))
+        respawnService.claim(guild, userId, displayName(userId), nicknameIn(guild, userId),
+          characterName, code, minutes))
     }
 
   def release(guildId: String, userId: String, code: Option[String]): Future[ActionResult] =
@@ -96,7 +105,8 @@ final class JdaRespawnActions(
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.addSchedule(guild, respawn, userId, displayName(userId), characterName,
+          respawnService.addSchedule(guild, respawn, userId, displayName(userId),
+            nicknameIn(guild, userId), characterName,
             firstStart, durationMinutes, daysOfWeek) match {
             case Right(com.tibiabot.respawn.ScheduleResult.Booked(schedule)) =>
               ActionResult(ok = true,

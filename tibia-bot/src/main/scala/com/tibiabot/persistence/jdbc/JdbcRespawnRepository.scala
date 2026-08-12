@@ -182,6 +182,11 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       // was, rather than quietly becoming a one-off.
       statement.executeUpdate(
         "ALTER TABLE respawn_schedules ADD COLUMN IF NOT EXISTS days_of_week SMALLINT NOT NULL DEFAULT 127;")
+      // What the owner is called in the guild, kept beside the account name so
+      // a row can name somebody the way their server does without a lookup —
+      // and can still name somebody who has since left.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_schedules ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
 
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS schedule_id BIGINT;")
@@ -193,6 +198,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_id VARCHAR(255);")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
+      statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
       // The window the asker wants, when they asked by trying to book over this
       // slot. Null for a Request-button ask, where the slot itself is what they
       // are asking for.
@@ -304,6 +311,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       requestDeadline = optionalZoned(result, "request_deadline"),
       requesterUserId = Option(result.getString("requester_user_id")).filter(_.nonEmpty),
       requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty),
+      nickname = Option(result.getString("nickname")).getOrElse(""),
       requestedStartsAt = optionalZoned(result, "requested_starts_at"),
       requestedDurationMinutes = {
         val minutes = result.getInt("requested_duration_minutes")
@@ -723,7 +731,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
                         durationMinutes: Int, kind: String): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
@@ -734,8 +742,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       val statement = conn.prepareStatement(
         """INSERT INTO respawn_claims
           |(respawn_id, user_id, user_name, character_name, status, queue_position,
-          | claimed_at, starts_at, ends_at, duration_minutes, warned, kind)
-          |SELECT ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, FALSE, ?
+          | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, nickname)
+          |SELECT ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, FALSE, ?, ?
           |WHERE NOT EXISTS (
           |  SELECT 1 FROM respawn_claims WHERE respawn_id = ? AND status = 'active'
           |)
@@ -750,13 +758,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(7, Timestamp.from(endsAt.toInstant))
         statement.setInt(8, durationMinutes)
         statement.setString(9, kind)
-        statement.setLong(10, respawnId)
+        statement.setString(10, nickname)
+        statement.setLong(11, respawnId)
         val result = statement.executeQuery()
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
     }
 
-  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                    characterName: String, durationMinutes: Int, queueLimit: Int,
                    kind: String): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
@@ -794,8 +803,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         val statement = conn.prepareStatement(
           """INSERT INTO respawn_claims
             |(respawn_id, user_id, user_name, character_name, status, queue_position,
-            | claimed_at, duration_minutes, warned, kind)
-            |VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, FALSE, ?)
+            | claimed_at, duration_minutes, warned, kind, nickname)
+            |VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, FALSE, ?, ?)
             |RETURNING *;""".stripMargin)
         try {
           statement.setLong(1, respawnId)
@@ -806,6 +815,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           statement.setTimestamp(6, Timestamp.from(ZonedDateTime.now().toInstant))
           statement.setInt(7, durationMinutes)
           statement.setString(8, kind)
+          statement.setString(9, nickname)
           val result = statement.executeQuery()
           result.next()
           Some(readClaim(result))
@@ -1108,7 +1118,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       durationMinutes = result.getInt("duration_minutes"),
       active = result.getBoolean("active"),
       createdAt = toZoned(result.getTimestamp("created_at")),
-      daysOfWeek = result.getInt("days_of_week")
+      daysOfWeek = result.getInt("days_of_week"),
+      nickname = Option(result.getString("nickname")).getOrElse("")
     )
 
   private def collectSchedules(result: ResultSet): List[RespawnSchedule] = {
@@ -1117,15 +1128,15 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     out.toList
   }
 
-  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
+  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                   characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
                   durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay): RespawnSchedule = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_schedules
         |(respawn_id, user_id, user_name, character_name, anchor_at, period_minutes,
-        | duration_minutes, days_of_week, active, created_at)
-        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, NOW())
+        | duration_minutes, days_of_week, active, created_at, nickname)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, NOW(), ?)
         |RETURNING *;""".stripMargin)
     try {
       statement.setLong(1, respawnId)
@@ -1136,6 +1147,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setInt(6, periodMinutes)
       statement.setInt(7, durationMinutes)
       statement.setInt(8, daysOfWeek)
+      statement.setString(9, nickname)
       val result = statement.executeQuery()
       result.next()
       readSchedule(result)
@@ -1186,7 +1198,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   // --- reserved occurrences -----------------------------------------------
 
   def reserveOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
-                        userName: String, characterName: String, startsAt: ZonedDateTime,
+                        userName: String, nickname: String, characterName: String, startsAt: ZonedDateTime,
                         durationMinutes: Int): Option[RespawnClaim] = withGuild(guildId) { conn =>
     // ON CONFLICT against the partial unique index, so booking the same slot
     // twice is a no-op rather than a duplicate — the materialiser runs on every
@@ -1194,9 +1206,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_claims
         |(respawn_id, user_id, user_name, character_name, status, queue_position,
-        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, schedule_id)
+        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, schedule_id, nickname)
         |VALUES (?, ?, ?, ?, 'reserved', 0, NOW(), ?,
-        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'scheduled', ?)
+        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'scheduled', ?, ?)
         |ON CONFLICT DO NOTHING
         |RETURNING *;""".stripMargin)
     try {
@@ -1209,6 +1221,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setInt(7, durationMinutes)
       statement.setInt(8, durationMinutes)
       statement.setLong(9, scheduleId)
+      statement.setString(10, nickname)
       val result = statement.executeQuery()
       if (result.next()) Some(readClaim(result)) else None
     } finally statement.close()
@@ -1306,7 +1319,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     } finally statement.close()
   }
 
-  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String,
+  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                  startsAt: ZonedDateTime, durationMinutes: Int): RespawnClaim = withGuild(guildId) { conn =>
     // No schedule_id: this is a one-off booking handed to whoever asked, not an
     // occurrence of anybody's standing rule. It still activates through the same
@@ -1314,9 +1327,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_claims
         |(respawn_id, user_id, user_name, character_name, status, queue_position,
-        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind)
+        | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, nickname)
         |VALUES (?, ?, ?, '', 'reserved', 0, NOW(), ?,
-        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'adhoc')
+        |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'adhoc', ?)
         |RETURNING *;""".stripMargin)
     try {
       statement.setLong(1, respawnId)
@@ -1326,6 +1339,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setTimestamp(5, Timestamp.from(startsAt.toInstant))
       statement.setInt(6, durationMinutes)
       statement.setInt(7, durationMinutes)
+      statement.setString(8, nickname)
       val result = statement.executeQuery()
       result.next()
       readClaim(result)

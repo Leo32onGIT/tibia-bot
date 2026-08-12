@@ -43,6 +43,11 @@ object RespawnModals extends StrictLogging {
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
 
+  /** As RespawnButtons.nicknameOf: what the caller is called in this guild. */
+  private def nicknameOf(event: ModalInteractionEvent): String =
+    Option(event.getMember).map(_.getEffectiveName).getOrElse("")
+
+
   /** Discord rejects a modal outright if a label runs past 45 characters or its
    *  description past 100 — the interaction fails rather than the text being
    *  trimmed. Several of these interpolate a Discord username or a spawn name,
@@ -447,7 +452,8 @@ object RespawnModals extends StrictLogging {
         else {
           val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
             .atZone(java.time.ZoneOffset.UTC)
-          service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
+          service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName,
+            nicknameOf(event), "",
             firstStart, duration, daysOfWeek) match {
             case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
             case Right(ScheduleResult.Booked(schedule)) =>
@@ -459,7 +465,7 @@ object RespawnModals extends StrictLogging {
             // for them, and telling somebody they have a slot they may not get
             // is worse than making them wait for the answer.
             case Right(ScheduleResult.Requested(_, slot, deadline)) =>
-              reply(event, s"${Config.yesEmoji} That time is ${Names.user(slot.userName)}'s, so I've asked " +
+              reply(event, s"${Config.yesEmoji} That time is ${Names.user(slot.nickname, slot.userName)}'s, so I've asked " +
                 "whether they're actually hunting it.\nIf they say no, or don't answer by " +
                 s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
                 s"booked for you from <t:$startEpoch:t> for " +
@@ -599,7 +605,7 @@ object RespawnModals extends StrictLogging {
 
     // No duration passed, so the member's own default (or the guild's) applies —
     // which is the point of pairing this with the Config button.
-    val outcome = service.claim(guild, user.getId, user.getName, "", query, None)
+    val outcome = service.claim(guild, user.getId, user.getName, nicknameOf(event), "", query, None)
     val threadLink = service.resolve(guild.getId, query)
       .map(_.threadId)
       .filter(id => id.nonEmpty && id != "0")

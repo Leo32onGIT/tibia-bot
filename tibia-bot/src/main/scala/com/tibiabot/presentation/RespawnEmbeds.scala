@@ -56,7 +56,8 @@ object RespawnEmbeds {
     (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)  => s"**${claim.characterName}** (${Names.user(claim.userName)})"
       case (true, false) => s"**${claim.characterName}**"
-      case _             => Names.user(claim.userName)
+      // No character given, so the guild name is what identifies them.
+      case _             => Names.user(claim.nickname, claim.userName)
     }
 
   /** The same, for a booking that has not produced a slot row yet — the rule
@@ -65,7 +66,7 @@ object RespawnEmbeds {
     (schedule.characterName.nonEmpty, schedule.userName.nonEmpty) match {
       case (true, true)  => s"**${schedule.characterName}** (${Names.user(schedule.userName)})"
       case (true, false) => s"**${schedule.characterName}**"
-      case _             => Names.user(schedule.userName)
+      case _             => Names.user(schedule.nickname, schedule.userName)
     }
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
@@ -274,7 +275,7 @@ object RespawnEmbeds {
       case _                        => ""
     }
     val booking = if (slot.requestedSlot.isDefined) " Your booking wasn't made." else ""
-    s"${Names.user(slot.userName)} has confirmed they are hunting **${respawn.displayName}**$when, " +
+    s"${Names.user(slot.nickname, slot.userName)} has confirmed they are hunting **${respawn.displayName}**$when, " +
       s"so it stays theirs.$booking"
   }
 
@@ -345,7 +346,7 @@ object RespawnEmbeds {
 
   /** DM'd when a booked slot arrives to find somebody already hunting. */
   def slotOccupied(respawn: Respawn, holder: Option[RespawnClaim]): String = {
-    val who = holder.map(c => s" by ${Names.user(c.userName)}").getOrElse("")
+    val who = holder.map(c => s" by ${Names.user(c.nickname, c.userName)}").getOrElse("")
     val until = holder.flatMap(_.endsAt).map(end => s" until ${clockTime(end)}").getOrElse("")
     s"**${respawn.displayName}** was already being hunted$who$until when your slot came round, " +
       "so you're first in the queue and I'll offer it to you the moment they finish."
@@ -382,7 +383,7 @@ object RespawnEmbeds {
       }.sortBy { case (start, _, _) => start.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue) }
 
       embed.setDescription(truncateLines(dated.map { case (start, schedule, respawn) =>
-        val who = if (everyones) s" · ${Names.user(schedule.userName)}" else ""
+        val who = if (everyones) s" · ${Names.user(schedule.nickname, schedule.userName)}" else ""
         start match {
           case Some(from) =>
             // A repeat says which days and needs no date. A one-off is one

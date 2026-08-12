@@ -104,7 +104,15 @@ final case class RespawnClaim(
    *  Empty on an ad-hoc claim, and on every row written before confirmation
    *  existed — which is what keeps the sweep off hunts that were already
    *  running when this shipped. */
-  confirmBy: Option[ZonedDateTime] = None
+  confirmBy: Option[ZonedDateTime] = None,
+  /** What this person is called in the guild, as they were called when they
+   *  took the spawn — their nickname where they have one, their display name
+   *  otherwise. Stamped rather than looked up: the rows outlive membership, and
+   *  a name resolved at render time is blank for everyone who has since left.
+   *
+   *  Last in the list only so adding it left every existing construction alone.
+   *  Empty on rows written before it existed, which read as the username. */
+  nickname: String = ""
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -301,7 +309,9 @@ final case class RespawnSchedule(
   createdAt: ZonedDateTime,
   /** Which weekdays this repeats on, as a bitmask — Monday is the low bit. Last
    *  in the list only so adding it left every existing construction alone. */
-  daysOfWeek: Int = RespawnSchedule.EveryDay
+  daysOfWeek: Int = RespawnSchedule.EveryDay,
+  /** As RespawnClaim.nickname. */
+  nickname: String = ""
 ) {
   /** A booking that comes back around, as opposed to a single slot held ahead of
    *  time. */

@@ -152,7 +152,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
 
     // 415 is gone from the file, but ending somebody's hunt to tidy a catalogue
     // is the wrong trade — it is reported instead.
@@ -171,7 +171,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
-    repo.reserveFor(g, spawn.id, "u2", "Two", now.plusHours(3), 120)
+    repo.reserveFor(g, spawn.id, "u2", "Two", "", now.plusHours(3), 120)
 
     // A booking is a hunt that hasn't happened yet; removing the spawn under it
     // would cancel somebody's evening.
@@ -228,7 +228,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
 
     repo.activeClaim(g, spawn.id) shouldBe None
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Char", now, now.plusMinutes(120), 120,
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "Char", now, now.plusMinutes(120), 120,
       RespawnClaim.KindAdHoc).get
     claim.status shouldBe RespawnClaim.StatusActive
     claim.endsAt.map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
@@ -241,17 +241,17 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("queueing assigns increasing positions and refuses duplicates and a full queue") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.insertActiveClaim(g, spawn.id, "holder", "H", "", now, now.plusMinutes(60), 60, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, spawn.id, "holder", "H", "", "", now, now.plusMinutes(60), 60, RespawnClaim.KindAdHoc).get
 
-    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 120, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(1)
-    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(2)
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 120, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(1)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", "", 60, 2, RespawnClaim.KindAdHoc).map(_.queuePosition) shouldBe Some(2)
 
     // Already queued.
-    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 120, 5, RespawnClaim.KindAdHoc) shouldBe None
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 120, 5, RespawnClaim.KindAdHoc) shouldBe None
     // Already holding it.
-    repo.enqueueClaim(g, spawn.id, "holder", "H", "", 60, 5, RespawnClaim.KindAdHoc) shouldBe None
+    repo.enqueueClaim(g, spawn.id, "holder", "H", "", "", 60, 5, RespawnClaim.KindAdHoc) shouldBe None
     // Queue full at the limit of 2.
-    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", 60, 2, RespawnClaim.KindAdHoc) shouldBe None
+    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", "", 60, 2, RespawnClaim.KindAdHoc) shouldBe None
 
     repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u1", "u2")
   }
@@ -259,7 +259,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a queued claim must be offered before it can be promoted") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 90, 20, RespawnClaim.KindAdHoc).get
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 90, 20, RespawnClaim.KindAdHoc).get
 
     // Straight from the queue is refused: a spawn is never handed to somebody
     // who hasn't confirmed they still want it.
@@ -288,7 +288,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("only a queued claim can be offered, and only once") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc).get
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 60, 20, RespawnClaim.KindAdHoc).get
 
     repo.offerClaim(g, queued.id, now.plusMinutes(10)) should not be empty
     // A second offer on the same row would let two sweeps both DM the same
@@ -299,7 +299,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("an offer past its deadline is picked up for cancellation, and only then") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc).get
+    val queued = repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 60, 20, RespawnClaim.KindAdHoc).get
     repo.offerClaim(g, queued.id, now.plusMinutes(10))
 
     repo.expiredOffers(g, now) shouldBe empty
@@ -314,7 +314,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a claim in limbo is not treated as expired until its handover window elapses") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(2), now, 120,
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now.minusHours(2), now, 120,
       RespawnClaim.KindAdHoc).get
 
     // Its time is up, so without limbo it's expired work.
@@ -336,7 +336,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     // Released early: two hours still on the clock.
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc).get
     repo.setLimbo(g, claim.id, now.plusMinutes(10))
 
@@ -354,9 +354,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("cancelQueued clears exactly the named users, leaving the rest in order") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.enqueueClaim(g, spawn.id, "u1", "One", "", 60, 20, RespawnClaim.KindAdHoc)
-    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
-    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u1", "One", "", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.enqueueClaim(g, spawn.id, "u3", "Three", "", "", 60, 20, RespawnClaim.KindAdHoc)
 
     repo.cancelQueued(g, spawn.id, Set("u1", "u3"), RespawnClaim.Outcome.NoStamina)
     repo.queueFor(g, spawn.id).map(_.userId) shouldBe List("u2")
@@ -369,9 +369,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val soon = repo.addRespawn(g, "2", "Soon", "", "R", "", "", Respawn.SourceSeed, "seed")
     val later = repo.addRespawn(g, "3", "Later", "", "R", "", "", Respawn.SourceSeed, "seed")
 
-    repo.insertActiveClaim(g, past.id, "u1", "1", "", now.minusHours(3), now.minusMinutes(5), 175, RespawnClaim.KindAdHoc).get
-    val soonClaim = repo.insertActiveClaim(g, soon.id, "u2", "2", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
-    repo.insertActiveClaim(g, later.id, "u3", "3", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, past.id, "u1", "1", "", "", now.minusHours(3), now.minusMinutes(5), 175, RespawnClaim.KindAdHoc).get
+    val soonClaim = repo.insertActiveClaim(g, soon.id, "u2", "2", "", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, later.id, "u3", "3", "", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
 
     repo.expiredClaims(g, now).map(_.userId) shouldBe List("u1")
 
@@ -388,7 +388,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a claim handing over is not offered a reminder — its time is already up") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc).get
     repo.unwarnedActiveClaims(g, now).map(_.id) shouldBe List(claim.id)
 
@@ -399,7 +399,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("setClaimDuration moves an active claim's deadline, and leaves a queued one without any") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val active = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(120), 120,
+    val active = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusMinutes(120), 120,
       RespawnClaim.KindAdHoc).get
     repo.markWarned(g, active.id)
 
@@ -410,7 +410,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // Re-armed, so a claim whose deadline moved still gets its reminder.
     grown.map(_.warned) shouldBe Some(false)
 
-    val queued = repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc).get
+    val queued = repo.enqueueClaim(g, spawn.id, "u2", "Two", "", "", 60, 20, RespawnClaim.KindAdHoc).get
     queued.endsAt shouldBe None
     repo.setClaimDuration(g, queued.id, 90, None)
     val requeued = repo.queueFor(g, spawn.id).find(_.id == queued.id)
@@ -426,10 +426,10 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // Nothing is deleted, so history is simply the rows that already exist —
     // which is why this needs no separate audit table.
-    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now.minusHours(4),
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now.minusHours(4),
       now.minusHours(2), 120, RespawnClaim.KindAdHoc).get
     repo.finishClaim(g, first.id, RespawnClaim.Outcome.Completed)
-    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now.minusHours(2),
+    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", "", now.minusHours(2),
       now, 120, RespawnClaim.KindAdHoc).get
     repo.cancelClaim(g, second.id, RespawnClaim.Outcome.Forced)
 
@@ -442,7 +442,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     history.flatMap(_.endedAt) should have size 2
 
     // A claim still running is not history.
-    repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", now, now.plusHours(1), 60,
+    repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", "", now, now.plusHours(1), 60,
       RespawnClaim.KindAdHoc).get
     repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.userId) shouldBe List("u2", "u1")
 
@@ -452,7 +452,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("an already-ended claim keeps its original outcome") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60,
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(1), 60,
       RespawnClaim.KindAdHoc).get
 
     repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
@@ -466,8 +466,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a booked slot is asked about once, whatever the answer") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
@@ -482,8 +482,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a request raised by booking over a slot remembers the window that was booked") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     // They booked three hours from an hour before the slot, which is a different
@@ -502,8 +502,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a slot with an unanswered request waits past its start rather than claiming itself") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
     val start = now.plusHours(2)
 
@@ -522,8 +522,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("keeping a slot clears the request but not the fact it was asked") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
     repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
       Some((now.plusHours(1), 180)))
@@ -543,8 +543,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("an unanswered request is picked up only once its deadline has gone by") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
     repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
 
@@ -555,12 +555,12 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a slot handed on becomes the requester's own booking, and starts like any other") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     repo.cancelClaim(g, slot.id, RespawnClaim.Outcome.GivenUp)
-    val handed = repo.reserveFor(g, spawn.id, "u2", "Two", now.plusHours(2), 120)
+    val handed = repo.reserveFor(g, spawn.id, "u2", "Two", "", now.plusHours(2), 120)
 
     // No schedule of their own — it is a one-off, not an occurrence of anybody's
     // standing rule, and the audit keeps both halves of what happened.
@@ -576,7 +576,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("schedules round-trip and cancelling drops the slots it had booked") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "Char", now.plusHours(2), 1440, 120)
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "Char", now.plusHours(2), 1440, 120)
     schedule.periodMinutes shouldBe 1440
     // Left unsaid, a booking repeats every day — which is what every schedule
     // written before weekdays existed has to keep meaning.
@@ -584,11 +584,11 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.schedulesForUser(g, "owner").map(_.id) shouldBe List(schedule.id)
     repo.schedulesForRespawn(g, spawn.id).map(_.id) shouldBe List(schedule.id)
 
-    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "Char",
+    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "Char",
       now.plusHours(2), 120) should not be empty
     // Booking the same slot twice is a no-op, which is what makes the
     // materialiser safe to run on every sweep.
-    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "Char",
+    repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "Char",
       now.plusHours(2), 120) shouldBe None
 
     repo.deactivateSchedule(g, schedule.id)
@@ -603,8 +603,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val teamNights = RespawnSchedule.maskOf(
       Seq(java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.SUNDAY))
 
-    val weekly = repo.addSchedule(g, spawn.id, "u1", "One", "", now.plusHours(2), 1440, 120, teamNights)
-    val once = repo.addSchedule(g, spawn.id, "u2", "Two", "", now.plusHours(5), 1440, 60,
+    val weekly = repo.addSchedule(g, spawn.id, "u1", "One", "", "", now.plusHours(2), 1440, 120, teamNights)
+    val once = repo.addSchedule(g, spawn.id, "u2", "Two", "", "", now.plusHours(5), 1440, 60,
       RespawnSchedule.OneOff)
 
     repo.findSchedule(g, weekly.id).map(_.daysOfWeek) shouldBe Some(teamNights)
@@ -615,8 +615,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a slot's owner is nudged once, only inside the lead time") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     // Two hours out, a fifteen-minute lead says nothing yet.
@@ -631,8 +631,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("starting a slot re-arms the reminder flag the nudge used") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
     repo.markWarned(g, slot.id)
 
@@ -649,8 +649,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a booking that starts is left awaiting confirmation, and is swept once its window is up") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     val start = now.plusHours(2)
@@ -665,8 +665,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("taking the claim keeps it off the sweep") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     val start = now.plusHours(2)
@@ -678,8 +678,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("confirming before the start settles the slot, and survives it starting") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     // Confirmed while still reserved: no longer open to being asked for.
@@ -698,8 +698,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a confirmed slot is never passed to whoever asked for it") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     // Asked first, then confirmed from the reminder rather than from the request
@@ -712,8 +712,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("confirming twice is a no-op rather than a restamp") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
-    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "",
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
     repo.confirmClaim(g, slot.id, now) should not be empty
@@ -727,7 +727,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     // The guard on every hunt that was already running when confirmation
     // shipped: no deadline stamped, so nothing gives up on it.
-    repo.insertActiveClaim(g, spawn.id, "owner", "Owner", "", now, now.plusHours(2), 120,
+    repo.insertActiveClaim(g, spawn.id, "owner", "Owner", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc)
     repo.unconfirmedClaims(g, now.plusDays(1)) shouldBe empty
   }
@@ -735,7 +735,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("removing a spawn takes its schedules, not just its claims") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.addSchedule(g, spawn.id, "owner", "Owner", "", now.plusHours(2), 1440, 120)
+    repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
     repo.allSchedules(g) should have size 1
 
     // Left behind, they would go on booking slots on a spawn that no longer
@@ -748,8 +748,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val one = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val two = repo.addRespawn(g, "806", "Hydra Mountain", "", "Port Hope", "", "", Respawn.SourceSeed, "seed")
-    repo.addSchedule(g, one.id, "u1", "One", "", now.plusHours(2), 1440, 120)
-    repo.addSchedule(g, two.id, "u2", "Two", "", now.plusHours(3), 1440, 60)
+    repo.addSchedule(g, one.id, "u1", "One", "", "", now.plusHours(2), 1440, 120)
+    repo.addSchedule(g, two.id, "u2", "Two", "", "", now.plusHours(3), 1440, 60)
 
     repo.allSchedules(g).map(_.userId) should contain theSameElementsAs List("u1", "u2")
     repo.schedulesForUser(g, "u1").map(_.userId) shouldBe List("u1")
@@ -789,7 +789,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("extending moves the deadline and re-arms the warning") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusMinutes(5), 5, RespawnClaim.KindAdHoc).get
     repo.markWarned(g, claim.id)
 
     repo.extendClaim(g, claim.id, now.plusMinutes(65), 65)
@@ -807,9 +807,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // happens when two people press Claim on a free spawn at the same moment.
     // The second insert has to come back empty rather than making a second
     // holder, whoever wins the race.
-    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc)
-    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now, now.plusHours(2), 120,
+    val second = repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc)
 
     first should not be empty
@@ -821,13 +821,13 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("a spawn can be claimed again once the hunt before it has ended") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(2), 120,
+    val first = repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc).get
 
     // The guard is on *active* claims only, so it must not outlive the hunt —
     // otherwise a spawn could be claimed exactly once, ever.
     repo.finishClaim(g, first.id, RespawnClaim.Outcome.Completed)
-    repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", now, now.plusHours(2), 120,
+    repo.insertActiveClaim(g, spawn.id, "u2", "Two", "", "", now, now.plusHours(2), 120,
       RespawnClaim.KindAdHoc) should not be empty
     repo.activeClaim(g, spawn.id).map(_.userId) shouldBe Some("u2")
   }
@@ -836,8 +836,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val (repo, g) = freshRepo()
     val a = repo.addRespawn(g, "1", "A", "", "R", "", "", Respawn.SourceSeed, "seed")
     val b = repo.addRespawn(g, "2", "B", "", "R", "", "", Respawn.SourceSeed, "seed")
-    val finished = repo.insertActiveClaim(g, a.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
-    val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
+    val finished = repo.insertActiveClaim(g, a.id, "u1", "1", "", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
+    val cancelled = repo.insertActiveClaim(g, b.id, "u1", "1", "", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
 
     repo.openClaimsForUser(g, "u1") should have size 2
     repo.finishClaim(g, finished.id, RespawnClaim.Outcome.Completed)
@@ -904,8 +904,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("removing a respawn takes its claims with it") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
-    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", "", 60, 20, RespawnClaim.KindAdHoc)
 
     repo.removeRespawn(g, spawn.id)
     repo.openClaimsForUser(g, "u1") shouldBe empty
@@ -928,7 +928,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // Deliberately not UTC: the column is TIMESTAMPTZ, so what comes back must
     // be the same instant regardless of the zone it went in as.
     val inTokyo = now.withZoneSameInstant(ZoneOffset.ofHours(9))
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", inTokyo, inTokyo.plusMinutes(120), 120, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", inTokyo, inTokyo.plusMinutes(120), 120, RespawnClaim.KindAdHoc).get
     repo.activeClaim(g, spawn.id).flatMap(_.endsAt).map(_.toInstant) shouldBe Some(now.plusMinutes(120).toInstant)
   }
 
@@ -937,8 +937,8 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.saveSettings(g, RespawnSettings("111", "222", 120, 240, 20, 240, 10, 10))
     val spawn = repo.addRespawn(g, "415", "My Own Name", "Orc Cult Fanatic", "Edron", "", "", Respawn.SourceCustom, "admin")
     repo.setThreadId(g, spawn.id, "5551234")
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
-    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", 60, 20, RespawnClaim.KindAdHoc)
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(1), 60, RespawnClaim.KindAdHoc).get
+    repo.enqueueClaim(g, spawn.id, "u2", "Two", "", "", 60, 20, RespawnClaim.KindAdHoc)
 
     repo.dropGuildData(g)
 

@@ -477,7 +477,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  leaves a valid claim with a stale-looking post rather than losing the
    *  claim.
    */
-  def claim(guild: Guild, userId: String, userName: String, characterName: String,
+  def claim(guild: Guild, userId: String, userName: String, nickname: String, characterName: String,
             query: String, requestedMinutes: Option[Int],
             now: ZonedDateTime = ZonedDateTime.now()): ClaimOutcome =
     settings(guild.getId) match {
@@ -514,9 +514,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   // claims the moment the offer was accepted.
                   else if (repository.activeClaim(guildId, respawn.id).isDefined ||
                            repository.offeredClaim(guildId, respawn.id).isDefined)
-                    enqueue(guild, respawn, config, userId, userName, characterName, minutes)
+                    enqueue(guild, respawn, config, userId, userName, nickname, characterName, minutes)
                   else
-                    beginClaim(guild, respawn, config, userId, userName, characterName, minutes,
+                    beginClaim(guild, respawn, config, userId, userName, nickname, characterName, minutes,
                       RespawnClaim.KindAdHoc, now)
               }
             }
@@ -528,7 +528,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  scheduled claim all come through here, so stamina reservation and the
    *  thread update can't be forgotten by one of them. */
   def beginClaim(guild: Guild, respawn: Respawn, config: RespawnSettings, userId: String,
-                 userName: String, characterName: String, minutes: Int, kind: String,
+                 userName: String, nickname: String, characterName: String, minutes: Int, kind: String,
                  now: ZonedDateTime): ClaimOutcome = {
     val guildId = guild.getId
     val boundary = resetBoundary(now)
@@ -565,7 +565,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       val fresh = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
       ClaimOutcome.NoStamina(respawn, granted, fresh, ServerSaveSchedule.nextServerSave(now))
     } else {
-      repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
+      repository.insertActiveClaim(guildId, respawn.id, userId, userName, nickname, characterName,
         now, end, granted, kind) match {
         case None =>
           // Somebody claimed it between the check above and this insert. Hand the
@@ -590,13 +590,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   }
 
   private def enqueue(guild: Guild, respawn: Respawn, config: RespawnSettings, userId: String,
-                      userName: String, characterName: String, minutes: Int): ClaimOutcome = {
+                      userName: String, nickname: String, characterName: String, minutes: Int): ClaimOutcome = {
     // Queueing deliberately does NOT reserve stamina. A queue that may never
     // reach the front would otherwise let people park their whole tank in other
     // people's queues; the reservation happens at promotion instead, and
     // someone who can't afford it by then is skipped rather than blocking the
     // line (see sweepGuild).
-    repository.enqueueClaim(guild.getId, respawn.id, userId, userName, characterName, minutes,
+    repository.enqueueClaim(guild.getId, respawn.id, userId, userName, nickname, characterName, minutes,
       config.queueLimit, RespawnClaim.KindAdHoc) match {
       case None =>
         repository.openClaimsForUser(guild.getId, userId).find(_.respawnId == respawn.id) match {
@@ -928,7 +928,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  instead depends on the clash: a one-off over a single booked slot nobody has
    *  asked about becomes a question for that slot's owner (see `askForClash`),
    *  and anything else is still refused outright. */
-  def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
+  def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String, nickname: String,
                   characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay,
                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, ScheduleResult] =
@@ -949,7 +949,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           val schedules = repository.schedulesForRespawn(guildId, respawn.id).filter(overlaps(_, candidate))
           val slots = clashingReservations(guildId, respawn.id, candidate, now)
           if (schedules.isEmpty && slots.isEmpty) {
-            val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
+            val saved = repository.addSchedule(guildId, respawn.id, userId, userName, nickname, characterName,
               firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
             materialise(guildId, saved, now)
             refreshThread(guild, respawn, config)
@@ -1026,13 +1026,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def clashMessage(schedules: List[RespawnSchedule], slots: List[RespawnClaim],
                            now: ZonedDateTime): String = {
     val (who, when, minutes) = slots.headOption match {
-      case Some(slot) => (slot.userName, slot.startsAt, slot.durationMinutes)
+      case Some(slot) => (Names.user(slot.nickname, slot.userName), slot.startsAt, slot.durationMinutes)
       case None =>
         val schedule = schedules.head
-        (schedule.userName, schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
+        (Names.user(schedule.nickname, schedule.userName),
+          schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
     }
     val at = when.map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
-    s"That clashes with ${Names.user(who)}'s slot on this respawn " +
+    s"That clashes with $who's slot on this respawn " +
       s"($at for ${RespawnEmbeds.humanDuration(minutes)})."
   }
 
@@ -1138,7 +1139,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
     schedule.occurrencesBetween(now, horizon).count { start =>
       repository.reserveOccurrence(guildId, schedule.id, schedule.respawnId, schedule.userId,
-        schedule.userName, schedule.characterName, start, schedule.durationMinutes).isDefined
+        schedule.userName, schedule.nickname, schedule.characterName, start, schedule.durationMinutes).isDefined
     }
   }
 
@@ -1209,7 +1210,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // longer an occurrence of anybody's standing rule, and the audit trail
             // keeps both halves of what happened.
             repository.reserveFor(guildId, respawn.id, requester,
-              slot.requesterUserName.getOrElse(""), start, minutes)
+              slot.requesterUserName.getOrElse(""), "", start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
                 RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
@@ -1494,7 +1495,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // Somebody else is on it. Cancel the booking and take a queue place
         // instead, so the existing hunt is not interrupted mid-flight.
         repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.TakenOver)
-        repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.characterName,
+        repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.nickname, slot.characterName,
           slot.durationMinutes, config.queueLimit, RespawnClaim.KindScheduled)
         RespawnThreads.dm(guild, slot.userId,
           RespawnEmbeds.dmEmbed("Your slot is taken", RespawnEmbeds.slotOccupied(respawn, holder),

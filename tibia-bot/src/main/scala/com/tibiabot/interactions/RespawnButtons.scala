@@ -34,6 +34,13 @@ object RespawnButtons extends StrictLogging {
 
   def handles(componentId: String): Boolean = RespawnButtonId.handles(componentId)
 
+  /** What the presser is called in this guild — their nickname where they have
+   *  one, their display name otherwise. Empty in a DM, where there is no member
+   *  and so no guild name to take; the row then reads as the account name. */
+  private def nicknameOf(event: net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent): String =
+    Option(event.getMember).map(_.getEffectiveName).getOrElse("")
+
+
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
 
@@ -352,7 +359,7 @@ object RespawnButtons extends StrictLogging {
                 // function of the spawn's state right now, not of which button
                 // the card happened to be showing when they clicked.
                 respond.embed(claimOutcomeEmbed(
-                  service.claim(guild, user.getId, user.getName, "", respawn.code, None)))
+                  service.claim(guild, user.getId, user.getName, nicknameOf(event), "", respawn.code, None)))
 
               case "config" =>
                 // Not deferred yet — see ModalActions.
@@ -429,7 +436,7 @@ object RespawnButtons extends StrictLogging {
                     respond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**.")
                   case Some(holder) =>
                     respond.text(s"${Config.yesEmoji} Freed **${respawn.displayName}** from " +
-                      s"${Names.user(holder.userName)}. They keep their unused stamina, and whoever is next " +
+                      s"${Names.user(holder.nickname, holder.userName)}. They keep their unused stamina, and whoever is next " +
                       "has been offered it.")
                 }
 
@@ -546,7 +553,7 @@ object RespawnButtons extends StrictLogging {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
       val refund = if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
       val handover = offered
-        .map(claim => s" ${Names.user(claim.userName)} has been asked if they want it — it stays yours until they answer.")
+        .map(claim => s" ${Names.user(claim.nickname, claim.userName)} has been asked if they want it — it stays yours until they answer.")
         .getOrElse("")
       s"${Config.yesEmoji} You've released **${respawn.displayName}**.$refund$handover"
     case ReleaseOutcome.LeftQueue(respawn) =>

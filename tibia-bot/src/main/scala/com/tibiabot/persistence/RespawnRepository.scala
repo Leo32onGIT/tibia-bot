@@ -141,14 +141,14 @@ trait RespawnRepository {
    *  free" read is not enough on its own, since two people pressing Claim at once
    *  both pass it. Whoever loses is told the spawn was taken rather than ending up
    *  with a second claim on the same hunt. */
-  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
                         durationMinutes: Int, kind: String): Option[RespawnClaim]
 
   /** Append to a spawn's queue, taking the next free position. Returns the
    *  stored row, or None if the queue is already at `queueLimit` or the user is
    *  already in it. */
-  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                    characterName: String, durationMinutes: Int, queueLimit: Int,
                    kind: String): Option[RespawnClaim]
 
@@ -258,7 +258,7 @@ trait RespawnRepository {
 
   // --- schedules ----------------------------------------------------------
 
-  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
+  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                   characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
                   durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay): RespawnSchedule
@@ -284,7 +284,7 @@ trait RespawnRepository {
    *  run on every sweep — the (schedule, start) pair is the identity of an
    *  occurrence. */
   def reserveOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
-                        userName: String, characterName: String, startsAt: ZonedDateTime,
+                        userName: String, nickname: String, characterName: String, startsAt: ZonedDateTime,
                         durationMinutes: Int): Option[RespawnClaim]
 
   /** Slots booked on a spawn that haven't started, soonest first — what the card
@@ -322,7 +322,7 @@ trait RespawnRepository {
 
   /** Book a slot for somebody with no schedule of their own — used when a booked
    *  slot passes to whoever asked for it. */
-  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String,
+  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                  startsAt: ZonedDateTime, durationMinutes: Int): RespawnClaim
 
   /** Ask the owner of a booked slot whether they are actually hunting it.

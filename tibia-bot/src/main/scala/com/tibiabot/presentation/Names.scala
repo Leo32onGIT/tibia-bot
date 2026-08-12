@@ -27,4 +27,24 @@ object Names {
     val cleaned = name.replace("`", "").trim
     if (cleaned.isEmpty) "**`someone`**" else s"**`$cleaned`**"
   }
+
+  /** The same, said the way a server knows somebody: what they are called here,
+   *  then the account it belongs to.
+   *
+   *  Two names because either alone leaves somebody guessing. A nickname is what
+   *  people actually call each other and is often nothing like the account name;
+   *  the account name is the one that is unique and searchable, and the only one
+   *  that means anything to a moderator reading a log. Neither is a mention —
+   *  see [[user]].
+   *
+   *  Falls back to the account name alone when there is no nickname to add, or
+   *  when it would only repeat it: **@bob** (**`bob`**) says nothing twice as
+   *  loudly. Rows written before nicknames were kept have none, so most of the
+   *  history reads exactly as it did.
+   */
+  def user(nickname: String, username: String): String = {
+    val nick = nickname.replace("`", "").replace("*", "").trim
+    if (nick.isEmpty || nick.equalsIgnoreCase(username.trim)) user(username)
+    else s"**@$nick** (${user(username)})"
+  }
 }
