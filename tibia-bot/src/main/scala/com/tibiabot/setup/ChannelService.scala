@@ -126,6 +126,7 @@ final class ChannelService(
         .grant(Permission.MESSAGE_HISTORY)
         .grant(Permission.MANAGE_THREADS)
         .grant(Permission.MANAGE_CHANNEL)
+        .grant(Permission.MANAGE_MESSAGES)
         .grant(Permission.MANAGE_PERMISSIONS)
         .complete()
     } catch {
@@ -147,7 +148,7 @@ final class ChannelService(
    *  the deny. `visible` is false on the path that hides the category entirely. */
   private def setCategoryPublicPerms(category: Category, publicRole: Role, visible: Boolean): Unit = {
     val action = category.upsertPermissionOverride(publicRole)
-      .deny(Permission.CREATE_PUBLIC_THREADS)
+      .grant(Permission.CREATE_PUBLIC_THREADS)
     (if (visible) action.grant(Permission.VIEW_CHANNEL) else action.deny(Permission.VIEW_CHANNEL)).queue()
   }
 
@@ -587,7 +588,7 @@ final class ChannelService(
           // admin category has been deleted
           val adminCategory = guild.createCategory("Violent Bot").complete()
           setCategoryBotPerms(adminCategory, botRole)
-          setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = false)
+          setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = true)
           discordUpdateConfig(guild, adminCategory.getId, "", "", "", world)
           adminCategoryCheck = adminCategory
         }
