@@ -553,7 +553,18 @@ object RespawnDashboardRoute {
     "id" -> JsString(claim.userId),
     "name" -> JsString(if (claim.characterName.nonEmpty) claim.characterName else claim.userName))
 
+  private def personName(claim: com.tibiabot.domain.RespawnClaim): String =
+    if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+
   private def instant(when: java.time.ZonedDateTime): JsValue = JsString(when.toInstant.toString)
+
+  /** How many rows of "up next" a spawn sends. Matches
+   *  `RespawnEmbeds.RowsPerField`, because the panel and the Discord card are
+   *  meant to be the same list — a page that showed twelve where the card showed
+   *  ten would read as two different answers to one question. The count of
+   *  everything is sent alongside, so the page can own up to what it is not
+   *  showing without being sent it. */
+  private[web] val UpNextRows: Int = 10
 
   /** One spawn's window for the grid. Every block carries both ends as instants,
    *  so the page places it on a local axis without knowing anything about how
@@ -648,6 +659,45 @@ object RespawnDashboardRoute {
     val queue =
       if (entry.queue.isEmpty) Map.empty[String, JsValue]
       else Map[String, JsValue]("queue" -> JsArray(entry.queue.map(person).toVector))
+
+    // The same queue again, as rows to read rather than people to act on: how
+    // long each would hunt for and when their turn would come. The start is
+    // projected — see RespawnBoardEntry.projectedQueueStarts — and the page marks
+    // it as approximate rather than printing it like a booking's.
+    val now = java.time.ZonedDateTime.now()
+    val waiting =
+      if (entry.queue.isEmpty) Map.empty[String, JsValue]
+      else Map[String, JsValue]("waiting" -> JsArray(
+        entry.projectedQueueStarts(now).take(UpNextRows).map { case (claim, at) =>
+          JsObject(
+            "name" -> JsString(personName(claim)),
+            "minutes" -> JsNumber(claim.durationMinutes),
+            "startsAt" -> instant(at),
+            "mine" -> JsBoolean(claim.userId == viewerId)
+          ): JsValue
+        }.toVector))
+
+    // Bookings that have not started, soonest first — what the panel lists under
+    // "up next" below the queue. Only the rows: a booking whose slot has not been
+    // written yet lives in the schedule rather than here, and the calendar below
+    // is where those are drawn.
+    val ahead = entry.reservations.filter(_.startsAt.exists(_.isAfter(now)))
+    val booked =
+      if (ahead.isEmpty) Map.empty[String, JsValue]
+      else Map[String, JsValue](
+        "booked" -> JsArray(ahead.take(UpNextRows).flatMap { slot =>
+          slot.startsAt.map { start =>
+            JsObject(
+              "name" -> JsString(personName(slot)),
+              "minutes" -> JsNumber(slot.durationMinutes),
+              "startsAt" -> instant(start),
+              "mine" -> JsBoolean(slot.userId == viewerId),
+              "asked" -> JsBoolean(slot.requestPending)
+            ): JsValue
+          }
+        }.toVector),
+        // Everything there was before the cap, so one note can cover it.
+        "bookedTotal" -> JsNumber(ahead.size))
     val holder = entry.active.map(claim => "holderId" -> (JsString(claim.userId): JsValue))
     val holderName = entry.holderLabel.map(name => "holder" -> (JsString(name): JsValue))
     // Both ends of a live hunt, so the page can draw the progress bar itself and
@@ -659,7 +709,7 @@ object RespawnDashboardRoute {
     val nextAt = entry.nextReservation.flatMap(_.startsAt).map(s => "nextAt" -> instant(s))
     val touched = entry.lastActivity.map(t => "lastActivity" -> instant(t))
 
-    JsObject(base ++ window ++ holderName ++ holder ++ queue ++ nextAt ++ touched)
+    JsObject(base ++ window ++ holderName ++ holder ++ queue ++ waiting ++ booked ++ nextAt ++ touched)
   }
 
   /** The board a visitor sees, plus what they are allowed to do with it. The

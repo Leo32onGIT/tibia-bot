@@ -115,6 +115,29 @@ final case class RespawnBoardEntry(
   def nextReservation: Option[RespawnClaim] =
     reservations.find(_.requesterUserId.isEmpty)
 
+  /** When each queued claim would start, if every hunt ahead of it ran its full
+   *  length: the current hunt's end, then each person in turn.
+   *
+   *  A projection and nothing more, which is why it is offered as one rather
+   *  than written to a claim's `startsAt` — that field means "this really began
+   *  then". Somebody releasing early brings every one of these forward, an offer
+   *  that goes unanswered expires and does the same, and a hunt run to the wire
+   *  still hands over a minute or two late. Surfaces that show it are expected to
+   *  mark it as approximate.
+   *
+   *  Computed here rather than in the page so that everything showing a queue is
+   *  showing the same arithmetic. A spawn with a queue and no live hunt — which
+   *  should not happen, but does if a claim ends between the two reads — starts
+   *  counting from `now`, since the next person's turn is not in the past.
+   */
+  def projectedQueueStarts(now: ZonedDateTime): List[(RespawnClaim, ZonedDateTime)] = {
+    val first = active.flatMap(_.endsAt).filter(_.isAfter(now)).getOrElse(now)
+    queue.foldLeft((first, List.empty[(RespawnClaim, ZonedDateTime)])) {
+      case ((cursor, acc), claim) =>
+        (cursor.plusMinutes(claim.durationMinutes.toLong), acc :+ (claim -> cursor))
+    }._2
+  }
+
   /** How this spawn reads on the board, as one of
    *  [[RespawnBoardEntry.States]] other than
    *  [[RespawnBoardEntry.Asked]], which is a calendar state only.

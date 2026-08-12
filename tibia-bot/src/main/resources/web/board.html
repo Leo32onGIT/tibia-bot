@@ -42,6 +42,15 @@
       linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
     background-size: 46px 46px;
   }
+  /* A page that cannot move cannot drag the window about with it. The spawn
+     window is `position: fixed`, and on a phone a fixed element is only really
+     fixed while the document behind it is still: rubber-banding at either end of
+     the board — or the address bar sliding in and out on the way — repaints it a
+     frame late and the whole panel jitters under the thumb. So while the window
+     is up the document is pinned where it stood, and put back on the way out.
+     `top` is written by the script, since pinning it at 0 would otherwise scroll
+     the board back to the beginning behind the window. */
+  body.locked { position: fixed; left: 0; right: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
   main { max-width: 1180px; margin: 0 auto; padding: 26px 24px 70px; }
   .muted { color: var(--muted); }
 
@@ -165,6 +174,10 @@
     background: var(--panel); border: 1px solid #2a3142; border-radius: 14px;
     box-shadow: 0 30px 90px rgba(0,0,0,0.6);
     display: none; overflow: hidden;
+    /* Nothing inside hands its leftover scroll to the page behind it. Reaching
+       the bottom of the week and carrying on used to bounce the document, which
+       is the other half of the jitter the body lock deals with. */
+    overscroll-behavior: contain;
   }
   .window.open { display: flex; flex-direction: column; }
 
@@ -187,11 +200,24 @@
   }
   .window > .win-head, .window > .win-body { position: relative; }
 
-  .win-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px 13px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
-  .win-head .code-chip { font-size: 15px; padding: 4px 11px; border-radius: 7px; }
-  .win-title { font-size: 17px; color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em; }
-  .win-region { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
+  /* One row, always. Wrapping put the close button on a line of its own the
+     moment a long spawn name met a narrow phone, which cost a row of the panel
+     and moved the one control that should never move. So the row does not wrap
+     and the two things that can be any length give way instead: the region
+     first — where a spawn is, is the least of what this row says — and the name
+     ellipsises only once that is gone. */
+  .win-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px 13px; border-bottom: 1px solid var(--panel-border); flex-wrap: nowrap; }
+  .win-head .code-chip { font-size: 15px; padding: 4px 11px; border-radius: 7px; flex-shrink: 0; }
+  .win-title {
+    font-size: 17px; color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em;
+    flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* A shrink factor far above the title's, so this is what disappears first. */
+  .win-region {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
   .win-close:hover { color: var(--text-strong); }
   /* A column, so the week inside it can be handed whatever height is left over
      rather than guessing at it. `min-height: 0` on each link of that chain is
@@ -199,7 +225,8 @@
      one of them sizes to the full grid and the panel grows past the window,
      which is the scrolling this is meant to do away with. */
   .win-body { flex: 1; min-height: 0; display: flex; flex-direction: column;
-              overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+              overflow-y: auto; overscroll-behavior: contain;
+              scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
   .cal-section.open, .cal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .win-body::-webkit-scrollbar { width: 10px; }
   .win-body::-webkit-scrollbar-track { background: transparent; }
@@ -214,17 +241,90 @@
   .fold { cursor: pointer; user-select: none; }
   .fold:hover { background: rgba(255,255,255,0.03); }
   .fold-title { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
-  .fold-chevron { transition: transform 0.15s ease; }
+  .fold-chevron { transition: transform 0.15s ease; margin-left: auto; }
   .fold.open .fold-chevron { transform: rotate(180deg); }
+  /* The standing instructions, belonging to the heading above them rather than to
+     the top of the panel: same block, no rule between, indented to the title so
+     they read as its second line. Which also means they go with the week when it
+     is folded away, along with everything they are about. */
+  .fold-hint {
+    border-bottom: 1px solid var(--panel-border); padding: 0 20px 9px 46px;
+    margin-top: -3px; font-size: 11.5px; line-height: 1.45; color: var(--muted);
+  }
+
+  /* ---- Up next -----------------------------------------------------------
+     What is actually coming to this spawn, which "+2 queued" never said. The
+     queue first — it happens soonest, and its times run off the hunt on now —
+     then bookings by start. Shut by default: it is reference, not the thing
+     anybody opened the panel to do, and its header carries the one row worth
+     having without opening it.
+
+     A rail with a pip per entry rather than a table, because the list is short
+     and in time order, and a rail reads as an evening where a table reads as
+     data. */
+  .up-head {
+    display: flex; align-items: center; gap: 9px; padding: 9px 20px;
+    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+    cursor: pointer; user-select: none;
+  }
+  .up-head:hover { background: rgba(255,255,255,0.03); }
+  .up-head .fold-chevron { transform: rotate(180deg); }
+  .up-head.open .fold-chevron { transform: rotate(0deg); }
+  .up-peek {
+    font-family: var(--mono); font-size: 11px; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .up-peek b { color: var(--text); font-weight: 600; }
+  .up-count {
+    font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 9px;
+    background: rgba(255,255,255,0.05); color: var(--muted); flex-shrink: 0; margin-left: auto;
+  }
+  .up-list {
+    border-bottom: 1px solid var(--panel-border); padding: 6px 20px 9px;
+    max-height: 190px; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  /* Fixed tracks throughout, and a width on the trailing one: a column that only
+     some rows fill is a column that moves. */
+  .up-row {
+    display: grid; grid-template-columns: 58px 14px minmax(0, 1fr) 44px;
+    gap: 8px; align-items: center; padding: 5px 0; line-height: 1.4;
+  }
+  .up-when { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .up-when small { display: block; font-size: 9px; color: var(--muted); }
+  /* The rail is drawn off each row's own box, joining pip to pip, and stops at
+     the first and last so it does not dangle past either end of the list. */
+  .up-rail { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .up-rail::before {
+    content: ''; position: absolute; top: -50%; bottom: -50%; left: 50%; width: 1px;
+    background: var(--panel-border); transform: translateX(-0.5px);
+  }
+  .up-row:first-child .up-rail::before { top: 50%; }
+  .up-row:last-child .up-rail::before { bottom: 50%; }
+  .up-pip { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--st-booked); }
+  .up-queued .up-pip { background: var(--st-claimed); }
+  .up-asked .up-pip { background: var(--st-asked); }
+  .up-mine .up-pip { background: var(--st-free); }
+  .up-body { min-width: 0; }
+  .up-who { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .up-sub { color: var(--muted); font-size: 10px; }
+  /* A booking's countdown is definite and coloured; a queue place's is a
+     projection off hunts that may not run their length, so it stays muted. */
+  .up-sub .up-rel { color: var(--accent); }
+  .up-queued .up-sub .up-rel { color: var(--muted); }
+  .up-tag {
+    font-family: var(--sans); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.09em;
+    padding: 1px 5px; border-radius: 3px; justify-self: end;
+  }
+  .up-tag.queue { color: var(--st-claimed); background: rgba(210,51,105,0.16); }
+  .up-tag.asked { color: var(--st-asked); background: rgba(224,169,62,0.16); }
+  .up-tag.you { color: var(--st-free); background: rgba(46,204,113,0.16); }
+  .up-more { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding-top: 6px; }
   .field { display: flex; align-items: center; gap: 7px; }
   .field-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
   .live-bar { flex: 1; min-width: 80px; max-width: 220px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
   .live-bar span { display: block; height: 100%; background: var(--st-claimed); transition: width 1s linear; }
-
-  .stamina-bar { width: 120px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; display: flex; }
-  .stamina-bar .used { background: var(--muted); height: 100%; }
-  .stamina-bar .pending { background: var(--accent); height: 100%; }
-  .stamina-val { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
 
   .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; }
   .seg button {
@@ -236,17 +336,60 @@
   .seg button:hover { background: rgba(255,255,255,0.04); color: var(--text); }
   .seg button.on { background: rgba(91,140,255,0.18); color: #cfdcff; }
 
-  .stepper { display: flex; align-items: center; gap: 8px; }
-  .stepper button {
-    width: 22px; height: 22px; padding: 0; flex-shrink: 0;
-    background: transparent; border: 1px solid var(--panel-border); border-radius: 5px;
-    color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1; cursor: pointer;
-  }
-  .stepper button:hover:not([disabled]) { border-color: var(--accent); color: var(--text-strong); }
-  .stepper button[disabled] { opacity: 0.35; cursor: not-allowed; }
-  .stepper input[type=range] { width: 112px; accent-color: var(--accent); }
-  .dur-val { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text-strong); min-width: 42px; font-variant-numeric: tabular-nums; }
   .dur-cap { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  /* ---- How long: the day's tank ------------------------------------------
+     Not a nought-to-ceiling slider but the stamina itself — grey for what today
+     has already taken, accent for what this hunt would take, empty for what
+     would be left. The ceiling stops being a rule that refuses you and becomes
+     the end of the bar, which you can see yourself approaching.
+     It is also why the strip above no longer carries a stamina readout of its
+     own: that was the same quantity stated twice, once as a bar you could not
+     touch and once as a number, and neither of them was the thing you were
+     about to change. */
+  .tank {
+    display: block; position: relative; width: 240px; height: 34px; border-radius: 8px;
+    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.02);
+    overflow: hidden; touch-action: none; user-select: none; cursor: ew-resize;
+  }
+  .tank:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Nothing to set when there is nothing left to spend. Still drawn, because a
+     full grey bar is the clearest possible statement of why. */
+  .tank[aria-disabled="true"] { cursor: default; }
+  .tank-zones { position: absolute; inset: 5px; border-radius: 4px; background: rgba(255,255,255,0.05); overflow: hidden; display: flex; }
+  .tank-spent { background: rgba(124,134,152,0.3); }
+  .tank-hunt { background: var(--accent); }
+  /* Where this hunt would end. */
+  .tank-edge {
+    position: absolute; top: 3px; bottom: 3px; width: 3px; border-radius: 2px;
+    background: var(--text-strong); box-shadow: 0 0 6px rgba(0,0,0,0.7); z-index: 2; pointer-events: none;
+  }
+  /* The guild's own ceiling, drawn only when it bites before the tank does.
+     Without it the bar would just stop following the finger part way along with
+     nothing on screen to say why. */
+  .tank-cap { position: absolute; top: 4px; bottom: 4px; border-left: 1px dashed var(--warn); opacity: 0.75; z-index: 1; pointer-events: none; }
+  /* Each figure inside the block it is about, both sliding with the boundary. */
+  .tank-in, .tank-out {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
+    white-space: nowrap; pointer-events: none; font-family: var(--mono); font-variant-numeric: tabular-nums;
+  }
+  .tank-in { font-size: 12.5px; font-weight: 600; color: #06122e; }
+  /* A short hunt is narrower than the word for it, so the figure steps outside
+     the block and takes the page's own text colour to stay readable. */
+  .tank-in.outside { color: var(--text-strong); }
+  .tank-out { font-size: 10.5px; color: var(--muted); }
+  /* The blue has reached it and is now behind it, so it wears the blue's type
+     colour rather than moving out of the way. */
+  .tank-out.on-hunt { color: #06122e; font-weight: 600; }
+
+  /* The booking controls, in named groups rather than one flat run of spans.
+     On a wide panel the groups sit on one line and read exactly as they did; on
+     a phone each becomes a row of its own, which is the only way any of them can
+     be centred — a flat strip left to wrap puts things wherever they happen to
+     fall, which is how "Once | Weekly" ended up off to one side. */
+  .cal-controls { gap: 10px 14px; }
+  .cc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .cc-week { margin-left: auto; gap: 10px; }
 
   .btn {
     background: var(--accent); border: 1px solid var(--accent); border-radius: 6px;
@@ -274,15 +417,24 @@
   .btn-emoji { width: 15px; height: 15px; flex-shrink: 0; }
   .btn[disabled] .btn-emoji { opacity: 0.4; filter: grayscale(1); }
 
-  .answer { padding: 10px 20px; font-size: 12.5px; line-height: 1.5; }
-  .answer.ok { color: var(--st-free); }
-  .answer.no { color: var(--st-asked); }
-  /* Sized by its content and never scrolled away, so neither the button nor an
-     answer can be left off the bottom of a panel whose body is taller than the
+  /* Everything the panel has to say, on one row of its own above the row you act
+     on. A verdict about the slot selected and a reply to something just pressed
+     are the same kind of thing at different moments, so they share a row rather
+     than stacking two — and the reply wins while there is one, being the newer
+     news. The row below never changes height, so the button never moves; this
+     one grows upward instead. */
+  .foot-msg {
+    padding: 9px 20px; border-top: 1px solid var(--panel-border);
+    display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.45;
+  }
+  .foot-msg > i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .foot-msg.ok { color: var(--st-free); }
+  .foot-msg.no { color: var(--st-asked); }
+  /* Sized by its content and never scrolled away, so neither the button nor a
+     reply can be left off the bottom of a panel whose body is taller than the
      window. Its children carry their own top borders, so it adds none. */
   .win-foot { position: relative; flex-shrink: 0; }
   .win-foot[hidden] { display: none; }
-  .win-foot .answer { border-top: 1px solid var(--panel-border); }
 
   /* Moderator tools, walled off from the member ones. Acting on somebody else's
      claim is a different kind of act from taking a free spawn, and a strip that
@@ -301,10 +453,18 @@
   .sw-asked { border-color: var(--st-asked); background: rgba(224,169,62,0.28); }
   .sw-pick { border-color: var(--purple); border-style: dashed; background: rgba(167,139,250,0.4); }
 
-  .wk { display: grid; grid-template-columns: 56px repeat(7, 1fr); padding: 0 20px; }
+  /* The headings ride inside the scroller with the columns they name, stuck to
+     its top. They used to be a grid of their own above it, which is fine while
+     the week is only ever as wide as the panel — but a phone shows four days of
+     seven and slides sideways for the rest, and a heading row outside that
+     movement would sit still while its own columns went past underneath. */
+  .wk-headrow, .wk-rows { display: grid; grid-template-columns: var(--gutter, 56px) repeat(7, 1fr); }
+  .wk-headrow { position: sticky; top: 0; z-index: 7; background: var(--panel); }
   .wk-head { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
   .wk-head.today { color: var(--accent); }
   .wk-head .dnum { display: block; font-size: 13px; color: var(--text-strong); margin-top: 2px; letter-spacing: 0; }
+  /* The corner the two sticky axes meet in, above both of them. */
+  .wk-corner { position: sticky; left: 0; z-index: 8; background: var(--panel); border-bottom: 1px solid var(--panel-border); }
   /* Sized off the viewport rather than fixed, so on a laptop screen the grid
      gives ground to the strips above and below it instead of pushing the
      booking controls off the bottom of the window. */
@@ -312,7 +472,8 @@
      strips above and below have had theirs, rather than the viewport arithmetic
      this used to do — which had to be re-guessed whenever anything around it
      changed height, and was wrong on a phone. */
-  .wk-body { position: relative; flex: 1; min-height: 120px; overflow-y: auto; margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .wk-body { position: relative; flex: 1; min-height: 120px; overflow: auto; overscroll-behavior: contain;
+             margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
   .wk-body::-webkit-scrollbar { width: 10px; }
   .wk-body::-webkit-scrollbar-track { background: transparent; }
   .wk-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
@@ -323,7 +484,7 @@
   .wk-body.pending::before {
     /* Pulled back out of the flow it takes up, so the grid does not step down
        two pixels while a week is loading and back up when it arrives. */
-    content: ''; position: sticky; top: 0; z-index: 6; display: block;
+    content: ''; position: sticky; top: 0; z-index: 9; display: block;
     height: 2px; margin-bottom: -2px; pointer-events: none;
     background-image: linear-gradient(90deg, transparent, var(--accent), transparent);
     background-size: 40% 100%; background-repeat: no-repeat;
@@ -333,8 +494,16 @@
   @media (prefers-reduced-motion: reduce) {
     .wk-body.pending::before { animation: none; background-image: none; background-color: rgba(91,140,255,0.45); }
   }
-  .wk-grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); position: relative; }
-  .wk-hours { border-right: 1px solid var(--panel-border); }
+  /* Two grids of identical shape, stacked: the headings and the day columns.
+     Everything absolutely placed on the week — the now line, the selection —
+     belongs to the lower one, so its coordinates stay measured from midnight and
+     owe nothing to how tall the headings happen to be. */
+  .wk-grid { position: relative; --gutter: 56px; }
+  .wk-rows { position: relative; }
+  /* Relative only so the now flag can hang off it; it earns a background and a
+     layer of its own on a phone, where it is stuck to the left edge and has the
+     rest of the week passing behind it. */
+  .wk-hours { border-right: 1px solid var(--panel-border); position: relative; z-index: 5; }
   .wk-hour {
     height: 28px; font-family: var(--mono); font-size: 9.5px; color: var(--muted);
     text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
@@ -352,7 +521,9 @@
     font-family: var(--mono); font-size: 9.5px; line-height: 1.25; cursor: pointer; border: 1px solid;
   }
   .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; }
+  /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
+     half on the next is not a shorter label, it is a wrong-looking one. */
+  .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; display: block; white-space: nowrap; }
   /* State decides the colour; whose it is decides how loud. Two hues would have
      meant a booking of yours and a booking of theirs looked like different
      kinds of thing, which they are not. */
@@ -389,25 +560,29 @@
 
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
   .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: 8px; color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
-  .now-line { position: absolute; left: 56px; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  .now-line { position: absolute; left: var(--gutter, 56px); right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  /* Carried by the hour gutter rather than by the grid, so that on a phone — where
+     the gutter is stuck to the left edge and the days slide past it — the time
+     stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
   .now-flag {
-    position: absolute; left: 2px; transform: translateY(-50%); z-index: 5; pointer-events: none;
+    position: absolute; left: 2px; transform: translateY(-50%); z-index: 6; pointer-events: none;
     font-family: var(--mono); font-size: 8.5px; font-weight: 600; color: var(--bg);
     background: var(--bad); border-radius: 3px; padding: 1px 4px; font-variant-numeric: tabular-nums;
   }
 
-  .readout { padding: 12px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 10px; font-size: 12.5px; min-height: 48px; }
-  /* Two columns that never trade places: the text gives way and wraps within
-     itself, and the buttons keep the corner they are in. Before this the row
-     simply wrapped, so a long enough verdict pushed the button onto its own
-     line and away from the right-hand edge it is supposed to hold. */
-  .readout-text { flex: 1 1 0; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  /* How long, and the thing that acts on it, in one row. The tank used to live
+     up in the booking controls, a screen away from the button it feeds; the
+     verdict that shared this row has moved to .foot-msg above. What is left is
+     two objects whose height never changes, which is what keeps the button in
+     one place however much the panel has to say. */
+  .readout { padding: 10px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+  .foot-dur { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
   .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .readout i { font-size: 15px; }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
   .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
 
-  @media (max-width: 900px) { .wk, .wk-grid { grid-template-columns: 44px repeat(7, 1fr); } .now-line { left: 44px; } }
+  @media (max-width: 900px) { .wk-grid { --gutter: 44px; } }
   @media (max-width: 620px) {
     main { padding: 18px 12px 50px; }
     .masthead-right { margin-left: 0; width: 100%; }
@@ -418,7 +593,6 @@
        the address bar. dvh is the height there really is. The vh line stays
        ahead of it for anything too old to know the unit. */
     .window { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
-    .wk { padding: 0 10px; }
     .wk-body { margin: 0 10px; }
     /* Nothing outside the week scrolls: it is the part that is too big for a
        phone, and everything else earns its place by being small enough. */
@@ -426,9 +600,57 @@
     /* Tighter, so the grid keeps as much of a short screen as it can. */
     .win-head { padding: 11px 14px 9px; }
     .strip { padding: 8px 14px; }
-    .readout { padding: 9px 14px; min-height: 0; }
-    .answer { padding: 8px 14px; }
+    .readout { padding: 9px 14px; gap: 10px; }
+    .foot-msg { padding: 8px 14px; }
+    .up-head { padding: 8px 14px; }
+    .up-list { padding: 5px 14px 8px; max-height: 168px; }
+    .fold-hint { padding: 0 14px 8px 37px; }
     .cal-legend { display: none; }
+
+    /* ---- Four days, not seven -------------------------------------------
+       A seventh of a phone is about forty pixels, which is not enough to say
+       who has a slot or when it runs — every block was an ellipsis. So the
+       columns are given a width worth reading and the week slides sideways for
+       the rest of itself, opened on yesterday so today and the two days worth
+       planning are already in view. The hour gutter and the day headings stay
+       put while it does, which is what the sticky rules above are for. */
+    .wk-grid {
+      --gutter: 44px;
+      /* The four that fit: the body's own width (the window, less its margins)
+         less the gutter, split four ways. */
+      --daycol: calc((100vw - 20px - var(--gutter)) / 4);
+      width: max-content;
+    }
+    .wk-headrow, .wk-rows { grid-template-columns: var(--gutter) repeat(7, var(--daycol)); }
+    .wk-hours { position: sticky; left: 0; background: var(--panel); }
+    /* Every pixel of a narrow column goes to the label, so a whole time fits on
+       one line and the name has somewhere to be above it. The size follows the
+       screen, because a quarter of a 320px phone is not a quarter of a 430px one
+       and "19:00–21:00" has to survive both — clamped at the top so a big phone
+       gets the desktop size rather than an inflated one. */
+    .wk-block { padding: 2px 4px; font-size: clamp(8px, 2.4vw, 9.5px); }
+
+    /* ---- Booking controls, on one row -----------------------------------
+       Stacked and centred, these took four rows of a short screen. "Book" goes,
+       because the heading immediately above says it; Now keeps its crosshair and
+       drops its word. What is left is two objects that fit inside 320px with
+       room to spare, so the row cannot wrap and never has to be centred twice.
+       The weekday mask is still a row of its own — seven targets need the
+       width. */
+    .cal-controls { justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .cc-week { margin-left: 0; gap: 8px; }
+    .cc-repeat .field-label { display: none; }
+    .cc-week .btn span { display: none; }
+    .cc-week .btn { padding: 5px 8px; }
+    .cc-days { flex: 1 1 100%; justify-content: center; }
+    .cc-days .seg { flex: 1; max-width: 320px; }
+    .cc-days .seg button { flex: 1; padding: 7px 0; font-size: 12px; }
+
+    /* The tank takes what is left of the foot beside the button it feeds. */
+    .foot-dur { flex: 1 1 auto; }
+    .foot-dur .tank { width: auto; flex: 1; height: 40px; }
+    .tank-in { font-size: 13px; }
+    .tank-out { font-size: 11px; }
   }
 </style>
 </head>
@@ -501,6 +723,16 @@ const DRAG_SNAP = 15;
 // eighteen minutes is still eighteen minutes of hunting and rounding it away
 // would refuse somebody a hunt to keep the numbers tidy.
 const MIN_CLAIM = 5;
+// How many rows "Up next" shows before it owns up to the rest. Matches
+// RespawnDashboardRoute.UpNextRows and RespawnEmbeds.RowsPerField, so the panel
+// and the Discord card are the same list rather than two answers to one
+// question. The server has already capped what it sends; this is the guard for
+// the two lists together.
+const UP_NEXT_ROWS = 10;
+// Whether to say "tap" or "click", and whether to mention right-clicking at all
+// — a phone has no right button, so that sentence would be advice nobody can
+// take. Read once: it is a property of the device, not of the moment.
+const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches;
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 const pad = n => String(n).padStart(2, '0');
@@ -548,6 +780,31 @@ function clockTime(iso) {
 
 function minutesLeft(endsAt) {
   return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
+}
+
+/** How far off something is, at the coarseness worth reading at that distance.
+ *  Minutes while it is soon enough to wait for, hours through the evening, days
+ *  once it is another day's problem — an evening seven days out does not become
+ *  more useful for being told it is 168 hours. */
+function relTime(at) {
+  const mins = Math.round((new Date(at).getTime() - Date.now()) / 60000);
+  if (mins <= 0) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60), rest = mins % 60;
+  if (hours < 24) return rest ? `${hours}h${pad(rest)}` : `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/** Today, tomorrow, or the weekday — for a list whose whole point is *when*, a
+ *  date is a thing to decode where "Tomorrow" is a thing to read. */
+function dayLabel(at) {
+  const day = new Date(at); day.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((day - today) / DAY_MS);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  const d = new Date(at);
+  return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()}`;
 }
 
 /** How a card reads its state, and never a crash if it meets one it does not
@@ -677,7 +934,11 @@ const view = {
   busy: false,
   // Set for real by openWindow, which opens the week — this only covers the
   // moment before any spawn has been opened at all.
-  calendarOpen: false
+  calendarOpen: false,
+  // Shut on every open. Deliberately not remembered between spawns: it is
+  // reference, and a section that stayed open would take the grid's height on
+  // every spawn after the one somebody wanted it on.
+  upNextOpen: false
 };
 
 let gridEl = null;
@@ -1144,10 +1405,11 @@ function openWindow(code) {
   view.repeat = 'once';
   view.days = new Set();
   // Open on the week rather than on a fold that has to be found and pressed.
-  // It is also where the length of a hunt is set now that the strip above has no
-  // stepper of its own, so a spawn opened straight to a claim would otherwise
+  // It is also where the length of a hunt is set, the strip above having no
+  // control of its own, so a spawn opened straight to a claim would otherwise
   // offer no way to change how long it runs for.
   view.calendarOpen = true;
+  view.upNextOpen = false;
   scrolledOnce = false;
   const l = limits();
   // Start at the guild's default, but never above what is actually claimable —
@@ -1156,6 +1418,7 @@ function openWindow(code) {
   view.duration = l ? Math.min(l.defaultDurationMinutes, l.claimableMinutes) : null;
   veil.classList.add('open');
   windowEl.classList.add('open');
+  lockPage();
   // Read even while the week is folded away, because the header says how much is
   // in it and a header that lied until you opened it would be worse than no
   // header. Drawn first and filled in after, so the window itself is up as soon
@@ -1173,16 +1436,186 @@ function closeWindow() {
   gridEl = null;
   veil.classList.remove('open');
   windowEl.classList.remove('open');
+  unlockPage();
+}
+
+/** Hold the board still behind the window, and put it back afterwards.
+ *
+ *  The window is fixed to the viewport, which on a phone only means anything
+ *  while the viewport is not itself moving. Scrolling past either end of the
+ *  board rubber-bands the document, the address bar comes and goes on the way,
+ *  and a fixed panel is repainted against all of it a frame behind — which is
+ *  the jitter. Nothing behind the window is reachable anyway, so the cheapest
+ *  answer is for there to be nothing to scroll.
+ *
+ *  Pinning is `position: fixed` rather than `overflow: hidden`, which iOS
+ *  ignores on the body; the offset is what stops the board jumping to the top
+ *  while it is pinned, and it is undone on the way out.
+ */
+let pinnedAt = 0;
+function lockPage() {
+  if (document.body.classList.contains('locked')) return;
+  pinnedAt = window.scrollY;
+  document.body.style.top = -pinnedAt + 'px';
+  document.body.classList.add('locked');
+}
+function unlockPage() {
+  if (!document.body.classList.contains('locked')) return;
+  document.body.classList.remove('locked');
+  document.body.style.top = '';
+  window.scrollTo(0, pinnedAt);
+}
+
+/** What lengths actually exist. Half hours on the way up, but the ceiling wins:
+ *  the last of a tank is claimable exactly as it stands, so the floor is a whole
+ *  step only while there is a whole step to be had. */
+function snapDuration(minutes) {
+  const s = step();
+  return Math.max(Math.min(s, cap()), Math.min(cap(), Math.round(minutes / s) * s));
 }
 
 function setDuration(minutes) {
-  const s = step();
-  // Half hours on the way up, but the ceiling wins: the last of a tank is
-  // claimable exactly as it stands, so the floor is a whole step only while
-  // there is a whole step to be had.
-  view.duration = Math.max(Math.min(s, cap()), Math.min(cap(), Math.round(minutes / s) * s));
+  view.duration = snapDuration(minutes);
   view.answer = null;
   renderWindow();
+}
+
+/** The three quantities the duration control is drawn against.
+ *
+ *  `span` is what the whole bar is worth. With stamina switched off there is no
+ *  tank to show — the guild's ceiling is the only limit — so the bar becomes the
+ *  claim's own range and nothing is spent, which degrades to an ordinary slider
+ *  without needing a second control for the case.
+ */
+function tankState() {
+  const l = limits();
+  const budget = l && l.budgetMinutes ? l.budgetMinutes : 0;
+  const remaining = budget ? Math.max(0, l.remainingMinutes || 0) : null;
+  const ceiling = cap();
+  return {
+    span: budget || Math.max(SLOT, ceiling),
+    spent: budget ? budget - remaining : 0,
+    remaining,
+    cap: ceiling
+  };
+}
+
+/** Draw the tank at a given length.
+ *
+ *  Called on every render and directly on every frame of a drag — the second is
+ *  why it takes the length as an argument rather than reading `view.duration`.
+ *  Rebuilding the panel per frame of a drag fights the pointer, exactly as it
+ *  does for the selection on the grid.
+ */
+function paintTank(root, minutes) {
+  const t = tankState();
+  const zones = root.querySelector('.tank-zones');
+  root.querySelector('.tank-spent').style.width = (t.spent / t.span * 100) + '%';
+  root.querySelector('.tank-hunt').style.width = (minutes / t.span * 100) + '%';
+
+  // Measured rather than computed, because the markers are placed on the face
+  // and the zones sit inset within it.
+  const box = zones.getBoundingClientRect(), face = root.getBoundingClientRect();
+  const left = box.left - face.left, w = box.width;
+  const at = left + ((t.spent + minutes) / t.span) * w;
+
+  const edge = root.querySelector('.tank-edge');
+  edge.style.left = (at - edge.offsetWidth / 2) + 'px';
+
+  const ceiling = root.querySelector('.tank-cap');
+  const bound = t.remaining !== null && t.cap < t.remaining;
+  ceiling.hidden = !bound;
+  if (bound) ceiling.style.left = (left + ((t.spent + t.cap) / t.span) * w) + 'px';
+
+  // Both figures are anchored to an end rather than floating beside the boundary:
+  // the length to the head of the blue, what is left to the tail of the bar.
+  // Neither moves while you drag — only the boundary and the fill do — and
+  // neither can be pushed out of the bar, which is what the caption-line
+  // fallback used to be for.
+  const head = left + (t.spent / t.span) * w;
+  const inLabel = root.querySelector('.tank-in'), outLabel = root.querySelector('.tank-out');
+  // A tank with nothing in it has no length to state — "0m" beside "no stamina"
+  // is the same news twice, and the second telling is the one that reads like a
+  // choice somebody made.
+  inLabel.textContent = minutes ? fmtDur(minutes) : '';
+  // A short hunt is narrower than the word for it, so its figure steps just past
+  // the boundary into the empty and takes the page's text colour to stay
+  // readable. Still inside the bar.
+  const fits = (minutes / t.span) * w > inLabel.offsetWidth + 12;
+  inLabel.classList.toggle('outside', !fits);
+  inLabel.style.left = (fits ? head + 7 : at + 7) + 'px';
+
+  // What the tank would have left afterwards — of the tank, not of this
+  // control's own range. A guild whose per-claim ceiling bites before stamina
+  // does would otherwise report a full tank as empty.
+  const rest = t.remaining === null ? null : Math.max(0, t.remaining - minutes);
+  const text = rest === null ? '' : rest ? `${fmtDur(rest)} left` : 'no stamina';
+  outLabel.textContent = text;
+  // It stays put and lets the blue arrive underneath it, going dark when it
+  // does. Moving it would mean shoving it off the end on a full tank, which is
+  // the one moment "no stamina" is the thing you want to read.
+  const outLeft = left + w - outLabel.offsetWidth - 7;
+  outLabel.style.left = outLeft + 'px';
+  outLabel.classList.toggle('on-hunt', at > outLeft - 2);
+  // The single case where something has to give: a hunt too short to hold its
+  // own figure puts it where this one is. The length wins.
+  outLabel.style.visibility =
+    text && !(!fits && at + 7 + inLabel.offsetWidth > outLeft - 6) ? 'visible' : 'hidden';
+
+  root.setAttribute('aria-valuemin', Math.min(SLOT, t.cap));
+  root.setAttribute('aria-valuemax', t.cap);
+  root.setAttribute('aria-valuenow', minutes);
+  root.setAttribute('aria-valuetext', fmtDur(minutes) + (text ? `, ${text}` : ''));
+}
+
+/** Drag it, tap it, or arrow it. There are no buttons on either end, so the face
+ *  has to take every gesture there is. */
+function wireTank(root) {
+  const t = tankState();
+  if (t.cap < MIN_CLAIM) { root.setAttribute('aria-disabled', 'true'); return; }
+
+  // A position on the bar is a point in the day, and the hunt is what is left of
+  // it once the spent part is taken off — which is why dragging into the grey
+  // pins at the floor rather than going negative.
+  const at = clientX => {
+    const r = root.getBoundingClientRect();
+    return snapDuration(((clientX - r.left) / r.width) * t.span - t.spent);
+  };
+
+  root.addEventListener('pointerdown', down => {
+    if (down.button > 0) return;
+    down.preventDefault();
+    // Capture keeps the drag alive once the pointer leaves the bar, which is
+    // most of a drag on a control this short. Not worth losing the drag over,
+    // though, so a refusal is allowed rather than left to abort the handler.
+    try { root.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+    let preview = at(down.clientX);
+    paintTank(root, preview);
+
+    const move = ev => {
+      const next = at(ev.clientX);
+      if (next === preview) return;
+      preview = next;
+      paintTank(root, next);
+    };
+    const up = () => {
+      root.removeEventListener('pointermove', move);
+      root.removeEventListener('pointerup', up);
+      root.removeEventListener('pointercancel', up);
+      // One render at the end, against the length actually settled on — it
+      // redraws the selection on the grid and the verdict under it.
+      if (preview !== view.duration) setDuration(preview);
+    };
+    root.addEventListener('pointermove', move);
+    root.addEventListener('pointerup', up);
+    root.addEventListener('pointercancel', up);
+  });
+
+  root.addEventListener('keydown', e => {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+    if (d) { e.preventDefault(); setDuration(view.duration + d * step()); }
+  });
 }
 
 /** Put the selection down without making another one.
@@ -1204,7 +1637,10 @@ function clearPick() {
 function renderWindow() {
   const spawn = openSpawn();
   if (!spawn) { closeWindow(); return; }
-  const keepScroll = gridEl ? gridEl.scrollTop : null;
+  // Both axes: on a phone the week is wider than the screen as well as taller,
+  // and a render that put the hours back but not the days would jump the reader
+  // to Monday every time the selection moved.
+  const keepScroll = gridEl ? { top: gridEl.scrollTop, left: gridEl.scrollLeft } : null;
 
   const watermark = document.getElementById('watermark');
   const wanted = spawn.sprite || PLACEHOLDER;
@@ -1223,30 +1659,34 @@ function renderWindow() {
   const body = document.getElementById('win-body');
   body.innerHTML = '';
   body.appendChild(nowStrip(spawn));
+  const upNext = upNextSection(spawn);
+  if (upNext) body.appendChild(upNext);
   body.appendChild(calendarSection());
   if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
 
-  // The foot of the panel: what pressing the button would do, the button itself,
-  // and whatever the bot last said back. Outside the part that scrolls, so all
-  // three sit in the same corner however tall the body above them happens to be
-  // and whether or not the week is open.
+  // The foot of the panel: whatever it has to say, then how long and the button
+  // that acts on it. Outside the part that scrolls, so all of it sits in the same
+  // corner however tall the body above happens to be and whether or not the week
+  // is open.
+  //
+  // The message goes above the action row, not below it. Below, every reply the
+  // bot gave changed the height of the thing under the button and shifted the
+  // button itself; above, it grows upward into the panel and the button keeps the
+  // corner it had.
   const foot = document.getElementById('win-foot');
   foot.innerHTML = '';
-  // The answer goes above the action row, not below it. Below, every reply the
-  // bot gave changed the height of the thing under the button and shifted the
-  // button itself; above, the reply grows upward into the panel and the button
-  // keeps the corner it had. Whether there is an answer at all is then the one
-  // thing that cannot move it.
-  if (view.answer) {
-    foot.appendChild(el('div', 'answer ' + (view.answer.ok ? 'ok' : 'no'), esc(view.answer.message)));
-  }
+  const message = footMessage();
+  if (message) foot.appendChild(message);
   const action = readout();
   if (action) foot.appendChild(action);
   foot.hidden = !foot.firstChild;
 
   wireWindow();
-  if (keepScroll !== null && gridEl) gridEl.scrollTop = keepScroll;
-  else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
+  if (keepScroll !== null && gridEl) {
+    gridEl.style.scrollBehavior = 'auto';
+    gridEl.scrollTop = keepScroll.top;
+    gridEl.scrollLeft = keepScroll.left;
+  } else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
 }
 
 /** Already holding it, or already standing in its queue, means there is nothing
@@ -1360,9 +1800,11 @@ function nowStrip(spawn) {
   const l = limits();
   const strip = el('div', 'strip now-strip');
   const tick = spawn.state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
+  // No "+2 queued" here. On a card, before the panel is open, a count is the
+  // whole story; once it is open the question has moved on to who and when, and
+  // the section below answers that with the rows themselves.
   strip.innerHTML = `<span class="dot ${spawn.state}"></span>${tick}
-    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>
-    ${spawn.queueLength ? `<span class="queue">+${spawn.queueLength} queued</span>` : ''}`;
+    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>`;
 
   if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
     const start = new Date(spawn.startsAt).getTime(), end = new Date(spawn.endsAt).getTime();
@@ -1370,31 +1812,89 @@ function nowStrip(spawn) {
     strip.appendChild(el('span', 'live-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
   }
 
-  const canClaim = canClaimNow(spawn);
-  if (canClaim) {
-    // How long is set on the week's slider and nowhere else. There used to be a
-    // stepper here as well, which meant two controls for one number — this says
-    // only what the ceiling is and which rule imposes it.
-    strip.appendChild(el('span', 'field',
-      `<span class="dur-cap">up to ${fmtDur(cap())} · ${esc(l.boundBy)}</span>`));
-  } else if (l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
+  // Nothing about the ceiling here either. "up to 5h · stamina" was a third
+  // telling of a thing the tank says by being the tank — the bar ends where the
+  // ceiling is, and you can watch yourself arrive at it.
+  if (!canClaimNow(spawn) && l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
     strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
   }
 
-  const actions = el('span', 'field');
-  actions.style.marginLeft = 'auto';
-  if (l && l.remainingMinutes !== undefined) {
-    const left = l.remainingMinutes, budget = l.budgetMinutes || 1;
-    actions.appendChild(el('span', 'stamina-bar', `
-      <span class="used" style="width:${((budget - left) / budget * 100).toFixed(1)}%"></span>
-      <span class="pending" style="width:${(Math.min(view.duration || 0, left) / budget * 100).toFixed(1)}%"></span>`));
-    actions.appendChild(el('span', 'stamina-val', `${fmtDur(left)} left`));
-  }
   // No buttons here at all. Claim, Book, Release and Leave queue are all the
   // same decision about this spawn at different moments, so they are one button
   // in one corner of the panel — see primaryAction.
-  strip.appendChild(actions);
+  //
+  // Nor any stamina, which used to sit at the right of this row as a bar and a
+  // figure. The duration control below is that same tank, drawn at a size you
+  // can read and act on, so this said it a second time in a place where nothing
+  // could be done about it.
   return strip;
+}
+
+/** What is actually coming to this spawn: the queue, then the bookings.
+ *
+ *  Shut by default. It is reference rather than the thing anybody opened the
+ *  panel to do, and ten rows is more height than a phone can spare beside the
+ *  grid — so the header carries the one row worth having without opening
+ *  anything, and the rest is a press away.
+ *
+ *  The queue comes first because it happens soonest and because its times are
+ *  derived from the hunt running now. Those times are projections: the server
+ *  works them out from the current hunt's end plus everyone ahead
+ *  (`RespawnBoardEntry.projectedQueueStarts`), and a hunt released early brings
+ *  every one of them forward. They are marked `≈` and their countdown is left
+ *  muted, where a booking's is definite and coloured.
+ */
+function upNextRows(spawn) {
+  const waiting = (spawn.waiting || []).map(w => ({
+    at: w.startsAt, minutes: w.minutes, who: w.mine ? 'You' : w.name,
+    kind: 'queued', tag: 'queue', projected: true
+  }));
+  const booked = (spawn.booked || []).map(b => ({
+    at: b.startsAt, minutes: b.minutes, who: b.mine ? 'You' : b.name,
+    kind: b.asked ? 'asked' : b.mine ? 'mine' : 'booked',
+    tag: b.asked ? 'asked' : b.mine ? 'you' : ''
+  }));
+  // Everything there was before any cap, so one note covers the lot — the
+  // server has already trimmed each list to ten, and `bookedTotal` is what it
+  // trimmed from.
+  const total = waiting.length + (spawn.bookedTotal || booked.length);
+  return { rows: waiting.concat(booked), total };
+}
+
+function upNextSection(spawn) {
+  const { rows, total } = upNextRows(spawn);
+  if (!rows.length) return null;
+
+  const wrap = document.createDocumentFragment();
+  const soonest = rows[0];
+  const head = el('div', 'up-head' + (view.upNextOpen ? ' open' : ''), `
+    <i class="ti ti-clock-hour-4" aria-hidden="true"></i>
+    <span class="fold-title">Up next</span>
+    <span class="up-peek">next in <b>${esc(relTime(soonest.at))}</b> — ${esc(soonest.who)}</span>
+    <span class="up-count">${total}</span>
+    <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
+  head.setAttribute('role', 'button');
+  head.setAttribute('aria-expanded', String(!!view.upNextOpen));
+  head.addEventListener('click', () => { view.upNextOpen = !view.upNextOpen; renderWindow(); });
+  wrap.appendChild(head);
+
+  if (view.upNextOpen) {
+    const shown = rows.slice(0, UP_NEXT_ROWS);
+    const hidden = total - shown.length;
+    const list = el('div', 'up-list', shown.map(r => `
+      <div class="up-row up-${r.kind}">
+        <span class="up-when">${r.projected ? '≈' : ''}${fmtLocal(new Date(r.at))}<small>${esc(dayLabel(r.at))}</small></span>
+        <span class="up-rail"><span class="up-pip"></span></span>
+        <span class="up-body">
+          <span class="up-who">${esc(r.who)}</span>
+          <span class="up-sub">in <span class="up-rel">${esc(relTime(r.at))}</span> · ${fmtDur(r.minutes)}</span>
+        </span>
+        ${r.tag ? `<span class="up-tag ${r.tag}">${r.tag}</span>` : '<span></span>'}
+      </div>`).join('')
+      + (hidden > 0 ? `<div class="up-more">…and ${hidden} more</div>` : ''));
+    wrap.appendChild(list);
+  }
+  return wrap;
 }
 
 /** The week, folded away until it is wanted.
@@ -1422,7 +1922,6 @@ function calendarSection() {
     <i class="ti ti-calendar-month" aria-hidden="true"></i>
     <span class="fold-title">Book a time</span>
     <span class="muted">${summary}</span>
-    <span style="margin-left:auto"></span>
     <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
   head.setAttribute('role', 'button');
   head.setAttribute('aria-expanded', String(view.calendarOpen));
@@ -1439,6 +1938,19 @@ function calendarSection() {
     if (view.calendarOpen) showWeek(); else renderWindow();
   });
   wrap.appendChild(head);
+  // The standing instructions, belonging to this heading rather than to the top
+  // of the panel: no rule between them, indented to the title. They are about
+  // the grid, so they are drawn only while there is a grid and only while there
+  // is nothing picked — once there is, the foot has a verdict to give about the
+  // actual selection, and the two never appear together.
+  if (view.calendarOpen && !view.pick) {
+    head.style.borderBottom = 'none';
+    head.style.paddingBottom = '5px';
+    wrap.appendChild(el('div', 'fold-hint', TOUCH
+      ? 'Tap a start time on the grid to book it, or tap one of your own bookings to cancel it.'
+      : 'Pick a start time on the grid to book it, or click one of your own bookings to cancel it. '
+        + 'Right-click a selection to clear it.'));
+  }
   if (view.calendarOpen) wrap.appendChild(calendar());
   return wrap;
 }
@@ -1449,33 +1961,30 @@ function calendar() {
   const start = weekStart();
 
   // --- booking controls
-  wrap.appendChild(el('div', 'strip', `
-    <span class="field-label">Book</span>
-    <span class="seg" data-seg="repeat">
-      <button data-v="once" class="${view.repeat === 'once' ? 'on' : ''}">Once</button>
-      <button data-v="week" class="${view.repeat === 'week' ? 'on' : ''}">Weekly</button>
-    </span>
-    ${view.repeat === 'week'
-      ? `<span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
-          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span>`
-      : ''}
-    <span class="field"><span class="field-label">For</span>
-      <span class="stepper">
-        <button data-step="-1" ${view.duration <= SLOT ? 'disabled' : ''} aria-label="Shorter">&minus;</button>
-        <input type="range" id="dur" min="${SLOT}" max="${Math.max(SLOT, cap())}" step="${SLOT}"
-               value="${Math.min(view.duration || SLOT, Math.max(SLOT, cap()))}" aria-label="Duration">
-        <span class="dur-val">${fmtDur(view.duration)}</span>
-        <button data-step="1" ${view.duration >= cap() ? 'disabled' : ''} aria-label="Longer">+</button>
+  // One group per decision — how often, which days, which week. How *long* is not
+  // among them any more: it sits in the foot beside the button it feeds, which is
+  // where the decision it belongs to actually gets made. See .cal-controls for
+  // why these are groups rather than a flat run of spans.
+  wrap.appendChild(el('div', 'strip cal-controls', `
+    <span class="cc-row cc-repeat">
+      <span class="field-label">Book</span>
+      <span class="seg" data-seg="repeat">
+        <button data-v="once" class="${view.repeat === 'once' ? 'on' : ''}">Once</button>
+        <button data-v="week" class="${view.repeat === 'week' ? 'on' : ''}">Weekly</button>
       </span>
     </span>
-    <span class="field" style="margin-left:auto">
+    <span class="cc-row cc-week">
       <span class="seg" data-seg="week">
         <button data-v="-1" aria-label="Previous week">&lsaquo;</button>
         <button data-v="0" class="${view.weekOffset === 0 ? 'on' : ''}">${weekLabel(start)}</button>
         <button data-v="1" aria-label="Next week">&rsaquo;</button>
       </span>
-      <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> Now</button>
-    </span>`));
+      <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> <span>Now</span></button>
+    </span>
+    ${view.repeat === 'week'
+      ? `<span class="cc-row cc-days"><span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
+          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span></span>`
+      : ''}`));
 
   wrap.appendChild(el('div', 'cal-legend', `
     <span><i class="swatch sw-claimed"></i>Being hunted</span>
@@ -1486,16 +1995,18 @@ function calendar() {
     <span style="margin-left:auto"><i class="swatch" style="border:none;border-left:2px solid var(--bad);border-radius:0;width:2px"></i>Now</span>
     <span><i class="swatch" style="border:none;border-left:2px dashed var(--warn);border-radius:0;width:2px"></i>Server save</span>`));
 
-  // --- day headings
-  wrap.appendChild(el('div', 'wk', '<div></div>' + [0,1,2,3,4,5,6].map(i => {
+  // --- grid
+  const body = el('div', 'wk-body' + (weekPending ? ' pending' : ''));
+  const grid = el('div', 'wk-grid');
+
+  // --- day headings, inside the scroller so they slide with their own columns
+  grid.appendChild(el('div', 'wk-headrow', '<div class="wk-corner"></div>' + [0,1,2,3,4,5,6].map(i => {
     const d = dayStart(start, i);
     const today = d.toDateString() === now.toDateString();
     return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[i]}<span class="dnum">${d.getDate()}</span></div>`;
   }).join('')));
 
-  // --- grid
-  const body = el('div', 'wk-body' + (weekPending ? ' pending' : ''));
-  const grid = el('div', 'wk-grid');
+  const rows = el('div', 'wk-rows');
 
   // Built as one string and written once. Appending to innerHTML in the loop
   // made the browser reserialise and reparse the whole gutter twenty-four times
@@ -1508,7 +2019,8 @@ function calendar() {
     probe.setHours(h, 0, 0, 0);
     hourRows.push(`<div class="wk-hour">${pad(h)}:00<span class="srv">${pad(serverParts(probe).hour)} srv</span></div>`);
   }
-  grid.appendChild(el('div', 'wk-hours', hourRows.join('')));
+  const hours = el('div', 'wk-hours', hourRows.join(''));
+  rows.appendChild(hours);
 
   // Worked out once for the week rather than once per column: the answer does
   // not depend on which column is being drawn, and each entry may well belong
@@ -1610,18 +2122,21 @@ function calendar() {
       const line = el('div', 'ss-line'); line.style.top = y + 'px'; col.appendChild(line);
       const lbl = el('div', 'ss-label', `SS ${fmtLocal(ss)}`); lbl.style.top = y + 'px'; col.appendChild(lbl);
     }
-    grid.appendChild(col);
+    rows.appendChild(col);
   }
 
-  // Now line, if this week contains it.
+  // Now line, if this week contains it. The line belongs to the days, the time
+  // to the hour axis — which is what keeps the time on screen when a phone has
+  // slid the days sideways.
   const nowDay = Math.floor((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
   if (nowDay >= 0 && nowDay < 7) {
     const y = (localMinutes(now) / 60) * ROW_H;
     const line = el('div', 'now-line'); line.style.top = y + 'px';
     const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
-    grid.appendChild(line); grid.appendChild(flag);
+    rows.appendChild(line); hours.appendChild(flag);
   }
 
+  grid.appendChild(rows);
   body.appendChild(grid);
   wrap.appendChild(body);
   gridEl = body;
@@ -1803,59 +2318,39 @@ function stretchHandle(block) {
   return handle;
 }
 
-/** The panel's action row: what pressing the button would do, and the button.
+/** Everything the panel has to say, on the row above the one you act on.
  *
- *  Anchored to the foot of the panel whether or not the week is open, rather
- *  than drawn wherever the panel currently happens to end. Folding the week away
- *  used to move the button from the bottom corner up into the strip at the top,
- *  so the one control somebody presses over and over was in a different place
- *  depending on something unrelated to it.
+ *  A verdict about the slot selected and a reply to something just pressed are
+ *  the same kind of thing at different moments, so they share a row rather than
+ *  stacking two of them — and the reply wins while there is one, being the newer
+ *  news. After a booking lands, the verdict on the slot still selected would be
+ *  about a slot you now own: true, and not what anybody wants to read.
  *
- *  Nothing at all when there is neither a verdict to give nor a button to offer
- *  — an empty bar across the bottom of the panel is worse than no bar.
+ *  Nothing at all when there is neither, which is the ordinary opening state:
+ *  the instructions under "Book a time" are doing that job, and an empty bar
+ *  above the button would be worse than none.
  */
-function readout() {
-  const spawn = openSpawn();
-  const primary = spawn ? primaryAction(spawn) : null;
-
-  // Text on the left, buttons on the right, always in that order and always in
-  // those two columns. The text column is the one that gives way when there is
-  // too much of it — a verdict long enough to fill the row must wrap inside its
-  // own column rather than shoulder the button onto a line of its own, which is
-  // how the button ended up on the left of the panel instead of the right.
-  const row = () => {
-    const out = el('div', 'readout');
-    const text = el('div', 'readout-text');
-    const actions = el('div', 'readout-actions');
-    out.appendChild(text);
-    out.appendChild(actions);
-    return { out, text, actions };
-  };
-
-  if (!view.pick) {
-    if (!primary) return null;
-    const { out, text, actions } = row();
-    // The grid hint only means anything while the grid is on screen.
-    if (view.calendarOpen) {
-      text.innerHTML = '<span class="muted">Pick a start time on the grid to book it, '
-        + 'or click one of your own bookings to cancel it. Right-click a selection to clear it.</span>';
-    }
-    actions.appendChild(primary);
-    return out;
+function footMessage() {
+  if (view.answer) {
+    return el('div', 'foot-msg ' + (view.answer.ok ? 'ok' : 'no'),
+      `<i class="ti ${view.answer.ok ? 'ti-circle-check' : 'ti-alert-triangle'}" aria-hidden="true"></i>
+       <span>${esc(view.answer.message)}</span>`);
   }
-
-  const { out, text, actions } = row();
+  if (!view.pick) return null;
 
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
   const localDay = DAY_NAMES[(view.pick.getDay() + 6) % 7];
   const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop' : 'ti-alert-triangle';
   const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask' : 'verdict-no';
-  // Only worth saying when the two clocks disagree about the day; otherwise it
-  // is noise on every pick.
+  // Only when the two clocks disagree about the *day*, because that is the only
+  // time the server's reading changes what gets booked — a weekly rule repeats
+  // on the server's weekday, not on the one in the column. When they agree the
+  // server clock is a second number that answers no question anybody has, so it
+  // is not offered at all.
   const dayNote = srv.weekday !== localDay
     ? `<span class="srv-note">· ${pad(srv.hour)}:${pad(srv.minute)} ${srv.weekday} server time${view.repeat === 'week' ? ` — a weekly booking repeats on ${srv.weekday}s` : ''}</span>`
-    : `<span class="muted">· ${pad(srv.hour)}:${pad(srv.minute)} server</span>`;
+    : '';
   // A weekly booking anchored on a day its own mask excludes is legal — the
   // anchor gives the time of day and the mask gives the days — but it means the
   // first slot is not the evening that was clicked, which nobody expects unless
@@ -1865,9 +2360,47 @@ function readout() {
     ? `<span class="srv-note">· repeats on ${[...view.days].sort().map(d => DAY_NAMES[d]).join(', ')}, so the first slot is not this ${srv.weekday}</span>`
     : '';
 
-  text.innerHTML = `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
-    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}`;
+  return el('div', 'foot-msg', `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
+    <span class="${cls}">${esc(v.text)}</span>${dayNote}${offMask}`);
+}
 
+/** The panel's action row: how long, and the thing that acts on it.
+ *
+ *  Anchored to the foot of the panel whether or not the week is open, rather
+ *  than drawn wherever the panel currently happens to end. Folding the week away
+ *  used to move the button from the bottom corner up into the strip at the top,
+ *  so the one control somebody presses over and over was in a different place
+ *  depending on something unrelated to it.
+ *
+ *  Its height never changes — the verdict that used to share it has moved to
+ *  footMessage above, which grows upward instead — so the button stays in one
+ *  place however much the panel has to say.
+ */
+function readout() {
+  const spawn = openSpawn();
+  const primary = spawn ? primaryAction(spawn) : null;
+
+  const out = el('div', 'readout');
+  const dur = el('div', 'foot-dur', `<span class="field-label">For</span>
+    <span class="tank" id="tank" role="slider" tabindex="0" aria-label="How long">
+      <span class="tank-zones"><span class="tank-spent"></span><span class="tank-hunt"></span></span>
+      <span class="tank-cap" hidden></span>
+      <span class="tank-edge"></span>
+      <span class="tank-in"></span>
+      <span class="tank-out"></span>
+    </span>`);
+  const actions = el('div', 'readout-actions');
+  // The tank is only worth offering while there is something it could be spent
+  // on. With no action available at all — somebody already holding the spawn and
+  // nothing selected — the row would be a control feeding nothing.
+  if (limits()) out.appendChild(dur);
+  out.appendChild(actions);
+
+  if (!view.pick) {
+    if (!primary && !limits()) return null;
+    if (primary) actions.appendChild(primary);
+    return out;
+  }
   // The same button that offers Claim when nothing is picked; a selection is
   // what turns it into Book, and clearing one turns it back.
   if (primary) actions.appendChild(primary);
@@ -1945,27 +2478,41 @@ function button(label, className, onClick, icon) {
 
 function scrollToNow(smooth) {
   if (!gridEl) return;
-  const y = (localMinutes(new Date()) / 60) * ROW_H;
+  const now = new Date();
   gridEl.style.scrollBehavior = smooth ? 'smooth' : 'auto';
+
+  // The headings sit at the top of the same scroller, stuck there, so the height
+  // they hold is height the hours are never scrolled into — the third is a third
+  // of what is left under them, not of the box.
+  const rows = gridEl.querySelector('.wk-rows');
+  const headH = rows ? rows.offsetTop : 0;
+  const visible = Math.max(0, gridEl.clientHeight - headH);
   // A third down: enough of the morning above for context, most of the evening
   // below, which is where hunts actually are.
-  gridEl.scrollTop = Math.max(0, Math.min(y - gridEl.clientHeight / 3, 24 * ROW_H - gridEl.clientHeight));
+  gridEl.scrollTop = Math.max(0, Math.min(
+    (localMinutes(now) / 60) * ROW_H - visible / 3, gridEl.scrollHeight - gridEl.clientHeight));
+
+  // Sideways, where the week is wider than the screen: open on yesterday, so the
+  // four days in view are the one just gone, today, and the two anybody is
+  // actually planning into. Clamped, so a week with no "today" in it — one the
+  // arrows have been walked to — simply starts at Monday.
+  const col = gridEl.querySelector('.wk-col');
+  if (col && gridEl.scrollWidth > gridEl.clientWidth) {
+    const width = col.getBoundingClientRect().width;
+    const today = Math.round((new Date(now).setHours(0, 0, 0, 0) - weekStart().getTime()) / DAY_MS);
+    gridEl.scrollLeft = Math.max(0, Math.min(
+      (today - 1) * width, gridEl.scrollWidth - gridEl.clientWidth));
+  }
 }
 
 function wireWindow() {
   const body = document.getElementById('win-body');
 
-  body.querySelectorAll('[data-step]').forEach(btn =>
-    btn.addEventListener('click', () => setDuration(view.duration + Number(btn.dataset.step) * SLOT)));
-
-  const dur = body.querySelector('#dur');
-  if (dur) {
-    // `input` keeps the figure live under the thumb; `change` settles it. A full
-    // re-render on every pixel of drag fights the drag.
-    dur.addEventListener('input', e =>
-      body.querySelectorAll('.dur-val').forEach(v => { v.textContent = fmtDur(Number(e.target.value)); }));
-    dur.addEventListener('change', e => setDuration(Number(e.target.value)));
-  }
+  // In the foot rather than the body now, so it is looked up on the document.
+  // Painted here rather than while it was being built, because it measures its
+  // own zones to place the markers and cannot do that until it is in the page.
+  const tank = document.getElementById('tank');
+  if (tank) { wireTank(tank); paintTank(tank, view.duration || 0); }
 
   body.querySelectorAll('[data-seg] button').forEach(btn => btn.addEventListener('click', () => {
     const seg = btn.closest('[data-seg]').dataset.seg;
@@ -2093,6 +2640,13 @@ function doBook() {
 document.getElementById('win-close').addEventListener('click', closeWindow);
 veil.addEventListener('click', closeWindow);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWindow(); });
+
+// The tank places its markers and its two figures by measuring itself, so a
+// phone turned on its side has to be told to look again.
+addEventListener('resize', () => {
+  const tank = document.getElementById('tank');
+  if (tank) paintTank(tank, view.duration || 0);
+});
 
 document.getElementById('filter').addEventListener('input', e => {
   filterText = e.target.value;
