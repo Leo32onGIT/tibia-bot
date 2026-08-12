@@ -139,6 +139,12 @@ final class RespawnCommandConsumer(
           case _ => missing("code and name")
         }
 
+      case RespawnCommand.ExtendHolder =>
+        (command.param("code"), command.intParam("minutes").filter(_ > 0)) match {
+          case (Some(code), Some(minutes)) => local.extendHolder(guildId, actor, code, minutes)
+          case _ => missing("spawn and length")
+        }
+
       case RespawnCommand.RemoveSpawn =>
         command.param("code").fold(missing("spawn"))(local.removeSpawn(guildId, actor, _))
 

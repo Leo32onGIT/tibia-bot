@@ -47,7 +47,7 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val cache = new CreatureSpriteCache(dir, fetch)(sameThread)
     val access = new DashboardAccessService(
       new FakeGateway, _ => false, _ => Nil, _ => "0")
-    pathPrefix("dashboard")(new RespawnDashboardRoute(a, access, cache, _ => Nil, (_, _) => None, NoActions).routes)
+    pathPrefix("dashboard")(new RespawnDashboardRoute(a, access, cache, _ => Nil, (_, _) => None, _ => Nil, NoActions).routes)
   }
 
   /** No test here posts anything, so the write seam refuses everything. */
@@ -70,6 +70,8 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def addSpawn(guildId: String, actorId: String, code: String, region: String,
                  name: String, creature: String): Future[ActionResult] = no
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = no
+    def extendHolder(guildId: String, actorId: String, code: String,
+                     extraMinutes: Int): Future[ActionResult] = no
   }
 
   /** Enough gateway to construct the access service; no test here reaches it. */

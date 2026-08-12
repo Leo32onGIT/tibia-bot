@@ -1,7 +1,7 @@
 package com.tibiabot.persistence.jdbc
 
 import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.{ConnectionProvider, RespawnRepository, SeedSync}
+import com.tibiabot.persistence.{ConnectionProvider, KnownMember, RespawnRepository, SeedSync}
 
 import java.sql.{Connection, ResultSet, Timestamp}
 import java.time.{ZoneOffset, ZonedDateTime}
@@ -408,6 +408,43 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setString(1, forumChannel)
       statement.setString(2, boardThread)
       statement.executeUpdate()
+    } finally statement.close()
+  }
+
+  def knownMembers(guildId: String, limit: Int): List[KnownMember] = withGuild(guildId) { conn =>
+    // Claims and schedules together: somebody whose only involvement is a
+    // standing weekly booking has no claim row at all until it materialises, and
+    // leaving them out would make them unpickable.
+    //
+    // DISTINCT ON keeps one row per account — the newest, which is where the
+    // current spelling of both names is. Ordered by when the row was written and
+    // deliberately not by its id: the two tables have independent identity
+    // sequences, so a schedule's id and a claim's id are not comparable and the
+    // greater of the two says nothing about which came last.
+    val statement = conn.prepareStatement(
+      """SELECT DISTINCT ON (user_id) user_id, user_name, nickname FROM (
+        |  SELECT user_id, user_name, nickname, claimed_at AS seen_at FROM respawn_claims
+        |  UNION ALL
+        |  SELECT user_id, user_name, nickname, created_at AS seen_at FROM respawn_schedules
+        |) AS everyone
+        |WHERE user_id <> ''
+        |ORDER BY user_id, seen_at DESC
+        |LIMIT ?;""".stripMargin)
+    try {
+      statement.setInt(1, limit)
+      val result = statement.executeQuery()
+      val people = ListBuffer[KnownMember]()
+      while (result.next()) {
+        people += KnownMember(
+          userId = result.getString("user_id"),
+          userName = Option(result.getString("user_name")).getOrElse(""),
+          nickname = Option(result.getString("nickname")).getOrElse(""))
+      }
+      // Sorted for a person rather than for the database: the picker shows them
+      // as a list to read, and `DISTINCT ON` forces an ordering by id that means
+      // nothing to anybody.
+      people.toList.sortBy(person =>
+        (if (person.nickname.nonEmpty) person.nickname else person.userName).toLowerCase)
     } finally statement.close()
   }
 

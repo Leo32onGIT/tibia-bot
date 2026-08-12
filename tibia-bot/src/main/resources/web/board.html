@@ -198,6 +198,9 @@
     background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
     color: var(--text); font-family: var(--mono); font-size: 12px; padding: 7px 9px; width: 100%;
   }
+  /* A range has no box of its own to draw — the rule above would put a border
+     round the track and pad it away from its own thumb. */
+  .mod-field input[type="range"] { background: none; border: 0; padding: 0; }
   .mod-field input::placeholder { color: var(--muted); font-family: var(--sans); }
   .mod-field input:focus { outline: none; border-color: var(--purple); }
   .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -225,6 +228,31 @@
      like the first. */
   .btn.danger-hover:hover:not([disabled]) { color: var(--st-claimed); border-color: rgba(210,51,105,0.5); background: rgba(210,51,105,0.1); }
   .btn.mod-btn.armed { color: var(--st-claimed); border-color: rgba(210,51,105,0.65); background: rgba(210,51,105,0.14); }
+
+  /* Handing somebody minutes in their tank. A person and an amount, side by side
+     while there is room and stacked when there is not. */
+  .mod-stamina { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px; }
+  .mod-give { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: center; }
+  .mod-who { position: relative; }
+  .mod-amount { display: flex; align-items: center; gap: 10px; }
+  .mod-amount input[type="range"] { flex: 1; min-width: 0; accent-color: var(--purple); }
+  .mod-amount-out { font-family: var(--mono); font-size: 13px; color: var(--text-strong); min-width: 4ch; text-align: right; }
+  /* Over the content rather than pushing it down: a list that grows moves the
+     buttons under it, and a moderator who is halfway to pressing one should not
+     have it walk away as they type. */
+  .mod-suggest {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px;
+    max-height: 200px; overflow-y: auto; box-shadow: 0 8px 22px rgba(0,0,0,0.45);
+  }
+  .mod-suggest-row {
+    display: block; width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 7px 10px;
+  }
+  .mod-suggest-row:hover { background: rgba(167,139,250,0.14); }
+  @media (max-width: 720px) {
+    .mod-give { grid-template-columns: 1fr; }
+  }
   @media (max-width: 720px) {
     .mod-form { grid-template-columns: 1fr 1fr; }
   }
@@ -725,6 +753,9 @@
   .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .readout i { font-size: 15px; }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
+  /* Neither a yes nor a no: somebody clicked a hunt in progress and is being
+     told whose it is. */
+  .verdict-info { color: var(--muted); }
   .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
 
   @media (max-width: 900px) { .wk-grid { --gutter: 44px; } }
@@ -1600,9 +1631,53 @@ function overlapping(start, minutes) {
   return slots.filter(b => start < b.end && b.start < end);
 }
 
+/** Who a block belongs to, said in full, for a sentence rather than for a label.
+ *
+ *  Built on [[accountLine]] so the grid and the message under it name the same
+ *  person the same way: the character the team recognises, then the account and
+ *  the nickname behind it. Never a mention — see `Names.user`, which is the same
+ *  convention on the Discord side.
+ */
+function nameOf(b) {
+  const account = accountLine(b);
+  const shown = (b.owner || '').trim();
+  if (!account) return shown || 'somebody';
+  // A leading @ means the line is a nickname alone, which happens when the block
+  // is already labelled with the account — so it goes in brackets after it
+  // rather than being introduced as a second, separate name.
+  if (account.startsWith('@')) return shown ? `${shown} (${account})` : account;
+  return shown ? `${shown} — ${account}` : account;
+}
+
+/** Whatever is actually happening at an instant — the block covering it, if any.
+ *
+ *  A hunt in progress rather than a window overlapping one, which is why it asks
+ *  about a moment instead of a range. */
+function runningAt(at) {
+  const t = at.getTime();
+  return slots.find(b => b.start.getTime() <= t && t < b.end.getTime() && !b.predicted);
+}
+
 function judge(start) {
   const end = new Date(start.getTime() + view.duration * 60000);
-  if (start.getTime() <= Date.now()) return { type: 'no', text: 'That start time has already passed.' };
+  if (start.getTime() <= Date.now()) {
+    // Clicking a block that is running sets the pick to its start, which is
+    // always in the past — so the honest reading of "that time has passed" was
+    // the answer to a question nobody asked. What they clicked was somebody's
+    // hunt, and what they wanted to know is whose. Named the way the bot names
+    // people in Discord, so the person on the card and the person in the thread
+    // are recognisably the same one.
+    const live = runningAt(start);
+    if (live) {
+      const who = live.mine ? 'You are' : `${nameOf(live)} is`;
+      const verb = live.state === 'claimed' ? 'hunting' : 'booked for';
+      return {
+        type: 'info',
+        text: `${who} ${verb} this until ${fmtClock12(live.end)}. Pick a later time to book it.`
+      };
+    }
+    return { type: 'no', text: 'That start time has already passed.' };
+  }
   const hit = overlapping(start, view.duration);
   if (!hit.length) return { type: 'ok', text: `Free — ${fmtLocal(start)}–${fmtLocal(end)}, ${fmtDur(view.duration)}` };
   if (hit.some(b => b.mine)) return { type: 'no', text: 'That runs over a booking of your own.' };
@@ -1617,7 +1692,11 @@ function judge(start) {
 function canBook() {
   if (!view.pick || view.busy || !view.duration) return false;
   if (view.repeat === 'week' && view.days.size === 0) return false;
-  return judge(view.pick).type !== 'no';
+  // `ok` and `ask` are the two that lead somewhere: a free slot, or one whose
+  // owner can be asked about it. Anything else — a refusal, or the note about a
+  // hunt already running — is not a booking waiting to be made.
+  const verdict = judge(view.pick).type;
+  return verdict === 'ok' || verdict === 'ask';
 }
 
 // ---- The spawn window -----------------------------------------------------
@@ -2611,8 +2690,12 @@ function footMessage() {
 
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
-  const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop' : 'ti-alert-triangle';
-  const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask' : 'verdict-no';
+  // `info` is not a refusal and must not be dressed as one: it answers "who has
+  // this?", which is the question a click on a running hunt actually asks.
+  const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop'
+    : v.type === 'info' ? 'ti-info-circle' : 'ti-alert-triangle';
+  const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask'
+    : v.type === 'info' ? 'verdict-info' : 'verdict-no';
   // The server's own clock used to be echoed here whenever it disagreed with the
   // reader's about the day. It is gone: the grid is drawn on the reader's clock,
   // the times in this line are on the reader's clock, and a second reading of
@@ -2708,12 +2791,18 @@ function modTools(body, spawn) {
     () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
   remove.title = `Take ${spawn.code} off whoever is holding it`;
   row.appendChild(remove);
-  // Giving the time back is the usual companion to taking a spawn away: they
-  // paid for the window up front and are losing the rest of it.
-  const refund = button('Give Stamina - 30m', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/grant-stamina`, { userId: holder, minutes: 30 }));
-  refund.title = 'Put 30 minutes back in their tank for today';
-  row.appendChild(refund);
+  // The other half of putting a hunt right. Where taking somebody off is for a
+  // claim that should not stand, this is for one that lost time it should have
+  // had — a crash, a server issue, an argument that ate half the window.
+  //
+  // Stamina is not here any more: handing somebody minutes in the tank has
+  // nothing to do with the spawn open on screen, so it lives in the Moderator
+  // panel on the board, where any member can be picked rather than only whoever
+  // happens to be holding this one.
+  const extend = button('Extend Hunt - 30m', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/extend-holder`, { code: spawn.code, minutes: 30 }));
+  extend.title = 'Add 30 minutes to this hunt — costs them no stamina';
+  row.appendChild(extend);
   box.appendChild(row);
 
   // Handing over needs somebody to hand to, and the people already waiting for
@@ -2762,7 +2851,7 @@ function setUpModPanel() {
       </div>
       <div class="mod-field">
         <label class="field-label" for="ms-name">Name</label>
-        <input id="ms-name" type="text" maxlength="60" placeholder="Cult Orcs" autocomplete="off">
+        <input id="ms-name" type="text" maxlength="60" placeholder="Moonstone Crater" autocomplete="off">
       </div>
       <div class="mod-field">
         <label class="field-label" for="ms-region">City</label>
@@ -2786,6 +2875,13 @@ function setUpModPanel() {
   // with the board below it.
   const owned = el('div', 'mod-owned');
   body.appendChild(owned);
+
+  // Handing somebody stamina. Here rather than on a spawn's card, where it used
+  // to sit: a tank belongs to a person and not to a respawn, and reaching it
+  // through whichever spawn they happened to be holding meant a moderator could
+  // only ever top up somebody who was mid-hunt.
+  const stamina = el('div', 'mod-stamina');
+  body.appendChild(stamina);
 
   const field = id => document.getElementById(id);
   const inputs = ['ms-code', 'ms-name', 'ms-region', 'ms-creature'].map(field);
@@ -2884,6 +2980,126 @@ function setUpModPanel() {
     await refresh();
   }
 
+  // ---- Stamina ------------------------------------------------------------
+  // Everybody the guild's respawn system has seen. Read once the panel is opened
+  // rather than at page load: it is only the moderator panel that needs it, and
+  // most visits never open it.
+  let people = null;
+  let picked = null;
+
+  /** Minutes to give, on a scale that matches how the number is actually
+   *  chosen. A moderator is replacing what somebody lost, so the interesting
+   *  figures are a hunt's worth and its fractions, not every value in between —
+   *  and a slider stepping in half hours reaches all of them in a flick where a
+   *  text box asks for arithmetic. */
+  const STAMINA_STEPS = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360];
+
+  function drawStamina() {
+    stamina.innerHTML = `
+      <div class="field-label">Give stamina</div>
+      <div class="mod-give">
+        <div class="mod-field mod-who">
+          <input id="ms-who" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="Search a name, or paste a Discord ID">
+          <div class="mod-suggest" id="ms-suggest" hidden></div>
+        </div>
+        <div class="mod-field mod-amount">
+          <input id="ms-minutes" type="range" min="0" max="${STAMINA_STEPS.length - 1}" step="1" value="1"
+                 aria-label="How much stamina">
+          <span class="mod-amount-out" id="ms-amount">30m</span>
+        </div>
+      </div>
+      <p class="mod-note" id="ms-picked">Nobody picked yet.</p>`;
+
+    const who = document.getElementById('ms-who');
+    const suggest = document.getElementById('ms-suggest');
+    const slider = document.getElementById('ms-minutes');
+    const amount = document.getElementById('ms-amount');
+    const chosen = document.getElementById('ms-picked');
+
+    const give = button('Give stamina', 'btn mod-btn', () => grant(1), 'ti-battery-charging');
+    const take = button('Take back', 'btn mod-btn small', () => grant(-1), 'ti-battery-off');
+    const row = el('div', 'mod-actions');
+    row.appendChild(give);
+    row.appendChild(take);
+    stamina.appendChild(row);
+
+    const minutes = () => STAMINA_STEPS[Number(slider.value)];
+    const paint = () => { amount.textContent = fmtDur(minutes()); };
+    slider.addEventListener('input', paint);
+    paint();
+
+    function choose(person) {
+      picked = person;
+      who.value = personLabel(person);
+      suggest.hidden = true;
+      chosen.textContent = `Giving to ${personLabel(person)}.`;
+    }
+
+    // A pasted Discord id is a person too. Nobody knows their own snowflake, but
+    // a moderator copying one out of Discord does — and it is the only way to
+    // reach somebody who has never used the system here and so is in no list.
+    function typed() {
+      const text = who.value.trim();
+      if (/^\d{15,25}$/.test(text)) return { id: text, name: text, nickname: '' };
+      return picked && personLabel(picked) === text ? picked : null;
+    }
+
+    who.addEventListener('input', () => {
+      picked = null;
+      chosen.textContent = 'Nobody picked yet.';
+      const text = who.value.trim().toLowerCase();
+      const matches = !text ? [] : (people || []).filter(p =>
+        p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
+      suggest.innerHTML = '';
+      matches.forEach(person => {
+        const hit = el('button', 'mod-suggest-row', esc(personLabel(person)));
+        hit.type = 'button';
+        // mousedown, not click: the input's blur fires first and would hide the
+        // list out from under the pointer before the click ever landed.
+        hit.addEventListener('mousedown', e => { e.preventDefault(); choose(person); });
+        suggest.appendChild(hit);
+      });
+      suggest.hidden = !matches.length;
+    });
+    who.addEventListener('blur', () => setTimeout(() => (suggest.hidden = true), 120));
+
+    async function grant(sign) {
+      const person = typed();
+      if (!person) { say('Pick somebody first, or paste their Discord ID.', 'no'); return; }
+      give.disabled = take.disabled = true;
+      say(sign > 0 ? 'Giving…' : 'Taking back…');
+      const result = await send(`/dashboard/g/${GUILD_ID}/grant-stamina`,
+        { userId: person.id, minutes: sign * minutes() });
+      give.disabled = take.disabled = false;
+      say(result.message, result.ok ? 'ok' : 'no');
+      // Their tank may be the reader's own, and it feeds the length control on
+      // every spawn — so the board is re-read rather than left saying what it
+      // said before.
+      if (result.ok) await refresh();
+    }
+  }
+
+  /** How somebody reads in the picker: the account, then what this server calls
+   *  them. The same order the bot names people in Discord. */
+  function personLabel(person) {
+    const nick = (person.nickname || '').trim();
+    const name = (person.name || '').trim() || person.id;
+    return nick && nick.toLowerCase() !== name.toLowerCase() ? `${name} (@${nick})` : name;
+  }
+
+  async function loadPeople() {
+    if (people) return;
+    try {
+      const res = await fetch(`/dashboard/g/${GUILD_ID}/people`, { headers: { 'Accept': 'application/json' } });
+      people = res.ok ? (await res.json()).people : [];
+    } catch (e) {
+      // A picker that cannot be filled still takes a pasted id, so this is a
+      // smaller failure than it looks and not worth an error of its own.
+      people = [];
+    }
+  }
+
   async function submit() {
     const payload = {
       code: field('ms-code').value.trim(),
@@ -2916,7 +3132,12 @@ function setUpModPanel() {
     body.hidden = open;
     // Drawn on the way open rather than kept up to date while shut: the list is
     // only ever read here, and the catalogue may well have moved since last time.
-    if (!open) { drawOwned(); field('ms-code').focus(); }
+    if (!open) {
+      drawOwned();
+      drawStamina();
+      loadPeople();
+      field('ms-code').focus();
+    }
   });
 }
 

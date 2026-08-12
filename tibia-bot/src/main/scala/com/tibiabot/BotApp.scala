@@ -418,6 +418,7 @@ object BotApp extends App with StrictLogging {
           settings.defaultDurationMinutes,
           respawnService.nextStaminaReset())
       },
+      peopleOf = guildId => respawnService.knownMembers(guildId),
       actions = respawnActions,
       boardChanged = boardSnapshots.invalidate)(respawnActionPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —

@@ -114,6 +114,55 @@ class CatalogueAdminIntegrationSpec extends AnyFunSuite with Matchers with Postg
     service.removeCustomSpawn(g, "9004").map(_.code) shouldBe Right("9004")
   }
 
+  // There is no member list to offer instead — the bot runs without the
+  // privileged GUILD_MEMBERS intent — so the picker is built from whoever has
+  // actually used the system here.
+  test("everybody the system has seen can be picked from, once each") {
+    val (service, repo, g) = freshService()
+    val spawn = service.addCustomSpawn(g, "mod-1", "9101", "Edron", "Deep Cave", "").toOption.get
+    repo.insertActiveClaim(g, spawn.id, "u1", "violentbeams", "Beams", "", now, now.plusHours(1), 60, "adhoc")
+    repo.enqueueClaim(g, spawn.id, "u2", "someone", "Some One", "", 60, 20, "adhoc")
+    // Somebody whose only involvement is a standing booking has no claim row at
+    // all until it materialises, and leaving them out makes them unpickable.
+    repo.addSchedule(g, spawn.id, "u3", "planner", "The Planner", "", now.plusDays(1), 1440, 60)
+
+    val people = service.knownMembers(g)
+    people.map(_.userId) should contain allOf ("u1", "u2", "u3")
+    people.map(_.userId).distinct.size shouldBe people.size
+    people.find(_.userId == "u1").map(_.nickname) shouldBe Some("Beams")
+  }
+
+  test("the newest spelling of a name is the one offered") {
+    // People rename themselves, and the picker is searched by what they are
+    // called now rather than by what they were called the first time. Two
+    // spawns rather than two rows on one, since a second claim on a spawn
+    // somebody already holds is refused.
+    val (service, repo, g) = freshService()
+    val first = service.addCustomSpawn(g, "mod-1", "9102", "Edron", "Deep Cave", "").toOption.get
+    val second = service.addCustomSpawn(g, "mod-1", "9103", "Edron", "Deeper Cave", "").toOption.get
+    repo.insertActiveClaim(g, first.id, "u1", "oldname", "Old Nick", "",
+      now.minusDays(7), now.minusDays(7).plusHours(1), 60, "adhoc")
+    repo.insertActiveClaim(g, second.id, "u1", "newname", "New Nick", "",
+      now, now.plusHours(1), 60, "adhoc")
+
+    val found = service.knownMembers(g).find(_.userId == "u1")
+    found.map(_.userName) shouldBe Some("newname")
+    found.map(_.nickname) shouldBe Some("New Nick")
+  }
+
+  test("a booking made after a claim is the newer of the two") {
+    // The two tables have their own identity sequences, so ordering by id would
+    // compare a schedule's 3 against a claim's 900 and call the claim newer
+    // whatever the dates say.
+    val (service, repo, g) = freshService()
+    val spawn = service.addCustomSpawn(g, "mod-1", "9104", "Edron", "Deep Cave", "").toOption.get
+    repo.insertActiveClaim(g, spawn.id, "u4", "oldname", "Old Nick", "",
+      now.minusDays(30), now.minusDays(30).plusHours(1), 60, "adhoc")
+    repo.addSchedule(g, spawn.id, "u4", "newname", "New Nick", "", now.plusDays(1), 1440, 60)
+
+    service.knownMembers(g).find(_.userId == "u4").map(_.userName) shouldBe Some("newname")
+  }
+
   test("removing something that was never there says so") {
     val (service, _, g) = freshService()
     service.removeCustomSpawn(g, "nope").isLeft shouldBe true

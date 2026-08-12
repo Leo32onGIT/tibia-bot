@@ -78,6 +78,11 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       lastRemove = Some(code); result
     }
     var lastRemove: Option[String] = None
+    def extendHolder(guildId: String, actorId: String, code: String,
+                     extraMinutes: Int): Future[ActionResult] = {
+      lastExtend = Some((code, extraMinutes)); result
+    }
+    var lastExtend: Option[(String, Int)] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -150,6 +155,15 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       consumer(cache, local).sweep().futureValue
       pending.futureValue.ok shouldBe true
       local.lastRemove shouldBe Some("999")
+    }
+
+    "hand an extension to the bot that owns the forum" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val pending = relay(cache).extendHolder("g1", "mod-1", "415", 30)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastExtend shouldBe Some(("415", 30))
     }
 
     // The thing the whole lease design exists to prevent.

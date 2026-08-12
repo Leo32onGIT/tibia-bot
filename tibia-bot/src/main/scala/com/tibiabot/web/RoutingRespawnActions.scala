@@ -52,6 +52,9 @@ final class RoutingRespawnActions(
                name: String, creature: String): Future[ActionResult] =
     port(guildId).addSpawn(guildId, actorId, code, region, name, creature)
 
+  def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult] =
+    port(guildId).extendHolder(guildId, actorId, code, extraMinutes)
+
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     port(guildId).removeSpawn(guildId, actorId, code)
 

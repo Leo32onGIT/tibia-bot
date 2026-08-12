@@ -7,6 +7,7 @@ import com.tibiabot.discord.{DiscordGateway, MemberAccess}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import spray.json._
 
 import java.nio.file.Files
 import scala.concurrent.{ExecutionContext, Future}
@@ -97,6 +98,10 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"remove:$code"; result
     }
+    def extendHolder(guildId: String, actorId: String, code: String,
+                     extraMinutes: Int): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"extend:$code:$extraMinutes"; result
+    }
   }
 
   private def auth = new DiscordAuth(
@@ -108,6 +113,11 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   /** A member who holds the guild's moderator role. */
   private val moderator = Some(MemberAccess(false, Set(ModRole), Set(CategoryId)))
+
+  /** Two people the guild's respawn system knows, for the stamina picker. */
+  private val people = List(
+    com.tibiabot.persistence.KnownMember("user-1", "violentbeams", "Violent Beams"),
+    com.tibiabot.persistence.KnownMember("user-9", "someone", ""))
 
   private def routes(actions: RespawnActionPort,
                      member: Option[MemberAccess] = Some(MemberAccess(false, Set.empty, Set(CategoryId))),
@@ -121,7 +131,7 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       worldsOf = _ => List(WorldChannel("Antica", CategoryId)),
       moderatorRoleOf = _ => moderatorRole)
     val cache = new CreatureSpriteCache(Files.createTempDirectory("action-route"), _ => Future.successful(None))(sameThread)
-    pathPrefix("dashboard")(new RespawnDashboardRoute(a, access, cache, _ => Nil, (_, _) => None, actions).routes)
+    pathPrefix("dashboard")(new RespawnDashboardRoute(a, access, cache, _ => Nil, (_, _) => None, _ => people, actions).routes)
   }
 
   private def signedIn = {
@@ -314,7 +324,8 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/reassign", """{"code":"415","toUserId":"u9"}"""),
       ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}"""),
       ("/dashboard/g/g1/spawns", """{"code":"999","name":"Somewhere"}"""),
-      ("/dashboard/g/g1/remove-spawn", """{"code":"999"}""")
+      ("/dashboard/g/g1/remove-spawn", """{"code":"999"}"""),
+      ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path: ")(status shouldBe StatusCodes.Forbidden)
@@ -340,9 +351,43 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/remove-spawn", body("""{"code":"999"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/extend-holder", body("""{"code":"415","minutes":30}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
-      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999")
+      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "extend:415:30")
+  }
+
+  test("an extension of nothing, or of a negative, never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    List("""{"code":"415"}""", """{"code":"415","minutes":0}""",
+         """{"code":"415","minutes":-30}""", """{"minutes":30}""").foreach { payload =>
+      Post("/dashboard/g/g1/extend-holder", body(payload)) ~> signedIn ~> r ~> check {
+        withClue(s"$payload: ")(status shouldBe StatusCodes.BadRequest)
+      }
+    }
+    actions.moderatorCalls shouldBe empty
+  }
+
+  // The list is everybody who has used the respawn system here, which is not
+  // something an ordinary member should be able to enumerate off the board.
+  test("only a moderator may read the list of people") {
+    val actions = new RecordingActions
+    Get("/dashboard/g/g1/people") ~> signedIn ~> routes(actions) ~> check {
+      status shouldBe StatusCodes.Forbidden
+    }
+    Get("/dashboard/g/g1/people") ~> signedIn ~>
+      routes(actions, member = moderator, moderatorRole = ModRole) ~> check {
+      status shouldBe StatusCodes.OK
+      val listed = responseAs[String].parseJson.asJsObject.fields("people")
+        .asInstanceOf[JsArray].elements.map(_.asJsObject.fields)
+      listed.map(_("id")) shouldBe Vector(JsString("user-1"), JsString("user-9"))
+      // Both names travel: one is searchable and unique, the other is what
+      // anybody would actually type.
+      listed.head("name") shouldBe JsString("violentbeams")
+      listed.head("nickname") shouldBe JsString("Violent Beams")
+    }
   }
 
   test("a removal with no code is refused before it reaches the catalogue") {

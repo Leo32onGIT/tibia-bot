@@ -97,6 +97,13 @@ trait RespawnActionPort {
   /** Give somebody back (or take away) stamina for the rest of the day. */
   def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult]
 
+  /** Give whoever holds a spawn more time on it.
+   *
+   *  An override: no stamina is charged and the guild's maximum claim length
+   *  does not apply, both because a moderator repairing a lost hunt should not
+   *  be refused by rules written for the person asking for one. */
+  def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult]
+
   /** Add a spawn to the guild's catalogue that the bundled list does not carry.
    *
    *  The same four fields `respawns.json` has. Relayed like every other write

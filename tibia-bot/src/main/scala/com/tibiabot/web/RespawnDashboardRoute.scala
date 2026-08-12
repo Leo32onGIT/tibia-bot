@@ -28,6 +28,10 @@ final class RespawnDashboardRoute(
   spriteCache: CreatureSpriteCache,
   boardOf: String => List[com.tibiabot.respawn.RespawnBoardEntry],
   limitsOf: (String, String) => Option[BoardLimits],
+  /** Everybody a guild's respawn system knows, for the moderator panel's stamina
+   *  picker. A function like the two above rather than the service itself, so
+   *  the route can be stood up in a test without one. */
+  peopleOf: String => List[com.tibiabot.persistence.KnownMember],
   actions: RespawnActionPort,
   /** Told which guild a write has just changed, so a board held for a few
    *  seconds is not what the person who made it is shown next. Does nothing by
@@ -442,6 +446,36 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    // Who a moderator may hand stamina to. Behind the moderator gate rather than
+    // merely unadvertised: it is a list of everybody who has used the system
+    // here, which is not something an ordinary member should be able to
+    // enumerate just because they can reach the board.
+    path("g" / Segment / "people") { guildId =>
+      get {
+        withModerator(guildId) { (_, _) =>
+          read(peopleOf(guildId)) { people =>
+            // Cached briefly. It changes only when somebody claims for the first
+            // time, and the picker is reopened far more often than that.
+            cachedJson(RespawnDashboardRoute.peopleJson(people), RespawnDashboardRoute.PeopleMaxAge)
+          }
+        }
+      }
+    } ~
+    path("g" / Segment / "extend-holder") { guildId =>
+      post {
+        withModerator(guildId) { (userId, _) =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption).filter(_ > 0)) match {
+              case (Some(code), Some(minutes)) =>
+                actionResult(guildId, actions.extendHolder(guildId, userId, code, minutes))
+              case _ => badRequest("An extension needs a spawn and how much longer.")
+            }
+          }
+        }
+      }
+    } ~
     path("g" / Segment / "grant-stamina") { guildId =>
       post {
         withModerator(guildId) { (userId, _) =>
@@ -596,6 +630,11 @@ object RespawnDashboardRoute {
    *  renamed spawn corrects itself while somebody is still looking. */
   val CatalogueMaxAge: Long = 120L
 
+  /** How long the stamina picker's list of people may be reused. Short, because
+   *  somebody who has just made their first claim should turn up in it without
+   *  the moderator wondering why they cannot find them. */
+  val PeopleMaxAge: Long = 30L
+
   val SpriteMaxAge: scala.concurrent.duration.FiniteDuration =
     scala.concurrent.duration.Duration(30, java.util.concurrent.TimeUnit.DAYS)
 
@@ -733,6 +772,18 @@ object RespawnDashboardRoute {
    *  the catalogue and not otherwise, so this is fetched once and kept. It is
    *  also most of the bytes: on a 285-spawn guild the names, regions and sprite
    *  paths are several times the size of everything that actually moves. */
+  /** The people a moderator may pick between. Both names travel: the account is
+   *  what is searchable and unique, the nickname is what anybody would actually
+   *  look for. Neither is composed into a sentence here — the page decides how
+   *  to show them, and it also has to search them separately. */
+  private[web] def peopleJson(people: List[com.tibiabot.persistence.KnownMember]): JsObject =
+    JsObject("people" -> JsArray(people.map { person =>
+      JsObject(
+        "id" -> JsString(person.userId),
+        "name" -> JsString(person.userName),
+        "nickname" -> JsString(person.nickname)): JsValue
+    }.toVector))
+
   private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry]): JsObject =
     JsObject("spawns" -> JsArray(entries.map { entry =>
       val spawn = entry.respawn

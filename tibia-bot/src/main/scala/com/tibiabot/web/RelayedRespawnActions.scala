@@ -105,6 +105,10 @@ final class RelayedRespawnActions(
     send(guildId, actorId, RespawnCommand.AddSpawn,
       Map("code" -> code, "region" -> region, "name" -> name, "creature" -> creature))
 
+  def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.ExtendHolder,
+      Map("code" -> code, "minutes" -> extraMinutes.toString))
+
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.RemoveSpawn, Map("code" -> code))
 

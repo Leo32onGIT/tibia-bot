@@ -11,6 +11,13 @@ import java.time.ZonedDateTime
  *  would end a hunt in progress. It is counted rather than silently skipped, so
  *  whoever ran the repair knows there is something to come back to.
  */
+/** Somebody the guild's respawn system knows about, for a picker to offer.
+ *
+ *  Both names travel and neither is a mention: the account is what is unique and
+ *  searchable, the nickname is what people actually call them. Either may be
+ *  empty on a row written before it was recorded. */
+final case class KnownMember(userId: String, userName: String, nickname: String)
+
 final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
   def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
 }
@@ -33,6 +40,20 @@ trait RespawnRepository {
 
   /** Point the guild at a (re)created forum channel and board post. */
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit
+
+  /** Everybody this guild's respawn system has ever seen, newest first.
+   *
+   *  Exists because there is no member list to offer instead: the bot runs
+   *  without the privileged GUILD_MEMBERS intent, so Discord's own user picker
+   *  has no web counterpart here (see `DiscordGateway.memberAccess`). These are
+   *  the people who have actually claimed, queued or booked something, which is
+   *  the set a moderator ever needs to pick from — and the names come from the
+   *  rows themselves, so somebody who has since left is still nameable.
+   *
+   *  One entry per account, carrying the most recent name and nickname recorded
+   *  for them: people change both, and the newest is the one anybody would
+   *  search by. */
+  def knownMembers(guildId: String, limit: Int): List[KnownMember]
 
   /** The fingerprint of the catalogue the pinned board post was last drawn from,
    *  or None if it has never been recorded — which is every guild the first time

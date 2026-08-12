@@ -252,6 +252,21 @@ final class JdaRespawnActions(
       }
     }
 
+  def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, s"No spawn matches '$code'.")
+        case Some(respawn) =>
+          respawnService.extendHolder(guild, respawn, extraMinutes) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right((claim, endsAt)) =>
+              logger.info(s"Dashboard: '$actorId' extended '${claim.userId}' on ${respawn.code} " +
+                s"by $extraMinutes minutes in guild '$guildId'")
+              ActionResult(ok = true, s"${respawn.displayName} now runs until ${endsAt.toInstant}.")
+          }
+      }
+    }
+
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.settings(guildId) match {

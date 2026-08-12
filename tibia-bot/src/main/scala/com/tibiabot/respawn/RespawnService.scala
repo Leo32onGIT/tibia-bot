@@ -337,6 +337,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   def listRespawns(guildId: String): List[Respawn] = repository.listRespawns(guildId)
 
+  /** Everybody this guild's respawn system knows, for a moderator to pick from.
+   *
+   *  Capped because it feeds a picker rather than a report: a guild that has run
+   *  this for years has thousands of rows behind it and nobody scrolls a list
+   *  that long — they type a name. Anyone beyond the cap is still reachable by
+   *  their Discord id, which the same field accepts. */
+  def knownMembers(guildId: String): List[com.tibiabot.persistence.KnownMember] =
+    repository.knownMembers(guildId, RespawnService.MaxKnownMembers)
+
   /** Resolve what a user typed — a code ("415"), or a name — to a catalogue
    *  entry. Autocomplete sends the code back, so the code path is the common
    *  one; the name fallbacks exist for people who type it out by hand. */
@@ -924,6 +933,53 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           s"A moderator has freed **${respawn.displayName}**, so it's no longer yours.",
           imageFor(respawn), RespawnEmbeds.RedColor))
       holder
+    }
+  }
+
+  /** Give whoever holds a spawn more time on it, for a moderator putting right a
+   *  hunt that lost some — a crash, a server issue, a dispute that ate half of it.
+   *
+   *  Deliberately unlike the member's own extend in two ways, both because this
+   *  is an override rather than a request:
+   *
+   *  Nobody's stamina is charged. The holder asked for the window they paid for
+   *  and is being handed the difference; billing them for a moderator's decision
+   *  would be the opposite of the repair. Handing somebody time *in the tank* is
+   *  a separate tool, and the one to reach for when that is what is meant.
+   *
+   *  The guild's maximum claim length does not apply. It is a rule about what
+   *  members may ask for, and enforcing it here would make the button quietly
+   *  refuse on exactly the long hunts most likely to need rescuing.
+   *
+   *  What happens to everybody else falls out of the claim simply running
+   *  longer: the queue is served when it ends, so each person waits the extra
+   *  time, and a booking that starts inside the new window is cut into — the
+   *  same thing a member's own extend has always done.
+   */
+  def extendHolder(guild: Guild, respawn: Respawn, extraMinutes: Int,
+                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, (RespawnClaim, ZonedDateTime)] = {
+    val guildId = guild.getId
+    if (extraMinutes <= 0) Left("That would add no time.")
+    else settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server.")
+      case Some(config) =>
+        // A claim in limbo has already been offered on to the next person; adding
+        // time to it would extend a hunt that is on its way out of somebody's
+        // hands, and the offer would still stand.
+        repository.activeClaim(guildId, respawn.id).filter(_.limboUntil.isEmpty) match {
+          case None => Left(s"Nobody is hunting ${respawn.displayName} right now.")
+          case Some(claim) =>
+            val newEnd = claim.endsAt.getOrElse(now).plusMinutes(extraMinutes.toLong)
+            repository.extendClaim(guildId, claim.id, newEnd, claim.durationMinutes + extraMinutes)
+            refreshThread(guild, respawn, config)
+            RespawnThreads.dm(guild, claim.userId,
+              RespawnEmbeds.dmEmbed("Your hunt was extended",
+                s"A moderator has added **${RespawnEmbeds.humanDuration(extraMinutes)}** to your claim on " +
+                  s"**${respawn.displayName}**. It now runs until <t:${newEnd.toEpochSecond}:t>, and it " +
+                  "hasn't cost you any stamina.",
+                imageFor(respawn), RespawnEmbeds.FreeColor))
+            Right((claim, newEnd))
+        }
     }
   }
 
@@ -2038,6 +2094,10 @@ object RespawnService {
    *  name is drawn in full on the board image, so one absurdly long entry makes
    *  the picture wider for every other guild member who opens it.
    */
+  /** How many people the stamina picker is willing to offer. Generous for a
+   *  guild and small enough that the payload stays a list rather than a dump. */
+  val MaxKnownMembers: Int = 500
+
   val MaxCodeLength: Int = 16
   val MaxSpawnNameLength: Int = 60
   val MaxRegionLength: Int = 40
