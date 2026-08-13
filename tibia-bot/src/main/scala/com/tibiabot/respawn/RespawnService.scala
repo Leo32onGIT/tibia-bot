@@ -573,27 +573,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the claim is refused with an explanation instead. */
   val MinimumClaimMinutes: Int = 5
 
-  /** How far into their own hunt a slot's owner may still answer a request.
-   *
-   *  A deadline landing exactly on the start punishes somebody who is logging in
-   *  on time: they arrive to find the slot already gone. A few minutes past it
-   *  costs the asker very little — the hunt they take over runs its full length
-   *  from whenever it starts — and turns "you were a minute late" into "you never
-   *  turned up", which is the thing the question was actually asking. */
-  val RequestGraceMinutes: Int = 5
-
-  /** When an owner has to answer by: `minutes` from now, but never longer than a
-   *  short grace past the start of the slot in question.
-   *
-   *  Both request paths clamp the same way. The clamp is what stops a request
-   *  made hours ahead from waiting hours, and the grace is what stops one made
-   *  minutes ahead from being no time at all. */
-  private[respawn] def answerDeadline(now: ZonedDateTime, slotStart: ZonedDateTime,
-                                      minutes: Int): ZonedDateTime = {
-    val latest = slotStart.plusMinutes(RequestGraceMinutes.toLong)
-    val wanted = now.plusMinutes(minutes.toLong)
-    if (wanted.isAfter(latest)) latest else wanted
-  }
 
   /** When the next booked slot on a spawn starts, if there is one. */
   def nextReservationStart(guildId: String, respawnId: Long,
@@ -1197,8 +1176,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         refuse(" It runs over more than one booking, so there's nobody single to ask.")
 
       case ClashVerdict.Ask(slot) =>
-        val deadline = answerDeadline(now, slot.startsAt.getOrElse(now),
-          Config.Respawn.bookingRequestResponseMinutes)
+        val deadline = RespawnService.answerDeadline(slot.startsAt.getOrElse(now),
+          Config.Respawn.bookingRequestGraceMinutes)
         val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
 
         repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
@@ -2303,6 +2282,29 @@ object RespawnService {
       Some(s"I can't fetch a picture for '$creature'. Use the creature's wiki name, " +
         "or leave it empty and the spawn goes without one.")
     else None
+
+  /** When an owner has to answer by: a little way into the slot itself,
+   *  whenever they were asked.
+   *
+   *  It used to be a fixed hour from the question, cut short if that ran past
+   *  the slot. That measured the wrong thing. Somebody asked at lunchtime about
+   *  an evening slot lost it by mid-afternoon without ever having been near a
+   *  computer, and the question was never about the afternoon — it was "are you
+   *  hunting this tonight", which only the evening can answer. So the clock runs
+   *  to the hunt rather than from the asking, and the whole of the answer is
+   *  whether they turned up.
+   *
+   *  Past the start rather than on it, because a deadline landing exactly on the
+   *  start punishes somebody logging in on time: they arrive to find the slot
+   *  already gone. It costs the asker very little — the hunt they take over runs
+   *  its full length from whenever it starts — and turns "you were a minute
+   *  late" into "you never turned up".
+   *
+   *  Always in the future when it is set. A slot stops being requestable once it
+   *  starts, since by then it is a running claim rather than a booking, so there
+   *  is no way to be asked about an evening that has already gone. */
+  def answerDeadline(slotStart: ZonedDateTime, graceMinutes: Int): ZonedDateTime =
+    slotStart.plusMinutes(graceMinutes.toLong)
 
   /** How long a claim actually runs for, given what a booking leaves and what
    *  is in the tank.

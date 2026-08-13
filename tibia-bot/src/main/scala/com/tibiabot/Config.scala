@@ -246,10 +246,12 @@ object Config {
      *  and plan around tonight's slot; short enough that a cancelled schedule
      *  leaves few bookings to clear. */
     val scheduleLookAheadMinutes: Int = respawn.getInt("schedule-look-ahead-minutes")
-    /** How long the owner of a booked slot has to say whether they are hunting it
-     *  before it passes to whoever asked. Clamped to shortly after the slot's own
-     *  start, so it never waits past the hunt it is about. */
-    val bookingRequestResponseMinutes: Int = respawn.getInt("booking-request-response-minutes")
+    /** How far into a booked slot its owner may still say they are hunting it,
+     *  before it passes to whoever asked. The deadline is this much past the
+     *  slot's own start whenever the question was put, so somebody asked hours
+     *  ahead is judged on whether they turned up rather than on whether they
+     *  read a DM that afternoon. */
+    val bookingRequestGraceMinutes: Int = respawn.getInt("booking-request-grace-minutes")
     /** How long before a booked slot starts its owner is reminded. 0 turns the
      *  reminder off. Separate from the claim-end reminder members set for
      *  themselves: this one is about a hunt that hasn't begun. */
