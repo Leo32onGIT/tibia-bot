@@ -909,7 +909,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       release(guild, holder.userId, Some(respawn.code), now, RespawnClaim.Outcome.Forced)
       RespawnThreads.dm(guild, holder.userId,
         RespawnEmbeds.dmEmbed("Claim ended by a moderator",
-          s"A moderator has freed **${respawn.displayName}**, so it's no longer yours.",
+          s"A moderator has freed ${RespawnEmbeds.spawnLink(respawn)}, so it's no longer yours.",
           imageFor(respawn), RespawnEmbeds.RedColor))
       holder
     }
@@ -954,7 +954,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             RespawnThreads.dm(guild, claim.userId,
               RespawnEmbeds.dmEmbed("Your hunt was extended",
                 s"A moderator has added **${RespawnEmbeds.humanDuration(extraMinutes)}** to your claim on " +
-                  s"**${respawn.displayName}**. It now runs until <t:${newEnd.toEpochSecond}:t>, and it " +
+                  s"${RespawnEmbeds.spawnLink(respawn)}. It now runs until <t:${newEnd.toEpochSecond}:t>, and it " +
                   "hasn't cost you any stamina.",
                 imageFor(respawn), RespawnEmbeds.FreeColor))
             Right((claim, newEnd))

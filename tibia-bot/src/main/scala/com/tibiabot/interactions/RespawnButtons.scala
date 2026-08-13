@@ -115,16 +115,16 @@ object RespawnButtons extends StrictLogging {
                 com.tibiabot.domain.RespawnClaim.Outcome.GivenUp)
             answer match {
               case SlotAnswer.Kept(respawn) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** stays yours — " +
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} stays yours — " +
                   "I've let them know you're hunting it.")
                 clearOfferButtons(event)
               case SlotAnswer.Passed(respawn, toUserName) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** has gone to " +
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} has gone to " +
                   s"${Names.user(toUserName)} for that slot. Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.PassedUnclaimed(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've given up that slot on " +
-                  s"**${respawn.displayName}** — the hunt they'd booked around it no longer fits, " +
+                  s"${RespawnEmbeds.spawnLink(respawn)} — the hunt they'd booked around it no longer fits, " +
                   "so it's simply free now. Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.NotYours =>
@@ -143,14 +143,14 @@ object RespawnButtons extends StrictLogging {
           case Some(slotGuild) =>
             BotApp.respawnService.confirmSlot(slotGuild, event.getUser.getId, claimId) match {
               case ConfirmOutcome.Settled(respawn, _) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** is settled — nobody can " +
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is settled — nobody can " +
                   "ask you for it now, and it'll start on its own with nothing left to answer.")
                 clearOfferButtons(event)
               case ConfirmOutcome.Taken(respawn, _) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** is yours — enjoy the hunt.")
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours — enjoy the hunt.")
                 clearOfferButtons(event)
               case ConfirmOutcome.Already(respawn) =>
-                respond.text(s"${Config.yesEmoji} You've already confirmed **${respawn.displayName}**.")
+                respond.text(s"${Config.yesEmoji} You've already confirmed ${RespawnEmbeds.spawnLink(respawn)}.")
                 clearOfferButtons(event)
               case ConfirmOutcome.NotYours =>
                 respond.text(s"${Config.noEmoji} That booking isn't yours.")
@@ -436,9 +436,9 @@ object RespawnButtons extends StrictLogging {
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
                 else service.forceLeave(guild, respawn) match {
                   case None =>
-                    respond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**.")
+                    respond.text(s"${Config.noEmoji} Nobody is on ${RespawnEmbeds.spawnLink(respawn)}.")
                   case Some(holder) =>
-                    respond.text(s"${Config.yesEmoji} Freed **${respawn.displayName}** from " +
+                    respond.text(s"${Config.yesEmoji} Freed ${RespawnEmbeds.spawnLink(respawn)} from " +
                       s"${Names.user(holder.nickname, holder.userName)}. They keep their unused stamina, and whoever is next " +
                       "has been offered it.")
                 }
@@ -462,7 +462,7 @@ object RespawnButtons extends StrictLogging {
         clearOfferButtons(event)
 
       case OfferOutcome.Declined(respawn) =>
-        respond.text(s"${Config.yesEmoji} You've passed on **${respawn.displayName}** and left its queue.")
+        respond.text(s"${Config.yesEmoji} You've passed on ${RespawnEmbeds.spawnLink(respawn)} and left its queue.")
         clearOfferButtons(event)
 
       case OfferOutcome.NoStamina(needed, tank, resetsAt) =>
@@ -493,21 +493,23 @@ object RespawnButtons extends StrictLogging {
   /** Rendering shared with the board's Claim modal, so pressing Claim on a
    *  spawn's post and typing its code on the board give the same answer.
    *
-   *  `extra` appends a jump link to the spawn's thread when the caller has one —
-   *  worth having from the board, where the member never saw the post. */
-  private[interactions] def claimOutcomeEmbed(outcome: ClaimOutcome, extra: String = ""): MessageEmbed = {
+   *  Every outcome that knows which spawn it is about names it as a link to that
+   *  spawn's post, which is what the board's Claim used to append a jump link
+   *  for: a member who typed a code and has never seen the post still has one
+   *  click to it, and it is on the name rather than on a bare URL underneath. */
+  private[interactions] def claimOutcomeEmbed(outcome: ClaimOutcome): MessageEmbed = {
     val text = outcome match {
       case ClaimOutcome.Claimed(respawn, claim) =>
         val ends = claim.endsAt.map(e => s"<t:${e.toInstant.getEpochSecond}:R>").getOrElse("soon")
-        s"${Config.yesEmoji} **${respawn.displayName}** is yours until $ends."
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends."
 
       case ClaimOutcome.Queued(respawn, _, position) =>
-        s"${Config.yesEmoji} You're **#$position** in the queue for **${respawn.displayName}**. " +
+        s"${Config.yesEmoji} You're **#$position** in the queue for ${RespawnEmbeds.spawnLink(respawn)}. " +
           "I'll DM you when it's your turn."
 
       case ClaimOutcome.AlreadyHolding(respawn, claim) =>
-        if (claim.isActive) s"${Config.noEmoji} You're already on **${respawn.displayName}**."
-        else s"${Config.noEmoji} You're already queued for **${respawn.displayName}** " +
+        if (claim.isActive) s"${Config.noEmoji} You're already on ${RespawnEmbeds.spawnLink(respawn)}."
+        else s"${Config.noEmoji} You're already queued for ${RespawnEmbeds.spawnLink(respawn)} " +
           s"at **#${claim.queuePosition}**."
 
       case ClaimOutcome.Shortened(respawn, claim, _, reservedFrom) =>
@@ -518,23 +520,23 @@ object RespawnButtons extends StrictLogging {
         val starts = reservedFrom
           .map(from => s"at <t:${from.toInstant.getEpochSecond}:t>")
           .getOrElse("then")
-        s"${Config.yesEmoji} **${respawn.displayName}** is yours until $ends.\n" +
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends.\n" +
           s"A booked slot starts $starts, so that's all you are able to claim."
 
       case ClaimOutcome.Reserved(respawn, from) =>
-        s"${Config.noEmoji} **${respawn.displayName}** is booked from " +
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is booked from " +
           s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
           "starting a hunt now. Press **Next** to line up for it instead."
 
       case ClaimOutcome.JustTaken(respawn) =>
-        s"${Config.noEmoji} Somebody claimed **${respawn.displayName}** a moment before you. " +
+        s"${Config.noEmoji} Somebody claimed ${RespawnEmbeds.spawnLink(respawn)} a moment before you. " +
           "Press **Next** to line up behind them."
 
       case ClaimOutcome.QueueFull(respawn, limit) =>
-        s"${Config.noEmoji} The queue for **${respawn.displayName}** is full ($limit waiting)."
+        s"${Config.noEmoji} The queue for ${RespawnEmbeds.spawnLink(respawn)} is full ($limit waiting)."
 
       case ClaimOutcome.NoStamina(respawn, needed, tank, resetsAt) =>
-        s"${Config.noEmoji} **${respawn.displayName}** needs **${RespawnEmbeds.humanDuration(needed)}** but you " +
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} needs **${RespawnEmbeds.humanDuration(needed)}** but you " +
           s"have **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of stamina left. " +
           s"It refills at server save <t:${resetsAt.toInstant.getEpochSecond}:R>."
 
@@ -549,18 +551,18 @@ object RespawnButtons extends StrictLogging {
       case ClaimOutcome.NotConfigured =>
         s"${Config.noEmoji} The respawn claim system isn't set up here."
     }
-    Embeds.response(text + extra)
+    Embeds.response(text)
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
-      val refund = if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
+      val refund = if (refunded > 0) s"\nYou got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
       val handover = offered
-        .map(claim => s" ${Names.user(claim.nickname, claim.userName)} has been asked if they want it — it stays yours until they answer.")
+        .map(claim => s"\n\n${Names.user(claim.nickname, claim.userName)} has been asked if they want it — it stays yours until they answer.")
         .getOrElse("")
-      s"${Config.yesEmoji} You've released **${respawn.displayName}**.$refund$handover"
+      s"${Config.yesEmoji} You've released ${RespawnEmbeds.spawnLink(respawn)}.$refund$handover"
     case ReleaseOutcome.LeftQueue(respawn) =>
-      s"${Config.yesEmoji} You've left the queue for **${respawn.displayName}**."
+      s"${Config.yesEmoji} You've left the queue for ${RespawnEmbeds.spawnLink(respawn)}."
     case ReleaseOutcome.AlreadyHandingOver(spawnName) =>
       s"${Config.noEmoji} **$spawnName** is already being handed over — waiting on the next person to answer."
     case ReleaseOutcome.NothingHeld =>

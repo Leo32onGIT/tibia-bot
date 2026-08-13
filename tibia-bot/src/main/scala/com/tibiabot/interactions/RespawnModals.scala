@@ -457,7 +457,7 @@ object RespawnModals extends StrictLogging {
             firstStart, duration, daysOfWeek) match {
             case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
             case Right(ScheduleResult.Booked(schedule)) =>
-              reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
+              reply(event, s"${Config.yesEmoji} Booked ${RespawnEmbeds.spawnLink(respawn)} " +
                 s"${schedule.repeatLabel} for " +
                 s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
                 s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
@@ -467,7 +467,7 @@ object RespawnModals extends StrictLogging {
             case Right(ScheduleResult.Requested(_, slot, deadline)) =>
               reply(event, s"${Config.yesEmoji} That time is ${Names.user(slot.nickname, slot.userName)}'s, so I've asked " +
                 "whether they're actually hunting it.\nIf they say no, or don't answer by " +
-                s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
+                s"<t:${deadline.toInstant.getEpochSecond}:t>, ${RespawnEmbeds.spawnLink(respawn)} is " +
                 s"booked for you from <t:$startEpoch:t> for " +
                 s"${RespawnEmbeds.humanDuration(duration)} and I'll DM you. " +
                 "Nothing is held for you until then.")
@@ -562,7 +562,7 @@ object RespawnModals extends StrictLogging {
                         s"\nThe hunt had already run longer than that, so it's set to " +
                           s"${RespawnEmbeds.humanDuration(applied)} and ends now."
                       else ""
-                    reply(event, s"${Config.yesEmoji} **${respawn.displayName}**$whose is now set to " +
+                    reply(event, s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)}$whose is now set to " +
                       s"${RespawnEmbeds.humanDuration(applied)}.$moved$note")
                 }
             }
@@ -606,13 +606,9 @@ object RespawnModals extends StrictLogging {
     // No duration passed, so the member's own default (or the guild's) applies —
     // which is the point of pairing this with the Config button.
     val outcome = service.claim(guild, user.getId, user.getName, nicknameOf(event), "", query, None)
-    val threadLink = service.resolve(guild.getId, query)
-      .map(_.threadId)
-      .filter(id => id.nonEmpty && id != "0")
-      .map(id => s"\n<#$id>")
-      .getOrElse("")
-
-    replyEmbed(event, RespawnButtons.claimOutcomeEmbed(outcome, threadLink))
+    // No jump link appended any more: the spawn is named as a link to its own
+    // post now, so a second one on its own line was the same destination twice.
+    replyEmbed(event, RespawnButtons.claimOutcomeEmbed(outcome))
   }
 
   private def submitConfig(event: ModalInteractionEvent): Unit = {
