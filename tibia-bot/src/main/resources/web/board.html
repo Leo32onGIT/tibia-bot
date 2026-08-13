@@ -636,13 +636,43 @@
   /* The same tools one evening at a time, under the calendar. Dashed top border
      and the purple label of the block above, so a moderator reads them as the
      same kind of act rather than as part of the booking controls they sit
-     beside — what is being changed here is somebody else's evening. */
-  .slot-tools { border-top: 1px dashed var(--panel-border); padding: 10px 20px; display: flex; flex-direction: column; gap: 8px; }
-  .slot-tools-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
-  /* The name field takes the room and the button keeps its own width, so the
-     row reads as one control however long somebody's name is. */
-  .slot-tools-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
-  .slot-tools-row .mod-field { flex: 1 1 190px; }
+     beside — what is being changed here is somebody else's evening.
+
+     Folded away by default, because it is the rarest thing on this panel and
+     the only one that acts on somebody else. What is left when it is closed is
+     one line naming the evening it would act on, which is what keeps it from
+     being a box somebody has to open to find out what is in it. */
+  .slot-tools { border-top: 1px dashed var(--panel-border); }
+  .slot-strip {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 20px;
+    background: none; border: 0; cursor: pointer; color: var(--purple); text-align: left;
+  }
+  .slot-strip:hover { background: rgba(167,139,250,0.06); }
+  .slot-tools.open .slot-strip { background: rgba(167,139,250,0.08); }
+  .slot-strip-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; }
+  /* Pushed to the end and allowed to shrink first: on a narrow screen the label
+     and the chevron are what must survive, and a long name truncates rather
+     than pushing the chevron off the strip. */
+  .slot-strip-who {
+    margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 10px;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .slot-body { padding: 0 20px 12px; display: flex; flex-direction: column; gap: 9px; }
+  .slot-ctx { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+  .slot-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.45; }
+  .slot-row { display: flex; gap: 8px; }
+  /* Both actions share the row equally and each is a thumb's worth tall, so the
+     pair works the same under a finger as under a pointer. Cancel keeps its own
+     width — it is the way out, not half the decision. */
+  .btn.slot-act { flex: 1; justify-content: center; min-height: 38px; }
+  .btn.slot-cancel { flex: 0 0 auto; min-height: 38px; }
+  @media (max-width: 420px) {
+    .slot-strip, .slot-body { padding-left: 14px; padding-right: 14px; }
+    /* Stacked rather than squeezed: two full-width targets beat two that are
+       each too narrow to read the label of. */
+    .slot-row { flex-direction: column; }
+    .btn.slot-cancel { flex: 1 1 auto; }
+  }
 
   /* ---- Week grid ---------------------------------------------------------- */
   .cal-legend { display: flex; gap: 14px; padding: 9px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
@@ -2845,41 +2875,125 @@ function readout() {
  *  Hidden for a member, which is convenience rather than the control: both
  *  endpoints re-resolve the tier per request, so a forged one is refused.
  */
+/** Where the slot tools have got to, kept out of the DOM.
+ *
+ *  The foot is rebuilt from scratch on every render, and the board re-renders
+ *  every ten seconds whether anything happened or not — so anything held only
+ *  in an element is thrown away mid-use. `query` is the name being typed, which
+ *  otherwise vanished under the person's fingers on the next poll.
+ *
+ *  `pick` is the slot all of this is about, so opening the panel on one evening
+ *  and clicking another closes it rather than quietly re-aiming a Delete at
+ *  somebody who was never on screen when it was opened.
+ */
+let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
+
+function resetSlotPanel(pick) {
+  slotPanel = { open: false, mode: 'idle', pick, query: '', typing: false };
+}
+
+/** Putting one evening of the calendar right, for a moderator.
+ *
+ *  Deliberately about the day and never about the booking behind it. Cancelling
+ *  a booking is the owner's own control in the row below and ends the whole
+ *  arrangement; these two end an evening — the Tuesday somebody cannot make,
+ *  the slot two people ended up agreeing between themselves — and leave a
+ *  repeating booking repeating.
+ *
+ *  Folded away until asked for. It is the rarest thing on this panel and the
+ *  only one that acts on somebody else, so it earns a line rather than a block:
+ *  the strip names the evening it would act on, which is what stops it being a
+ *  box you have to open to find out what is inside.
+ *
+ *  Opened, it asks one question at a time. Both actions used to be on screen at
+ *  once alongside a name field nothing had asked for yet, which is a lot of
+ *  panel under a calendar on a phone — so the field appears only once giving
+ *  the claim away is what is being done.
+ *
+ *  Offered against a predicted block as readily as a written one. To the person
+ *  looking at the grid they are the same evening, and which of them has a row in
+ *  the database yet is not something a moderator should have to know about.
+ *
+ *  Hidden for a member, which is convenience rather than the control: both
+ *  endpoints re-resolve the tier per request, so a forged one is refused.
+ */
 function slotTools(spawn) {
   if (TIER !== 'moderator' && TIER !== 'admin') return null;
-  if (!spawn || !view.pick) return null;
-  const slot = slots.find(b => b.start.getTime() === view.pick.getTime() && b.state !== 'claimed');
-  if (!slot) return null;
+  const slot = spawn && view.pick
+    ? slots.find(b => b.start.getTime() === view.pick.getTime() && b.state !== 'claimed')
+    : null;
+  // Forgotten as soon as there is nothing selected — which is what a finished
+  // action leaves behind. Otherwise picking that same hour again, now somebody
+  // else's, would reopen the panel exactly where the last one left off, with a
+  // Confirm Delete already armed at a booking nobody has looked at yet.
+  if (!slot) { if (slotPanel.pick !== null) resetSlotPanel(null); return null; }
 
   const startsAt = slot.startsAt;
-  const day = slot.start.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
-  const box = el('div', 'slot-tools');
-  box.appendChild(el('div', 'slot-tools-title',
-    `<i class="ti ti-shield-half" aria-hidden="true"></i>${esc(whoHas(slot))}'s ${esc(day)}`));
+  if (slotPanel.pick !== startsAt) resetSlotPanel(startsAt);
 
-  const row = el('div', 'slot-tools-row');
-  const remove = button('Remove day', 'btn mod-btn small', () =>
-    post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt }), 'ti-calendar-minus');
-  remove.title = slot.repeats
-    ? 'Take this one evening off the calendar — the booking keeps repeating'
-    : 'Take this booking off the calendar';
-  row.appendChild(remove);
-  box.appendChild(row);
+  const box = el('div', 'slot-tools' + (slotPanel.open ? ' open' : ''));
+  const day = slot.start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 
-  const picker = personField('Search a name, or paste a Discord ID');
-  const give = el('div', 'slot-tools-row');
-  give.appendChild(picker.field);
-  give.appendChild(button('Give day to', 'btn mod-btn small', () => {
-    const person = picker.chosen();
-    if (!person) {
-      view.answer = { ok: false, message: 'Pick somebody first, or paste their Discord ID.' };
-      renderWindow();
-      return;
-    }
-    post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
-      { code: spawn.code, startsAt, toUserId: person.id });
-  }, 'ti-user-share'));
-  box.appendChild(give);
+  const strip = el('button', 'slot-strip',
+    `<i class="ti ti-shield-half" aria-hidden="true"></i>
+     <span class="slot-strip-label">Moderator</span>
+     <span class="slot-strip-who">${esc(whoHas(slot))} · ${esc(day)}</span>
+     <i class="ti ti-chevron-${slotPanel.open ? 'up' : 'down'}" aria-hidden="true"></i>`);
+  strip.type = 'button';
+  strip.setAttribute('aria-expanded', String(slotPanel.open));
+  strip.addEventListener('click', () => {
+    slotPanel.open = !slotPanel.open;
+    slotPanel.mode = 'idle';
+    renderWindow();
+  });
+  box.appendChild(strip);
+  if (!slotPanel.open) return box;
+
+  const body = el('div', 'slot-body');
+  const when = `${fmtLocal(slot.start)}–${fmtLocal(slot.end)}`;
+  body.appendChild(el('div', 'slot-ctx', `${esc(whoHas(slot))} · ${esc(day)}, ${esc(when)}`));
+
+  const go = (mode) => { slotPanel.mode = mode; renderWindow(); };
+
+  if (slotPanel.mode === 'idle') {
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Delete Claim', 'btn danger slot-act', () => go('confirm'), 'ti-trash'));
+    row.appendChild(button('Give Claim To', 'btn mod-btn slot-act', () => go('give'), 'ti-user-share'));
+    body.appendChild(row);
+  } else if (slotPanel.mode === 'confirm') {
+    // Said before the second press rather than after it: a repeating booking
+    // losing one evening and a booking ending outright look identical from
+    // here, and only one of them is what anybody means.
+    body.appendChild(el('div', 'slot-warn', slot.repeats
+      ? 'Their booking repeats — only this evening goes.'
+      : 'This booking is only on this evening.'));
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Confirm Delete', 'btn mod-btn armed slot-act', () =>
+      post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt })));
+    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
+    body.appendChild(row);
+  } else {
+    const picker = personField('Search a name, or paste a Discord ID', slotPanel);
+    body.appendChild(picker.field);
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Give Claim', 'btn mod-btn slot-act', () => {
+      const person = picker.chosen();
+      if (!person) {
+        view.answer = { ok: false, message: 'Pick somebody first, or paste their Discord ID.' };
+        renderWindow();
+        return;
+      }
+      post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
+        { code: spawn.code, startsAt, toUserId: person.id });
+    }, 'ti-user-share'));
+    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
+    body.appendChild(row);
+    // After the row, so the field exists to be focused and the caret goes back
+    // where the poll took it from.
+    picker.restore();
+  }
+
+  box.appendChild(body);
   return box;
 }
 
@@ -3308,22 +3422,30 @@ async function loadPeople() {
  *  Returns the field and a `chosen()` that answers null until it names somebody
  *  real, so the caller never has to guess what a half-typed name meant.
  */
-function personField(placeholder) {
+function personField(placeholder, memory) {
+  // Somewhere outside the DOM to keep what has been typed. The panel this sits
+  // in is rebuilt whole on every render, and the board renders every ten
+  // seconds on its own — so without this the name being typed disappeared under
+  // the fingers of whoever was typing it, roughly once per name.
+  const held = memory || { query: '', picked: null, typing: false };
   const field = el('div', 'mod-field mod-who');
   field.innerHTML = `<input type="text" autocomplete="off" spellcheck="false"
       placeholder="${esc(placeholder)}"><div class="mod-suggest" hidden></div>`;
   const input = field.querySelector('input');
   const suggest = field.querySelector('.mod-suggest');
-  let held = null;
+  input.value = held.query || '';
 
   function choose(person) {
-    held = person;
-    input.value = personLabel(person);
+    held.picked = person;
+    held.query = personLabel(person);
+    input.value = held.query;
     suggest.hidden = true;
   }
 
+  input.addEventListener('focus', () => { held.typing = true; });
   input.addEventListener('input', () => {
-    held = null;
+    held.picked = null;
+    held.query = input.value;
     const text = input.value.trim().toLowerCase();
     const matches = !text ? [] : (people || []).filter(p =>
       p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
@@ -3345,10 +3467,20 @@ function personField(placeholder) {
 
   return {
     field,
+    /** Put the cursor back where a re-render took it from. Called once the
+     *  field is in the document, since focusing a detached input does nothing. */
+    restore() {
+      if (!held.typing) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    },
     chosen() {
       const text = input.value.trim();
+      // A pasted Discord id is a person too. Nobody knows their own snowflake,
+      // but a moderator copying one out of Discord does — and it is the only way
+      // to reach somebody who has never used the system here.
       if (/^\d{15,25}$/.test(text)) return { id: text, name: text, nickname: '' };
-      return held && personLabel(held) === text ? held : null;
+      return held.picked && personLabel(held.picked) === text ? held.picked : null;
     }
   };
 }
