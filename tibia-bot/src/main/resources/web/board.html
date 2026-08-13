@@ -1788,7 +1788,57 @@ function canBook() {
 const veil = document.getElementById('veil');
 const windowEl = document.getElementById('window');
 
+/** The open card as a history entry, so a phone's Back closes it.
+ *
+ *  Without one the card is pure DOM state and the browser has no idea anything
+ *  happened, so Back does the only thing it can — leaves the dashboard, which
+ *  is a long way to fall for shutting a panel.
+ *
+ *  The URL is left alone: `pushState` with the current href adds an entry
+ *  without changing what the address bar says or what a refresh would load.
+ *  That does mean a reload with a card open comes back to the board rather than
+ *  to the card, which is the trade for not having to define what a bookmarked
+ *  card means.
+ *
+ *  `history.state` rather than a variable of our own, because a reload keeps the
+ *  state and would not keep the variable — and the two disagreeing is exactly
+ *  how a Back button ends up needing two presses. */
+const cardEntryOpen = () => !!(history.state && history.state.spawn);
+
+/** Shut the card the way a reader asked for it: through the history entry, so
+ *  the ✕, the veil, Escape and Back are one action rather than four that have
+ *  to be kept in step. The teardown itself happens in `closeWindow`, when the
+ *  `popstate` below arrives.
+ *
+ *  The fallback matters as much as the normal path. `renderWindow` shuts the
+ *  card on its own when a spawn has gone from the catalogue under somebody, and
+ *  a card opened before this code shipped has no entry behind it — neither has
+ *  a `history.back()` to spend, and calling one would take the reader off the
+ *  dashboard instead. */
+/** Set between asking to go back and the `popstate` that answers, since the two
+ *  are a tick apart. `renderWindow` can shut the card while it draws and is
+ *  called freely, so without this a spawn that vanished could spend two Backs
+ *  in that gap — and the second one leaves the dashboard. */
+let dismissing = false;
+
+function dismissWindow() {
+  if (dismissing) return;
+  if (cardEntryOpen()) { dismissing = true; history.back(); }
+  else closeWindow();
+}
+
+window.addEventListener('popstate', () => {
+  // Only ever a close. The entry is pushed on open and spent on Back, so
+  // arriving here with the card already shut means the reader has gone back
+  // past the board itself, and there is nothing of ours to undo.
+  if (view.code) closeWindow();
+});
+
 function openWindow(code) {
+  // Guarded rather than assumed: two entries for one card would need two Backs
+  // to shut it. The cards sit behind the veil so this should not arise, but the
+  // cost of being wrong is a button that looks broken.
+  if (!view.code) history.pushState({ spawn: code }, '');
   view.code = code;
   view.weekOffset = 0;
   view.pick = null;
@@ -1818,6 +1868,7 @@ function openWindow(code) {
 }
 
 function closeWindow() {
+  dismissing = false;
   view.code = null;
   slots = [];
   // The weeks themselves are kept — reopening a spawn a moment later should not
@@ -2050,7 +2101,9 @@ function clearPick() {
 
 function renderWindow() {
   const spawn = openSpawn();
-  if (!spawn) { closeWindow(); return; }
+  // Through the same door as the ✕, so the history entry the card was opened
+  // with is spent rather than left behind as a Back that does nothing.
+  if (!spawn) { dismissWindow(); return; }
   fitDuration();
   // Both axes: on a phone the week is wider than the screen as well as taller,
   // and a render that put the hours back but not the days would jump the reader
@@ -3671,9 +3724,12 @@ function doBook() {
   });
 }
 
-document.getElementById('win-close').addEventListener('click', closeWindow);
-veil.addEventListener('click', closeWindow);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWindow(); });
+// All three go through the history entry rather than tearing the card down
+// themselves, so a phone's Back is the same action as the ✕ rather than a
+// fourth one that has to be kept in step with the other three.
+document.getElementById('win-close').addEventListener('click', dismissWindow);
+veil.addEventListener('click', dismissWindow);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') dismissWindow(); });
 
 /** The server menu. Present only when there is more than one server to switch
  *  to — the markup for it is not drawn otherwise — so everything here is behind
