@@ -339,8 +339,7 @@ object RespawnThreads extends StrictLogging {
    *  directly underneath and speak for themselves. All this adds is the part
    *  neither can: why a member would leave Discord for the browser at all. */
   def boardIntro: String =
-    "Press **Claim** and type a code. **Dashboard** opens the same board in a " +
-      "browser, where you can book much further in advance."
+    "Press **Claim** and type a code for the spawn.\nUse the web **Dashboard** if you want a simpler interface or want to **Book** a spawn much further in advance."
 
   /** The board's card: the whole post bar the buttons.
    *
@@ -361,7 +360,7 @@ object RespawnThreads extends StrictLogging {
    *  the embed renders with an empty space where the board should be. */
   private def boardEmbed(hasImage: Boolean): MessageEmbed = {
     val embed = new EmbedBuilder()
-      .setColor(Embeds.BrandColor)
+      .setColor(Embeds.NemesisPurple)
       .setTitle("Respawn Claims", dashboardLink)
       .setDescription(boardIntro)
       .setThumbnail(com.tibiabot.Config.webHookAvatar)
