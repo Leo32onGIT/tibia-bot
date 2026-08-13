@@ -313,9 +313,8 @@ object RespawnEmbeds {
   def slotReminder(respawn: Respawn, slot: RespawnClaim): String = {
     val start = slot.startsAt.map(relative).getOrElse("shortly")
     s"Your booked slot on **${respawn.displayName}** starts $start for " +
-      s"${humanDuration(slot.durationMinutes)}.\n" +
-      "Confirm now and it's settled — nobody can ask you for it, and you won't " +
-      "need to answer again when it starts."
+      s"${humanDuration(slot.durationMinutes)}.\n\n" +
+      "Confirm now to claim it automatically."
   }
 
   /** DM'd when a booked slot starts and its owner has already confirmed it. */
@@ -333,18 +332,16 @@ object RespawnEmbeds {
    *  somebody absent. */
   def slotStartedUnconfirmed(respawn: Respawn, claim: RespawnClaim, confirmBy: ZonedDateTime): String = {
     val ends = claim.endsAt.map(clockTime).getOrElse("soon")
-    s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends.\n" +
-      s"**Take the claim ${relative(confirmBy)}** or it's given up for you and the spawn " +
-      "goes to whoever's next."
+    s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends.\n\n" +
+      s"**Take the claim ${relative(confirmBy)}** or you will lose the claim."
   }
 
   /** DM'd when that deadline goes by unanswered. Says what it cost and what to do
    *  instead, since the booking itself is untouched and comes round again. */
   def slotUnconfirmed(respawn: Respawn, refundedMinutes: Int): String = {
-    val refund = if (refundedMinutes > 0) s" You've had **${humanDuration(refundedMinutes)}** put back in your tank." else ""
+    val refund = if (refundedMinutes > 0) s" You've had **${humanDuration(refundedMinutes)}** stamina refunded." else ""
     s"Your booked hunt on **${respawn.displayName}** was given up — you didn't take the claim in " +
-      s"time, so it's gone to whoever was next.$refund\n" +
-      "Your booking still stands for the days after."
+      s"time, so it's gone to whoever was next.\n$refund"
   }
 
   /** DM'd when a booking comes round to find its own owner already on the spawn:
@@ -367,7 +364,7 @@ object RespawnEmbeds {
     s"Your booked slot on **${respawn.displayName}** needed " +
       s"**${humanDuration(needed)}** but you have " +
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
-      s"Your tank refills at server save ${relative(resetsAt)}."
+      s"Your stamina refills at server save ${relative(resetsAt)}."
 
   /** Standing bookings, for the Schedule panel and `/respawn schedules`.
    *

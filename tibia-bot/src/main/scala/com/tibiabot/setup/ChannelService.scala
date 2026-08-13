@@ -283,13 +283,11 @@ final class ChannelService(
       .setColor(BrandColor)
       .setFooter("Add or remove yourself from the role using the buttons below:")
       .setDescription(
-        s"The bot will poke:\n" +
         s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
         s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +
         s"${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n\n" +
-        s"The bot will DM you:\n" +
         s"${Config.masslogEmoji}<@&$masslogRoleId> If enough enemies log in at once on **$world**\n" +
-        s"${Config.bountyEmoji}$bountyMention If a character you're watching logs in on **$world**")
+        s"${Config.bountyEmoji}$bountyMention If a character you're watching `logs in` on **$world**")
       .build()
   }
 

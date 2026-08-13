@@ -63,6 +63,10 @@ object NotifyButtons extends StrictLogging {
     title.replace(":crossed_swords:", "").trim
   }
 
+  /** The window the threshold counts over, in minutes — the same one the online
+   *  list draws its zap icon from, so the form and the alert can't disagree. */
+  private def windowMinutes: Long = com.tibiabot.tracking.MasslogDetector.RecentLoginSeconds / 60
+
   private def thresholdInput(current: Int): TextInput =
     TextInput.create(NotifyIds.ThresholdField, TextInputStyle.SHORT)
       .setValue(current.toString)
@@ -77,7 +81,7 @@ object NotifyButtons extends StrictLogging {
       .map(_.threshold)
       .getOrElse(NotifySettings.DefaultThreshold)
     val modal = Modal.create(NotifyIds.masslogForm(world), "Mass log alerts")
-      .addComponents(label("How many enemies logging in?", NotifySettings.ThresholdHelp, thresholdInput(current)))
+      .addComponents(label("How many enemies need to log in?", NotifySettings.thresholdHelp(windowMinutes), thresholdInput(current)))
       .build()
     event.replyModal(modal).queue()
   }
@@ -107,7 +111,7 @@ object NotifyButtons extends StrictLogging {
       case None => refuse(event, gone)
       case Some(sub) =>
         val modal = Modal.create(NotifyIds.thresholdForm(id), "Mass log alerts")
-          .addComponents(label("How many enemies logging in?", NotifySettings.ThresholdHelp, thresholdInput(sub.threshold)))
+          .addComponents(label("How many enemies need to log in?", NotifySettings.thresholdHelp(windowMinutes), thresholdInput(sub.threshold)))
           .build()
         event.replyModal(modal).queue()
     }

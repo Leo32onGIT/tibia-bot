@@ -62,12 +62,19 @@ object NotifySettings {
   val MaxCharacterName: Int = 29
 
   /** The suggestion under the threshold box. People have no feel for what a
-   *  number means here until they have been woken by it once. */
-  val ThresholdHelp: String =
-    s"$MinThreshold-8 a small group, 9-14 a war party, 15+ a full mass log."
+   *  number means here until they have been woken by it once.
+   *
+   *  The window is passed in rather than written out, so this can't go on
+   *  promising fifteen minutes after the window it describes has moved —
+   *  the caller reads it off tracking.MasslogDetector, which is the one place
+   *  the zap icon, the category marker and this threshold all agree on. It is
+   *  an argument rather than an import because nothing else in `domain` reaches
+   *  into another package, and a help string is not the reason to start. */
+  def thresholdHelp(windowMinutes: Long): String =
+    s"I'll DM you if this many enemies log in within $windowMinutes minutes."
 
   val CooldownHelp: String =
-    s"Silence after a login DM, in minutes. Default $DefaultCooldownMinutes."
+    "Change this if your target relogs a lot."
 
   def parseThreshold(raw: String): Either[String, Int] =
     parseBounded(raw, MinThreshold, MaxThreshold, "threshold")
