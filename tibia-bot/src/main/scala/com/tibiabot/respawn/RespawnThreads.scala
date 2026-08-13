@@ -1,9 +1,9 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.domain.{Respawn, RespawnSchedule, RespawnSettings}
-import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
+import com.tibiabot.presentation.{Embeds, RespawnBoardImage, RespawnEmbeds}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.Permission
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, ThreadChannel}
@@ -333,31 +333,50 @@ object RespawnThreads extends StrictLogging {
    *  dashboard does. See `Config.Web.dashboardOrigin`. */
   def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
 
-  /** The one line of text above the board.
+  /** The line of text above the board, inside the card.
    *
    *  Names the two buttons rather than repeating what they say, since they are
    *  directly underneath and speak for themselves. All this adds is the part
-   *  neither can: why a member would leave Discord for the browser at all.
-   *
-   *  Carries no URL of its own — the Dashboard button holds it. That keeps the
-   *  address out of the text and, more usefully, means there is nothing here for
-   *  Discord to unfurl: no card to suppress at creation, and none that can come
-   *  back when [[redrawBoard]] edits the content. The card `web.LinkPreview`
-   *  serves is not wasted, it simply belongs to the link pasted by hand rather
-   *  than to this post, where the board is what deserves the vertical space. */
+   *  neither can: why a member would leave Discord for the browser at all. */
   def boardIntro: String =
     "Press **Claim** and type a code. **Dashboard** opens the same board in a " +
       "browser, where you can book much further in advance."
 
+  /** The board's card: the whole post bar the buttons.
+   *
+   *  The bot builds this itself rather than pasting the link and letting Discord
+   *  unfurl `web.LinkPreview`'s page into a card of its own. Same shape, but this
+   *  one can hold the board image, which the unfurled card cannot, and it appears
+   *  with the message instead of whenever the crawler gets round to it.
+   *
+   *  The title is a second way to the dashboard, for anyone who reads a card
+   *  before they look at a button — and it is a plain link rather than a masked
+   *  one, so nothing here can unfurl a second card underneath the first.
+   *
+   *  Thumbnail and image are both set and are not the same picture: Discord puts
+   *  the thumbnail small in the top corner (the bot's avatar, so the card is
+   *  recognisably ours at a glance) and the image full width underneath, which is
+   *  where the board goes. `attachment://` refers to the file uploaded with the
+   *  message — the name has to match [[RespawnBoardImage.FileName]] exactly or
+   *  the embed renders with an empty space where the board should be. */
+  private def boardEmbed(hasImage: Boolean): MessageEmbed = {
+    val embed = new EmbedBuilder()
+      .setColor(Embeds.BrandColor)
+      .setTitle("Respawn Claims", dashboardLink)
+      .setDescription(boardIntro)
+      .setThumbnail(com.tibiabot.Config.webHookAvatar)
+    if (hasImage) embed.setImage(s"attachment://${RespawnBoardImage.FileName}")
+    embed.build()
+  }
+
   /** Post (or repost) the informational board thread, pinned to the top of the
    *  forum.
    *
-   *  One message: the intro line, the board image and the buttons all belong to
-   *  the post's starter message. It used to be two, because the dashboard link
-   *  needed to sit above the board and nothing can be inserted before a forum
-   *  post's first message — which stops mattering once there is only one message
-   *  for both to be part of. [[redrawBoard]] folds an older two-message board
-   *  back into this shape.
+   *  One message: the card and the buttons under it are both the post's starter
+   *  message. It used to be two, because the dashboard link had to sit above the
+   *  board and nothing can be inserted before a forum post's first message —
+   *  which stops mattering once the link lives inside a card the bot builds.
+   *  [[redrawBoard]] folds an older two-message board back into this shape.
    *
    *  Deliberately **not** locked, even though it is purely informational.
    *  Discord greys out message components for anyone who cannot post in the
@@ -383,17 +402,19 @@ object RespawnThreads extends StrictLogging {
     thread.getId
   }
 
-  /** The whole board post as one message: intro line, image, buttons.
+  /** The whole board post as one message: the card, and the buttons under it.
    *
-   *  The image is best effort. A board that fails to render still posts, because
-   *  a thread with the intro and the buttons is one people can claim from — the
-   *  codes are the part they are missing, and the next redraw brings them. */
+   *  The image is best effort, which is why the card is told whether there is
+   *  one. A board that fails to render still posts — a thread with the card and
+   *  the buttons is one people can claim from, the codes are the part they are
+   *  missing, and the next redraw brings them — but it posts without an
+   *  `attachment://` pointing at a file that was never uploaded. */
   private def boardMessage(spawns: List[Respawn]) = {
+    val png = RespawnBoardImage.render(spawns)
     val builder = new MessageCreateBuilder()
-      .setContent(boardIntro)
+      .setEmbeds(boardEmbed(png.isDefined))
       .setComponents(boardButtons)
-    RespawnBoardImage.render(spawns)
-      .foreach(png => builder.setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName)))
+    png.foreach(bytes => builder.setFiles(FileUpload.fromData(bytes, RespawnBoardImage.FileName)))
     builder.build()
   }
 
@@ -461,7 +482,7 @@ object RespawnThreads extends StrictLogging {
           thread.retrieveStartMessage().complete()
             .editMessage(new MessageEditBuilder()
                 .setReplace(true)
-                .setContent(boardIntro)
+                .setEmbeds(boardEmbed(hasImage = true))
                 .setComponents(boardButtons)
                 .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
                 .build())
