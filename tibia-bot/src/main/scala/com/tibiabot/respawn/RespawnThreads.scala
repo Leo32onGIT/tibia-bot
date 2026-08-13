@@ -9,7 +9,7 @@ import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, ThreadChannel}
 import net.dv8tion.jda.api.entities.channel.forums.{ForumTag, ForumTagData, ForumTagSnowflake}
 import net.dv8tion.jda.api.entities.emoji.Emoji
-import net.dv8tion.jda.api.entities.{Guild, MessageEmbed, Role}
+import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
 import net.dv8tion.jda.api.managers.channel.concrete.ThreadChannelManager
 import net.dv8tion.jda.api.utils.FileUpload
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
@@ -319,8 +319,26 @@ object RespawnThreads extends StrictLogging {
     (forum.getId, boardId)
   }
 
+  /** The link the board thread opens with, and nothing but the link.
+   *
+   *  Bare on purpose: Discord unfurls a URL into a card of its own, and the card
+   *  is the message — any sentence wrapped around it would sit above the embed
+   *  saying in worse words what the embed already says. What the card reads as
+   *  is decided at the other end, by `web.LinkPreview`.
+   *
+   *  Built from the configured origin rather than written out, so a bot running
+   *  against a different deployment posts its own address. */
+  def dashboardLink: String = s"${com.tibiabot.Config.Web.baseUrl.stripSuffix("/")}/dashboard"
+
   /** Post (or repost) the informational board thread, pinned to the top of the
    *  forum.
+   *
+   *  Two messages, in this order and for this reason: the dashboard link opens
+   *  the thread so its unfurled card sits *above* the board, and the board image
+   *  follows underneath. A forum post's first message is the one it was created
+   *  with and nothing can be inserted before it, so the link has to be what the
+   *  post is created with — the image cannot simply have the link posted above
+   *  it afterwards.
    *
    *  Deliberately **not** locked, even though it is purely informational.
    *  Discord greys out message components for anyone who cannot post in the
@@ -335,16 +353,13 @@ object RespawnThreads extends StrictLogging {
    *  activity of its own to keep the timer alive. [[refreshBoard]] revives it if
    *  it slips through anyway. */
   def postBoard(forum: ForumChannel, settings: RespawnSettings, spawns: List[Respawn]): String = {
-    // The image is the whole post: no embed above it, because everything one
-    // would have said is either on the image or on the buttons under it.
-    val message = new MessageCreateBuilder().setComponents(boardButtons)
-    RespawnBoardImage.render(spawns)
-      .foreach(png => message.setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName)))
-
-    val post = forum.createForumPost("📅 Respawn Claims", message.build())
+    val post = forum.createForumPost("📅 Respawn Claims",
+        new MessageCreateBuilder().setContent(dashboardLink).build())
       .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
       .complete()
     val thread = post.getThreadChannel
+
+    sendBoardImage(thread, spawns)
 
     Try(thread.getManager.setPinned(true).complete()).failed.foreach { error =>
       logger.warn(s"Could not pin the respawn board post in guild '${forum.getGuild.getId}'", error)
@@ -352,12 +367,94 @@ object RespawnThreads extends StrictLogging {
     thread.getId
   }
 
+  /** The board image and its buttons, as their own message under the link.
+   *
+   *  No embed with it, because everything one would have said is either on the
+   *  image or on the buttons beneath it. Best effort: a thread that ends up with
+   *  the link and no board is missing the board until the next redraw, which is
+   *  a worse-looking version of the same thread rather than a broken one. */
+  private def sendBoardImage(thread: ThreadChannel, spawns: List[Respawn]): Boolean =
+    RespawnBoardImage.render(spawns).exists { png =>
+      Try {
+        thread.sendMessage(new MessageCreateBuilder()
+            .setComponents(boardButtons)
+            .setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName))
+            .build())
+          .complete()
+        true
+      }.recover { case error =>
+        logger.warn(s"Could not post the respawn board image in thread '${thread.getId}'", error)
+        false
+      }.get
+    }
+
+  /** How far into the board thread [[boardImageMessage]] will look for the board.
+   *
+   *  The board is the message right after the opening link, so one page of
+   *  history is generous already — it only needs to be deeper than the number of
+   *  stray replies a moderator might have left in between. */
+  private val BoardSearchLimit = 25
+
+  /** The message carrying the board image, out of whatever else is in the thread.
+   *
+   *  Searched rather than remembered. Its id could be stored on the guild's
+   *  settings, but that is a column to migrate and a second thing that can be
+   *  wrong about a board, in exchange for saving one request on a path that runs
+   *  when the catalogue changes or somebody types `/repair` — neither of them
+   *  hot. Only messages *after* the opening one are considered, so the link at
+   *  the top is never mistaken for the board.
+   *
+   *  The oldest match, not the newest: if a redraw ever managed to post two, the
+   *  first is the one people have scrolled to and the one under the link. */
+  private def boardImageMessage(thread: ThreadChannel): Option[Message] = {
+    val self = thread.getJDA.getSelfUser.getId
+    Try(thread.getHistoryAfter(thread.getId, BoardSearchLimit).complete()
+      .getRetrievedHistory.asScala.toList)
+      .recover { case error =>
+        logger.warn(s"Could not read the respawn board thread '${thread.getId}'", error)
+        Nil
+      }
+      .getOrElse(Nil)
+      .filter(message => message.getAuthor.getId == self)
+      .filter(message => !message.getAttachments.isEmpty || !message.getComponents.isEmpty)
+      .sortBy(_.getTimeCreated)
+      .headOption
+  }
+
+  /** Make the thread's opening message the dashboard link, if it isn't already.
+   *
+   *  This is what migrates a board built before the link existed: those threads
+   *  open with the image itself, so the image is cleared off the opening message
+   *  and reposted below by the caller, leaving the link on top where its card can
+   *  appear. A thread already in that shape is left alone rather than edited into
+   *  the same state, since editing the content is what makes Discord unfurl it
+   *  again. */
+  private def restoreBoardLink(start: Message): Unit =
+    if (start.getContentRaw.trim != dashboardLink) {
+      Try(
+        start.editMessage(new MessageEditBuilder()
+            // Everything not set is cleared: an older board's opening message
+            // carries the board image, its buttons, and possibly an embed from a
+            // build older still, and all three belong to the message below now.
+            .setReplace(true)
+            .setContent(dashboardLink)
+            .build())
+          .complete()
+      ).failed.foreach { error =>
+        logger.warn(s"Could not put the dashboard link at the top of board thread '${start.getId}'", error)
+      }
+    }
+
   /** Redraw an existing board in place, for a catalogue that has changed.
    *
-   *  Edits the post's own opening message rather than replacing the post, so the
-   *  thread keeps its id, its pin and anything said in it. The old attachment has
-   *  to be cleared explicitly — an edit that only adds files keeps the ones
+   *  Edits the messages in the existing post rather than replacing the post, so
+   *  the thread keeps its id, its pin and anything said in it. The old attachment
+   *  has to be cleared explicitly — an edit that only adds files keeps the ones
    *  already there, which would leave two boards stacked in one message.
+   *
+   *  Also the repair path for the layout itself, which is why it puts the link
+   *  back before it touches the board: `/repair` redraws unconditionally, so a
+   *  thread that has lost its opening link, or never had one, gets it here.
    *
    *  Returns whether it managed to. Nothing here is fatal: a board that fails to
    *  redraw is out of date, not broken, and the codes it shows still work. */
@@ -365,18 +462,34 @@ object RespawnThreads extends StrictLogging {
     (for {
       forum <- findForum(guild, settings)
       thread <- resolveThread(guild, forum, settings.boardThread)
-      png <- RespawnBoardImage.render(spawns)
     } yield Try {
-      val start = thread.retrieveStartMessage().complete()
-      start.editMessage(new MessageEditBuilder()
-          // Cleared explicitly: a board posted by an older build carries an embed
-          // above the image, and an edit that only sets the attachment keeps it.
-          .setEmbeds(java.util.Collections.emptyList[MessageEmbed]())
-          .setComponents(boardButtons)
-          .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
-          .build())
-        .complete()
-      true
+      // Found before the opening message is rewritten: on an old board the image
+      // is *on* that message, and this has to come back empty for it to be
+      // reposted below rather than edited back into the top of the thread.
+      val existing = boardImageMessage(thread)
+      restoreBoardLink(thread.retrieveStartMessage().complete())
+
+      RespawnBoardImage.render(spawns) match {
+        case None => false
+        case Some(png) =>
+          existing match {
+            case Some(board) =>
+              board.editMessage(new MessageEditBuilder()
+                  // Cleared explicitly: a board posted by an older build carries
+                  // an embed above the image, and an edit that only sets the
+                  // attachment keeps it.
+                  .setEmbeds(java.util.Collections.emptyList[MessageEmbed]())
+                  .setComponents(boardButtons)
+                  .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
+                  .build())
+                .complete()
+              true
+            case None =>
+              // Either a board being migrated to the two-message layout, or one
+              // whose image message somebody deleted.
+              sendBoardImage(thread, spawns)
+          }
+      }
     }.recover { case error =>
       logger.warn(s"Could not redraw the respawn board in guild '${guild.getId}'", error)
       false

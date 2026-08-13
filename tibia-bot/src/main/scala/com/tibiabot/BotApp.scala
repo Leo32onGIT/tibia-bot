@@ -285,8 +285,9 @@ object BotApp extends App with StrictLogging {
     // So a dashboard link pasted into Discord unfurls as this bot rather than as
     // Discord itself, which is what the crawler found at the end of the sign-in
     // redirect it was following. Built from the configured origin, so it names
-    // whichever domain this deployment actually answers on.
-    linkPreview = Some(web.LinkPreview.default(Config.Web.baseUrl))
+    // whichever domain this deployment actually answers on, and picked per area
+    // so the two mounts above describe themselves rather than the site.
+    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl))
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,

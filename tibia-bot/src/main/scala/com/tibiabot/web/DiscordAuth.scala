@@ -48,10 +48,13 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                         /** A page to answer a link crawler with, rather than
                          *  bouncing it to Discord's OAuth screen and letting it
                          *  describe this link as Discord — see [[LinkPreview]].
-                         *  Passed in because what a gated area is *called* is
-                         *  not something this class should know. None keeps the
-                         *  old behaviour for every caller. */
-                        linkPreview: Option[String] = None)
+                         *
+                         *  A function of the path that was asked for, not a
+                         *  fixed page: the areas behind this auth are different
+                         *  things to whoever is shown the card, and only the
+                         *  caller knows what each of them is called. None keeps
+                         *  the old behaviour for every caller. */
+                        linkPreview: Option[String => String] = None)
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
 
   /** Every area this session is good for. `mountPath` is where the auth routes
@@ -309,19 +312,20 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
           // and only for something that says it is a crawler; everybody else
           // takes the branch below exactly as before.
           optionalHeaderValueByName("User-Agent") { agent =>
-            linkPreview.filter(_ => agent.exists(LinkPreview.isCrawler)) match {
-              case Some(preview) =>
-                complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, preview))
-              case None =>
-                // Carries which area was being asked for, so somebody who opens
-                // the admin dashboard cold is returned there rather than dropped
-                // on the member one. Matched against the known paths on the way
-                // back, never used as given.
-                extractMatchedPath { matched =>
+            // Which area was being asked for, wanted by both branches: the
+            // crawler is told what is behind *this* link rather than what the
+            // site is, and somebody who opens the admin dashboard cold is
+            // returned there rather than dropped on the member one. Matched
+            // against the known paths on the way back, never used as given.
+            extractMatchedPath { matched =>
+              linkPreview.filter(_ => agent.exists(LinkPreview.isCrawler)) match {
+                case Some(preview) =>
+                  complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, preview(matched.toString)))
+                case None =>
                   val area = cookiePaths.find(p => matched.toString.startsWith(p))
                   redirect(area.fold(loginPath)(p => s"$loginPath?next=${URLEncoder.encode(p, "UTF-8")}"),
                     StatusCodes.Found)
-                }
+              }
             }
           }
       }

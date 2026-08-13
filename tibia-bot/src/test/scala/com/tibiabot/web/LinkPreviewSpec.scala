@@ -30,9 +30,12 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
 
   test("the tags say what is behind the link") {
     val page = LinkPreview.default("https://violentbot.xyz")
-    page should include("""<meta content="Violent Bot" property="og:title">""")
-    page should include("""<meta content="A Discord bot for the online MMORPG Tibia" property="og:description">""")
-    page should include("""<meta content="https://violentbot.xyz" property="og:url">""")
+    page should include("""<meta content="Respawn Claims /dashboard" property="og:title">""")
+    page should include("this allows you to book much further in advance")
+    page should include("Sign in with Discord to open it.")
+    // The link's own area, not the site root: og:url is what the embed's title
+    // is hyperlinked to.
+    page should include("""<meta content="https://violentbot.xyz/dashboard" property="og:url">""")
     page should include("""<meta content="https://violentbot.xyz/assets/img/avatar.png" property="og:image">""")
     page should include("""<meta content="48" property="og:image:width">""")
     page should include("""<meta content="48" property="og:image:height">""")
@@ -41,9 +44,34 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
     page should include("""name="twitter:card"""")
   }
 
+  test("each area is coloured and titled as itself") {
+    // theme-color is what Discord paints the embed's left stripe with, so it is
+    // the one thing that tells the two areas apart before anything is read.
+    val dashboard = LinkPreview.page("https://violentbot.xyz", LinkPreview.Dashboard)
+    dashboard should include("""<meta content="#5b8cff" name="theme-color">""")
+
+    val status = LinkPreview.page("https://violentbot.xyz", LinkPreview.Status)
+    status should include("""<meta content="Violent Bot /status" property="og:title">""")
+    status should include("""<meta content="#a78bfa" name="theme-color">""")
+    status should include("""<meta content="https://violentbot.xyz/status" property="og:url">""")
+    // Who may open it is settled by the sign-in; the card anybody can unfurl
+    // does not announce it.
+    status should not include "Owner only"
+  }
+
+  test("the page answered is the one for the path that was asked for") {
+    val pages = LinkPreview.forPath("https://violentbot.xyz")
+    pages("/status") should include("Violent Bot /status")
+    pages("/status/thing") should include("Violent Bot /status")
+    pages("/dashboard") should include("Respawn Claims /dashboard")
+    pages("/dashboard/g/8814") should include("Respawn Claims /dashboard")
+    // A mount nobody described still gets a truthful page rather than an error.
+    pages("/somewhere-else") should include("Respawn Claims /dashboard")
+  }
+
   test("the origin is whatever this deployment answers on, not a domain in the source") {
     val page = LinkPreview.default("http://localhost:8081/")
-    page should include("""<meta content="http://localhost:8081" property="og:url">""")
+    page should include("""<meta content="http://localhost:8081/dashboard" property="og:url">""")
     // The trailing slash is not doubled into the image path.
     page should include("http://localhost:8081/assets/img/avatar.png")
     page should not include "localhost:8081//"
@@ -52,7 +80,8 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
   test("nothing interpolated can break out of the markup") {
     // The origin is configuration rather than user input, but it lands in an
     // attribute either way and a mangled one should stay inside its quotes.
-    val page = LinkPreview.page("""a"b<c""", "d&e", """https://x"onload="alert(1)""")
+    val page = LinkPreview.page("""https://x"onload="alert(1)""",
+      LinkPreview.Area("""/p"q""", """a"b<c""", "d&e", """#fff"onload="alert(1)"""))
     page should not include """content="a"b"""
     page should include("&quot;")
     page should include("&lt;c")
@@ -63,7 +92,9 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
     // The sniff can misfire, and a page that only exists for machines would
     // leave them staring at a blank one.
     val page = LinkPreview.default("https://violentbot.xyz")
-    page should include("sign in")
+    page should include("Sign in with Discord")
     page should include("""href="https://violentbot.xyz/dashboard"""")
+    // Both lines of the description reach the visible page, not just the tag.
+    page should include("<p>Sign in with Discord to open it.</p>")
   }
 }

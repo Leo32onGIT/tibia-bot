@@ -41,7 +41,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     redirectUri = s"https://example.test$mountPath/auth/callback",
     mountPath = mountPath,
     extraCookiePaths = List(adminPath),
-    linkPreview = Some(LinkPreview.default("https://violentbot.xyz"))
+    linkPreview = Some(LinkPreview.forPath("https://violentbot.xyz"))
   )(system, executor)
 
   /** How Discord's unfurler actually introduces itself: a browser-shaped string
@@ -156,8 +156,19 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val guarded = pathPrefix("dashboard")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
     Get(s"$mountPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~> guarded ~> check {
       status shouldBe StatusCodes.OK
-      responseAs[String] should include("""content="Violent Bot" property="og:title"""")
-      responseAs[String] should include("A Discord bot for the online MMORPG Tibia")
+      responseAs[String] should include("""content="Respawn Claims /dashboard" property="og:title"""")
+      responseAs[String] should include("this allows you to book much further in advance")
+    }
+  }
+
+  // The whole point of describing the areas separately: a link to one of them
+  // has to unfurl as that one, and the path is the only thing that says which.
+  test("the crawler's page is the one for the area it asked about") {
+    val guarded = pathPrefix("status")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
+    Get(s"$adminPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~> guarded ~> check {
+      status shouldBe StatusCodes.OK
+      responseAs[String] should include("""content="Violent Bot /status" property="og:title"""")
+      responseAs[String] should not include "Respawn Claims"
     }
   }
 
