@@ -1,6 +1,6 @@
 package com.tibiabot.interactions
 
-import com.tibiabot.respawn.RespawnButtonId
+import com.tibiabot.respawn.{LogScope, RespawnButtonId}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -56,20 +56,46 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
   test("log pages edit the message they were pressed on, rather than replying") {
     // Deferring these as a reply would stack a fresh ephemeral log on every
     // click instead of turning the page.
-    RespawnButtonId.ackFor(RespawnButtonId.logPage(None, 0)) shouldBe RespawnButtonId.Ack.EditsMessage
-    RespawnButtonId.ackFor(RespawnButtonId.logPage(Some(415L), 3)) shouldBe RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(LogScope.Everything, 0)) shouldBe
+      RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(LogScope.Spawn(415L), 3)) shouldBe
+      RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(LogScope.Member("1082484147492237515"), 1)) shouldBe
+      RespawnButtonId.Ack.EditsMessage
   }
 
-  test("a log id round-trips through the parser, for the board and for one spawn") {
-    RespawnButtonId.parse(RespawnButtonId.logPage(None, 2)) shouldBe
-      Some(RespawnButtonId.LogButton(None, 2))
-    RespawnButtonId.parse(RespawnButtonId.logPage(Some(415L), 0)) shouldBe
-      Some(RespawnButtonId.LogButton(Some(415L), 0))
+  test("Find sits on a log message but must not be deferred, since it opens a modal") {
+    RespawnButtonId.ackFor(RespawnButtonId.logFind) shouldBe RespawnButtonId.Ack.OpensModal
+    RespawnButtonId.parse(RespawnButtonId.logFind) shouldBe Some(RespawnButtonId.LogFindButton)
+  }
+
+  test("a log id round-trips through the parser, for the guild, one spawn and one member") {
+    RespawnButtonId.parse(RespawnButtonId.logPage(LogScope.Everything, 2)) shouldBe
+      Some(RespawnButtonId.LogButton(LogScope.Everything, 2))
+    RespawnButtonId.parse(RespawnButtonId.logPage(LogScope.Spawn(415L), 0)) shouldBe
+      Some(RespawnButtonId.LogButton(LogScope.Spawn(415L), 0))
+    RespawnButtonId.parse(RespawnButtonId.logPage(LogScope.Member("1082484147492237515"), 4)) shouldBe
+      Some(RespawnButtonId.LogButton(LogScope.Member("1082484147492237515"), 4))
+  }
+
+  test("a spawn id and a member id are told apart, since both are bare digits") {
+    // Without the `u` prefix on the member form, one would parse as the other and
+    // the log would quietly read the wrong thing.
+    LogScope.Spawn(415L).token should not be LogScope.Member("415").token
+    LogScope.fromToken(LogScope.Member("415").token) shouldBe Some(LogScope.Member("415"))
+    LogScope.fromToken(LogScope.Spawn(415L).token) shouldBe Some(LogScope.Spawn(415L))
+  }
+
+  test("a member token that isn't a snowflake is refused rather than passed to a query") {
+    LogScope.fromToken("u") shouldBe None
+    LogScope.fromToken("u12'; DROP TABLE respawn_claims;--") shouldBe None
+    LogScope.fromToken("nonsense") shouldBe None
   }
 
   test("the three acknowledgement kinds stay distinct") {
     RespawnButtonId.ackFor(RespawnButtonId.boardClaim) shouldBe RespawnButtonId.Ack.OpensModal
-    RespawnButtonId.ackFor(RespawnButtonId.logPage(None, 0)) shouldBe RespawnButtonId.Ack.EditsMessage
+    RespawnButtonId.ackFor(RespawnButtonId.logPage(LogScope.Everything, 0)) shouldBe
+      RespawnButtonId.Ack.EditsMessage
     RespawnButtonId.ackFor(RespawnButtonId.leave(1L)) shouldBe RespawnButtonId.Ack.Replies
   }
 

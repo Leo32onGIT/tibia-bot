@@ -1029,36 +1029,28 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def cancelClaim(guildId: String, claimId: Long, outcome: String): Unit =
     setStatus(guildId, claimId, RespawnClaim.StatusCancelled, outcome)
 
-  def claimHistory(guildId: String, respawnId: Option[Long], limit: Int, offset: Int): List[RespawnClaim] =
+  def claimHistory(guildId: String, respawnId: Option[Long], userId: Option[String],
+                   limit: Int, offset: Int): List[RespawnClaim] =
     withGuild(guildId) { conn =>
-      // One spawn or the whole guild, same ordering either way. The predicate is
-      // built rather than parameterised because a column cannot be bound.
-      val spawnFilter = if (respawnId.isDefined) "respawn_id = ? AND " else ""
+      // One spawn, one member, or the whole guild — same ordering whichever it
+      // is. The predicates are built rather than parameterised because a column
+      // cannot be bound; the values below still are. Both filters can be present
+      // at once, which no caller does today but which costs nothing to allow.
+      val filters =
+        respawnId.map(_ => "respawn_id = ?").toList ::: userId.map(_ => "user_id = ?").toList
+      val where = (filters :+ "status IN ('finished', 'cancelled')").mkString(" AND ")
       val statement = conn.prepareStatement(
         s"""SELECT * FROM respawn_claims
-           |WHERE ${spawnFilter}status IN ('finished', 'cancelled')
+           |WHERE $where
            |ORDER BY ended_at DESC NULLS LAST, id DESC
            |LIMIT ? OFFSET ?;""".stripMargin)
       try {
-        val limitAt = respawnId.map { id => statement.setLong(1, id); 2 }.getOrElse(1)
-        statement.setInt(limitAt, limit)
-        statement.setInt(limitAt + 1, offset)
+        var at = 1
+        respawnId.foreach { id => statement.setLong(at, id); at += 1 }
+        userId.foreach { id => statement.setString(at, id); at += 1 }
+        statement.setInt(at, limit)
+        statement.setInt(at + 1, offset)
         collectClaims(statement.executeQuery())
-      } finally statement.close()
-    }
-
-  def claimCountsSince(guildId: String, since: ZonedDateTime): List[(Long, Int)] =
-    withGuild(guildId) { conn =>
-      val statement = conn.prepareStatement(
-        """SELECT respawn_id, COUNT(*) AS hunts FROM respawn_claims
-          |WHERE status IN ('finished', 'cancelled') AND ended_at >= ?
-          |GROUP BY respawn_id;""".stripMargin)
-      try {
-        statement.setTimestamp(1, Timestamp.from(since.toInstant))
-        val result = statement.executeQuery()
-        val counts = scala.collection.mutable.ListBuffer.empty[(Long, Int)]
-        while (result.next()) counts += result.getLong("respawn_id") -> result.getInt("hunts")
-        counts.toList
       } finally statement.close()
     }
 

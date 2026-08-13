@@ -246,12 +246,8 @@ trait RespawnRepository {
    *  `offset` pages backwards through it. Callers keep that bounded (see
    *  RespawnService.LogMaxPages) rather than letting somebody walk years of
    *  history one page at a time. */
-  def claimHistory(guildId: String, respawnId: Option[Long], limit: Int, offset: Int): List[RespawnClaim]
-
-  /** How many finished claims each spawn saw since `since`, for the Log panel's
-   *  summary line. One grouped query rather than counting rows in Scala, since
-   *  the window can cover far more claims than a page ever shows. */
-  def claimCountsSince(guildId: String, since: ZonedDateTime): List[(Long, Int)]
+  def claimHistory(guildId: String, respawnId: Option[Long], userId: Option[String],
+                   limit: Int, offset: Int): List[RespawnClaim]
 
   /** Close a claim that ran to its end. `outcome` records why, for the audit log
    *  (see RespawnClaim.Outcome); `ended_at` is stamped by the database. */

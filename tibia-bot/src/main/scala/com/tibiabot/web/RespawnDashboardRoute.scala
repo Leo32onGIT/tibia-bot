@@ -889,7 +889,13 @@ object RespawnDashboardRoute {
         // remove — the bundled ones come back on the next boot. Sent to
         // everybody, because it belongs to the spawn rather than to the viewer,
         // and this payload is shared by every visitor and cached as one thing.
-        "custom" -> JsBoolean(spawn.source == com.tibiabot.domain.Respawn.SourceCustom)
+        "custom" -> JsBoolean(spawn.source == com.tibiabot.domain.Respawn.SourceCustom),
+        // The creature by name as well as by picture, so the filter can find a
+        // spawn by the monster somebody actually went there for. The sprite below
+        // is built from this same field, which is what stops a search and a
+        // picture ever disagreeing about which monster a spawn is. Empty for the
+        // many catalogue rows whose creature is deliberately unset.
+        "creature" -> JsString(spawn.creature)
       ) ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue)))
     }.toVector))
 

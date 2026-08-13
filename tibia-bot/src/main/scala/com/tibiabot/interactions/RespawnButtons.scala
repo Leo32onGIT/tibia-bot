@@ -1,11 +1,11 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, ConfirmOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
+import com.tibiabot.respawn.{ClaimOutcome, ConfirmOutcome, LogScope, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
-import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import com.tibiabot.presentation.Names
 
@@ -81,8 +81,16 @@ object RespawnButtons extends StrictLogging {
       case Some(RespawnButtonId.BoardButton(what)) =>
         handleBoardButton(event, respond, what)
 
-      case Some(RespawnButtonId.LogButton(respawnId, page)) =>
-        handleLogButton(event, respawnId, page)
+      case Some(RespawnButtonId.LogButton(scope, page)) =>
+        handleLogButton(event, scope, page)
+
+      // Opens a modal, so nothing has been deferred and nothing may be: the form
+      // has to be this interaction's first response.
+      case Some(RespawnButtonId.LogFindButton) =>
+        val guild = event.getGuild
+        if (guild == null) respond.text(s"${Config.noEmoji} That only works inside a server.")
+        else if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+        else event.replyModal(RespawnModals.logFindModal).queue()
 
       // A spawn button pressed from a DM: no event guild, so it names its own.
       case Some(RespawnButtonId.DmSpawnButton(action, guildId, respawnId)) =>
@@ -249,7 +257,7 @@ object RespawnButtons extends StrictLogging {
    *  Moderator-only, re-checked here rather than trusted from the panel that
    *  offered it: an ephemeral message persists, and the role can be taken away
    *  while it sits open. */
-  private def handleLogButton(event: ButtonInteractionEvent, respawnId: Option[Long], page: Int): Unit = {
+  private def handleLogButton(event: ButtonInteractionEvent, scope: LogScope, page: Int): Unit = {
     val guild = event.getGuild
     def refuse(text: String): Unit =
       event.getHook.editOriginalEmbeds(com.tibiabot.presentation.Embeds.response(text))
@@ -257,27 +265,53 @@ object RespawnButtons extends StrictLogging {
 
     if (guild == null) refuse(s"${Config.noEmoji} That only works inside a server.")
     else if (!RespawnModals.moderates(guild, event.getMember)) refuse(notModeratorText)
-    else {
-      val service = BotApp.respawnService
-      val guildId = guild.getId
-      val scope = respawnId.flatMap(id => service.listRespawns(guildId).find(_.id == id))
-      if (respawnId.isDefined && scope.isEmpty) {
-        refuse(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-      } else {
-        val logPage = service.claimLog(guildId, respawnId, page)
-        // Only the guild-wide log needs spawn names, and only for the rows on
-        // this page — the catalogue runs to several hundred entries.
-        val names =
-          if (respawnId.isDefined) Map.empty[Long, String]
-          else service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
-        val embed = RespawnEmbeds.claimLog(scope, logPage, service.logSummary(guildId), names,
-          service.LogMaxPages)
-        val action = event.getHook.editOriginalEmbeds(embed)
-        RespawnThreads.logButtons(respawnId, logPage) match {
-          case Some(row) => action.setComponents(row).queue()
-          case None      => action.setComponents().queue()
-        }
-      }
+    else logView(guild, scope, page) match {
+      case Left(problem) => refuse(problem)
+      case Right((embed, row)) =>
+        event.getHook.editOriginalEmbeds(embed).setComponents(row).queue()
+    }
+  }
+
+  /** One page of the log as a message: the embed, and the row that pages it.
+   *
+   *  Shared with the Find form's submission, so a log arrived at by searching is
+   *  built exactly like one arrived at by pressing Log — same folding, same
+   *  buttons, same footer. `Left` is a reason it cannot be shown, which only a
+   *  spawn scope can produce: a member who has left is still a member whose
+   *  hunts happened, but a spawn dropped from the catalogue has no name to
+   *  print.
+   *
+   *  Moderator permission is the caller's business — both callers check it
+   *  against the live member rather than trusting the message they were
+   *  pressed on. */
+  private[interactions] def logView(guild: Guild, scope: LogScope,
+                                    page: Int): Either[String, (MessageEmbed, ActionRow)] = {
+    val service = BotApp.respawnService
+    val guildId = guild.getId
+    val heading: Either[String, Option[String]] = scope match {
+      case LogScope.Everything => Right(None)
+      case LogScope.Spawn(id) =>
+        service.listRespawns(guildId).find(_.id == id)
+          .toRight(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+          .map(respawn => Some(respawn.displayName))
+      // Cache-only, and deliberately not fetched: a name is all this is for, and
+      // a REST call per page turn to decorate a title is not worth it. Somebody
+      // who has left the server falls back to the plain id, which is still the
+      // right log.
+      case LogScope.Member(userId) =>
+        Right(Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)))
+    }
+    heading.map { what =>
+      val logPage = service.claimLog(guildId, scope, page)
+      // A single spawn's log is the only one with nothing to fold. The names are
+      // only needed when it does fold, and only for the rows on this page — the
+      // catalogue runs to several hundred entries.
+      val foldBySpawn = !scope.isInstanceOf[LogScope.Spawn]
+      val names =
+        if (foldBySpawn) service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
+        else Map.empty[Long, String]
+      (RespawnEmbeds.claimLog(what, foldBySpawn, logPage, names, service.LogMaxPages),
+        RespawnThreads.logButtons(scope, logPage))
     }
   }
 
@@ -324,12 +358,11 @@ object RespawnButtons extends StrictLogging {
       case "mysettings" =>
         event.replyModal(RespawnModals.configModal(guild.getId, event.getUser.getId)).queue()
 
-      case "claimrules" | "timers" =>
+      case "claimrules" =>
         // Re-checked here, not trusted from the panel: that message persists and
         // could be clicked long after the role was taken away.
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
-        else if (what == "claimrules") event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
-        else event.replyModal(RespawnModals.timersModal(guild.getId)).queue()
+        else event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
 
       case other =>
         logger.warn(s"Unknown respawn board button '$other'")

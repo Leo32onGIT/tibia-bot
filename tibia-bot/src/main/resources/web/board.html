@@ -908,7 +908,7 @@
     <span class="tier tier-<!--TIER-->"><!--TIER--></span>
     <div class="masthead-right">
       <span class="stale-note" id="stale"></span>
-      <input class="filter" id="filter" type="search" placeholder="Filter by code or name…" aria-label="Filter spawns">
+      <input class="filter" id="filter" type="search" placeholder="Filter by code, name or creature…" aria-label="Filter spawns by code, name or creature">
     </div>
   </div>
 
@@ -1287,10 +1287,17 @@ function hoursSince(iso) {
   return (Date.now() - new Date(iso).getTime()) / 3600000;
 }
 
+/** Code, name, or the creature the spawn is known for — the last of those
+ *  because people remember what they went there to kill more readily than what
+ *  the place is called. Substring on all three, so the three behave alike; the
+ *  creature arrives with the catalogue and is empty for the many rows that
+ *  deliberately have none, which simply never match. */
 function matches(spawn) {
   if (!filterText) return true;
   const q = filterText.toLowerCase();
-  return spawn.code.toLowerCase().includes(q) || spawn.name.toLowerCase().includes(q);
+  return spawn.code.toLowerCase().includes(q)
+    || spawn.name.toLowerCase().includes(q)
+    || (spawn.creature || '').toLowerCase().includes(q);
 }
 
 function el(tag, className, html) {

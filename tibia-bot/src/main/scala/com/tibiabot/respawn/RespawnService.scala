@@ -83,9 +83,34 @@ final case class LogPage(entries: List[RespawnClaim], page: Int, hasOlder: Boole
   def hasNewer: Boolean = page > 0
 }
 
-/** The Log panel's summary line: how much hunting happened recently, and where
- *  most of it happened. */
-final case class LogSummary(total: Int, busiest: Option[(Respawn, Int)], days: Int)
+/** What a page of the claim log is about.
+ *
+ *  The board's Log opens on [[LogScope.Everything]], a spawn's own post on that
+ *  spawn, and Find produces either a spawn or a member. It travels in the button
+ *  id rather than being remembered anywhere, because a Next press has to know
+ *  what it is paging through and the message it edits cannot say. */
+sealed trait LogScope {
+  /** The id-safe form. A colon separates the parts of a button id, so no token
+   *  may contain one — and since a spawn id and a Discord snowflake are both
+   *  bare digits, the member form carries a `u` to tell them apart. */
+  def token: String
+}
+
+object LogScope {
+  case object Everything extends LogScope { val token: String = "all" }
+  final case class Spawn(respawnId: Long) extends LogScope { def token: String = respawnId.toString }
+  final case class Member(userId: String) extends LogScope { def token: String = s"u$userId" }
+
+  def fromToken(token: String): Option[LogScope] =
+    if (token == "all") Some(Everything)
+    else if (token.startsWith("u")) {
+      val id = token.drop(1)
+      // Digits only: the token is echoed straight back into a database lookup,
+      // and anything else in there did not come from a button this bot drew.
+      if (id.nonEmpty && id.forall(_.isDigit)) Some(Member(id)) else None
+    }
+    else scala.util.Try(token.toLong).toOption.map(Spawn(_))
+}
 
 /** One spawn as the web board shows it: the catalogue row, whoever holds it,
  *  who is waiting, what is booked ahead, and when it was last touched.
@@ -290,8 +315,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  can't drift on what counts as a legal combination — a default claim longer
    *  than the maximum being the one that actually bites, since every later claim
    *  would be refused for exceeding a ceiling nobody set deliberately. */
+  /** `warnMinutes` is deliberately absent: it is the fallback reminder for
+   *  members who have not set their own, and there is no longer anywhere to
+   *  change it per guild — it sits at `Config.Respawn.warnMinutes` for everybody.
+   *  Members set their own in Config, which is the setting that was ever
+   *  actually used. */
   def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
-                     queueLimit: Option[Int], stamina: Option[Int], warn: Option[Int],
+                     queueLimit: Option[Int], stamina: Option[Int],
                      handover: Option[Int]): Either[String, RespawnSettings] =
     settings(guildId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
@@ -301,7 +331,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           maxDurationMinutes = maxDuration.getOrElse(current.maxDurationMinutes),
           queueLimit = queueLimit.getOrElse(current.queueLimit),
           staminaMinutes = stamina.getOrElse(current.staminaMinutes),
-          warnMinutes = warn.getOrElse(current.warnMinutes),
           handoverMinutes = handover.getOrElse(current.handoverMinutes)
         )
         if (updated.defaultDurationMinutes < 5 || updated.maxDurationMinutes < 5)
@@ -309,8 +338,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
           Left(s"The default claim (${RespawnEmbeds.humanDuration(updated.defaultDurationMinutes)}) can't be " +
             s"longer than the maximum (${RespawnEmbeds.humanDuration(updated.maxDurationMinutes)}).")
-        else if (updated.queueLimit < 0 || updated.staminaMinutes < 0 || updated.warnMinutes < 0)
-          Left("Queue limit, stamina and reminder time can't be negative.")
+        else if (updated.queueLimit < 0 || updated.staminaMinutes < 0)
+          Left("Queue limit and stamina can't be negative.")
         else if (updated.handoverMinutes < 1)
           Left("The handover window has to be at least a minute, or nobody could ever accept one.")
         else {
@@ -346,24 +375,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def knownMembers(guildId: String): List[com.tibiabot.persistence.KnownMember] =
     repository.knownMembers(guildId, RespawnService.MaxKnownMembers)
 
-  /** Resolve what a user typed — a code ("415"), or a name — to a catalogue
-   *  entry. Autocomplete sends the code back, so the code path is the common
-   *  one; the name fallbacks exist for people who type it out by hand. */
+  /** Resolve what a user typed — a code ("415"), a name, or the creature the
+   *  place is known for — to a catalogue entry. Autocomplete sends the code back,
+   *  so the code path is the common one; the rest exist for people typing by
+   *  hand.
+   *
+   *  The creature is tried last and only as a whole word or a substring, after
+   *  every name test has missed. It is the loosest of the three — several spawns
+   *  can share a monster — so it settles a query only when exactly one row
+   *  matches, the same rule the name substring already answered to. */
   def resolve(guildId: String, query: String): Option[Respawn] = {
     val trimmed = query.trim
     if (trimmed.isEmpty) None
     else repository.findByCode(guildId, trimmed).orElse {
       val all = repository.listRespawns(guildId)
       val lower = trimmed.toLowerCase
+      def only(candidates: List[Respawn]): Option[Respawn] = candidates match {
+        case single :: Nil => Some(single)
+        case _             => None // ambiguous: make them pick rather than guessing
+      }
       // "415 — Cult Orcs" comes back from autocomplete as the display name in
       // some clients, so match that shape too before falling back to a
       // substring search.
       all.find(_.displayName.equalsIgnoreCase(trimmed))
         .orElse(all.find(_.name.equalsIgnoreCase(trimmed)))
-        .orElse(all.filter(_.name.toLowerCase.contains(lower)) match {
-          case single :: Nil => Some(single)
-          case _             => None // ambiguous: make them pick rather than guessing
-        })
+        .orElse(only(all.filter(_.name.toLowerCase.contains(lower))))
+        .orElse(only(all.filter(_.creature.equalsIgnoreCase(trimmed))))
+        .orElse(only(all.filter(r => r.creature.nonEmpty && r.creature.toLowerCase.contains(lower))))
     }
   }
 
@@ -1026,35 +1064,21 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  at a time is not something to invite people to do. */
   val LogMaxPages: Int = 10
 
-  /** The window the Log panel's summary line covers. */
-  val LogSummaryDays: Int = 7
-
-  /** One page of the claim log, newest first. `respawnId` empty reads the whole
-   *  guild — the board's Log — and set reads one spawn's.
+  /** One page of the claim log, newest first, for whichever [[LogScope]] is
+   *  asked for.
    *
    *  Asks for one row more than a page so the caller can tell "there is more"
    *  from "this is the end" without a second count query; [[LogPage.hasOlder]]
    *  consumes that and hands back only the page itself. */
-  def claimLog(guildId: String, respawnId: Option[Long], page: Int): LogPage = {
+  def claimLog(guildId: String, scope: LogScope, page: Int): LogPage = {
     val safePage = math.max(0, math.min(page, LogMaxPages - 1))
-    val fetched = repository.claimHistory(guildId, respawnId, LogPageSize + 1, safePage * LogPageSize)
+    val respawnId = scope match { case LogScope.Spawn(id) => Some(id); case _ => None }
+    val userId = scope match { case LogScope.Member(id) => Some(id); case _ => None }
+    val fetched = repository.claimHistory(guildId, respawnId, userId, LogPageSize + 1, safePage * LogPageSize)
     LogPage(
       entries = fetched.take(LogPageSize),
       page = safePage,
       hasOlder = fetched.size > LogPageSize && safePage < LogMaxPages - 1
-    )
-  }
-
-  /** Hunts finished in the last [[LogSummaryDays]] days, and the spawn that saw
-   *  the most of them — the Log panel's one-line summary. `None` for the busiest
-   *  when nothing finished in the window, which is also when `total` is 0. */
-  def logSummary(guildId: String, now: ZonedDateTime = ZonedDateTime.now()): LogSummary = {
-    val counts = repository.claimCountsSince(guildId, now.minusDays(LogSummaryDays.toLong))
-    val byId = listRespawns(guildId).map(r => r.id -> r).toMap
-    LogSummary(
-      total = counts.map(_._2).sum,
-      busiest = counts.sortBy(-_._2).headOption.flatMap { case (id, n) => byId.get(id).map(_ -> n) },
-      days = LogSummaryDays
     )
   }
 

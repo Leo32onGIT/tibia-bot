@@ -450,7 +450,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
       now, 120, RespawnClaim.KindAdHoc).get
     repo.cancelClaim(g, second.id, RespawnClaim.Outcome.Forced)
 
-    val history = repo.claimHistory(g, Some(spawn.id), 10, 0)
+    val history = repo.claimHistory(g, Some(spawn.id), None, 10, 0)
     history.map(_.userId) shouldBe List("u2", "u1")
     history.map(_.outcome) shouldBe List(Some(RespawnClaim.Outcome.Forced),
       Some(RespawnClaim.Outcome.Completed))
@@ -461,9 +461,38 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // A claim still running is not history.
     repo.insertActiveClaim(g, spawn.id, "u3", "Three", "", "", now, now.plusHours(1), 60,
       RespawnClaim.KindAdHoc).get
-    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.userId) shouldBe List("u2", "u1")
+    repo.claimHistory(g, Some(spawn.id), None, 10, 0).map(_.userId) shouldBe List("u2", "u1")
 
-    repo.claimHistory(g, Some(spawn.id), 1, 0).map(_.userId) shouldBe List("u2")
+    repo.claimHistory(g, Some(spawn.id), None, 1, 0).map(_.userId) shouldBe List("u2")
+  }
+
+  test("the history reads one member's hunts across spawns, for the log's Find") {
+    val (repo, g) = freshRepo()
+    val orcs = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val cults = repo.addRespawn(g, "205", "Carlin Cults", "", "Carlin", "", "", Respawn.SourceSeed, "seed")
+
+    def finished(spawnId: Long, userId: String): Unit = {
+      val claim = repo.insertActiveClaim(g, spawnId, userId, userId, "", "", now, now.plusHours(1), 60,
+        RespawnClaim.KindAdHoc).get
+      repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
+    }
+
+    finished(orcs.id, "u1")
+    finished(cults.id, "u1")
+    finished(orcs.id, "u2")
+
+    // Both spawns, and only this member — the whole point of the member scope is
+    // that it crosses the catalogue where a spawn scope does not.
+    val mine = repo.claimHistory(g, None, Some("u1"), 10, 0)
+    mine.map(_.respawnId).toSet shouldBe Set(orcs.id, cults.id)
+    mine.map(_.userId).distinct shouldBe List("u1")
+
+    // A member with nothing is empty rather than everything, which is what a
+    // filter silently dropped would give.
+    repo.claimHistory(g, None, Some("nobody"), 10, 0) shouldBe empty
+
+    // Both filters at once still narrows rather than widening.
+    repo.claimHistory(g, Some(orcs.id), Some("u1"), 10, 0).map(_.userId) shouldBe List("u1")
   }
 
   test("an already-ended claim keeps its original outcome") {
@@ -476,7 +505,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // A late second call — the sweep and a release racing, say — must not relabel
     // why it ended, or the audit trail would depend on ordering.
     repo.cancelClaim(g, claim.id, RespawnClaim.Outcome.Forced)
-    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.outcome) shouldBe
+    repo.claimHistory(g, Some(spawn.id), None, 10, 0).map(_.outcome) shouldBe
       List(Some(RespawnClaim.Outcome.Completed))
   }
 
@@ -586,7 +615,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.reservationsFor(g, spawn.id, now).map(_.userId) shouldBe List("u2")
     // The due-slot path keys off the status, so it activates like any other.
     repo.dueReservations(g, now.plusHours(2)).map(_.id) shouldBe List(handed.id)
-    repo.claimHistory(g, Some(spawn.id), 10, 0).map(_.outcome) shouldBe
+    repo.claimHistory(g, Some(spawn.id), None, 10, 0).map(_.outcome) shouldBe
       List(Some(RespawnClaim.Outcome.GivenUp))
   }
 

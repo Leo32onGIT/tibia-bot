@@ -40,8 +40,20 @@ object RespawnModals extends StrictLogging {
   private val WarnField = "warn"
   private val HolderField = "holder"
   private val MinutesField = "minutes"
+  private val LogMemberField = "logmember"
+  private val LogSpawnField = "logspawn"
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
+
+  /** Whether this form answers by rewriting the message it was opened from,
+   *  rather than with an ephemeral reply of its own.
+   *
+   *  Only the log's search does. It is opened from a log panel and replaces what
+   *  that panel is showing, so a reply would leave the old log sitting above the
+   *  new one — and pressing Find twice would stack three. `BotListener` reads
+   *  this to choose `deferEdit` over `deferReply`, which has to be decided before
+   *  the handler runs. */
+  def editsOriginal(modalId: String): Boolean = modalId == RespawnButtonId.modalLogFind
 
   /** As RespawnButtons.nicknameOf: what the caller is called in this guild. */
   private def nicknameOf(event: ModalInteractionEvent): String =
@@ -199,13 +211,16 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** Server-wide claim rules: how long a hunt runs, how many may wait for one,
-   *  and how much hunting a member gets in a day.
+  /** Every server-wide setting a moderator can change, in one modal.
    *
-   *  Split from the timers below because a modal takes five inputs
-   *  (`Modal.MAX_COMPONENTS`) and there are six settings. The split is by what
-   *  a setting *is* rather than by what fits: these four are the rules of who may
-   *  claim what, and the two below are how long the bot waits before acting. */
+   *  There used to be a second one called Timers holding the handover window and
+   *  a default reminder. The reminder went: members set their own, and a server
+   *  default that only applies to people who never opened Config was a setting
+   *  about the absence of a setting. That left the handover window on its own,
+   *  which is not a panel — so it moved here, and Timers went with it.
+   *
+   *  Five inputs is `Modal.MAX_COMPONENTS` exactly. The next server-wide setting
+   *  after this one needs somewhere new to live; there is no sixth slot. */
   def claimRulesModal(guildId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
@@ -218,28 +233,39 @@ object RespawnModals extends StrictLogging {
           numberInput("queue", settings.map(_.queueLimit))),
         label("Daily stamina per member (minutes)",
           "0 means unlimited. Turning a limit on refills everyone.",
-          numberInput("stamina", settings.map(_.staminaMinutes)))
-      )
-      .build()
-  }
-
-  /** Server-wide timers: the default reminder, and how long a handover offer
-   *  stays open. The daily budget used to live here and now sits with the claim
-   *  rules, which is what it is — nobody looking for stamina looked under
-   *  "timers". */
-  def timersModal(guildId: String): Modal = {
-    val settings = BotApp.respawnService.settings(guildId)
-    Modal.create(RespawnButtonId.modalTimers, "Server timers")
-      .addComponents(
-        label("Default reminder (minutes before the end)",
-          "Members can override this for themselves. 0 turns it off.",
-          numberInput("warn", settings.map(_.warnMinutes))),
+          numberInput("stamina", settings.map(_.staminaMinutes))),
         label("Handover window (minutes)",
           "How long the next in line has to accept before it passes on.",
           numberInput("handover", settings.map(_.handoverMinutes)))
       )
       .build()
   }
+
+  /** The claim log's search form: whose hunts, or which spawn's.
+   *
+   *  A picker for the member rather than a name to type, which is the whole
+   *  reason this is two fields instead of one. A name typed into a box has to be
+   *  matched against nicknames, display names and account names, and can collide
+   *  with a creature — a picker hands back an id and none of that arises. What is
+   *  left to interpret is the spawn, which is one job for one box.
+   *
+   *  Both optional, so either can be the question. Neither Discord nor JDA can
+   *  express "exactly one of these", so that rule lives in the submission. */
+  def logFindModal: Modal =
+    Modal.create(RespawnButtonId.modalLogFind, "Find in the claim log")
+      .addComponents(
+        label("Member", "Their whole claim history in this server.",
+          EntitySelectMenu.create(LogMemberField, EntitySelectMenu.SelectTarget.USER)
+            .setRequiredRange(0, 1)
+            .build()),
+        label("Spawn", "A code, or a spawn or creature name. Leave empty if you picked a member.",
+          TextInput.create(LogSpawnField, TextInputStyle.SHORT)
+            .setPlaceholder("1219, or Emperor Rat")
+            .setRequired(false)
+            .setMaxLength(64)
+            .build())
+      )
+      .build()
 
   private def numberInput(id: String, current: Option[Int]): TextInput =
     TextInput.create(id, TextInputStyle.SHORT)
@@ -391,8 +417,8 @@ object RespawnModals extends StrictLogging {
         case RespawnButtonId.modalBoardSchedule => submitBoardSchedule(event)
         case RespawnButtonId.modalClaim      => submitClaim(event)
         case RespawnButtonId.modalConfig     => submitConfig(event)
-        case RespawnButtonId.modalClaimRules => submitSettings(event, claimRules = true)
-        case RespawnButtonId.modalTimers     => submitSettings(event, claimRules = false)
+        case RespawnButtonId.modalClaimRules => submitSettings(event)
+        case RespawnButtonId.modalLogFind    => submitLogFind(event)
         case RespawnButtonId.modalGiveStamina => submitGiveStamina(event)
         case other =>
           logger.warn(s"Unknown respawn modal '$other'")
@@ -480,7 +506,52 @@ object RespawnModals extends StrictLogging {
   private[interactions] def moderates(guild: Guild, member: Member): Boolean =
     Permissions.isModerator(member, BotApp.moderatorRoleId(guild.getId))
 
-  private def submitSettings(event: ModalInteractionEvent, claimRules: Boolean): Unit = {
+  /** The log's search, answered by rewriting the log it was opened from.
+   *
+   *  Anything that isn't a search — no answer, two answers, a spawn nobody
+   *  recognises — comes back as an ephemeral note *beside* the panel instead,
+   *  leaving what they were reading where it was. Replacing a perfectly good log
+   *  with an error message is a poor trade for a typo.
+   *
+   *  Always page 0: this is a new question, not a continuation of the old one. */
+  private def submitLogFind(event: ModalInteractionEvent): Unit = {
+    val guild = event.getGuild
+    def aside(text: String): Unit =
+      event.getHook.sendMessageEmbeds(Embeds.response(text)).setEphemeral(true).queue()
+
+    def show(scope: com.tibiabot.respawn.LogScope): Unit =
+      RespawnButtons.logView(guild, scope, 0) match {
+        case Left(problem)       => aside(problem)
+        case Right((embed, row)) => event.getHook.editOriginalEmbeds(embed).setComponents(row).queue()
+      }
+
+    // Re-checked on submit, like every other form here: a modal can sit open long
+    // after somebody's role was taken away.
+    if (!moderates(guild, event.getMember)) {
+      aside(s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
+    } else {
+      val member = selected(event, LogMemberField).headOption
+      val query = value(event, LogSpawnField)
+      (member, query.nonEmpty) match {
+        case (None, false) =>
+          aside(s"${Config.noEmoji} Pick a member, or name a spawn.")
+        case (Some(_), true) =>
+          aside(s"${Config.noEmoji} That's both at once — pick a member, or name a spawn.")
+        case (Some(userId), _) =>
+          show(com.tibiabot.respawn.LogScope.Member(userId))
+        case (None, _) =>
+          BotApp.respawnService.resolve(guild.getId, query) match {
+            case Some(respawn) => show(com.tibiabot.respawn.LogScope.Spawn(respawn.id))
+            case None =>
+              aside(s"${Config.noEmoji} I don't know a respawn matching **$query**. " +
+                "Try its code, or the creature it's known for.")
+          }
+      }
+    }
+  }
+
+  private def submitSettings(event: ModalInteractionEvent): Unit = {
     val guildId = event.getGuild.getId
     // Re-checked on submit rather than trusted from when the panel opened: a modal
     // can sit open long after somebody's role was taken away.
@@ -489,17 +560,12 @@ object RespawnModals extends StrictLogging {
         s"or the **${Permissions.ModeratorRoleName}** role.")
     } else {
       def field(id: String): Option[Int] = Try(value(event, id).toInt).toOption
-      val ids = if (claimRules) List("default", "max", "queue", "stamina") else List("warn", "handover")
+      val ids = List("default", "max", "queue", "stamina", "handover")
       if (ids.exists(field(_).isEmpty)) {
         reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
       } else {
-        val result =
-          if (claimRules)
-            BotApp.respawnService.updateSettings(guildId, field("default"), field("max"), field("queue"),
-              field("stamina"), None, None)
-          else
-            BotApp.respawnService.updateSettings(guildId, None, None, None,
-              None, field("warn"), field("handover"))
+        val result = BotApp.respawnService.updateSettings(guildId, field("default"), field("max"),
+          field("queue"), field("stamina"), field("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>

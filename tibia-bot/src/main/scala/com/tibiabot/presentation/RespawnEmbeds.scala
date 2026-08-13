@@ -441,15 +441,15 @@ object RespawnEmbeds {
     new EmbedBuilder()
       .setColor(Embeds.BrandColor)
       .setTitle("Server respawn settings")
-      .setDescription("These apply to everyone here. Members can set their own claim length " +
-        "and reminder time, which override the defaults below.")
+      .setDescription("These apply to everyone here. Members set their own claim length and " +
+        "reminder time in Config, which override the defaults below.")
       .addField("Default claim", humanDuration(settings.defaultDurationMinutes), true)
       .addField("Maximum claim", humanDuration(settings.maxDurationMinutes), true)
       .addField("Queue limit", settings.queueLimit.toString, true)
       .addField("Daily stamina",
         if (settings.staminaMinutes <= 0) "unlimited" else humanDuration(settings.staminaMinutes), true)
-      .addField("Default reminder",
-        if (settings.warnMinutes <= 0) "off" else s"${humanDuration(settings.warnMinutes)} before the end", true)
+      // The reminder default is not here: it is no longer a per-guild setting, so
+      // showing it would be showing a number nobody in this panel can change.
       .addField("Handover window", humanDuration(settings.handoverMinutes), true)
       .build()
 
@@ -582,41 +582,44 @@ object RespawnEmbeds {
    *  brings to it — who had this last night, is somebody sitting on it, did they
    *  turn up — is answered by the recent end of it.
    *
-   *  The summary sits in inline fields rather than a sentence: three short
-   *  numbers side by side is the one thing Discord's field layout genuinely does
-   *  better than prose, and it keeps the feed below starting at a predictable
-   *  place. */
-  def claimLog(scope: Option[Respawn], page: com.tibiabot.respawn.LogPage,
-               summary: com.tibiabot.respawn.LogSummary,
+   *  Nothing above the feed but the title. There used to be three inline fields
+   *  counting the week's hunts and naming the busiest spawn — read often enough
+   *  to keep, it turned out, by nobody: a moderator opens this with a question
+   *  about one spawn or one night, and a guild-wide tally answers neither while
+   *  pushing the rows that do answer them further down the card. */
+  /** `heading` names what the log is scoped to — a spawn, a member — and is
+   *  absent for the whole guild. `foldBySpawn` is separate from it rather than
+   *  derived, because the two do not move together: a member's log is scoped
+   *  *and* folded, since it runs across spawns exactly as the guild's does. */
+  def claimLog(heading: Option[String], foldBySpawn: Boolean, page: com.tibiabot.respawn.LogPage,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
     val embed = new EmbedBuilder()
       .setColor(Embeds.BrandColor)
-      .setTitle(scope.map(r => s"Claim log — ${r.displayName}").getOrElse("Claim log"))
-
-    // The summary covers the whole guild either way: on a spawn's own log it is
-    // the context the single-spawn feed below cannot give.
-    embed.addField(s"Last ${summary.days} days",
-      if (summary.total == 0) "nothing yet" else s"${summary.total} hunts", true)
-    embed.addField("Busiest",
-      summary.busiest.map { case (respawn, hunts) => s"${respawn.displayName} ($hunts)" }.getOrElse("—"), true)
-    embed.addField("Showing",
-      if (!page.hasOlder && !page.hasNewer) "all of it" else s"page ${page.page + 1}", true)
+      .setTitle(heading.map(what => s"Claim log — $what").getOrElse("Claim log"))
 
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")
     } else {
       // A spawn's own log has one code and nothing to fold, so it keeps the
-      // two-line entry. The board's is folded by spawn — that is where the same
-      // name was being repeated down the page.
+      // two-line entry. Everything else is folded by spawn — that is where the
+      // same name was being repeated down the page.
       val blocks =
-        if (scope.isDefined) page.entries.map(logEntry(_, None))
-        else collapsedRuns(page.entries).map { case (respawnId, claims) =>
+        if (foldBySpawn) collapsedRuns(page.entries).map { case (respawnId, claims) =>
           logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
         }
+        else page.entries.map(logEntry(_, None))
       embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
-      // Only said at the bottom of the reachable trail, where an absent Older
-      // button would otherwise look like the history simply stopped.
-      if (page.page + 1 >= maxPages) embed.setFooter(s"That's as far back as this goes ($maxPages pages).")
+      // The footer is where a page number belongs: it is what you check when you
+      // have lost your place, not something to read on the way in. Absent
+      // entirely on a log that fits in one page, since a number that never
+      // changes is furniture.
+      //
+      // The end of the trail is said here too, sharing the one line rather than
+      // taking a field of its own — without it, a missing Next button looks like
+      // the history simply stopped.
+      val place = s"Page ${page.page + 1}"
+      if (page.page + 1 >= maxPages) embed.setFooter(s"$place · that's as far back as this goes")
+      else if (page.hasOlder || page.hasNewer) embed.setFooter(place)
     }
     embed.build()
   }

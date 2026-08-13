@@ -125,7 +125,8 @@ object RespawnThreads extends StrictLogging {
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
       if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
-      Some(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log").withEmoji(Emoji.fromUnicode("📜")))
+      Some(Button.secondary(RespawnButtonId.logPage(LogScope.Spawn(respawnId), 0), "Log")
+        .withEmoji(Emoji.fromUnicode("📜")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -133,23 +134,36 @@ object RespawnThreads extends StrictLogging {
   }
 
   /** The Config panel a moderator gets from the board: their own settings, or the
-   *  server's rules. */
+   *  server's rules.
+   *
+   *  Timers used to sit between them. Everything it held is under Claim rules
+   *  now — see [[com.tibiabot.interactions.RespawnModals.claimRulesModal]]. */
   def boardModeratorButtons: ActionRow =
     ActionRow.of(
       Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
-      Button.primary(RespawnButtonId.boardTimers, "Timers"),
-      Button.secondary(RespawnButtonId.logPage(None, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
+      Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
     )
 
-  /** Newer/Older under a page of the claim log. Only the directions that lead
-   *  somewhere are offered, so neither button ever answers with the same page. */
-  def logButtons(respawnId: Option[Long], page: LogPage): Option[ActionRow] = {
+  /** Previous/Next under a page of the claim log, and Find beside them.
+   *
+   *  Only the directions that lead somewhere are offered, so neither ever
+   *  answers with the page you are already on. The log runs newest first, so
+   *  Next goes backwards in time — which Newer/Older used to say outright and
+   *  this pair does not, traded for the arrangement people expect under a page
+   *  number.
+   *
+   *  Find is always there, including on a log with a single page and nothing to
+   *  turn: a search is not a direction, and a one-page log is exactly where
+   *  somebody is most likely to want a different one. That is also why this now
+   *  always returns a row. */
+  def logButtons(scope: LogScope, page: LogPage): ActionRow = {
     val buttons = List(
-      if (page.hasNewer) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page - 1), "Newer")) else None,
-      if (page.hasOlder) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page + 1), "Older")) else None
+      if (page.hasNewer) Some(Button.secondary(RespawnButtonId.logPage(scope, page.page - 1), "Previous")) else None,
+      if (page.hasOlder) Some(Button.secondary(RespawnButtonId.logPage(scope, page.page + 1), "Next")) else None,
+      Some(Button.primary(RespawnButtonId.logFind, "Find").withEmoji(Emoji.fromUnicode("🔍")))
     ).flatten
-    if (buttons.isEmpty) None else Some(ActionRow.of(buttons.asJava))
+    ActionRow.of(buttons.asJava)
   }
 
   /** The Yes/No pair on a "are you hunting tonight?" DM. */
@@ -357,7 +371,7 @@ object RespawnThreads extends StrictLogging {
   def boardIntro: String =
     s"${com.tibiabot.Config.dailyEmoji} **Claim** **·** and type a code to claim a spawn right now\n" +
       s"$BookEmoji **Book** **·** to schedule/lock-in a hunt in the future\n" +
-      s"$DashboardEmoji **Dashboard** **·** if you want to book further in advance (webui)" +
+      s"$DashboardEmoji **Dashboard** **·** if you want to book further in advance (webui)\n" +
       s"$ConfigEmoji **Config** **·** to change your default claim time & reminder settings"
 
   /** The board's card: the whole post bar the buttons.
@@ -798,10 +812,13 @@ object RespawnButtonId {
   val boardBook: String = s"${Prefix}board:book"
 
   /** A page of the claim log. Opening it and paging through it are the same id
-   *  shape, so a press is handled one way wherever it came from: `all` reads
-   *  the whole guild, a spawn id reads that spawn. */
-  def logPage(respawnId: Option[Long], page: Int): String =
-    s"${Prefix}log:${respawnId.map(_.toString).getOrElse("all")}:$page"
+   *  shape, so a press is handled one way wherever it came from — see
+   *  [[LogScope.token]] for what the middle part can say. */
+  def logPage(scope: LogScope, page: Int): String = s"${Prefix}log:${scope.token}:$page"
+
+  /** Search the log. Carries no scope of its own: it produces one rather than
+   *  paging an existing one, so which log it was pressed on does not matter. */
+  val logFind: String = s"${Prefix}logfind"
 
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
@@ -842,7 +859,6 @@ object RespawnButtonId {
   /** A moderator handing stamina to somebody, from /stamina. */
   val giveStamina: String = s"${Prefix}board:givestamina"
   val boardClaimRules: String = s"${Prefix}board:claimrules"
-  val boardTimers: String = s"${Prefix}board:timers"
 
   /** Modal ids, kept next to the buttons that open them. */
   val ModalPrefix: String = s"${Prefix}modal:"
@@ -857,10 +873,10 @@ object RespawnButtonId {
   val modalBoardSchedule: String = s"${ModalPrefix}boardschedule"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
 
-  /** Guild-wide settings, split across two modals because Discord caps a modal at
-   *  five inputs and there are six settings. */
+  /** Every guild-wide setting, in one modal — exactly the five Discord allows. */
   val modalClaimRules: String = s"${ModalPrefix}claimrules"
-  val modalTimers: String = s"${ModalPrefix}timers"
+  /** The claim log's search form. */
+  val modalLogFind: String = s"${ModalPrefix}logfind"
   val modalGiveStamina: String = s"${ModalPrefix}givestamina"
 
   /** ("duration", 415L) from "respawn:modal:duration:415" — the kind and the spawn
@@ -911,14 +927,16 @@ object RespawnButtonId {
   final case class ConfirmSlotButton(guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
-  /** A page of the claim log — `respawnId` empty for the board's guild-wide view. */
-  final case class LogButton(respawnId: Option[Long], page: Int) extends Action
+  /** A page of the claim log, for whatever it is scoped to. */
+  final case class LogButton(scope: LogScope, page: Int) extends Action
+  /** The claim log's Find button, which opens the search form. */
+  case object LogFindButton extends Action
 
   /** Actions that always end in a modal, and so must not be deferred. The two
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
-    Set("claim", "book", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule",
+    Set("claim", "book", "mysettings", "claimrules", "selfcfg", "holdercfg", "schedule",
         "booknew", "givestamina")
 
   /** Whether this press has to answer with a modal, and so cannot be
@@ -945,6 +963,10 @@ object RespawnButtonId {
     parse(componentId) match {
       case Some(BoardButton(what)) if what == "config" || ModalActions.contains(what) => Ack.OpensModal
       case Some(SpawnButton(action, _)) if action == "config" || ModalActions.contains(action) => Ack.OpensModal
+      // Find sits on a log message but must not be deferred at all: it answers
+      // with a modal, and `replyModal` has to be an interaction's first response.
+      // It is listed before LogButton for exactly that reason.
+      case Some(LogFindButton)   => Ack.OpensModal
       case Some(LogButton(_, _)) => Ack.EditsMessage
       case _                     => Ack.Replies
     }
@@ -966,11 +988,9 @@ object RespawnButtonId {
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = false, guildId, _))
+      case Array("logfind") => Some(LogFindButton)
       case Array("log", target, page) =>
-        Try(page.toInt).toOption.flatMap { p =>
-          if (target == "all") Some(LogButton(None, p))
-          else Try(target.toLong).toOption.map(id => LogButton(Some(id), p))
-        }
+        Try(page.toInt).toOption.flatMap(p => LogScope.fromToken(target).map(LogButton(_, p)))
       case Array(action, id) =>
         Try(id.toLong).toOption.map(SpawnButton(action, _))
       case _ => None

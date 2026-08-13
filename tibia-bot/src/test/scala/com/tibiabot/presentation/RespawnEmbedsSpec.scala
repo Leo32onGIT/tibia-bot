@@ -282,16 +282,21 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   test("the server settings panel names every rule a moderator can change") {
     val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings))
     fs.keys should contain allOf ("Default claim", "Maximum claim", "Queue limit",
-      "Daily stamina", "Default reminder", "Handover window")
+      "Daily stamina", "Handover window")
     fs("Default claim") shouldBe "2h"
     fs("Queue limit") shouldBe "20"
   }
 
+  test("the panel does not show the reminder default, which is no longer a guild setting") {
+    // It survives as the fallback for members who have not set their own, but
+    // there is nowhere left to change it — and a panel of settings is a poor
+    // place to print a number that cannot be edited from it.
+    fields(RespawnEmbeds.serverSettingsEmbed(settings)).keys should not contain "Default reminder"
+  }
+
   test("the server settings panel spells out the disabled cases rather than showing 0") {
-    val off = settings.copy(staminaMinutes = 0, warnMinutes = 0)
-    val fs = fields(RespawnEmbeds.serverSettingsEmbed(off))
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(staminaMinutes = 0)))
     fs("Daily stamina") shouldBe "unlimited"
-    fs("Default reminder") shouldBe "off"
   }
 
   test("the spawn moderator panel names the holder and what force leave will do") {

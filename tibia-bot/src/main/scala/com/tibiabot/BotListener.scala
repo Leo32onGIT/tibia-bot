@@ -108,10 +108,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
     if (interactions.RespawnModals.handles(event.getModalId)) {
       // Acknowledged here rather than inside the handler, for the same reason
       // as the buttons below: deferring as the handler's first statement still
-      // left the acknowledgement waiting for a free worker. Unconditional,
-      // because no respawn modal branch opens a further modal — every one of
-      // them can be deferred.
-      event.deferReply(true).queue()
+      // left the acknowledgement waiting for a free worker. Every branch can be
+      // deferred, since none of them opens a further modal — but *how* differs.
+      // The log's search rewrites the log panel it was opened from, which needs
+      // deferEdit; everything else answers with an ephemeral of its own.
+      if (interactions.RespawnModals.editsOriginal(event.getModalId)) event.deferEdit().queue()
+      else event.deferReply(true).queue()
       interactionExecutor.execute(() => {
         try interactions.RespawnModals.handle(event)
         catch {
