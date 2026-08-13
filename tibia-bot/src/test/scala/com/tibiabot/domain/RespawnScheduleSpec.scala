@@ -355,6 +355,54 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     slot(anchor).requestable shouldBe true
   }
 
+  // --- days a rule has given up --------------------------------------------
+  // A rule speaks for every day; what became of one of them lives in its row.
+  // Without consulting those, a day handed to somebody else — or taken off the
+  // calendar by a moderator — left the old rule still defending it, and the
+  // next person to want that evening was refused on behalf of a booking that no
+  // longer existed.
+
+  private val givenUpWindow = (anchor.minusDays(1), anchor.plusDays(6))
+
+  private def hasGivenUp(schedule: RespawnSchedule, candidate: RespawnSchedule,
+                         settled: ZonedDateTime*) =
+    RespawnSchedule.surrendered(schedule, candidate, settled.map(_.toInstant).toSet,
+      givenUpWindow._1, givenUpWindow._2)
+
+  test("a rule that has given up the one evening being asked for stands aside") {
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    hasGivenUp(standing, wanted) shouldBe false
+    hasGivenUp(standing, wanted, anchor.plusDays(1)) shouldBe true
+  }
+
+  test("giving up one evening does not give up the rest of the week") {
+    val standing = schedule()
+    // A daily booking wants every evening, so one settled day leaves six it
+    // still owns and the clash stands.
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.EveryDay)
+    hasGivenUp(standing, wanted, anchor.plusDays(1)) shouldBe false
+  }
+
+  test("a settled evening nobody was asking about changes nothing") {
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    // Thursday is settled; the evening being asked for is Friday.
+    hasGivenUp(standing, wanted, anchor) shouldBe false
+  }
+
+  test("a rule that contests nothing inside the window has surrendered nothing") {
+    // Different times of day, so the two never meet. Answering "yes, given up"
+    // here would read as permission drawn from an absence of evidence.
+    val standing = schedule()
+    val elsewhere = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusHours(6),
+      RespawnSchedule.Daily, 60, active = true, anchor, RespawnSchedule.EveryDay)
+    hasGivenUp(standing, elsewhere) shouldBe false
+  }
+
   // --- confirming a booking that has started -------------------------------
 
   test("a started booking is awaiting confirmation until its owner takes the claim") {

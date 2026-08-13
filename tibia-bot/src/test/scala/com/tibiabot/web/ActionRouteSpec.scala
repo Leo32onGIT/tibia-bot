@@ -102,6 +102,14 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
                      extraMinutes: Int): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"extend:$code:$extraMinutes"; result
     }
+    def dropSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"drop:$code:${startsAt.toInstant}"; result
+    }
+    def reassignSlot(guildId: String, actorId: String, code: String,
+                     startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"move:$code:${startsAt.toInstant}:$toUserId"; result
+    }
   }
 
   private def auth = new DiscordAuth(
@@ -325,7 +333,10 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}"""),
       ("/dashboard/g/g1/spawns", """{"code":"999","name":"Somewhere"}"""),
       ("/dashboard/g/g1/remove-spawn", """{"code":"999"}"""),
-      ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}""")
+      ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}"""),
+      ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
+      ("/dashboard/g/g1/reassign-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path: ")(status shouldBe StatusCodes.Forbidden)
@@ -353,9 +364,36 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/extend-holder", body("""{"code":"415","minutes":30}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/drop-slot",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/reassign-slot",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
-      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "extend:415:30")
+      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "extend:415:30",
+      "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9")
+  }
+
+  // A slot is named by the moment it starts on, and getting that wrong means
+  // taking away a booking that belongs to somebody else entirely — so anything
+  // unreadable is refused rather than rounded to now.
+  test("a slot tool with no day, or an unreadable one, never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    List(
+      ("/dashboard/g/g1/drop-slot", """{"code":"415"}"""),
+      ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"tuesday evening"}"""),
+      ("/dashboard/g/g1/drop-slot", """{"startsAt":"2026-08-13T11:00:00Z"}"""),
+      ("/dashboard/g/g1/reassign-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
+      ("/dashboard/g/g1/reassign-slot", """{"code":"415","toUserId":"u9"}""")
+    ).foreach { case (path, payload) =>
+      Post(path, body(payload)) ~> signedIn ~> r ~> check {
+        withClue(s"$path $payload: ")(status shouldBe StatusCodes.BadRequest)
+      }
+    }
+    actions.moderatorCalls shouldBe empty
   }
 
   test("an extension of nothing, or of a negative, never reaches the service") {

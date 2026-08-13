@@ -84,6 +84,10 @@ final class RespawnCommandConsumer(
     val guildId = command.guildId
     val actor = command.actorId
     def missing(what: String) = Future.successful(ActionResult(ok = false, s"That instruction had no $what."))
+    // The instant a calendar slot starts on, which is how one day is named
+    // across the wire — a predicted slot has no row and so no id to send.
+    def slotStart(c: RespawnCommand) = c.param("startsAt")
+      .flatMap(s => scala.util.Try(java.time.Instant.parse(s).atZone(java.time.ZoneOffset.UTC)).toOption)
 
     command.action match {
       case RespawnCommand.Claim =>
@@ -147,6 +151,18 @@ final class RespawnCommandConsumer(
 
       case RespawnCommand.RemoveSpawn =>
         command.param("code").fold(missing("spawn"))(local.removeSpawn(guildId, actor, _))
+
+      case RespawnCommand.DropSlot =>
+        (command.param("code"), slotStart(command)) match {
+          case (Some(code), Some(start)) => local.dropSlot(guildId, actor, code, start)
+          case _ => missing("spawn and day")
+        }
+
+      case RespawnCommand.ReassignSlot =>
+        (command.param("code"), slotStart(command), command.param("toUserId")) match {
+          case (Some(code), Some(start), Some(to)) => local.reassignSlot(guildId, actor, code, start, to)
+          case _ => missing("spawn, day and somebody to give it to")
+        }
 
       // Unreachable via fromJson, which refuses unknown actions — kept so a
       // future action added to the set without a branch here fails loudly

@@ -72,6 +72,10 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = no
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = no
+    def dropSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime): Future[ActionResult] = no
+    def reassignSlot(guildId: String, actorId: String, code: String,
+                     startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = no
   }
 
   /** Enough gateway to construct the access service; no test here reaches it. */

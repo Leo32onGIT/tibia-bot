@@ -113,6 +113,24 @@ trait RespawnActionPort {
   def addSpawn(guildId: String, actorId: String, code: String, region: String,
                name: String, creature: String): Future[ActionResult]
 
+  /** Take one day off the calendar, leaving the booking rule behind it alone.
+   *
+   *  The day is named by the instant it starts on, which is what the grid
+   *  already draws and the only handle a predicted slot has — it has no row and
+   *  so no id. A repeating booking keeps repeating; only the evening goes.
+   */
+  def dropSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime): Future[ActionResult]
+
+  /** Put one day of the calendar in somebody else's name.
+   *
+   *  Named the same way and for the same reason. What the new owner gets is a
+   *  booking of their own for that evening, not a share of the rule it came
+   *  from — see `RespawnService.reassignSlot`.
+   */
+  def reassignSlot(guildId: String, actorId: String, code: String,
+                   startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult]
+
   /** Take a spawn the guild added back out of its catalogue.
    *
    *  Only ever one it added itself — a code from the bundled list is refused,

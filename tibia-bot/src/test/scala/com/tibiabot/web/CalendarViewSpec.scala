@@ -1,6 +1,7 @@
 package com.tibiabot.web
 
 import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule}
+import com.tibiabot.persistence.ScheduleOccurrence
 import org.scalatest.LoneElement._
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -34,11 +35,21 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
     RespawnSchedule(id, spawn.id, who, s"name-$who", character, anchor,
       RespawnSchedule.Daily, minutes, active = true, monday, days)
 
+  /** The occurrence rows a database would be holding for these bookings: one per
+   *  day of a rule that has been written down, all still standing. Tests about a
+   *  day that was *settled* — cancelled, handed on, or being hunted — pass their
+   *  own, since by then there is no reservation left to infer it from. */
+  private def occurrencesOf(reservations: List[RespawnClaim]) =
+    reservations.flatMap(claim =>
+      claim.scheduleId.flatMap(id => claim.startsAt.map(ScheduleOccurrence(id, _, live = true))))
+
   private def assemble(active: Option[RespawnClaim] = None,
                        reservations: List[RespawnClaim] = Nil,
                        schedules: List[RespawnSchedule] = Nil,
+                       occurrences: Option[List[ScheduleOccurrence]] = None,
                        from: ZonedDateTime = monday, to: ZonedDateTime = weekEnd) =
-    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules, from, to)
+    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules,
+      occurrences.getOrElse(occurrencesOf(reservations)), from, to)
 
   "the calendar" should {
 
@@ -168,6 +179,68 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
       view.slots.count(_.startsAt == at(1, 20)) shouldBe 2
       view.slots.filter(_.startsAt == at(1, 20)).map(_.predicted) should contain theSameElementsAs
         List(false, true)
+    }
+
+    // The bug that put two names on one evening. A day handed to whoever asked
+    // for it stops being a reservation of the rule that produced it, so drawing
+    // predictions against the reservations alone brought the old owner straight
+    // back — beside the person who had actually been given the evening.
+    "stay away from a day that has been handed to somebody else" in {
+      val rule = schedule(7, at(0, 20), who = "u3")
+      val view = assemble(
+        // The new owner's booking: their own, with no rule behind it.
+        reservations = List(reservation(1, at(1, 20), who = "u9", scheduleId = None)),
+        schedules = List(rule),
+        occurrences = Some(List(ScheduleOccurrence(7, at(1, 20), live = false))))
+
+      view.slots.filter(_.startsAt == at(1, 20)).map(_.ownerId) shouldBe List("u9")
+      view.slots.count(_.predicted) shouldBe 6
+    }
+
+    // The same blind spot at the other end of a slot's life: once it starts, the
+    // row is a live claim rather than a reservation, and the rule would draw its
+    // owner a second time over the hunt they are already on.
+    "stay away from a day that is being hunted right now" in {
+      val running = RespawnClaim(9, spawn.id, "u3", "name-u3", "", RespawnClaim.StatusActive, 0,
+        monday, Some(at(1, 20)), Some(at(1, 22)), 120, warned = false,
+        RespawnClaim.KindScheduled, None, None, None, None, scheduleId = Some(7))
+      val view = assemble(
+        active = Some(running),
+        schedules = List(schedule(7, at(0, 20))),
+        occurrences = Some(List(ScheduleOccurrence(7, at(1, 20), live = true))))
+
+      view.slots.filter(_.startsAt == at(1, 20)).map(_.state) shouldBe List("claimed")
+      view.slots.count(_.predicted) shouldBe 6
+    }
+
+    // A day taken off the calendar is settled in exactly the same way, and the
+    // rule has to stop offering it or the removal undoes itself on the next
+    // page load.
+    "stay away from a day a moderator has removed" in {
+      val view = assemble(
+        schedules = List(schedule(7, at(0, 20))),
+        occurrences = Some(List(ScheduleOccurrence(7, at(2, 20), live = false))))
+
+      view.slots.map(_.startsAt) should not contain at(2, 20)
+      view.slots should have size 6
+    }
+
+    // A row exists for it, but the window starts after it does, so no block is
+    // drawn from it. Letting the row silence the rule as well would leave the
+    // evening on the grid as nothing at all — which is worse than the faint
+    // prediction, since the reader would plan straight into it.
+    "still predict a day whose row falls outside the window it draws" in {
+      val edge = at(0, 20)
+      val view = assemble(
+        // `reservationsFor` asks for slots starting *after* the anchor, so a row
+        // exactly on it never reaches the blocks.
+        reservations = Nil,
+        schedules = List(schedule(7, edge)),
+        occurrences = Some(List(ScheduleOccurrence(7, edge, live = true))),
+        from = edge)
+
+      view.slots.map(_.startsAt) should contain(edge)
+      view.slots.find(_.startsAt == edge).map(_.predicted) shouldBe Some(true)
     }
 
     "produce nothing once a one-off has been and gone" in {

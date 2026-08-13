@@ -247,6 +247,12 @@ object RespawnClaim {
     /** A booking started on its own and its owner never confirmed they were
      *  there, so it was given up for them. */
     val Unconfirmed: String = "unconfirmed"
+    /** A moderator took this one day off the calendar. The rule behind it, if
+     *  there was one, carries on — only the day is written off. */
+    val SlotRemoved: String = "slot-removed"
+    /** A moderator put this day in somebody else's name. Recorded against the
+     *  day the previous owner lost, not against the one they were given. */
+    val SlotMoved: String = "slot-moved"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -267,6 +273,8 @@ object RespawnClaim {
       case GivenUp     => "given up for the night"
       case NoAnswer    => "no answer, passed on"
       case Unconfirmed => "never confirmed, given up"
+      case SlotRemoved => "taken off the calendar by a moderator"
+      case SlotMoved   => "moved to somebody else by a moderator"
       case other       => other
     }
   }
@@ -458,6 +466,34 @@ object RespawnSchedule {
       val endA = a.endOf(startA)
       slotsOfB.exists(startB => startA.isBefore(b.endOf(startB)) && startB.isBefore(endA))
     }
+  }
+
+  /** Whether `schedule` has given up every day it would contest with
+   *  `candidate`, and so no longer stands in its way.
+   *
+   *  [[clash]] compares two rules, and a rule is a sentence about every day. It
+   *  cannot know that one of those days was handed to somebody else, or taken
+   *  off the calendar — that lives in the row for the day, and `settled` is the
+   *  starts of the days whose rows say they are over. Without this, giving a
+   *  Thursday away left the rule still defending it, and the next person to want
+   *  that evening was refused on behalf of a booking nobody was going to hunt.
+   *
+   *  All-or-nothing on purpose. A repeating rule that has given up one Thursday
+   *  still owns every other, so it takes every contested day being settled
+   *  before it stops counting. A day too far ahead to have a row has settled
+   *  nothing, which is what keeps [[ClashVerdict.TooFarAhead]] meaning what it
+   *  says rather than quietly becoming a yes — and why no contested day at all
+   *  inside the window is false rather than true.
+   */
+  def surrendered(schedule: RespawnSchedule, candidate: RespawnSchedule,
+                  settled: Set[java.time.Instant],
+                  from: ZonedDateTime, to: ZonedDateTime): Boolean = {
+    val theirs = candidate.occurrencesBetween(from, to)
+    val contested = schedule.occurrencesBetween(from, to).filter { start =>
+      val end = schedule.endOf(start)
+      theirs.exists(other => other.isBefore(end) && start.isBefore(candidate.endOf(other)))
+    }
+    contested.nonEmpty && contested.forall(start => settled.contains(start.toInstant))
   }
 
   /** What a clashing booking should do about it, given the rules and the booked

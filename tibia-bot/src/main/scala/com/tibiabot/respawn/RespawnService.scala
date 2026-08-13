@@ -2,7 +2,7 @@ package com.tibiabot.respawn
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{ClashVerdict, Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.{RespawnRepository, SeedSync}
+import com.tibiabot.persistence.{RespawnRepository, ScheduleOccurrence, SeedSync}
 import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
@@ -1124,15 +1124,36 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else {
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
             firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
-          val schedules = repository.schedulesForRespawn(guildId, respawn.id).filter(overlaps(_, candidate))
-          val slots = clashingReservations(guildId, respawn.id, candidate, now)
-          if (schedules.isEmpty && slots.isEmpty) {
-            val saved = repository.addSchedule(guildId, respawn.id, userId, userName, nickname, characterName,
-              firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
-            materialise(guildId, saved, now)
-            refreshThread(guild, respawn, config)
-            Right(ScheduleResult.Booked(saved))
-          } else askForClash(guild, respawn, config, candidate, schedules, slots, now)
+          // Checking for a clash and then writing the booking is two decisions
+          // on one picture, and without the lock two people booking the same
+          // evening at the same moment each got the picture from before the
+          // other wrote. Nothing downstream would have caught it — the unique
+          // index on an occurrence sees two schedule ids, not one evening — so
+          // the read and the write are serialised on the spawn.
+          //
+          // Only they are. Everything after — materialising, the card, and the
+          // DM a clash sends — is outside, because holding a row lock across a
+          // Discord round trip would stall every other claim on the spawn for
+          // as long as Discord felt like taking. A rule is visible to the next
+          // booker the moment it is written, so nothing is lost by letting go
+          // before the slots behind it exist.
+          repository.withRespawnLock(guildId, respawn.id) {
+            val schedules = repository.schedulesForRespawn(guildId, respawn.id)
+              .filter(overlaps(_, candidate))
+              .filterNot(surrendered(guildId, _, candidate, now))
+            val slots = clashingReservations(guildId, respawn.id, candidate, now)
+            if (schedules.isEmpty && slots.isEmpty)
+              Right(repository.addSchedule(guildId, respawn.id, userId, userName, nickname,
+                characterName, firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek))
+            else Left((schedules, slots))
+          } match {
+            case Right(saved) =>
+              materialise(guildId, saved, now)
+              refreshThread(guild, respawn, config)
+              Right(ScheduleResult.Booked(saved))
+            case Left((schedules, slots)) =>
+              askForClash(guild, respawn, config, candidate, schedules, slots, now)
+          }
         }
     }
 
@@ -1234,6 +1255,31 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  itself lives in the domain, where it is testable without a database. */
   private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean =
     RespawnSchedule.clash(a, b)
+
+  /** Whether `schedule` has given up every day it would contest with
+   *  `candidate`, and so no longer stands in the way of it.
+   *
+   *  A rule is a sentence about every day; what became of one of those days
+   *  lives in the row for it. Comparing rules alone, a booking handed to
+   *  somebody else — or one a moderator took off the calendar — left the
+   *  original rule still defending an evening nobody was going to hunt, so the
+   *  next person to want it was refused on behalf of a booking that no longer
+   *  existed.
+   *
+   *  Deliberately all-or-nothing. A repeating rule that has given up one
+   *  Thursday still owns every other, so it takes every contested day being
+   *  settled before it stops counting — and a day too far ahead to have a row
+   *  yet has settled nothing, which is what keeps `TooFarAhead` meaning what it
+   *  says rather than quietly becoming a yes. */
+  private def surrendered(guildId: String, schedule: RespawnSchedule,
+                          candidate: RespawnSchedule, now: ZonedDateTime): Boolean = {
+    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    val settled = repository.occurrencesIn(guildId, schedule.respawnId, now, horizon)
+      .collect { case occurrence if occurrence.scheduleId == schedule.id && !occurrence.live =>
+        occurrence.startsAt.toInstant }
+      .toSet
+    RespawnSchedule.surrendered(schedule, candidate, settled, now, horizon)
+  }
 
   /** Retire a schedule and drop the slots it had booked but not yet started. */
   /** Drop every booking one member holds anywhere in the guild.
@@ -2010,6 +2056,129 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def reservationsFor(guildId: String, respawnId: Long,
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
+
+  /** Which days of which rules already have a row on this spawn — see
+   *  [[com.tibiabot.persistence.ScheduleOccurrence]]. What the calendar needs to
+   *  stop drawing a rule's prediction over the day that replaced it. */
+  def occurrencesIn(guildId: String, respawnId: Long,
+                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence] =
+    repository.occurrencesIn(guildId, respawnId, from, to)
+
+  // --- putting the calendar right ------------------------------------------
+
+  /** Take one day off the calendar, leaving the rule behind it alone.
+   *
+   *  The moderator counterpart to a member cancelling a booking, and pointedly
+   *  narrower: cancelling is about a standing arrangement, this is about one
+   *  evening that has gone wrong. A repeating booking keeps repeating.
+   *
+   *  A day that has been materialised is cancelled; one that has not is written
+   *  down as already cancelled, which is the only way to record "not this day"
+   *  about a rule — and is what both the calendar and the next person to book
+   *  that evening read. Either way the day ends up settled, so the two cases
+   *  differ only in whether there was a row to begin with.
+   */
+  def dropSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime,
+               now: ZonedDateTime = ZonedDateTime.now()): Either[String, String] = {
+    val guildId = guild.getId
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val outcome = repository.withRespawnLock(guildId, respawn.id) {
+          repository.slotAt(guildId, respawn.id, startsAt) match {
+            // Ending a hunt somebody is on is a different act — it has a queue
+            // to advance behind it — and Remove Claim on the board is what does
+            // it. Quietly doing that instead would be a surprise.
+            case Some(slot) if slot.isActive =>
+              Left("That one is being hunted now. Use Remove Claim on the board to end a running hunt.")
+            case Some(slot) =>
+              repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotRemoved)
+              Right(Names.user(slot.nickname, slot.userName))
+            case None =>
+              predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
+                case None => Left("Nothing is booked at that time.")
+                case Some(schedule) =>
+                  repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+                    schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+                    schedule.durationMinutes, RespawnClaim.Outcome.SlotRemoved)
+                  Right(Names.user(schedule.nickname, schedule.userName))
+              }
+          }
+        }
+        outcome.foreach(_ => refreshThread(guild, respawn, config))
+        outcome
+    }
+  }
+
+  /** Put one day in somebody else's name.
+   *
+   *  What they get is a booking of their own rather than a rewritten occurrence
+   *  of the old owner's rule — the same shape a slot takes when its owner gives
+   *  it up to whoever asked, and for the same reason: it is no longer a day of
+   *  anybody's standing arrangement, and the trail keeps both halves of what
+   *  happened. So the old owner's day is settled and a fresh booking is written
+   *  beside it.
+   *
+   *  Refused for a day that is already running. Moving a hunt somebody is on is
+   *  a different act with different consequences — see [[reassignClaim]], which
+   *  is what the board's Hand To does — and quietly doing that instead would be
+   *  a surprise.
+   */
+  def reassignSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime,
+                   toUserId: String, toUserName: String, toNickname: String,
+                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, String] = {
+    val guildId = guild.getId
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val outcome = repository.withRespawnLock(guildId, respawn.id) {
+          repository.slotAt(guildId, respawn.id, startsAt) match {
+            case Some(slot) if slot.isActive =>
+              Left("That one is being hunted now. Use Hand To on the board to move a running claim.")
+            case Some(slot) if slot.userId == toUserId =>
+              Left(s"That slot is already ${Names.user(slot.nickname, slot.userName)}'s.")
+            case Some(slot) =>
+              // An occurrence of a rule is settled and replaced, so the rule
+              // stops speaking for the day; a booking that belongs to nobody's
+              // rule is simply renamed, since there is nothing behind it to
+              // leave a record against.
+              if (slot.scheduleId.isDefined) {
+                repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotMoved)
+                repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
+                  startsAt, slot.durationMinutes)
+                Right(Names.user(slot.nickname, slot.userName))
+              } else
+                repository.reassignReservation(guildId, slot.id, toUserId, toUserName, toNickname)
+                  .map(_ => Names.user(slot.nickname, slot.userName))
+                  .toRight("That booking has already gone.")
+            case None =>
+              predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
+                case None => Left("Nothing is booked at that time.")
+                case Some(schedule) if schedule.userId == toUserId =>
+                  Left(s"That slot is already ${Names.user(schedule.nickname, schedule.userName)}'s.")
+                case Some(schedule) =>
+                  repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+                    schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+                    schedule.durationMinutes, RespawnClaim.Outcome.SlotMoved)
+                  repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
+                    startsAt, schedule.durationMinutes)
+                  Right(Names.user(schedule.nickname, schedule.userName))
+              }
+          }
+        }
+        outcome.foreach(_ => refreshThread(guild, respawn, config))
+        outcome
+    }
+  }
+
+  /** The rule that would put somebody on this spawn at this exact time, for a
+   *  day the sweep has not written down yet. None when no rule names it — which
+   *  is what tells a moderator they are pointing at nothing. */
+  private def predictedOwnerOf(guildId: String, respawnId: Long, startsAt: ZonedDateTime,
+                               now: ZonedDateTime): Option[RespawnSchedule] =
+    repository.schedulesForRespawn(guildId, respawnId)
+      .filter(_.startsAt(startsAt))
+      .find(_ => !startsAt.isBefore(now))
 
   /** `/respawn status <spawn>` — one spawn's current state. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =

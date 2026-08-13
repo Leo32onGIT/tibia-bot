@@ -49,13 +49,15 @@ object RespawnCommand {
   val AddSpawn = "add-spawn"
   val RemoveSpawn = "remove-spawn"
   val ExtendHolder = "extend-holder"
+  val DropSlot = "drop-slot"
+  val ReassignSlot = "reassign-slot"
 
   /** Every action a relayed command may name. An unrecognised one is answered
    *  rather than executed, so a newer build asking for something this one has
    *  never heard of fails visibly instead of silently doing nothing. */
   val Actions: Set[String] =
     Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina,
-        AddSpawn, RemoveSpawn, ExtendHolder)
+        AddSpawn, RemoveSpawn, ExtendHolder, DropSlot, ReassignSlot)
 
   /** None on anything malformed. A command that cannot be read is dropped by
    *  the consumer and times out for the caller, which is the right outcome:

@@ -58,6 +58,14 @@ final class RoutingRespawnActions(
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     port(guildId).removeSpawn(guildId, actorId, code)
 
+  def dropSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime): Future[ActionResult] =
+    port(guildId).dropSlot(guildId, actorId, code, startsAt)
+
+  def reassignSlot(guildId: String, actorId: String, code: String,
+                   startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] =
+    port(guildId).reassignSlot(guildId, actorId, code, startsAt, toUserId)
+
   def bookings(guildId: String, userId: String): List[BookingView] = local.bookings(guildId, userId)
   def calendar(guildId: String, code: String,
                from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] =

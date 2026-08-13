@@ -1,7 +1,7 @@
 package com.tibiabot.persistence.jdbc
 
 import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.{ConnectionProvider, KnownMember, RespawnRepository, SeedSync}
+import com.tibiabot.persistence.{ConnectionProvider, KnownMember, RespawnRepository, ScheduleOccurrence, SeedSync}
 
 import java.sql.{Connection, ResultSet, Timestamp}
 import java.time.{ZoneOffset, ZonedDateTime}
@@ -1307,6 +1307,121 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(2, Timestamp.from(now.toInstant))
         collectClaims(statement.executeQuery())
       } finally statement.close()
+    }
+
+  def occurrencesIn(guildId: String, respawnId: Long,
+                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence] =
+    withGuild(guildId) { conn =>
+      // Every status, deliberately. What this answers is "which days has a rule
+      // already produced a row for", and a cancelled or running one counts just
+      // as much as a reserved one — it is the day being spoken for that matters,
+      // not what is happening on it.
+      val statement = conn.prepareStatement(
+        """SELECT schedule_id, starts_at, status FROM respawn_claims
+          |WHERE respawn_id = ? AND schedule_id IS NOT NULL
+          |  AND starts_at >= ? AND starts_at <= ?;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setTimestamp(2, Timestamp.from(from.toInstant))
+        statement.setTimestamp(3, Timestamp.from(to.toInstant))
+        val result = statement.executeQuery()
+        val out = ListBuffer[ScheduleOccurrence]()
+        while (result.next())
+          out += ScheduleOccurrence(
+            result.getLong("schedule_id"),
+            toZoned(result.getTimestamp("starts_at")),
+            live = Set("reserved", "active").contains(result.getString("status")))
+        out.toList
+      } finally statement.close()
+    }
+
+  def skipOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
+                     userName: String, nickname: String, characterName: String,
+                     startsAt: ZonedDateTime, durationMinutes: Int, outcome: String): Boolean =
+    withGuild(guildId) { conn =>
+      // Born cancelled. The row exists only to say the day is settled, which is
+      // what stops the rule predicting it again and what frees the time for
+      // somebody else to book — ON CONFLICT against the same partial unique
+      // index the materialiser relies on, so a day that already has a row is
+      // left exactly as it is rather than overwritten.
+      val statement = conn.prepareStatement(
+        """INSERT INTO respawn_claims
+          |(respawn_id, user_id, user_name, character_name, status, queue_position,
+          | claimed_at, starts_at, ends_at, duration_minutes, warned, kind, schedule_id, nickname,
+          | outcome, ended_at)
+          |VALUES (?, ?, ?, ?, 'cancelled', 0, NOW(), ?,
+          |        CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?), ?, FALSE, 'scheduled', ?, ?,
+          |        ?, NOW())
+          |ON CONFLICT DO NOTHING
+          |RETURNING id;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setString(2, userId)
+        statement.setString(3, userName)
+        statement.setString(4, characterName)
+        statement.setTimestamp(5, Timestamp.from(startsAt.toInstant))
+        statement.setTimestamp(6, Timestamp.from(startsAt.toInstant))
+        statement.setInt(7, durationMinutes)
+        statement.setInt(8, durationMinutes)
+        statement.setLong(9, scheduleId)
+        statement.setString(10, nickname)
+        statement.setString(11, outcome)
+        statement.executeQuery().next()
+      } finally statement.close()
+    }
+
+  def reassignReservation(guildId: String, claimId: Long, toUserId: String,
+                          toUserName: String, toNickname: String): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      // schedule_id goes to NULL and the character with it: this day is now a
+      // booking of its own, in somebody else's name, and neither the rule it
+      // came from nor the character the old owner meant to bring still applies.
+      // Clearing schedule_id also leaves the rule's own day settled by the
+      // cancelled row skipOccurrence writes alongside this, rather than by this
+      // row wearing two owners at once.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET user_id = ?, user_name = ?, nickname = ?, character_name = '', kind = 'adhoc',
+          |    schedule_id = NULL, asked_at = NULL, request_deadline = NULL,
+          |    requester_user_id = NULL, requester_user_name = NULL,
+          |    requested_starts_at = NULL, requested_duration_minutes = NULL,
+          |    confirmed_at = NULL
+          |WHERE id = ? AND status = 'reserved'
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setString(1, toUserId)
+        statement.setString(2, toUserName)
+        statement.setString(3, toNickname)
+        statement.setLong(4, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+          |WHERE respawn_id = ? AND starts_at = ? AND status IN ('reserved', 'active')
+          |ORDER BY status LIMIT 1;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setTimestamp(2, Timestamp.from(startsAt.toInstant))
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A =
+    withGuildTransaction(guildId) { conn =>
+      lockRespawn(conn, respawnId)
+      // `body` opens connections of its own rather than joining this
+      // transaction, which is enough: whoever else wants this spawn is stopped
+      // at the lock above until this commits, so the reads inside cannot be
+      // interleaved with another decision about the same spawn. The provider
+      // hands out fresh connections rather than drawing on a pool, so holding
+      // one while opening more cannot starve anybody.
+      body
     }
 
   def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim] = withGuild(guildId) { conn =>

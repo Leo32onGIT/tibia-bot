@@ -633,6 +633,17 @@
   .mod-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
   .mod-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
+  /* The same tools one evening at a time, under the calendar. Dashed top border
+     and the purple label of the block above, so a moderator reads them as the
+     same kind of act rather than as part of the booking controls they sit
+     beside — what is being changed here is somebody else's evening. */
+  .slot-tools { border-top: 1px dashed var(--panel-border); padding: 10px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .slot-tools-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
+  /* The name field takes the room and the button keeps its own width, so the
+     row reads as one control however long somebody's name is. */
+  .slot-tools-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+  .slot-tools-row .mod-field { flex: 1 1 190px; }
+
   /* ---- Week grid ---------------------------------------------------------- */
   .cal-legend { display: flex; gap: 14px; padding: 9px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
   .cal-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
@@ -1157,6 +1168,11 @@ let weekPending = false;
  *  `weekPending` because the two say different things and only one of them is
  *  worth interrupting somebody over. */
 let weekError = false;
+/** Everybody the guild's respawn system has seen, once anything has asked for
+ *  them. Module-scope rather than owned by the moderator panel, because the
+ *  calendar's own "give this day to" needs the same list and reading it twice
+ *  would be two round trips for one answer. Null until first asked. */
+let people = null;
 
 /** `code|weekOffset` -> { slots, at }: weeks already read.
  *
@@ -2036,6 +2052,10 @@ function renderWindow() {
   foot.innerHTML = '';
   const message = footMessage();
   if (message) foot.appendChild(message);
+  // Between the two: a moderator repairing an evening is answering the message
+  // above it, and the action row below stays where it always is.
+  const tools = slotTools(openSpawn());
+  if (tools) foot.appendChild(tools);
   const action = readout();
   if (action) foot.appendChild(action);
   foot.hidden = !foot.firstChild;
@@ -2810,6 +2830,69 @@ function readout() {
   return out;
 }
 
+/** Putting one evening of the calendar right, for a moderator.
+ *
+ *  Deliberately about the day and never about the booking behind it. Cancelling
+ *  a booking is the owner's own control above and ends the whole arrangement;
+ *  these two end an evening — the Tuesday somebody cannot make, the slot two
+ *  people ended up agreeing between themselves — and leave a repeating booking
+ *  repeating.
+ *
+ *  Offered against a predicted block as readily as a written one. To the person
+ *  looking at the grid they are the same evening, and which of them has a row
+ *  in the database yet is not something a moderator should have to know about.
+ *
+ *  Hidden for a member, which is convenience rather than the control: both
+ *  endpoints re-resolve the tier per request, so a forged one is refused.
+ */
+function slotTools(spawn) {
+  if (TIER !== 'moderator' && TIER !== 'admin') return null;
+  if (!spawn || !view.pick) return null;
+  const slot = slots.find(b => b.start.getTime() === view.pick.getTime() && b.state !== 'claimed');
+  if (!slot) return null;
+
+  const startsAt = slot.startsAt;
+  const day = slot.start.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+  const box = el('div', 'slot-tools');
+  box.appendChild(el('div', 'slot-tools-title',
+    `<i class="ti ti-shield-half" aria-hidden="true"></i>${esc(whoHas(slot))}'s ${esc(day)}`));
+
+  const row = el('div', 'slot-tools-row');
+  const remove = button('Remove day', 'btn mod-btn small', () =>
+    post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt }), 'ti-calendar-minus');
+  remove.title = slot.repeats
+    ? 'Take this one evening off the calendar — the booking keeps repeating'
+    : 'Take this booking off the calendar';
+  row.appendChild(remove);
+  box.appendChild(row);
+
+  const picker = personField('Search a name, or paste a Discord ID');
+  const give = el('div', 'slot-tools-row');
+  give.appendChild(picker.field);
+  give.appendChild(button('Give day to', 'btn mod-btn small', () => {
+    const person = picker.chosen();
+    if (!person) {
+      view.answer = { ok: false, message: 'Pick somebody first, or paste their Discord ID.' };
+      renderWindow();
+      return;
+    }
+    post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
+      { code: spawn.code, startsAt, toUserId: person.id });
+  }, 'ti-user-share'));
+  box.appendChild(give);
+  return box;
+}
+
+/** Whose evening it is, for a line that has to name somebody in a few words.
+ *  The character is what the block is labelled with, so it leads; the account is
+ *  what a moderator would go and look for. */
+function whoHas(slot) {
+  const name = (slot.owner || '').trim();
+  const account = (slot.nickname || slot.account || '').trim();
+  if (!name) return account || 'Somebody';
+  return account && account.toLowerCase() !== name.toLowerCase() ? `${name} (${account})` : name;
+}
+
 /** The tools that act on somebody else's claim.
  *
  *  Drawn only for a moderator, but that is convenience and not the control:
@@ -3045,10 +3128,9 @@ function setUpModPanel() {
   }
 
   // ---- Stamina ------------------------------------------------------------
-  // Everybody the guild's respawn system has seen. Read once the panel is opened
-  // rather than at page load: it is only the moderator panel that needs it, and
-  // most visits never open it.
-  let people = null;
+  // The list of people lives at module scope and is read once the panel is
+  // opened rather than at page load — most visits never open it — see
+  // `loadPeople`.
   let picked = null;
 
   /** The amounts worth offering, and the whole of what may be given.
@@ -3153,26 +3235,6 @@ function setUpModPanel() {
     }
   }
 
-  /** How somebody reads in the picker: the account, then what this server calls
-   *  them. The same order the bot names people in Discord. */
-  function personLabel(person) {
-    const nick = (person.nickname || '').trim();
-    const name = (person.name || '').trim() || person.id;
-    return nick && nick.toLowerCase() !== name.toLowerCase() ? `${name} (@${nick})` : name;
-  }
-
-  async function loadPeople() {
-    if (people) return;
-    try {
-      const res = await fetch(`/dashboard/g/${GUILD_ID}/people`, { headers: { 'Accept': 'application/json' } });
-      people = res.ok ? (await res.json()).people : [];
-    } catch (e) {
-      // A picker that cannot be filled still takes a pasted id, so this is a
-      // smaller failure than it looks and not worth an error of its own.
-      people = [];
-    }
-  }
-
   async function submit() {
     const payload = {
       code: field('ms-code').value.trim(),
@@ -3216,6 +3278,81 @@ function setUpModPanel() {
 
 /** `icon` is a Tabler class, drawn before the label. Appended as a text node
  *  rather than set through textContent, which would throw the icon away. */
+/** How somebody reads in a picker: the account, then what this server calls
+ *  them. The same order the bot names people in Discord. */
+function personLabel(person) {
+  const nick = (person.nickname || '').trim();
+  const name = (person.name || '').trim() || person.id;
+  return nick && nick.toLowerCase() !== name.toLowerCase() ? `${name} (@${nick})` : name;
+}
+
+async function loadPeople() {
+  if (people) return;
+  try {
+    const res = await fetch(`/dashboard/g/${GUILD_ID}/people`, { headers: { 'Accept': 'application/json' } });
+    people = res.ok ? (await res.json()).people : [];
+  } catch (e) {
+    // A picker that cannot be filled still takes a pasted id, so this is a
+    // smaller failure than it looks and not worth an error of its own.
+    people = [];
+  }
+}
+
+/** Somebody named by typing, for the calendar's "give this day to".
+ *
+ *  A search over everybody the system knows, and a pasted Discord id for
+ *  anybody it does not — the moderator panel's stamina field takes both for the
+ *  same reason, since somebody who has never claimed here is in no list but is
+ *  still a person a slot can be handed to.
+ *
+ *  Returns the field and a `chosen()` that answers null until it names somebody
+ *  real, so the caller never has to guess what a half-typed name meant.
+ */
+function personField(placeholder) {
+  const field = el('div', 'mod-field mod-who');
+  field.innerHTML = `<input type="text" autocomplete="off" spellcheck="false"
+      placeholder="${esc(placeholder)}"><div class="mod-suggest" hidden></div>`;
+  const input = field.querySelector('input');
+  const suggest = field.querySelector('.mod-suggest');
+  let held = null;
+
+  function choose(person) {
+    held = person;
+    input.value = personLabel(person);
+    suggest.hidden = true;
+  }
+
+  input.addEventListener('input', () => {
+    held = null;
+    const text = input.value.trim().toLowerCase();
+    const matches = !text ? [] : (people || []).filter(p =>
+      p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
+    suggest.innerHTML = '';
+    matches.forEach(person => {
+      const hit = el('button', 'mod-suggest-row', esc(personLabel(person)));
+      hit.type = 'button';
+      // mousedown, not click: the input's blur fires first and would hide the
+      // list out from under the pointer before the click ever landed.
+      hit.addEventListener('mousedown', e => { e.preventDefault(); choose(person); });
+      suggest.appendChild(hit);
+    });
+    suggest.hidden = !matches.length;
+  });
+  input.addEventListener('blur', () => setTimeout(() => (suggest.hidden = true), 120));
+  // Filled in the background: the field works without it, and waiting on a read
+  // before letting somebody type would make it feel broken.
+  loadPeople().then(() => {});
+
+  return {
+    field,
+    chosen() {
+      const text = input.value.trim();
+      if (/^\d{15,25}$/.test(text)) return { id: text, name: text, nickname: '' };
+      return held && personLabel(held) === text ? held : null;
+    }
+  };
+}
+
 function button(label, className, onClick, icon) {
   const b = document.createElement('button');
   b.className = className;

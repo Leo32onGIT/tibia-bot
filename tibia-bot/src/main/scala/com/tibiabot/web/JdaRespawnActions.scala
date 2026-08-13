@@ -159,6 +159,7 @@ final class JdaRespawnActions(
         // showing earlier in the week still draws what was booked then.
         respawnService.reservationsFor(guildId, respawn.id, from),
         respawnService.schedulesForRespawn(guildId, respawn.id),
+        respawnService.occurrencesIn(guildId, respawn.id, from, to),
         from, to)
     }
 
@@ -267,6 +268,40 @@ final class JdaRespawnActions(
       }
     }
 
+  def dropSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, s"No spawn matches '$code'.")
+        case Some(respawn) =>
+          respawnService.dropSlot(guild, respawn, startsAt) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(owner) =>
+              logger.info(s"Dashboard: '$actorId' took $owner's ${respawn.code} slot at " +
+                s"${startsAt.toInstant} off the calendar in guild '$guildId'")
+              ActionResult(ok = true, s"$owner's slot on ${respawn.displayName} has been removed.")
+          }
+      }
+    }
+
+  def reassignSlot(guildId: String, actorId: String, code: String,
+                   startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, s"No spawn matches '$code'.")
+        case Some(respawn) =>
+          respawnService.reassignSlot(guild, respawn, startsAt, toUserId,
+            displayName(toUserId), nicknameIn(guild, toUserId)) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(from) =>
+              logger.info(s"Dashboard: '$actorId' moved $from's ${respawn.code} slot at " +
+                s"${startsAt.toInstant} to '$toUserId' in guild '$guildId'")
+              ActionResult(ok = true,
+                s"That slot on ${respawn.displayName} is now ${displayName(toUserId)}'s.")
+          }
+      }
+    }
+
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.settings(guildId) match {
@@ -311,6 +346,9 @@ object JdaRespawnActions {
                        active: Option[RespawnClaim],
                        reservations: List[RespawnClaim],
                        schedules: List[RespawnSchedule],
+                       /** Which days each rule has already written a row for,
+                        *  whatever became of them. */
+                       occurrences: List[com.tibiabot.persistence.ScheduleOccurrence],
                        from: java.time.ZonedDateTime,
                        to: java.time.ZonedDateTime): CalendarView = {
     val hunting = active.toList.flatMap { claim =>
@@ -346,7 +384,25 @@ object JdaRespawnActions {
       }
     }
 
-    val written = booked.flatMap(slot => slot.scheduleId.map(_ -> slot.startsAt.toInstant)).toSet
+    // A rule stops predicting a day for one of two reasons: the day is already
+    // on the grid, or it is over.
+    //
+    // Only the first used to be checked, and only through the reservations —
+    // which is the bug that put two names on one evening. A day handed to
+    // somebody else is no longer a reservation of the rule that produced it,
+    // and a day being hunted has become the live claim, so in both cases
+    // nothing suppressed the rule and it drew its old owner again beside
+    // whoever had actually taken the evening.
+    //
+    // The two are kept apart rather than read off the occurrence rows wholesale,
+    // because "written down" and "drawn" are not the same set: a slot starting
+    // exactly on the window's edge has a row but no block, and letting its row
+    // silence the rule would leave that evening on the grid as nothing at all.
+    val drawn = booked.flatMap(slot => slot.scheduleId.map(_ -> slot.startsAt.toInstant)) ++
+      (for { claim <- active.toList; id <- claim.scheduleId; start <- claim.startsAt }
+        yield id -> start.toInstant)
+    val over = occurrences.filterNot(_.live).map(o => o.scheduleId -> o.startsAt.toInstant)
+    val written = (drawn ++ over).toSet
     val predicted = schedules.flatMap { schedule =>
       schedule.occurrencesBetween(from, to)
         .filterNot(start => written.contains(schedule.id -> start.toInstant))

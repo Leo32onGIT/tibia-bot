@@ -446,6 +446,40 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    // Putting one evening of the calendar right. Both name the slot by the
+    // instant it starts on rather than by a row id, because the grid draws days
+    // a rule has not written down yet and those have no id to send.
+    path("g" / Segment / "drop-slot") { guildId =>
+      post {
+        withModerator(guildId) { (userId, _) =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt)) match {
+              case (Some(code), Some(start)) =>
+                actionResult(guildId, actions.dropSlot(guildId, userId, code, start))
+              case _ => badRequest("Removing a slot needs a spawn and which day.")
+            }
+          }
+        }
+      }
+    } ~
+    path("g" / Segment / "reassign-slot") { guildId =>
+      post {
+        withModerator(guildId) { (userId, _) =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt),
+             fields.get("toUserId").map(_.trim).filter(_.nonEmpty)) match {
+              case (Some(code), Some(start), Some(to)) =>
+                actionResult(guildId, actions.reassignSlot(guildId, userId, code, start, to))
+              case _ => badRequest("Moving a slot needs a spawn, which day, and somebody to give it to.")
+            }
+          }
+        }
+      }
+    } ~
     // Who a moderator may hand stamina to. Behind the moderator gate rather than
     // merely unadvertised: it is a list of everybody who has used the system
     // here, which is not something an ordinary member should be able to
@@ -684,6 +718,13 @@ object RespawnDashboardRoute {
       end   <- scala.util.Try(java.time.Instant.parse(to).atZone(java.time.ZoneOffset.UTC)).toOption
       if end.isAfter(start) && java.time.Duration.between(start, end).toDays <= MaxWindowDays
     } yield (start, end)
+
+  /** One instant off a posted field, for the moderator tools that name a day of
+   *  the calendar rather than a row. Anything unparseable is nothing rather than
+   *  now: a slot at the wrong moment is a slot belonging to somebody who was
+   *  never meant to lose it. */
+  private[web] def instantAt(raw: String): Option[java.time.ZonedDateTime] =
+    scala.util.Try(java.time.Instant.parse(raw.trim).atZone(java.time.ZoneOffset.UTC)).toOption
 
   /** Somebody on a board, as the page needs them: an id to act on and a name to
    *  show. Never one without the other — a name alone cannot be acted on, and an

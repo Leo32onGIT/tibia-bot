@@ -18,6 +18,19 @@ import java.time.ZonedDateTime
  *  empty on a row written before it was recorded. */
 final case class KnownMember(userId: String, userName: String, nickname: String)
 
+/** One day of a standing booking that has actually been written down, and
+ *  whether it is still standing.
+ *
+ *  A rule says "every day at eleven"; it cannot say what became of last
+ *  Thursday. Only the row can, and there is exactly one per `(schedule, start)`
+ *  — the pair the database already treats as an occurrence's identity.
+ *
+ *  `live` is false once the day has been settled some other way: cancelled by
+ *  its owner, handed to whoever asked for it, missed, or taken off the calendar
+ *  by a moderator. A settled day is one the rule has given up, and both the
+ *  calendar and the clash check have to stop speaking for it. */
+final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime, live: Boolean)
+
 final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
   def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
 }
@@ -322,6 +335,63 @@ trait RespawnRepository {
   /** Slots booked on a spawn that haven't started, soonest first — what the card
    *  shows and what an ad-hoc claim has to stop short of. */
   def reservationsFor(guildId: String, respawnId: Long, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Every occurrence any rule has written on this spawn between two instants,
+   *  whatever became of each — see [[ScheduleOccurrence]].
+   *
+   *  Distinct from [[reservationsFor]], which answers "what is booked": this
+   *  answers "which days have already been decided", and the difference is the
+   *  whole point. A day that is running, or was cancelled, or was handed to
+   *  somebody else, is missing from the first and present here — and reading
+   *  only the first is what let a rule's prediction reappear beside the very
+   *  booking that replaced it, so one slot showed two names. */
+  def occurrencesIn(guildId: String, respawnId: Long,
+                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence]
+
+  /** Write off one day of a rule without touching the rule.
+   *
+   *  A cancelled occurrence row is how "not this day" is recorded — there is no
+   *  separate exception table, and there does not need to be one, because the
+   *  row is what both the calendar and the clash check already consult. Used for
+   *  a day that was never materialised: the moderator is taking a slot off the
+   *  calendar before the sweep would have written it.
+   *
+   *  False when the day already had a row, which makes it safe to call against
+   *  a calendar that may be a few seconds out of date. */
+  def skipOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
+                     userName: String, nickname: String, characterName: String,
+                     startsAt: ZonedDateTime, durationMinutes: Int, outcome: String): Boolean
+
+  /** Put a booked slot in somebody else's name, keeping its time and length.
+   *
+   *  Any pending question goes with it: the answer would be about a slot that is
+   *  no longer theirs to answer for. The schedule behind it is dropped for the
+   *  same reason — one day of a rule, handed on, stops being an occurrence of
+   *  that rule, exactly as it does when the owner gives it up to whoever asked.
+   *
+   *  None when the slot is no longer reserved. */
+  def reassignReservation(guildId: String, claimId: Long, toUserId: String,
+                          toUserName: String, toNickname: String): Option[RespawnClaim]
+
+  /** A booked or running claim starting at exactly this instant, whoever owns
+   *  it — how a moderator names one day on the calendar without knowing any
+   *  row id. */
+  def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** Run `body` holding the spawn's row lock, so two people deciding about the
+   *  same spawn at once take turns rather than both deciding on the same
+   *  picture.
+   *
+   *  The one thing that makes a read-then-write safe here. Booking checks for a
+   *  clash and then inserts, across separate statements, so without this two
+   *  bookings arriving together both found the evening free and both took it —
+   *  and nothing downstream would catch it, since the unique index on
+   *  `(schedule_id, starts_at)` sees two ids and the one on `respawn_id` only
+   *  covers a claim that is already running.
+   *
+   *  It has to be the database's lock rather than a mutex: dashboard writes are
+   *  relayed, so the two racers need not even be in the same process. */
+  def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A
 
   /** Booked slots whose start has arrived, across the guild. */
   def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]

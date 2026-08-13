@@ -84,6 +84,16 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       lastExtend = Some((code, extraMinutes)); result
     }
     var lastExtend: Option[(String, Int)] = None
+    def dropSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime): Future[ActionResult] = {
+      lastDrop = Some((code, startsAt.toInstant.toString)); result
+    }
+    var lastDrop: Option[(String, String)] = None
+    def reassignSlot(guildId: String, actorId: String, code: String,
+                     startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = {
+      lastSlotMove = Some((code, startsAt.toInstant.toString, toUserId)); result
+    }
+    var lastSlotMove: Option[(String, String, String)] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -165,6 +175,28 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       consumer(cache, local).sweep().futureValue
       pending.futureValue.ok shouldBe true
       local.lastExtend shouldBe Some(("415", 30))
+    }
+
+    // A calendar day crosses as the instant it starts on, because the slot a
+    // moderator is pointing at may be one no row exists for yet.
+    "hand a removed calendar day to the bot that owns the forum" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
+      val pending = relay(cache).dropSlot("g1", "mod-1", "415", day)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastDrop shouldBe Some(("415", "2026-08-13T11:00:00Z"))
+    }
+
+    "hand a moved calendar day across with whose it becomes" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
+      val pending = relay(cache).reassignSlot("g1", "mod-1", "415", day, "u9")
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastSlotMove shouldBe Some(("415", "2026-08-13T11:00:00Z", "u9"))
     }
 
     // The thing the whole lease design exists to prevent.
