@@ -102,6 +102,7 @@ object Config {
  val satchelEmoji: String = discord.getString("satchel-emoji")
  val dreamScarEmoji: String = discord.getString("dreamscar-emoji")
  val masslogEmoji: String = discord.getString("masslog-emoji")
+ val bountyEmoji: String = discord.getString("bounty-emoji")
  val dromeEmoji: String = discord.getString("drome-emoji")
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")

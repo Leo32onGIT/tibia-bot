@@ -161,6 +161,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcRenameCooldownRepository(connectionProvider)
   private val patreonMemberRepository: persistence.PatreonMemberRepository =
     new persistence.jdbc.JdbcPatreonMemberRepository(connectionProvider)
+  private val notifyRepository: persistence.NotifyRepository =
+    new persistence.jdbc.JdbcNotifyRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -206,6 +208,11 @@ object BotApp extends App with StrictLogging {
   // own id for the same reason respawnOwnership above does: bots sharing a
   // bot_cache database must not consume each other's server-save state.
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList, discordGateway.selfUserId)
+
+  // The mass-log and bounty DM subscriptions behind the two notification-channel
+  // autoroles. Its cache is filled after createCacheDatabase() below, which is
+  // what creates the two tables — see notify.NotifyService for why it caches.
+  val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
 
   // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
@@ -554,7 +561,11 @@ object BotApp extends App with StrictLogging {
         else world -> discordsList
       }
       if (updatedDiscordsData != discordsData) modifyDiscordsData(_ => updatedDiscordsData)
+      // These live in the shared cache database, so dropping the guild's own
+      // one leaves them behind.
+      notifyService.forgetGuild(guildId)
     },
+    forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
   )
 
@@ -607,6 +618,10 @@ object BotApp extends App with StrictLogging {
   val boostedBossesList: List[String] = Await.result(bossesFutures, 10.seconds)
 
   createCacheDatabase()
+
+  // Now that the tables exist. Before the world streams start below, so the
+  // first online-list sweep already sees whatever is subscribed.
+  notifyService.load()
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,

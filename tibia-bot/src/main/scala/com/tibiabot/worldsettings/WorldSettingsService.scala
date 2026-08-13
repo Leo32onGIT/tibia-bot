@@ -268,8 +268,9 @@ final class WorldSettingsService(
               val nemesisRole = worldConfigData("nemesis_role")
               val allyPkRole = worldConfigData("allypk_role")
               val masslogRole = worldConfigData("masslog_role")
+              val bountyRole = worldConfigData.getOrElse("bounty_role", "0")
 
-              message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, level.toString))
+              message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, level.toString))
                 .setComponents(ActionRow.of(channelService.fullblessRoleButtons.asJava))
                 .queue()
             }

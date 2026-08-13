@@ -166,6 +166,47 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createSatchelTable)
       //logger.info("Table 'satchel' created successfully")
 
+      // The two DM subscriptions behind the notification-channel autoroles.
+      // Guild-scoped rows in the shared cache database (see NotifyRepository for
+      // why they aren't in the per-guild ones), so every lookup keys on guildid
+      // and world as well as the user.
+      val createMasslogNotificationsTable =
+        s"""CREATE TABLE IF NOT EXISTS masslog_notifications (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |guildid VARCHAR(255) NOT NULL,
+           |world VARCHAR(255) NOT NULL,
+           |userid VARCHAR(255) NOT NULL,
+           |threshold INTEGER NOT NULL,
+           |enabled BOOLEAN NOT NULL DEFAULT TRUE,
+           |muted_until TIMESTAMP,
+           |last_notified TIMESTAMP,
+           |CONSTRAINT unique_masslog_subscription UNIQUE (guildid, world, userid)
+           |);""".stripMargin
+
+      val createBountyNotificationsTable =
+        s"""CREATE TABLE IF NOT EXISTS bounty_notifications (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |guildid VARCHAR(255) NOT NULL,
+           |world VARCHAR(255) NOT NULL,
+           |userid VARCHAR(255) NOT NULL,
+           |character_name VARCHAR(255) NOT NULL,
+           |cooldown_minutes INTEGER NOT NULL,
+           |enabled BOOLEAN NOT NULL DEFAULT TRUE,
+           |muted_until TIMESTAMP,
+           |last_notified TIMESTAMP
+           |);""".stripMargin
+
+      // Case-insensitive on the name: Tibia treats "Bubble" and "bubble" as the
+      // same character, and someone re-adding a bounty with different casing
+      // means to adjust the one they have, not to hold two.
+      val createBountyUniqueIndex =
+        s"""CREATE UNIQUE INDEX IF NOT EXISTS unique_bounty_subscription
+           |ON bounty_notifications (guildid, world, userid, LOWER(character_name));""".stripMargin
+
+      newStatement.executeUpdate(createMasslogNotificationsTable)
+      newStatement.executeUpdate(createBountyNotificationsTable)
+      newStatement.executeUpdate(createBountyUniqueIndex)
+
       newStatement.close()
     }
   }
@@ -250,6 +291,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |nemesis_role VARCHAR(255) NOT NULL,
               |allypk_role VARCHAR(255) NOT NULL,
               |masslog_role VARCHAR(255) NOT NULL,
+              |bounty_role VARCHAR(255) NOT NULL DEFAULT '0',
               |fullbless_channel VARCHAR(255) NOT NULL,
               |nemesis_channel VARCHAR(255) NOT NULL,
               |fullbless_level INT NOT NULL,

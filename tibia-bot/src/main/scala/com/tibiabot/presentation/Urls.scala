@@ -21,6 +21,11 @@ object Urls {
     s"https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=${encodedString}"
   }
 
+  def worldUrl(world: String): String = {
+    val encodedString = URLEncoder.encode(world, StandardCharsets.UTF_8.toString)
+    s"https://www.tibia.com/community/?subtopic=worlds&world=${encodedString}"
+  }
+
   /** Resolve a creature name to its TibiaWiki file/page name.
    *
    *  Extracted verbatim from the name-parsing block shared by

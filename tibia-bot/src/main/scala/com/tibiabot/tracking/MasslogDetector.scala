@@ -10,6 +10,20 @@ object MasslogDetector {
 
   val DefaultFloor = 3
 
+  /** How long after logging in an enemy still counts as "just logged in" — the
+   *  window behind the `:zap:` on a player's online-list row, the `⚡` on the
+   *  category name, and the per-user mass-log DM.
+   *
+   *  One constant on purpose: the DM's threshold is a count of the same people
+   *  the `⚡` is counting, so a reader comparing the two has to be looking at the
+   *  same window or the number they picked means something else. */
+  val RecentLoginSeconds: Long = 900
+
+  /** Minimum spacing between mass-log DMs to one subscriber. The window above,
+   *  in minutes: a single mass log is one episode however many sweeps see it,
+   *  and by the time the window has rolled over the people in it are new. */
+  val NotifyCooldownMinutes: Int = (RecentLoginSeconds / 60).toInt
+
   /** Multiplier applied to the base percentage; lower = more sensitive.
    *  Only 0-4 are handled; other values throw MatchError. */
   def sensitivityModifier(sensitivity: Int): Double = sensitivity match {

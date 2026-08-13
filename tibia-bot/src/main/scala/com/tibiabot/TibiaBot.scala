@@ -70,6 +70,11 @@ class TibiaBot(
   // tracking.OnlineListState.
   private val onlineListState = new tracking.OnlineListState
 
+  // Owned by the online-list sweep, which never overlaps itself — see
+  // tracking.BountyPresence for why a login needs remembering rather than
+  // reading off the roster.
+  private val bountyPresence = new tracking.BountyPresence
+
   // initialize cached deaths/levels from database
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
   levelTracker.load(BotApp.getLevelsCache(world).map(levelsCache => tracking.LevelRecord(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time))))
@@ -789,6 +794,15 @@ class TibiaBot(
         onlineListRefreshSeconds =
           discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth, onlineListRefreshSeconds)
         val refreshIntervalSeconds = onlineListRefreshSeconds
+
+        // Bounty logins are checked every sweep, not on each guild's own refresh
+        // timer: that timer paces *rendering* an online list and backs off when
+        // the send lane is busy, which would quietly turn "they just logged in"
+        // into "they logged in a few minutes ago" exactly when the world is at
+        // its busiest. Presence itself is world-wide, so it is read once here and
+        // the result fanned out below.
+        bountyLoginSweep(roster)
+
         discordsData(world).foreach { discords =>
           val guildId = discords.id
           val onlineTimer = onlineListTimer.getOrElse(guildId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
@@ -810,6 +824,43 @@ class TibiaBot(
       case ex: Throwable => logger.error(s"Online list sweep failed for world '$world'", ex)
     }
   }
+
+  /** Who anybody has a bounty on has just logged in on this world — one presence
+   *  pass, then a DM per guild that was watching them.
+   *
+   *  Nothing is materialised when nobody is watching, which is the ordinary case:
+   *  the roster runs to four figures and the whole point of asking here is that
+   *  the answer is usually "no one".
+   *
+   *  A guild whose Patreon seat has lapsed is skipped, the same as its online
+   *  list is — a paused world shouldn't keep messaging people privately. */
+  private def bountyLoginSweep(roster: => List[tracking.OnlinePlayer]): Unit =
+    try {
+      val targets = BotApp.notifyService.bountyTargets(world)
+      if (targets.nonEmpty) {
+        val online = roster.iterator.map(player => player.name.toLowerCase -> player.duration).toMap
+        val logins = bountyPresence.logins(targets, online)
+        if (logins.nonEmpty) {
+          val byName = roster.iterator.map(player => player.name.toLowerCase -> player).toMap
+          discordsData(world).foreach { discords =>
+            val guildId = discords.id
+            if (paywallService.isActive(guildId, world)) {
+              val guild = BotApp.discordGateway.guildById(guildId)
+              val guildName = if (guild == null) "" else guild.getName
+              logins.foreach { name =>
+                byName.get(name).foreach { player =>
+                  BotApp.notifyService.onBountyLogin(guildId, world, guildName, player.name, player.level, player.vocation)
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Same rule as the sweep that calls this: a notification problem must not
+      // take the online list down with it.
+      case ex: Throwable => logger.warn(s"Bounty login sweep failed for world '$world'", ex)
+    }
 
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
     // post death to each discord
@@ -1206,8 +1257,11 @@ class TibiaBot(
       val huntedPlayerCheck = huntedPlayerNames.contains(playerNameLower)
       val guildIcon = presentation.GuildIcons.guildIcon(player.guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck)
 
-      // Masslog: only shows characters :zap: if they have only been logged in under 900 seconds (15 minutes)
-      val justLogged = durationInSec < 900 && (huntedGuildCheck || huntedPlayerCheck)
+      // Masslog: only shows characters :zap: if they have been logged in for
+      // less than tracking.MasslogDetector.RecentLoginSeconds. That constant is
+      // shared with the per-user mass-log DM below, whose threshold is a count
+      // of exactly these people.
+      val justLogged = durationInSec < tracking.MasslogDetector.RecentLoginSeconds && (huntedGuildCheck || huntedPlayerCheck)
       val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
       vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
@@ -1232,13 +1286,26 @@ class TibiaBot(
       .toList
 
     // Masslog threshold (sensitivity fixed at 0 today; formula in tracking.MasslogDetector).
-    // Drives only the "⚡" suffix on the category name below — the mass-log role
-    // poke itself is not implemented.
+    // Drives the "⚡" suffix on the category name below.
     val masslogCategory = tracking.MasslogDetector.isMasslog(zapCount, enemiesList.size, sensitivity = 0)
     // Suppressed for the first 30 minutes after a restart: on startup every
     // tracked player looks like a fresh login, which would read as a mass-log.
     val recentStart = BotApp.startTime.isAfter(Instant.now().minusSeconds(30 * 60))
     val masslogIcon = if (masslogCategory && !recentStart) "⚡" else ""
+
+    // The per-user mass-log DM. Deliberately not gated on `masslogCategory`:
+    // that formula is a proportion, tuned to decide whether a whole world's
+    // category deserves a warning icon, whereas a subscriber picked a flat count
+    // of enemies. A guild watching thirty enemies never trips the proportion at
+    // eight arrivals, and eight arriving at once is exactly what they asked to
+    // hear about. `recentStart` still applies, for the reason directly above.
+    if (!recentStart) {
+      try BotApp.notifyService.onMasslog(guildId, world, guild.getName, zapCount, enemiesList.size)
+      catch {
+        // Never let a notification failure cost this guild its online list.
+        case ex: Throwable => logger.warn(s"Mass-log notification failed for Guild ID: '$guildId'", ex)
+      }
+    }
 
     // combined online list into one channel
     if (onlineCombined == "true") {
