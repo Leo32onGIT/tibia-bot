@@ -27,6 +27,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       Future.successful { store.put(key, value); () }
     def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
       Future.successful(store.putIfAbsent(key, value).isEmpty)
+    def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = {
       val re = ("^" + java.util.regex.Pattern.quote(pattern).replace("*", "\\E.*\\Q") + "$").r
       Future.successful(store.keys.filter(k => re.findFirstIn(k).isDefined).toList)
@@ -159,6 +160,86 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       // The asker gets a definite no instead of waiting out its timeout.
       Await.result(answer, 2.seconds) shouldBe Nil
       redis.store.keys.exists(_.startsWith("tibia:access-a:")) shouldBe true
+    }
+
+    "answer a question once, not on every beat until it expires" in {
+      val redis = new FakeRedis
+      Await.result(redis.setEx(AccessQuery.requestKey("g1", "q1"),
+        AccessQuery("q1", "g1", "u1").toJson, 1.minute), 2.seconds)
+      var resolved = 0
+      val consumer = new AccessQueryConsumer(redis,
+        resolve = (_, _) => { resolved += 1; Some(access) }, canSee = _ == "g1")
+
+      // The beat is shorter than the blocking Discord lookup an answer costs,
+      // so a question left in place got resolved again on every sweep for as
+      // long as its key lived — several REST calls for one page load.
+      Await.result(consumer.sweep(), 3.seconds)
+      Await.result(consumer.sweep(), 3.seconds)
+      Await.result(consumer.sweep(), 3.seconds)
+
+      resolved shouldBe 1
+      redis.store.get(AccessQuery.requestKey("g1", "q1")) shouldBe None
+      redis.store.get(AccessQuery.replyKey("q1")) should not be empty
+    }
+
+    "keep a server that answered a moment ago when the fleet misses a beat" in {
+      val redis = new FakeRedis
+      Await.result(redis.setEx(GuildRoster.key("bot-2"),
+        GuildRoster("bot-2", List(RosterGuild("g1", "Their Server", None))).toJson, 1.minute), 2.seconds)
+      val consumer = new AccessQueryConsumer(redis, resolve = (_, _) => Some(access), canSee = _ == "g1")
+      val asking = new RemoteGuildAccess(redis, scheduler,
+        isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
+
+      val first = asking.accessFor("u1", Set("g1"))
+      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(first, 3.seconds) shouldBe List(access)
+
+      // Now nothing sweeps — a deploy, a busy beat, a page load that landed
+      // between two of them. The visitor's standing there has not changed, so
+      // dropping the server from their picker would be the wrong answer.
+      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe List(access)
+    }
+
+    "believe a 'they may not' over anything it remembers" in {
+      val redis = new FakeRedis
+      Await.result(redis.setEx(GuildRoster.key("bot-2"),
+        GuildRoster("bot-2", List(RosterGuild("g1", "Their Server", None))).toJson, 1.minute), 2.seconds)
+      var allowed = true
+      val consumer = new AccessQueryConsumer(redis,
+        resolve = (_, _) => if (allowed) Some(access) else None, canSee = _ == "g1")
+      val asking = new RemoteGuildAccess(redis, scheduler,
+        isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
+
+      val first = asking.accessFor("u1", Set("g1"))
+      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(first, 3.seconds) shouldBe List(access)
+
+      allowed = false
+      val second = asking.accessFor("u1", Set("g1"))
+      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(second, 3.seconds) shouldBe Nil
+
+      // And the refusal sticks: losing access must not be undone by the next
+      // beat the other bot happens to miss.
+      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe Nil
+    }
+
+    "not stand on an old answer when the question grants a moderator action" in {
+      val redis = new FakeRedis
+      Await.result(redis.setEx(GuildRoster.key("bot-2"),
+        GuildRoster("bot-2", List(RosterGuild("g1", "Their Server", None))).toJson, 1.minute), 2.seconds)
+      val consumer = new AccessQueryConsumer(redis, resolve = (_, _) => Some(access), canSee = _ == "g1")
+      val asking = new RemoteGuildAccess(redis, scheduler,
+        isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
+
+      val first = asking.accessFor("u1", Set("g1"))
+      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(first, 3.seconds) shouldBe List(access)
+
+      // A bot that cannot say now whether somebody is still a moderator is a
+      // no, however recently it said yes — this is the check that moves
+      // somebody else off a spawn.
+      Await.result(asking.accessFor("u1", Set("g1"), remembering = false), 3.seconds) shouldBe Nil
     }
 
     "leave alone a question about a guild it cannot see" in {

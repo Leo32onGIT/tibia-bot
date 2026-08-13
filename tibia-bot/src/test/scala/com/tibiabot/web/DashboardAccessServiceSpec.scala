@@ -27,7 +27,10 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
 
   private class FakeGateway(
     botGuilds: List[(String, String)],
-    members: Map[(String, String), MemberAccess]
+    /** A `var` so a test can have somebody become resolvable between two calls
+     *  — which is what a guild run by another bot looks like when the answer
+     *  arrives after the first page load gave up waiting for it. */
+    var members: Map[(String, String), MemberAccess]
   ) extends DiscordGateway {
     /** Which channel-visibility questions were actually asked, so a test can
      *  show the REST call was skipped rather than merely ignored. */
@@ -245,6 +248,53 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
         case DashboardEntry.Choose(options) => options.map(_.guildName) shouldBe List("Allies", "Violent")
         case other => fail(s"expected a picker, got $other")
       }
+    }
+  }
+
+  /** Two guilds, one of which starts out unresolvable — the shape of a guild
+   *  another bot runs that has not answered yet. */
+  private def twoServers = {
+    val gateway = new FakeGateway(
+      List("g1" -> "Violent", "g2" -> "Ruckus"),
+      Map(("g1", "u1") -> member()))
+    (gateway, new DashboardAccessService(
+      gateway,
+      respawnConfigured = Set("g1", "g2").contains,
+      worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+      moderatorRoleOf = _ => "0"))
+  }
+
+  "rememberedAccessFor" should {
+
+    "answer a second read from the last few seconds rather than asking again" in {
+      val (gateway, svc) = twoServers
+      svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
+      svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
+      // One pass over the candidates, not two — this is what keeps the ten
+      // second board poll from costing a Discord call each time.
+      gateway.lookups shouldBe List("g1", "g2")
+    }
+
+    // The bug this exists for: one page load that lost its race with the bot
+    // running the other guild was remembered as "no such server for you", and
+    // every reload for the next forty-five seconds was refused from that memory
+    // rather than asked afresh.
+    "ask again rather than refuse a guild an earlier answer had lost" in {
+      val (gateway, svc) = twoServers
+      svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g2")).map(_.guildId) shouldBe List("g1")
+
+      gateway.members += (("g2", "u1") -> member())
+      svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g2")).map(_.guildId) shouldBe
+        List("g1", "g2")
+    }
+
+    "still answer from memory when nothing in particular was asked for" in {
+      val (gateway, svc) = twoServers
+      svc.rememberedAccessFor("u1", Set("g1", "g2")).map(_.guildId) shouldBe List("g1")
+      gateway.members += (("g2", "u1") -> member())
+      // No guild was named, so there is no refusal to second-guess and the
+      // remembered answer stands until it ages out.
+      svc.rememberedAccessFor("u1", Set("g1", "g2")).map(_.guildId) shouldBe List("g1")
     }
   }
 

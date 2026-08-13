@@ -58,10 +58,25 @@ final class DashboardAccessService(
    *  because the cost of a stale answer there is a moderator who lost the role
    *  still being able to move people off spawns. The worst this can do is let
    *  somebody read a board they were removed from moments ago.
+   *
+   *  `mustInclude` names the guild the caller is about to check, where there is
+   *  one. A remembered answer that does not contain it is thrown away and the
+   *  question asked again, because the only thing that answer can produce is a
+   *  refusal — and a refusal is exactly what a half-resolved list looks like.
+   *  One page load that lost its race with another bot would otherwise be
+   *  remembered as "no such server for you" and refuse every reload for the
+   *  next three quarters of a minute.
+   *
+   *  It costs nothing in the ordinary case: a visitor reading a board they can
+   *  see is answered from the memory as before, and it is only the load that
+   *  was about to fail anyway that pays for a fresh lookup.
    */
-  def rememberedAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
+  def rememberedAccessFor(userId: String, userGuildIds: Set[String],
+                          mustInclude: Option[String] = None): List[GuildAccess] = {
     val key = s"$userId:${userGuildIds.toList.sorted.mkString(",")}"
-    cache.get(key).getOrElse {
+    def usable(granted: List[GuildAccess]) =
+      mustInclude.forall(guildId => granted.exists(_.guildId == guildId))
+    cache.get(key).filter(usable).getOrElse {
       val fresh = accessFor(userId, userGuildIds)
       cache.put(key, fresh)
       fresh
@@ -107,10 +122,11 @@ final class DashboardAccessService(
    *  and a timeout yields no guilds rather than an error, so the worst it can
    *  do is show a picker one server short.
    */
-  private def remoteAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
+  private def remoteAccessFor(userId: String, userGuildIds: Set[String],
+                             remembering: Boolean = true): List[GuildAccess] =
     remote.fold(List.empty[GuildAccess]) { resolver =>
       try scala.concurrent.Await.result(
-        resolver.accessFor(userId, userGuildIds),
+        resolver.accessFor(userId, userGuildIds, remembering),
         scala.concurrent.duration.Duration.fromNanos(remoteWait.toNanos))
       catch {
         case scala.util.control.NonFatal(e) =>
@@ -200,9 +216,14 @@ final class DashboardAccessService(
    *  Going through the full [[accessFor]] made every moderator action — a
    *  force-leave, a reassign — wait on Redis and on however many bots had
    *  published a roster, for guilds that had nothing to do with the action.
+   *
+   *  A guild run elsewhere is asked about without the standing memory that
+   *  [[RemoteGuildAccess]] keeps for reads. This is the check that grants a
+   *  mutation, so a bot that cannot say *now* whether somebody is still a
+   *  moderator has to be taken as a no.
    */
   def accessIn(userId: String, userGuildIds: Set[String], guildId: String): List[GuildAccess] =
     if (!userGuildIds.contains(guildId)) Nil
     else if (discordGateway.guildById(guildId) != null) localAccessFor(userId, Set(guildId))
-    else remoteAccessFor(userId, Set(guildId))
+    else remoteAccessFor(userId, Set(guildId), remembering = false)
 }

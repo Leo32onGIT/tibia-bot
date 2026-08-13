@@ -28,6 +28,7 @@ class OnlineDurationPersistenceSpec extends AnyFunSuite with Matchers {
         if (store.contains(key)) Future.successful(false)
         else { store(key) = value; Future.successful(true) }
       }
+    def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
     def close(): Unit = ()
   }

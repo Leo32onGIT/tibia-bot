@@ -39,25 +39,40 @@ final class AccessQueryConsumer(
         ()
     }
 
-  private def answer(guildId: String, id: String): Future[Unit] =
-    cache.get(AccessQuery.requestKey(guildId, id)).flatMap {
-      case None => Future.unit         // already answered and expired, or never there
+  private def answer(guildId: String, id: String): Future[Unit] = {
+    val requestKey = AccessQuery.requestKey(guildId, id)
+    cache.get(requestKey).flatMap {
+      case None => Future.unit         // already answered, or never there
       case Some(raw) => AccessQuery.fromJson(raw) match {
         case None =>
           logger.warn(s"Dropping an unreadable dashboard access query for guild '$guildId'")
-          Future.unit
+          cache.delete(requestKey)
         case Some(query) =>
-          val reply = try AccessAnswer(resolve(query.guildId, query.userId)) catch {
-            case NonFatal(e) =>
-              // A failure to resolve is answered as "no access" rather than left
-              // unanswered: the asker would wait out its timeout either way, and
-              // this way it stops asking and the reason is written down here.
-              logger.warn(s"Could not resolve dashboard access in guild '$guildId': ${e.getMessage}")
-              AccessAnswer(None)
+          // Taken off the board before the slow part, not after. Resolving is a
+          // blocking Discord REST call and the beat below is shorter than one,
+          // so a question left in place while it ran was picked up again by the
+          // next sweep and resolved a second time — and a third, for as long as
+          // the key lived. That cost the answering bot several REST calls per
+          // question, which lengthened the very lookup the asker is timing.
+          //
+          // Safe to drop it first because every path from here writes a reply,
+          // including the failure below. The one case it loses is this process
+          // dying mid-resolve, where the asker times out — which is what would
+          // have happened anyway.
+          cache.delete(requestKey).flatMap { _ =>
+            val reply = try AccessAnswer(resolve(query.guildId, query.userId)) catch {
+              case NonFatal(e) =>
+                // A failure to resolve is answered as "no access" rather than left
+                // unanswered: the asker would wait out its timeout either way, and
+                // this way it stops asking and the reason is written down here.
+                logger.warn(s"Could not resolve dashboard access in guild '$guildId': ${e.getMessage}")
+                AccessAnswer(None)
+            }
+            cache.setEx(AccessQuery.replyKey(id), reply.toJson, AccessQueryConsumer.ReplyTtl)
           }
-          cache.setEx(AccessQuery.replyKey(id), reply.toJson, AccessQueryConsumer.ReplyTtl)
       }
     }
+  }
 }
 
 object AccessQueryConsumer {
@@ -65,8 +80,20 @@ object AccessQueryConsumer {
    *  answer, short enough that Redis is not left holding stale ones. */
   val ReplyTtl: FiniteDuration = 30.seconds
 
-  /** The same beat the write consumer runs on, and for the same reason: it is
-   *  the shortest wait somebody is made to sit through, so it is the one that
-   *  decides how a dashboard load feels. */
-  val SweepEvery: FiniteDuration = 1.second
+  /** Faster than the write consumer's beat, because this one is racing a clock
+   *  the write relay does not have.
+   *
+   *  The asker gives up after [[RemoteGuildAccess.DefaultTimeout]] — one second
+   *  — so the whole of "notice the question, resolve it, reply" has to fit
+   *  inside that. On a one-second beat it did not: a question arriving just
+   *  after a sweep waited nearly a second to be seen at all, and the blocking
+   *  Discord lookup that follows then took the answer past the deadline. The
+   *  guild was left out of the picker, or the board it named answered 403 —
+   *  about half the time, and differently on each reload.
+   *
+   *  A quarter-second leaves room for the lookup inside the same budget. It is
+   *  four `KEYS` a second rather than one, over a pattern nothing else writes
+   *  to; the amplification fixed in `answer` above takes away several times
+   *  that much work in Discord calls. */
+  val SweepEvery: FiniteDuration = 250.millis
 }

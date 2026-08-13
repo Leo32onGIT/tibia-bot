@@ -92,7 +92,7 @@ final class RespawnDashboardRoute(
    *  never reads from that memory. */
   private def withAccessAs(guildId: String)(inner: (String, GuildAccess) => Route): Route =
     discordAuth.authenticatedUser { userId =>
-      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) { granted =>
+      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId), Some(guildId))) { granted =>
         granted.find(_.guildId == guildId) match {
           case Some(access) => inner(userId, access)
           case None         => complete(StatusCodes.Forbidden -> "Forbidden")
@@ -106,7 +106,7 @@ final class RespawnDashboardRoute(
    *  somebody with one server. */
   private def withAccessAmong(guildId: String)(inner: (GuildAccess, List[GuildAccess]) => Route): Route =
     discordAuth.authenticatedUser { userId =>
-      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) { granted =>
+      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId), Some(guildId))) { granted =>
         granted.find(_.guildId == guildId) match {
           case Some(access) => inner(access, granted)
           case None         => complete(StatusCodes.Forbidden -> "Forbidden")

@@ -23,6 +23,19 @@ trait RedisCache {
    *  A cache that cannot answer must say `false` rather than `true`: refusing
    *  to run a command is recoverable, running it twice is not. */
   def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean]
+
+  /** Forget `key` now rather than at its TTL.
+   *
+   *  For a key that is a piece of work rather than a cached value: once it has
+   *  been done, leaving it to expire means everything sweeping for work finds
+   *  it again and does it again. [[AccessQueryConsumer]] is the case in point —
+   *  an answered question left lying around was re-resolved on every beat until
+   *  it expired, at the cost of a Discord REST call each time.
+   *
+   *  Missing keys are not an error: deleting one twice, or one that was never
+   *  there, succeeds quietly. */
+  def delete(key: String): Future[Unit]
+
   /** Discovers keys by prefix pattern (e.g. `tibia:secondary-status:*`) —
    *  used by a shared-world-cycle primary to find however many secondaries
    *  are currently publishing, without needing to know their names in
@@ -42,6 +55,7 @@ object NoopRedisCache extends RedisCache {
    *  claiming otherwise would let a relayed command run unguarded. */
   def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
     Future.successful(false)
+  def delete(key: String): Future[Unit] = Future.unit
   def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
   def close(): Unit = ()
 }

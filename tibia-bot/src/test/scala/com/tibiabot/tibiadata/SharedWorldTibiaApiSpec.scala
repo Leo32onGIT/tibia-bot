@@ -45,6 +45,7 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
         if (store.contains(key)) Future.successful(false)
         else { store(key) = value; Future.successful(true) }
       }
+    def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = {
       val regex = ("^" + java.util.regex.Pattern.quote(pattern).replace("*", "\\E.*\\Q") + "$").r
       Future.successful(store.keys.filter(k => regex.pattern.matcher(k).matches()).toList)

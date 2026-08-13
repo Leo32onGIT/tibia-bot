@@ -51,6 +51,11 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
           logger.warn(s"redis SET NX failed for '$key': ${e.getMessage}"); false
       }
 
+  def delete(key: String): Future[Unit] =
+    commands.del(key).asScala.map(_ => ()).recover {
+      case NonFatal(e) => logger.warn(s"redis DEL failed for '$key': ${e.getMessage}"); ()
+    }
+
   def keysMatching(pattern: String): Future[List[String]] =
     commands.keys(pattern).asScala.map(_.asScala.toList).recover {
       case NonFatal(e) => logger.warn(s"redis KEYS failed for pattern '$pattern': ${e.getMessage}"); Nil

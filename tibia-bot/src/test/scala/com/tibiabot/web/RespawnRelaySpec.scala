@@ -37,6 +37,7 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
     /** Atomic, which is the property the whole design leans on. */
     def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
       Future.successful(store.putIfAbsent(key, value).isEmpty)
+    def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = {
       val regex = pattern.replace("*", ".*")
       Future.successful(store.keys.filter(_.matches(regex)).toList)
