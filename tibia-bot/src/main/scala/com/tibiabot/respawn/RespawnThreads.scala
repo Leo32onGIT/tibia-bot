@@ -49,6 +49,17 @@ object RespawnThreads extends StrictLogging {
    *  configured `<:name:id>` form rather than built from a code point. */
   private def claimEmoji: Emoji = Emoji.fromFormatted(com.tibiabot.Config.dailyEmoji)
 
+  /** The other three buttons' faces, as text.
+   *
+   *  Named here rather than written into [[boardButtons]] because the board's
+   *  description lists the buttons and wears the same emoji against each line.
+   *  Two copies of "📅" that could drift is exactly the kind of thing nobody
+   *  notices until the picture and the label disagree. Claim's is
+   *  `Config.dailyEmoji`, already in that form and already shared. */
+  private val BookEmoji: String = "📅"
+  private val ConfigEmoji: String = "⚙️"
+  private val DashboardEmoji: String = "🌐"
+
   private val tagSeeds: List[(String, String)] =
     List(TagFree -> "🟢", TagClaimed -> "🔴")
 
@@ -89,13 +100,16 @@ object RespawnThreads extends StrictLogging {
    *  Dashboard is a link button, so it carries no custom id: Discord opens the
    *  URL itself and the press never reaches the bot. That is why it can sit in
    *  the same row as the three that do — [[RespawnButtonId.parse]] never sees
-   *  it, and there is no handler to add. */
+   *  it, and there is no handler to add.
+   *
+   *  In the order [[boardIntro]] lists them, which is roughly how often they are
+   *  wanted: the three ways to get a spawn first, and settings last. */
   def boardButtons: ActionRow =
     ActionRow.of(
       Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(claimEmoji),
-      Button.secondary(RespawnButtonId.boardBook, "Book").withEmoji(Emoji.fromUnicode("📅")),
-      Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️")),
-      Button.link(dashboardLink, "Dashboard").withEmoji(Emoji.fromUnicode("🌐"))
+      Button.secondary(RespawnButtonId.boardBook, "Book").withEmoji(Emoji.fromUnicode(BookEmoji)),
+      Button.link(dashboardLink, "Dashboard").withEmoji(Emoji.fromUnicode(DashboardEmoji)),
+      Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode(ConfigEmoji))
     )
 
   /** The Config panel a moderator gets from a spawn's card, instead of going
@@ -333,17 +347,19 @@ object RespawnThreads extends StrictLogging {
    *  dashboard does. See `Config.Web.dashboardOrigin`. */
   def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
 
-  /** The line of text above the board, inside the card.
+  /** The text above the board, inside the card.
    *
-   *  Names the two buttons rather than repeating what they say, since they are
-   *  directly underneath and speak for themselves. All this adds is the part
-   *  neither can: why a member would leave Discord for the browser at all. */
+   *  One line per button, in the order they sit underneath and each wearing the
+   *  same emoji, so the list reads as a key to the row rather than as prose that
+   *  happens to mention it. A label says what a button is called; these say what
+   *  it is for, which is the part a member arriving at the board for the first
+   *  time does not have. */
   def boardIntro: String =
-    "Press\n" +
-    "**Claim** and type a code to claim a spawn right now" +
-    "**Book** to schedule/lock-in a hunt in the future" +
-    "**Dashboard** if you want a web interface or want to *book* a spawn much further in advance." +
-    "**Config** to change your default claim time & reminder settings"
+    s"${com.tibiabot.Config.dailyEmoji} **Claim** and type a code to claim a spawn right now\n" +
+      s"$BookEmoji **Book** to schedule/lock-in a hunt in the future\n" +
+      s"$DashboardEmoji **Dashboard** if you want a web interface or want to *book* a spawn " +
+      "much further in advance\n" +
+      s"$ConfigEmoji **Config** to change your default claim time & reminder settings"
 
   /** The board's card: the whole post bar the buttons.
    *
