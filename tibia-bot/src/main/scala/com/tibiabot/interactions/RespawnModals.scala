@@ -250,17 +250,24 @@ object RespawnModals extends StrictLogging {
    *  left to interpret is the spawn, which is one job for one box.
    *
    *  Both optional, so either can be the question. Neither Discord nor JDA can
-   *  express "exactly one of these", so that rule lives in the submission. */
+   *  express "exactly one of these", so that rule lives in the submission.
+   *
+   *  The picker needs `setRequired(false)` as well as a zero minimum, and both
+   *  are load-bearing: a select defaults to required, and Discord rejects the
+   *  whole form with `COMPONENT_REQUIRED_ZERO_MIN_VALUES` if a required
+   *  component asks for none. The range is still worth setting for its *upper*
+   *  bound — one member, since two would be two different logs. */
   def logFindModal: Modal =
     Modal.create(RespawnButtonId.modalLogFind, "Find in the claim log")
       .addComponents(
         label("Member", "Their whole claim history in this server.",
           EntitySelectMenu.create(LogMemberField, EntitySelectMenu.SelectTarget.USER)
             .setRequiredRange(0, 1)
+            .setRequired(false)
             .build()),
         label("Spawn", "A code, or a spawn or creature name. Leave empty if you picked a member.",
           TextInput.create(LogSpawnField, TextInputStyle.SHORT)
-            .setPlaceholder("1219, or Emperor Rat")
+            .setPlaceholder("816, or Energy Library")
             .setRequired(false)
             .setMaxLength(64)
             .build())

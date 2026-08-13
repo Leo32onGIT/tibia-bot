@@ -26,6 +26,15 @@ object RespawnEmbeds {
    *  at the same kind of thing. Keep the two in step if either moves. */
   val BookedColor: Int = 5999871
 
+  /** The claim log's thumbnail: the in-game book, for the card that is one.
+   *
+   *  Written out rather than built through [[Urls.creatureImageUrl]] — that
+   *  helper's name parsing exists for creature names, and this is an item that
+   *  happens to resolve through the same wiki redirect. Same form as the other
+   *  fixed wiki pictures the bot uses (Rashid, Galthen's Satchel). */
+  private val LogThumbnail: String =
+    "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tome_of_Knowledge.gif"
+
   /** A spawn as a link to its own forum post — how a spawn is named anywhere a
    *  member is being told something about it.
    *
@@ -596,6 +605,7 @@ object RespawnEmbeds {
     val embed = new EmbedBuilder()
       .setColor(Embeds.BrandColor)
       .setTitle(heading.map(what => s"Claim log — $what").getOrElse("Claim log"))
+      .setThumbnail(LogThumbnail)
 
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")

@@ -1289,15 +1289,18 @@ function hoursSince(iso) {
 
 /** Code, name, or the creature the spawn is known for — the last of those
  *  because people remember what they went there to kill more readily than what
- *  the place is called. Substring on all three, so the three behave alike; the
- *  creature arrives with the catalogue and is empty for the many rows that
- *  deliberately have none, which simply never match. */
+ *  the place is called. The creature arrives with the catalogue and is empty for
+ *  the many rows that deliberately have none, which simply never match it.
+ *
+ *  Every word has to appear somewhere, but they may appear in any order and in
+ *  any of the three: "fire library" finds "Secret Library (Fire)", which no
+ *  substring of that name does. A single word behaves exactly as a substring
+ *  search over the three fields, which is what this used to be. */
 function matches(spawn) {
-  if (!filterText) return true;
-  const q = filterText.toLowerCase();
-  return spawn.code.toLowerCase().includes(q)
-    || spawn.name.toLowerCase().includes(q)
-    || (spawn.creature || '').toLowerCase().includes(q);
+  const q = filterText.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = `${spawn.code} ${spawn.name} ${spawn.creature || ''}`.toLowerCase();
+  return q.split(/\s+/).every(word => haystack.includes(word));
 }
 
 function el(tag, className, html) {

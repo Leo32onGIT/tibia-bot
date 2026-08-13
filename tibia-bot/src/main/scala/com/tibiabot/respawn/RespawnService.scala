@@ -387,22 +387,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def resolve(guildId: String, query: String): Option[Respawn] = {
     val trimmed = query.trim
     if (trimmed.isEmpty) None
-    else repository.findByCode(guildId, trimmed).orElse {
-      val all = repository.listRespawns(guildId)
-      val lower = trimmed.toLowerCase
-      def only(candidates: List[Respawn]): Option[Respawn] = candidates match {
-        case single :: Nil => Some(single)
-        case _             => None // ambiguous: make them pick rather than guessing
-      }
-      // "415 — Cult Orcs" comes back from autocomplete as the display name in
-      // some clients, so match that shape too before falling back to a
-      // substring search.
-      all.find(_.displayName.equalsIgnoreCase(trimmed))
-        .orElse(all.find(_.name.equalsIgnoreCase(trimmed)))
-        .orElse(only(all.filter(_.name.toLowerCase.contains(lower))))
-        .orElse(only(all.filter(_.creature.equalsIgnoreCase(trimmed))))
-        .orElse(only(all.filter(r => r.creature.nonEmpty && r.creature.toLowerCase.contains(lower))))
-    }
+    else repository.findByCode(guildId, trimmed)
+      .orElse(RespawnService.resolveIn(repository.listRespawns(guildId), trimmed))
   }
 
   def removeRespawn(guildId: String, respawnId: Long): Unit = repository.removeRespawn(guildId, respawnId)
@@ -2266,6 +2252,65 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 }
 
 object RespawnService {
+
+  /** Match a typed query against a guild's catalogue, when it wasn't a code.
+   *
+   *  A ladder from exact to loose, stopping at the first rung that lands on
+   *  exactly one row. Every rung that can match several answers `None` instead
+   *  of picking one, because a search that guesses is worse than one that says
+   *  it doesn't know — the caller shows the query back and the reader tries
+   *  again.
+   *
+   *  The last rung is the word one: every word of the query somewhere in the
+   *  row, in any order, so "fire library" finds "Secret Library (Fire)" — which
+   *  no substring of that name does, since the words are the wrong way round and
+   *  have a bracket between them. It searches the name and the creature as one
+   *  piece of text, so "burning library" gets there too. Only for multi-word
+   *  queries: on a single word it is precisely the substring rungs above, and
+   *  running it again would say nothing new.
+   *
+   *  Pure and separated from the repository so it can be read against a handful
+   *  of rows in a test rather than a database.
+   */
+  private[respawn] def resolveIn(all: List[Respawn], query: String): Option[Respawn] = {
+    val trimmed = query.trim
+    if (trimmed.isEmpty) return None
+    val lower = trimmed.toLowerCase
+
+    val words = lower.split("\\s+").filter(_.nonEmpty).toList
+    def allWordsIn(respawn: Respawn): Boolean = {
+      val haystack = s"${respawn.name} ${respawn.creature}".toLowerCase
+      words.forall(haystack.contains)
+    }
+
+    // "415 — Cult Orcs" comes back from autocomplete as the display name in
+    // some clients, so match that shape too before falling back to a substring
+    // search. `creature.nonEmpty` guards the substring rung because "" is a
+    // substring of everything, and the many rows with no creature set must not
+    // match whatever was typed.
+    val rungs = List(
+      all.filter(_.displayName.equalsIgnoreCase(trimmed)),
+      all.filter(_.name.equalsIgnoreCase(trimmed)),
+      all.filter(_.name.toLowerCase.contains(lower)),
+      all.filter(_.creature.equalsIgnoreCase(trimmed)),
+      all.filter(r => r.creature.nonEmpty && r.creature.toLowerCase.contains(lower)),
+      if (words.sizeIs < 2) Nil else all.filter(allWordsIn)
+    )
+
+    // Nothing on a rung means try the next one. Several means stop — and stay
+    // unresolved. That second part is the one worth stating: "cult" naming two
+    // spawns is a real ambiguity, and answering it from some looser field
+    // further down would be exactly the guess this is built to refuse. Only a
+    // rung that finds silence hands on to the next.
+    rungs.iterator
+      .map {
+        case Nil           => None
+        case single :: Nil => Some(Some(single))
+        case _             => Some(None)
+      }
+      .collectFirst { case Some(answer) => answer }
+      .flatten
+  }
 
   /** Limits on a spawn somebody adds by hand.
    *
