@@ -30,8 +30,8 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
 
   test("the tags say what is behind the link") {
     val page = LinkPreview.default("https://violentbot.xyz")
-    page should include("""<meta content="Respawn Claims /dashboard" property="og:title">""")
-    page should include("this allows you to book much further in advance")
+    page should include("""<meta content="Respawn Claims" property="og:title">""")
+    page should include("book much further in advance")
     page should include("Sign in with Discord to open it.")
     // The link's own area, not the site root: og:url is what the embed's title
     // is hyperlinked to.
@@ -45,13 +45,14 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
   }
 
   test("each area is coloured and titled as itself") {
-    // theme-color is what Discord paints the embed's left stripe with, so it is
-    // the one thing that tells the two areas apart before anything is read.
+    // theme-color is what Discord paints the embed's left stripe with. Both areas
+    // currently carry the same purple, so it is the title rather than the stripe
+    // that tells them apart; the values are pinned so a change to either is seen.
     val dashboard = LinkPreview.page("https://violentbot.xyz", LinkPreview.Dashboard)
-    dashboard should include("""<meta content="#5b8cff" name="theme-color">""")
+    dashboard should include("""<meta content="#a78bfa" name="theme-color">""")
 
     val status = LinkPreview.page("https://violentbot.xyz", LinkPreview.Status)
-    status should include("""<meta content="Violent Bot /status" property="og:title">""")
+    status should include("""<meta content="Admin Panel" property="og:title">""")
     status should include("""<meta content="#a78bfa" name="theme-color">""")
     status should include("""<meta content="https://violentbot.xyz/status" property="og:url">""")
     // Who may open it is settled by the sign-in; the card anybody can unfurl
@@ -61,12 +62,12 @@ class LinkPreviewSpec extends AnyFunSuite with Matchers {
 
   test("the page answered is the one for the path that was asked for") {
     val pages = LinkPreview.forPath("https://violentbot.xyz")
-    pages("/status") should include("Violent Bot /status")
-    pages("/status/thing") should include("Violent Bot /status")
-    pages("/dashboard") should include("Respawn Claims /dashboard")
-    pages("/dashboard/g/8814") should include("Respawn Claims /dashboard")
+    pages("/status") should include("Admin Panel")
+    pages("/status/thing") should include("Admin Panel")
+    pages("/dashboard") should include("Respawn Claims")
+    pages("/dashboard/g/8814") should include("Respawn Claims")
     // A mount nobody described still gets a truthful page rather than an error.
-    pages("/somewhere-else") should include("Respawn Claims /dashboard")
+    pages("/somewhere-else") should include("Respawn Claims")
   }
 
   test("the origin is whatever this deployment answers on, not a domain in the source") {

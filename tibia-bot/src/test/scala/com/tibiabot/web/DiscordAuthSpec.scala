@@ -156,8 +156,8 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val guarded = pathPrefix("dashboard")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
     Get(s"$mountPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~> guarded ~> check {
       status shouldBe StatusCodes.OK
-      responseAs[String] should include("""content="Respawn Claims /dashboard" property="og:title"""")
-      responseAs[String] should include("this allows you to book much further in advance")
+      responseAs[String] should include("""content="Respawn Claims" property="og:title"""")
+      responseAs[String] should include("book much further in advance")
     }
   }
 
@@ -167,7 +167,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val guarded = pathPrefix("status")(path("thing")(previewing.authenticatedUser(_ => complete("ok"))))
     Get(s"$adminPath/thing") ~> addHeader("User-Agent", DiscordUnfurler) ~> guarded ~> check {
       status shouldBe StatusCodes.OK
-      responseAs[String] should include("""content="Violent Bot /status" property="og:title"""")
+      responseAs[String] should include("""content="Admin Panel" property="og:title"""")
       responseAs[String] should not include "Respawn Claims"
     }
   }

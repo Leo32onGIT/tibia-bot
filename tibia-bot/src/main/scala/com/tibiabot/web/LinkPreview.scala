@@ -78,9 +78,7 @@ object LinkPreview {
   final case class Area(path: String, title: String, description: String, themeColor: String)
 
   /** The member-facing dashboard — the link anybody in a guild might be given,
-   *  and the one the board post itself carries. Titled the way the monitoring
-   *  area has always titled itself, `<what it is> /<where it lives>`, so the two
-   *  read as the same bot rather than as two products. */
+   *  and the one the board post itself carries. */
   val Dashboard: Area = Area(
     path = "/dashboard",
     title = "Respawn Claims",
@@ -88,7 +86,7 @@ object LinkPreview {
       "Claim, book and leave respawns from the browser.\nThis allows you to book much further in advance.\n\n" +
         "Sign in with Discord to open it.",
     // The accent the dashboard is built in, so the stripe on the embed and the
-    // buttons behind the link are the same blue.
+    // buttons behind the link are the same purple.
     themeColor = "#a78bfa")
 
   /** The owner's monitoring area. Its description says what is behind the link

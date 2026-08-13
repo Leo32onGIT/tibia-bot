@@ -329,8 +329,7 @@ object RespawnEmbeds {
       "else's booking, so it hasn't been booked for you.\n" +
       "Book a shorter slot, or claim it on the night."
 
-  /** DM'd shortly before a booked slot begins, so its owner can be there for it —
-   *  or free it up if they can't.
+  /** DM'd shortly before a booked slot begins, so its owner can be there for it.
    *
    *  Says what Confirm buys them, because pressing it is optional and the reason
    *  to bother is not otherwise visible: it settles the slot early, so nobody
@@ -351,8 +350,9 @@ object RespawnEmbeds {
   /** DM'd when a booked slot starts unconfirmed: the spawn is theirs from this
    *  moment, but only if they say they are there.
    *
-   *  Leads with the deadline rather than the hunt, because the thing to act on is
-   *  the one that expires. A booking nobody turns up for used to hold a spawn for
+   *  Sets the deadline apart in bold, because the thing to act on is the one that
+   *  expires and it has to be findable at a glance in a notification. A booking
+   *  nobody turns up for used to hold a spawn for
    *  its whole window while the people who would have hunted it queued behind
    *  somebody absent. */
   def slotStartedUnconfirmed(respawn: Respawn, claim: RespawnClaim, confirmBy: ZonedDateTime): String = {
@@ -361,8 +361,8 @@ object RespawnEmbeds {
       s"**Take the claim ${relative(confirmBy)}** or you will lose the claim."
   }
 
-  /** DM'd when that deadline goes by unanswered. Says what it cost and what to do
-   *  instead, since the booking itself is untouched and comes round again. */
+  /** DM'd when that deadline goes by unanswered. Says what it cost and where the
+   *  hunt went. */
   def slotUnconfirmed(respawn: Respawn, refundedMinutes: Int): String = {
     val refund = if (refundedMinutes > 0) s" You've had **${humanDuration(refundedMinutes)}** stamina refunded." else ""
     s"Your booked hunt on ${spawnLink(respawn)} was given up — you didn't take the claim in " +

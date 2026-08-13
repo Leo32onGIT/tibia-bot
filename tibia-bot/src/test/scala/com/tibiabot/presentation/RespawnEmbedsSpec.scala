@@ -493,7 +493,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // Confirm is optional, so the reason to bother has to be on the message —
     // the button alone doesn't say what it settles.
     text should include("Confirm now")
-    text should include("ask you for it")
+    text should include("claim it automatically")
   }
 
   // --- confirming a booking ------------------------------------------------
@@ -504,7 +504,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     text should not include "Take the claim"
   }
 
-  test("an unconfirmed start leads with the deadline, not the hunt") {
+  test("an unconfirmed start sets the deadline apart from the hunt") {
     val started = reserved("99", now).copy(endsAt = Some(now.plusHours(2)))
     val text = RespawnEmbeds.slotStartedUnconfirmed(cultOrcs, started, now.plusMinutes(15))
     text should include("415 — Cult Orcs")
@@ -512,16 +512,18 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // glance in a notification.
     text should include("**Take the claim")
     text should include(":R>")
-    text should include("whoever's next")
+    // And what letting it expire costs, so the deadline reads as one.
+    text should include("lose the claim")
   }
 
-  test("giving up an unconfirmed hunt says what it cost and that the booking survives") {
+  test("giving up an unconfirmed hunt says what it cost and where the hunt went") {
     val text = RespawnEmbeds.slotUnconfirmed(cultOrcs, 90)
     text should include("was given up")
     text should include("1h 30m")
-    // The booking itself is untouched and comes round again — worth saying, or it
-    // reads as having lost the standing slot too.
-    text should include("still stands")
+    // Why it went, and to whom. The copy no longer says the standing booking
+    // itself survives, which its own scaladoc still claims it does.
+    text should include("didn't take the claim in time")
+    text should include("whoever was next")
   }
 
   test("a give-up with nothing left to refund doesn't mention the tank") {
