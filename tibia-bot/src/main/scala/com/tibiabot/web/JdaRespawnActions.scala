@@ -137,14 +137,18 @@ final class JdaRespawnActions(
       }
     }
 
-  def bookings(guildId: String, userId: String): List[BookingView] =
+  def bookings(guildId: String, userId: String): List[BookingView] = {
+    val givenUp = respawnService.daysGivenUp(guildId, java.time.ZonedDateTime.now())
     respawnService.scheduleListing(guildId, Some(userId)).map { case (schedule, respawn) =>
-      view(schedule, respawn, guildId)
+      view(schedule, respawn, guildId, givenUp)
     }
+  }
 
   def bookingsOn(guildId: String, code: String): List[BookingView] =
     respawnService.resolve(guildId, code).toList.flatMap { respawn =>
-      respawnService.schedulesForRespawn(guildId, respawn.id).map(view(_, respawn, guildId))
+      val givenUp = respawnService.daysGivenUp(guildId, java.time.ZonedDateTime.now(),
+        respawnId = Some(respawn.id))
+      respawnService.schedulesForRespawn(guildId, respawn.id).map(view(_, respawn, guildId, givenUp))
     }
 
   /** One spawn's window, expanded into blocks. The gathering is here; the
@@ -159,7 +163,7 @@ final class JdaRespawnActions(
         // showing earlier in the week still draws what was booked then.
         respawnService.reservationsFor(guildId, respawn.id, from),
         respawnService.schedulesForRespawn(guildId, respawn.id),
-        respawnService.occurrencesIn(guildId, respawn.id, from, to),
+        respawnService.daysGivenUp(guildId, from, Some(to), Some(respawn.id)),
         from, to)
     }
 
@@ -169,7 +173,8 @@ final class JdaRespawnActions(
    *  the schedule itself — asked and confirmed are properties of an occurrence,
    *  and a rule that has not materialised one yet is simply booked. */
   private def view(schedule: com.tibiabot.domain.RespawnSchedule,
-                   respawn: com.tibiabot.domain.Respawn, guildId: String): BookingView = {
+                   respawn: com.tibiabot.domain.Respawn, guildId: String,
+                   givenUp: Map[Long, Set[java.time.Instant]]): BookingView = {
     val slot = respawnService.reservationsFor(guildId, respawn.id)
       .find(_.scheduleId.contains(schedule.id))
     val state = slot match {
@@ -185,7 +190,9 @@ final class JdaRespawnActions(
       ownerId = schedule.userId,
       // The next occurrence rather than the anchor, since a weekly booking's
       // anchor may be weeks behind and means nothing to somebody planning.
-      startsAt = schedule.nextStartAtOrAfter(java.time.ZonedDateTime.now()).getOrElse(schedule.anchorAt),
+      startsAt = schedule
+        .nextStartAtOrAfter(java.time.ZonedDateTime.now(), givenUp.getOrElse(schedule.id, Set.empty))
+        .getOrElse(schedule.anchorAt),
       durationMinutes = schedule.durationMinutes,
       daysOfWeek = schedule.daysOfWeek,
       repeats = schedule.repeats,
@@ -346,9 +353,8 @@ object JdaRespawnActions {
                        active: Option[RespawnClaim],
                        reservations: List[RespawnClaim],
                        schedules: List[RespawnSchedule],
-                       /** Which days each rule has already written a row for,
-                        *  whatever became of them. */
-                       occurrences: List[com.tibiabot.persistence.ScheduleOccurrence],
+                       /** Days each rule has given up, keyed by schedule. */
+                       givenUp: Map[Long, Set[java.time.Instant]],
                        from: java.time.ZonedDateTime,
                        to: java.time.ZonedDateTime): CalendarView = {
     val hunting = active.toList.flatMap { claim =>
@@ -401,7 +407,7 @@ object JdaRespawnActions {
     val drawn = booked.flatMap(slot => slot.scheduleId.map(_ -> slot.startsAt.toInstant)) ++
       (for { claim <- active.toList; id <- claim.scheduleId; start <- claim.startsAt }
         yield id -> start.toInstant)
-    val over = occurrences.filterNot(_.live).map(o => o.scheduleId -> o.startsAt.toInstant)
+    val over = givenUp.toList.flatMap { case (id, days) => days.map(id -> _) }
     val written = (drawn ++ over).toSet
     val predicted = schedules.flatMap { schedule =>
       schedule.occurrencesBetween(from, to)

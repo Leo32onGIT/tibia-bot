@@ -215,7 +215,9 @@ object RespawnButtons extends StrictLogging {
     if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
     else {
       val entries = BotApp.respawnService.scheduleListing(guild.getId, Some(event.getUser.getId))
-      val embed = RespawnEmbeds.schedulesEmbed(entries, java.time.ZonedDateTime.now())
+      val now = java.time.ZonedDateTime.now()
+      val embed = RespawnEmbeds.schedulesEmbed(entries, now,
+        givenUp = BotApp.respawnService.daysGivenUp(guild.getId, now))
       respond.embed(embed, if (entries.isEmpty) None else Some(RespawnThreads.bookingsButtons(entries.size)))
     }
   }
@@ -412,7 +414,8 @@ object RespawnButtons extends StrictLogging {
                   deferredRespond.embed(
                     RespawnEmbeds.bookingPanel(respawn, mine, user.getId,
                       service.reservationsFor(guildId, respawn.id, now),
-                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
+                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
+                      service.daysGivenUp(guildId, now, respawnId = Some(respawn.id))),
                     Some(buttons))
                 }
 

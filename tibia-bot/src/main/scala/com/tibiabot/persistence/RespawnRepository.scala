@@ -18,18 +18,19 @@ import java.time.ZonedDateTime
  *  empty on a row written before it was recorded. */
 final case class KnownMember(userId: String, userName: String, nickname: String)
 
-/** One day of a standing booking that has actually been written down, and
- *  whether it is still standing.
+/** One day a standing booking has given up.
  *
  *  A rule says "every day at eleven"; it cannot say what became of last
- *  Thursday. Only the row can, and there is exactly one per `(schedule, start)`
- *  — the pair the database already treats as an occurrence's identity.
+ *  Thursday. Only the row for that day can, and there is exactly one per
+ *  `(schedule, start)` — the pair the database already treats as an
+ *  occurrence's identity.
  *
- *  `live` is false once the day has been settled some other way: cancelled by
- *  its owner, handed to whoever asked for it, missed, or taken off the calendar
- *  by a moderator. A settled day is one the rule has given up, and both the
- *  calendar and the clash check have to stop speaking for it. */
-final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime, live: Boolean)
+ *  A day is given up when its row has stopped standing: cancelled by its owner,
+ *  handed to whoever asked for it, missed, or taken off the calendar by a
+ *  moderator. Everywhere a rule speaks for a day — the card, the week, the
+ *  clash check, somebody's list of bookings — has to consult these first, or it
+ *  goes on naming an evening its owner no longer has. */
+final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime)
 
 final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
   def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
@@ -336,17 +337,20 @@ trait RespawnRepository {
    *  shows and what an ad-hoc claim has to stop short of. */
   def reservationsFor(guildId: String, respawnId: Long, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Every occurrence any rule has written on this spawn between two instants,
-   *  whatever became of each — see [[ScheduleOccurrence]].
+  /** Days a rule has given up — see [[ScheduleOccurrence]].
    *
    *  Distinct from [[reservationsFor]], which answers "what is booked": this
-   *  answers "which days have already been decided", and the difference is the
-   *  whole point. A day that is running, or was cancelled, or was handed to
-   *  somebody else, is missing from the first and present here — and reading
-   *  only the first is what let a rule's prediction reappear beside the very
-   *  booking that replaced it, so one slot showed two names. */
-  def occurrencesIn(guildId: String, respawnId: Long,
-                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence]
+   *  answers "which days are no longer anybody's to speak for", and the
+   *  difference is the whole point. A day handed to somebody else is missing
+   *  from the first and present here, and reading only the first is what let a
+   *  rule name an evening beside the booking that had replaced it.
+   *
+   *  Both bounds are optional because the callers want different shapes of the
+   *  same question: the week wants one spawn between two instants, and somebody
+   *  reading their bookings wants every spawn from now on. */
+  def settledOccurrences(guildId: String, from: ZonedDateTime,
+                         to: Option[ZonedDateTime] = None,
+                         respawnId: Option[Long] = None): List[ScheduleOccurrence]
 
   /** Write off one day of a rule without touching the rule.
    *

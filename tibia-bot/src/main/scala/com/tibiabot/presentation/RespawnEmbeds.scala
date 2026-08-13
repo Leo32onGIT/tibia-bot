@@ -96,7 +96,10 @@ object RespawnEmbeds {
   def claimCard(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
                 reservations: List[RespawnClaim], settings: RespawnSettings,
                 imageUrl: String, upcoming: List[RespawnSchedule] = Nil,
-                now: ZonedDateTime = ZonedDateTime.now()): MessageEmbed = {
+                now: ZonedDateTime = ZonedDateTime.now(),
+                /** Days each rule has given up, so one it no longer holds is
+                 *  not the evening it offers. Keyed by schedule id. */
+                givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder()
     embed.setTitle(respawn.displayName)
     embed.setImage(imageUrl)
@@ -149,7 +152,11 @@ object RespawnEmbeds {
       } ++ upcoming.flatMap { schedule =>
         // Only the next one. A weekly booking has occurrences forever, and a card
         // listing every Tuesday from now on would say the same thing ten times.
-        schedule.nextStartAtOrAfter(now).map { start =>
+        //
+        // The next one it still holds, at that: a rule that gave tonight away
+        // offers tomorrow, rather than standing beside the booking that took it
+        // and naming the same hour.
+        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
           val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
           start -> bookedRow(start, schedule.durationMinutes, scheduleLabel(schedule), repeat)
         }
@@ -177,7 +184,8 @@ object RespawnEmbeds {
    */
   def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
                    reservations: List[RespawnClaim], holder: Option[RespawnClaim],
-                   now: ZonedDateTime, imageUrl: String): MessageEmbed = {
+                   now: ZonedDateTime, imageUrl: String,
+                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
@@ -187,7 +195,8 @@ object RespawnEmbeds {
         s"Being hunted by ${claimantLabel(active)}$until."
       case None => "Free right now."
     }
-    val booked = mine.flatMap(schedule => schedule.nextStartAtOrAfter(now).map(schedule -> _))
+    val booked = mine.flatMap(schedule =>
+      schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map(schedule -> _))
     val yours =
       // A moderator opens this panel with nothing of their own booked here, so
       // "your booking has been and gone" would be a lie rather than an absence.
@@ -366,7 +375,8 @@ object RespawnEmbeds {
    *  moderator sees — and names the owner, since otherwise the list is a wall of
    *  spawns with no way to tell whose is whose. */
   def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime,
-                     everyones: Boolean = false): MessageEmbed = {
+                     everyones: Boolean = false,
+                     givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
       .setTitle(if (everyones) "Booked slots on this server" else "Your bookings")
     if (entries.isEmpty) {
@@ -379,7 +389,7 @@ object RespawnEmbeds {
       // bookings is asking what is coming up, not which respawns they favour.
       // A spent one-off has no next time, and sits at the end.
       val dated = entries.map { case (schedule, respawn) =>
-        (schedule.nextStartAtOrAfter(now), schedule, respawn)
+        (schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)), schedule, respawn)
       }.sortBy { case (start, _, _) => start.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue) }
 
       embed.setDescription(truncateLines(dated.map { case (start, schedule, respawn) =>

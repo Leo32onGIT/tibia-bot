@@ -1309,28 +1309,31 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  def occurrencesIn(guildId: String, respawnId: Long,
-                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence] =
+  def settledOccurrences(guildId: String, from: ZonedDateTime,
+                         to: Option[ZonedDateTime], respawnId: Option[Long]): List[ScheduleOccurrence] =
     withGuild(guildId) { conn =>
-      // Every status, deliberately. What this answers is "which days has a rule
-      // already produced a row for", and a cancelled or running one counts just
-      // as much as a reserved one — it is the day being spoken for that matters,
-      // not what is happening on it.
+      // Anything but reserved or active. Those two are the day still standing —
+      // booked, or being hunted — and every other status is the rule having
+      // stopped speaking for it, whichever way that happened.
       val statement = conn.prepareStatement(
-        """SELECT schedule_id, starts_at, status FROM respawn_claims
-          |WHERE respawn_id = ? AND schedule_id IS NOT NULL
-          |  AND starts_at >= ? AND starts_at <= ?;""".stripMargin)
+        """SELECT schedule_id, starts_at FROM respawn_claims
+          |WHERE schedule_id IS NOT NULL AND status NOT IN ('reserved', 'active')
+          |  AND starts_at >= ?
+          |  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR starts_at <= CAST(? AS TIMESTAMPTZ))
+          |  AND (CAST(? AS BIGINT) IS NULL OR respawn_id = CAST(? AS BIGINT));""".stripMargin)
       try {
-        statement.setLong(1, respawnId)
-        statement.setTimestamp(2, Timestamp.from(from.toInstant))
-        statement.setTimestamp(3, Timestamp.from(to.toInstant))
+        val until = to.map(t => Timestamp.from(t.toInstant)).orNull
+        statement.setTimestamp(1, Timestamp.from(from.toInstant))
+        statement.setTimestamp(2, until)
+        statement.setTimestamp(3, until)
+        respawnId match {
+          case Some(id) => statement.setLong(4, id); statement.setLong(5, id)
+          case None     => statement.setNull(4, java.sql.Types.BIGINT); statement.setNull(5, java.sql.Types.BIGINT)
+        }
         val result = statement.executeQuery()
         val out = ListBuffer[ScheduleOccurrence]()
         while (result.next())
-          out += ScheduleOccurrence(
-            result.getLong("schedule_id"),
-            toZoned(result.getTimestamp("starts_at")),
-            live = Set("reserved", "active").contains(result.getString("status")))
+          out += ScheduleOccurrence(result.getLong("schedule_id"), toZoned(result.getTimestamp("starts_at")))
         out.toList
       } finally statement.close()
     }

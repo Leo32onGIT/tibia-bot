@@ -362,6 +362,33 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   // next person to want that evening was refused on behalf of a booking that no
   // longer existed.
 
+  // What a rule offers as its next evening, once one of its days has gone. The
+  // card listed tonight twice without this — once as the booking that had taken
+  // it, and once as the rule that used to hold it, at the very same hour.
+  test("the next slot skips a day the booking has given up") {
+    val daily = schedule()
+    daily.nextStartAtOrAfter(anchor, Set.empty) shouldBe Some(anchor)
+    daily.nextStartAtOrAfter(anchor, Set(anchor.toInstant)) shouldBe Some(anchor.plusDays(1))
+    daily.nextStartAtOrAfter(anchor, Set(anchor.toInstant, anchor.plusDays(1).toInstant)) shouldBe
+      Some(anchor.plusDays(2))
+  }
+
+  test("a day given up that is not the next one changes nothing") {
+    schedule().nextStartAtOrAfter(anchor, Set(anchor.plusDays(3).toInstant)) shouldBe Some(anchor)
+  }
+
+  test("a one-off that has given up its only evening has no next slot at all") {
+    val once = schedule(days = RespawnSchedule.OneOff)
+    once.nextStartAtOrAfter(anchor, Set(anchor.toInstant)) shouldBe None
+  }
+
+  test("giving up a day of a weekly booking moves it on a week, not a day") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    val firstTuesday = tuesdays.nextStartAtOrAfter(anchor).getOrElse(fail("no Tuesday ahead"))
+    tuesdays.nextStartAtOrAfter(anchor, Set(firstTuesday.toInstant)) shouldBe
+      Some(firstTuesday.plusDays(7))
+  }
+
   private val givenUpWindow = (anchor.minusDays(1), anchor.plusDays(6))
 
   private def hasGivenUp(schedule: RespawnSchedule, candidate: RespawnSchedule,

@@ -1253,10 +1253,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def surrendered(guildId: String, schedule: RespawnSchedule,
                           candidate: RespawnSchedule, now: ZonedDateTime): Boolean = {
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
-    val settled = repository.occurrencesIn(guildId, schedule.respawnId, now, horizon)
-      .collect { case occurrence if occurrence.scheduleId == schedule.id && !occurrence.live =>
-        occurrence.startsAt.toInstant }
-      .toSet
+    val settled = daysGivenUp(guildId, now, Some(horizon), Some(schedule.respawnId))
+      .getOrElse(schedule.id, Set.empty)
     RespawnSchedule.surrendered(schedule, candidate, settled, now, horizon)
   }
 
@@ -1999,8 +1997,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // rule as well would list the same booking twice.
       val written = reservations.flatMap(_.scheduleId).toSet
       val upcoming = repository.schedulesForRespawn(guildId, respawn.id).filterNot(s => written.contains(s.id))
+      // A rule whose next evening has been given away must name the one after
+      // it. Without this the card listed tonight twice — once as the booking
+      // that had taken it, and once as the rule that used to hold it.
+      val givenUp = daysGivenUp(guildId, now, respawnId = Some(respawn.id))
       val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config,
-        imageFor(respawn), upcoming, now)
+        imageFor(respawn), upcoming, now, givenUp)
       val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
 
       // Re-read after a possible create so the row carries the new thread id;
@@ -2036,12 +2038,18 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
-  /** Which days of which rules already have a row on this spawn — see
-   *  [[com.tibiabot.persistence.ScheduleOccurrence]]. What the calendar needs to
-   *  stop drawing a rule's prediction over the day that replaced it. */
-  def occurrencesIn(guildId: String, respawnId: Long,
-                    from: ZonedDateTime, to: ZonedDateTime): List[ScheduleOccurrence] =
-    repository.occurrencesIn(guildId, respawnId, from, to)
+  /** Days each rule has given up, as the surfaces that draw rules need them:
+   *  keyed by schedule, so asking "when is this one next" costs a lookup rather
+   *  than a scan. See [[com.tibiabot.persistence.ScheduleOccurrence]].
+   *
+   *  Both bounds narrow the same question — one spawn's week for the calendar,
+   *  every spawn from now on for somebody's list of bookings. */
+  def daysGivenUp(guildId: String, from: ZonedDateTime,
+                  to: Option[ZonedDateTime] = None,
+                  respawnId: Option[Long] = None): Map[Long, Set[java.time.Instant]] =
+    repository.settledOccurrences(guildId, from, to, respawnId)
+      .groupBy(_.scheduleId)
+      .map { case (id, days) => id -> days.map(_.startsAt.toInstant).toSet }
 
   // --- putting the calendar right ------------------------------------------
 

@@ -354,6 +354,29 @@ final case class RespawnSchedule(
     }
   }
 
+  /** The next slot this rule will actually produce, skipping days it has given
+   *  up — see `persistence.ScheduleOccurrence`.
+   *
+   *  What every surface that says "your next booking is…" wants. Asking without
+   *  the days given up is what left a card naming tonight after tonight had been
+   *  handed to somebody else: the rule says every day, and by itself it has no
+   *  way to know one of those days is no longer its own to offer.
+   *
+   *  Bounded like [[occurrencesBetween]], and for the same reason — though it
+   *  cannot realistically walk far, since only a day a row was written for can
+   *  be given up and rows exist only inside the look-ahead.
+   */
+  def nextStartAtOrAfter(from: ZonedDateTime, givenUp: Set[java.time.Instant]): Option[ZonedDateTime] = {
+    var cursor = nextStartAtOrAfter(from)
+    var guard = 0
+    while (cursor.exists(start => givenUp.contains(start.toInstant)) &&
+           guard < RespawnSchedule.OccurrenceLimit) {
+      cursor = cursor.flatMap(start => nextStartAtOrAfter(start.plusMinutes(1)))
+      guard += 1
+    }
+    cursor
+  }
+
   /** Every slot starting inside a window. Bounded, so a bad row cannot make this
    *  run away. */
   def occurrencesBetween(from: ZonedDateTime, to: ZonedDateTime): List[ZonedDateTime] = {

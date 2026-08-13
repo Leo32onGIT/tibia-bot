@@ -35,21 +35,15 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
     RespawnSchedule(id, spawn.id, who, s"name-$who", character, anchor,
       RespawnSchedule.Daily, minutes, active = true, monday, days)
 
-  /** The occurrence rows a database would be holding for these bookings: one per
-   *  day of a rule that has been written down, all still standing. Tests about a
-   *  day that was *settled* — cancelled, handed on, or being hunted — pass their
-   *  own, since by then there is no reservation left to infer it from. */
-  private def occurrencesOf(reservations: List[RespawnClaim]) =
-    reservations.flatMap(claim =>
-      claim.scheduleId.flatMap(id => claim.startsAt.map(ScheduleOccurrence(id, _, live = true))))
+  private def givenUp(scheduleId: Long, days: ZonedDateTime*) =
+    Map(scheduleId -> days.map(_.toInstant).toSet)
 
   private def assemble(active: Option[RespawnClaim] = None,
                        reservations: List[RespawnClaim] = Nil,
                        schedules: List[RespawnSchedule] = Nil,
-                       occurrences: Option[List[ScheduleOccurrence]] = None,
+                       givenUp: Map[Long, Set[java.time.Instant]] = Map.empty,
                        from: ZonedDateTime = monday, to: ZonedDateTime = weekEnd) =
-    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules,
-      occurrences.getOrElse(occurrencesOf(reservations)), from, to)
+    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules, givenUp, from, to)
 
   "the calendar" should {
 
@@ -191,7 +185,7 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
         // The new owner's booking: their own, with no rule behind it.
         reservations = List(reservation(1, at(1, 20), who = "u9", scheduleId = None)),
         schedules = List(rule),
-        occurrences = Some(List(ScheduleOccurrence(7, at(1, 20), live = false))))
+        givenUp = givenUp(7, at(1, 20)))
 
       view.slots.filter(_.startsAt == at(1, 20)).map(_.ownerId) shouldBe List("u9")
       view.slots.count(_.predicted) shouldBe 6
@@ -204,10 +198,10 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
       val running = RespawnClaim(9, spawn.id, "u3", "name-u3", "", RespawnClaim.StatusActive, 0,
         monday, Some(at(1, 20)), Some(at(1, 22)), 120, warned = false,
         RespawnClaim.KindScheduled, None, None, None, None, scheduleId = Some(7))
-      val view = assemble(
-        active = Some(running),
-        schedules = List(schedule(7, at(0, 20))),
-        occurrences = Some(List(ScheduleOccurrence(7, at(1, 20), live = true))))
+      // Nothing is given up here — the day is very much still the rule's. What
+      // suppresses the prediction is that the day is already on the grid, as
+      // the hunt itself.
+      val view = assemble(active = Some(running), schedules = List(schedule(7, at(0, 20))))
 
       view.slots.filter(_.startsAt == at(1, 20)).map(_.state) shouldBe List("claimed")
       view.slots.count(_.predicted) shouldBe 6
@@ -219,25 +213,20 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
     "stay away from a day a moderator has removed" in {
       val view = assemble(
         schedules = List(schedule(7, at(0, 20))),
-        occurrences = Some(List(ScheduleOccurrence(7, at(2, 20), live = false))))
+        givenUp = givenUp(7, at(2, 20)))
 
       view.slots.map(_.startsAt) should not contain at(2, 20)
       view.slots should have size 6
     }
 
-    // A row exists for it, but the window starts after it does, so no block is
-    // drawn from it. Letting the row silence the rule as well would leave the
-    // evening on the grid as nothing at all — which is worse than the faint
-    // prediction, since the reader would plan straight into it.
-    "still predict a day whose row falls outside the window it draws" in {
+    // A booked day the window cannot draw — `reservationsFor` asks for slots
+    // starting strictly after the anchor, so a row sitting exactly on it never
+    // reaches the blocks. Only a day the rule has *given up* silences it, so the
+    // evening is still drawn from the rule rather than vanishing off the grid
+    // for the reader to plan straight into.
+    "still predict a day whose row the window cannot draw" in {
       val edge = at(0, 20)
-      val view = assemble(
-        // `reservationsFor` asks for slots starting *after* the anchor, so a row
-        // exactly on it never reaches the blocks.
-        reservations = Nil,
-        schedules = List(schedule(7, edge)),
-        occurrences = Some(List(ScheduleOccurrence(7, edge, live = true))),
-        from = edge)
+      val view = assemble(reservations = Nil, schedules = List(schedule(7, edge)), from = edge)
 
       view.slots.map(_.startsAt) should contain(edge)
       view.slots.find(_.startsAt == edge).map(_.predicted) shouldBe Some(true)
