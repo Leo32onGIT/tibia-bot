@@ -129,10 +129,11 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   private def routes(actions: RespawnActionPort,
                      member: Option[MemberAccess] = Some(MemberAccess(false, Set.empty, Set(CategoryId))),
-                     moderatorRole: String = "0") = {
+                     moderatorRole: String = "0",
+                     theirGuilds: Set[String] = Set("g1")) = {
     val a = auth
     // The guild list is seeded directly; a real one arrives at login.
-    a.userGuilds.put("user-1", Set("g1"))
+    a.userGuilds.put("user-1", theirGuilds)
     val access = new DashboardAccessService(
       new FakeGateway(member),
       respawnConfigured = _ => true,
@@ -322,6 +323,48 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       status shouldBe StatusCodes.Forbidden
     }
     actions.calendarWindows shouldBe empty
+  }
+
+  /* A guild another bot runs. This one is not in it — `guildById` answers null
+   * for anything but g1 — so it has no way to read a member of it, and the write
+   * goes to the bot that can rather than being refused for want of an answer.
+   * That refusal is the bug: it turned "the other bot was half a second late"
+   * into a permission error for somebody with every right to what they asked. */
+  test("a write into a guild this bot is not in is carried, not decided here") {
+    val actions = new RecordingActions
+    Post("/dashboard/g/g2/claim", body("""{"code":"415"}""")) ~>
+      signedIn ~> routes(actions, theirGuilds = Set("g1", "g2")) ~> check {
+      status shouldBe StatusCodes.OK
+    }
+    actions.claims.map(_._1) shouldBe List("g2")
+  }
+
+  // Including the ones that act on other people. Whether they hold the role
+  // there is a question only the bot in the guild can answer, and it does —
+  // see RespawnCommandConsumer.
+  test("a moderator write into a guild this bot is not in is carried too") {
+    val actions = new RecordingActions
+    Post("/dashboard/g/g2/force-leave", body("""{"code":"415"}""")) ~>
+      signedIn ~> routes(actions, theirGuilds = Set("g1", "g2")) ~> check {
+      status shouldBe StatusCodes.OK
+    }
+    actions.moderatorCalls shouldBe List("forceLeave:415")
+  }
+
+  // The one thing this end can still settle: their own Discord login says which
+  // guilds they are in, and a guild they merely named is not one of them.
+  test("a write into a guild the visitor is not in is refused, in words the page can read") {
+    val actions = new RecordingActions
+    Post("/dashboard/g/g9/claim", body("""{"code":"415"}""")) ~>
+      signedIn ~> routes(actions, theirGuilds = Set("g1", "g2")) ~> check {
+      status shouldBe StatusCodes.Forbidden
+      // JSON, not a bare "Forbidden": the page reads every answer with
+      // res.json(), and a plain-text refusal came out as "That did not go
+      // through" whatever had actually happened.
+      contentType shouldBe ContentTypes.`application/json`
+      responseAs[String] should include(""""ok":false""")
+    }
+    actions.claims shouldBe empty
   }
 
   test("a plain member is refused every moderator tool, and nothing is written") {

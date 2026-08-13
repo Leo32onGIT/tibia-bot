@@ -67,7 +67,10 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
     def bookingsOn(guildId: String, code: String): List[BookingView] = Nil
     def calendar(guildId: String, code: String, from: java.time.ZonedDateTime,
                  to: java.time.ZonedDateTime): Option[CalendarView] = None
-    def forceLeave(guildId: String, actorId: String, code: String): Future[ActionResult] = result
+    def forceLeave(guildId: String, actorId: String, code: String): Future[ActionResult] = {
+      lastForceLeave = Some(code); result
+    }
+    var lastForceLeave: Option[String] = None
     def reassign(guildId: String, actorId: String, code: String, toUserId: String): Future[ActionResult] = result
     def grantStamina(guildId: String, actorId: String, targetUserId: String, minutes: Int): Future[ActionResult] = result
     def addSpawn(guildId: String, actorId: String, code: String, region: String,
@@ -99,9 +102,17 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
     new RelayedRespawnActions(cache, system.scheduler, timeout = timeout, pollEvery = 20.millis)
 
+  /** Somebody the executing bot can see, at a tier it decides. The permission
+   *  check now lives on this side of the relay — the issuer cannot make it for a
+   *  guild it is not in — so a consumer in a test has to be told who people are
+   *  just as the real one is. */
+  private def asTier(tier: AccessTier): (String, String) => Option[GuildAccess] =
+    (guildId, userId) => Some(GuildAccess(guildId, "Their Server", tier, List("Antica")))
+
   private def consumer(cache: RedisCache, local: RespawnActionPort,
-                       owns: String => Boolean = _ => true, selfId: String = "bot-a") =
-    new RespawnCommandConsumer(cache, local, owns, selfId)
+                       owns: String => Boolean = _ => true, selfId: String = "bot-a",
+                       resolve: (String, String) => Option[GuildAccess] = asTier(AccessTier.Admin)) =
+    new RespawnCommandConsumer(cache, local, owns, selfId, resolve)
 
   "a relayed write" should {
 
@@ -266,6 +277,69 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       val local = new CountingActions()
       consumer(cache, local).sweep().futureValue
       local.claims.get() shouldBe 1
+    }
+  }
+
+  /* The permission check moved to this end of the relay. The bot serving the
+   * page is not in the guild and cannot read a member of it; the bot doing the
+   * work is, and can — so it decides, and the issuer's job is only to say who is
+   * asking. */
+  "the executing bot" should {
+
+    "refuse a moderator action from somebody who is only a member there" in {
+      val cache = new FakeCache
+      val pending = relay(cache).forceLeave("g1", "u1", "415")
+      val local = new CountingActions()
+      consumer(cache, local, resolve = asTier(AccessTier.Member)).sweep().futureValue
+
+      local.lastForceLeave shouldBe None
+      val answer = pending.futureValue
+      answer.ok shouldBe false
+      answer.message.toLowerCase should include("permission")
+    }
+
+    "let the same person do the things that are theirs to do" in {
+      val cache = new FakeCache
+      val pending = relay(cache).claim("g1", "u1", "", "415", None)
+      val local = new CountingActions()
+      consumer(cache, local, resolve = asTier(AccessTier.Member)).sweep().futureValue
+
+      pending.futureValue.ok shouldBe true
+      local.claims.get() shouldBe 1
+    }
+
+    // The visitor's own login proves they are in the guild, which is all the
+    // issuing side can know. Whether they can see a tracked world there is this
+    // side's to answer, and "no" has to mean no.
+    "refuse anything at all from somebody it cannot resolve" in {
+      val cache = new FakeCache
+      val pending = relay(cache).claim("g1", "stranger", "", "415", None)
+      val local = new CountingActions()
+      consumer(cache, local, resolve = (_, _) => None).sweep().futureValue
+
+      local.claims.get() shouldBe 0
+      pending.futureValue.ok shouldBe false
+    }
+
+    // A refusal to resolve is not a reason to go ahead. Performing a write
+    // because the check could not be made is the one failure nobody can undo.
+    "refuse when resolving throws rather than assuming the best" in {
+      val cache = new FakeCache
+      val pending = relay(cache).claim("g1", "u1", "", "415", None)
+      val local = new CountingActions()
+      consumer(cache, local, resolve = (_, _) => throw new RuntimeException("JDA fell over"))
+        .sweep().futureValue
+
+      local.claims.get() shouldBe 0
+      pending.futureValue.ok shouldBe false
+    }
+
+    // An action this build has never heard of cannot be known to be harmless,
+    // so it is held to the stricter bar.
+    "hold an action it does not recognise to the moderator bar" in {
+      RespawnCommand.requiredTier(RespawnCommand.Claim) shouldBe AccessTier.Member
+      RespawnCommand.requiredTier(RespawnCommand.DropSlot) shouldBe AccessTier.Moderator
+      RespawnCommand.requiredTier("something-from-a-newer-build") shouldBe AccessTier.Moderator
     }
   }
 

@@ -348,7 +348,12 @@ object BotApp extends App with StrictLogging {
   // executes any given command.
   private val respawnCommandConsumer = new web.RespawnCommandConsumer(
     persistence.RedisCacheProvider.cache, localRespawnActions,
-    localRespawnActions.ownsGuild, discordGateway.selfUserId)(respawnActionPool)
+    localRespawnActions.ownsGuild, discordGateway.selfUserId,
+    // The permission check for every relayed write, made here because this is
+    // the process that is actually in the guild. The same resolution the access
+    // relay answers questions with, and deliberately the local one: a bot going
+    // back out over Redis to ask about its own guild would be asking itself.
+    resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId))(respawnActionPool)
   if (Config.Respawn.enabled && Config.redisEnabled) {
     actorSystem.scheduler.scheduleWithFixedDelay(
       web.RespawnCommandConsumer.SweepEvery, web.RespawnCommandConsumer.SweepEvery

@@ -135,6 +135,16 @@ final class DashboardAccessService(
       }
     }
 
+  /** Whether this process is in the guild at all, and so whether it can decide
+   *  anything about who somebody is there.
+   *
+   *  The question behind who checks permission for a write. A bot that cannot
+   *  see the guild has no way to read a member of it, and asking the bot that
+   *  can — then deciding here on its answer — is a round trip that can fail for
+   *  somebody perfectly entitled. So a write into a guild this bot cannot see is
+   *  carried to the bot that can, and decided there; see [[RespawnCommand]]. */
+  def canSee(guildId: String): Boolean = discordGateway.guildById(guildId) != null
+
   /** One guild, resolved here and never by asking anyone else.
    *
    *  What [[AccessQueryConsumer]] answers with. It must not be the full

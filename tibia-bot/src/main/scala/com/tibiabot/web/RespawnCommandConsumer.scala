@@ -25,7 +25,16 @@ final class RespawnCommandConsumer(
   cache: RedisCache,
   local: RespawnActionPort,
   ownsGuild: String => Boolean,
-  selfId: String
+  selfId: String,
+  /** Who somebody is in a guild this bot runs, resolved locally. `None` when
+   *  they may not use the dashboard there at all.
+   *
+   *  This is the permission check for every relayed command, and it belongs
+   *  here because this is the only process that can make it: the bot serving
+   *  the page is not in the guild and cannot read a member of it. Defaulted to
+   *  a refusal so that a consumer stood up without one performs nothing rather
+   *  than everything. */
+  resolve: (String, String) => Option[GuildAccess] = (_, _) => None
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
   /** Ids finished in this process, so a reply still sitting in Redis is not
@@ -62,6 +71,15 @@ final class RespawnCommandConsumer(
               case None =>
                 logger.warn(s"Dropping unreadable respawn command '$id' for guild '$guildId'")
                 reply(id, ActionResult(ok = false, "That instruction could not be understood."))
+              case Some(command) if !permitted(command) =>
+                // Refused here rather than by whoever sent it, because only this
+                // process is in the guild and can tell. Answered plainly: the
+                // command was delivered and understood, and the person is simply
+                // not entitled to it.
+                logger.info(s"Refusing relayed '${command.action}' in guild '$guildId': " +
+                  s"'${command.actorId}' is not ${RespawnCommand.requiredTier(command.action).name} there")
+                reply(id, ActionResult(ok = false,
+                  "You don't have permission to do that on this server."))
               case Some(command) =>
                 execute(command).flatMap(result => reply(id, result)).recoverWith {
                   case NonFatal(e) =>
@@ -72,6 +90,25 @@ final class RespawnCommandConsumer(
         }
     }.recover {
       case NonFatal(e) => logger.warn(s"Could not handle respawn command '$id': ${e.getMessage}")
+    }
+
+  /** Whether the person named on a command may have it done as them.
+   *
+   *  Resolved live, every time, and never from anything remembered: this is what
+   *  actually grants the write, and somebody who lost the moderator role a
+   *  minute ago must be refused now.
+   *
+   *  A resolution that throws is a refusal. The alternative — performing it
+   *  because the check could not be made — is the one failure that cannot be
+   *  taken back. */
+  private def permitted(command: RespawnCommand): Boolean =
+    try resolve(command.guildId, command.actorId)
+      .exists(_.tier.atLeast(RespawnCommand.requiredTier(command.action)))
+    catch {
+      case NonFatal(e) =>
+        logger.warn(s"Could not resolve '${command.actorId}' in guild '${command.guildId}', " +
+          s"refusing '${command.action}': ${e.getMessage}")
+        false
     }
 
   private def reply(id: String, result: ActionResult): Future[Unit] =

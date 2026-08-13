@@ -13,14 +13,29 @@ import spray.json._
  *  This crosses a process boundary between two builds that may not match: a
  *  field a newer version adds is simply absent to an older one, which is the
  *  failure mode we want. A sealed hierarchy would refuse to decode instead.
+ *
+ *  ==Who decides permission==
+ *  Whichever bot can actually see the person. For a guild the issuer is in,
+ *  that is the issuer, and it has decided before writing anything here. For a
+ *  guild it is not in — the case this relay exists for — it is the executor,
+ *  which resolves `actorId` in the guild and refuses the command outright if
+ *  they are not entitled to it (see [[RespawnCommand.requiredTier]]).
+ *
+ *  It used to be the issuer in both cases, which meant asking the executing bot
+ *  "who is this person" over Redis, waiting a second for the answer, and only
+ *  then sending the write to that same bot. Two round trips to one process for
+ *  one button press, and the first of them was the one that failed: a page load
+ *  that lost its race with the answer refused the write with a permission error
+ *  for somebody who had every right to it. Asking the bot that already has to
+ *  do the work is one message instead of two, and it cannot race with itself.
  */
 final case class RespawnCommand(
   id: String,
   guildId: String,
   action: String,
   /** Who is asking. Every action is performed *as* this person, never as the
-   *  bot — the executing process re-checks nothing about permissions, so the
-   *  issuing process is trusted to have done that, and does. */
+   *  bot — and, for a guild the issuer is not in, they are also the person the
+   *  *executing* bot resolves before doing anything. See below. */
   actorId: String,
   params: Map[String, String]
 ) {
@@ -58,6 +73,27 @@ object RespawnCommand {
   val Actions: Set[String] =
     Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina,
         AddSpawn, RemoveSpawn, ExtendHolder, DropSlot, ReassignSlot)
+
+  /** The actions that act on somebody else, and so need the moderator tier.
+   *
+   *  A property of the action rather than of the request, which is why it is
+   *  decided here and not carried on the wire. A command that could name its own
+   *  requirement would be a command that could understate it. */
+  private val ModeratorActions: Set[String] =
+    Set(ForceLeave, Reassign, GrantStamina, AddSpawn, RemoveSpawn, ExtendHolder, DropSlot, ReassignSlot)
+
+  /** What somebody must be in the guild for this action to be performed as them.
+   *
+   *  Read by the bot that *executes* a command, which for a guild the issuer is
+   *  not in is the only one of the two that can resolve the person at all — see
+   *  the note on who decides permission in [[RespawnCommand]].
+   *
+   *  Anything unrecognised is a moderator action. A build that has not heard of
+   *  an action cannot know how dangerous it is, and the safe reading of "I don't
+   *  know what this is" is the stricter one. */
+  def requiredTier(action: String): AccessTier =
+    if (ModeratorActions.contains(action) || !Actions.contains(action)) AccessTier.Moderator
+    else AccessTier.Member
 
   /** None on anything malformed. A command that cannot be read is dropped by
    *  the consumer and times out for the caller, which is the right outcome:

@@ -114,7 +114,49 @@ final class RespawnDashboardRoute(
       }
     }
 
+  /** Runs a *write* if the visitor may make it — deciding here only when this
+   *  bot is in a position to decide.
+   *
+   *  For a guild this bot is in, that is here and now, exactly as before: the
+   *  remembered answer is good enough for somebody acting on their own claim,
+   *  and anything acting on another person is resolved fresh.
+   *
+   *  For a guild it is not in, it is nobody's decision to make here. The bot
+   *  serving this page cannot read a member of a guild it is not in, so it used
+   *  to ask the bot that runs it over Redis, wait a second, and refuse if the
+   *  answer did not arrive — then send the write to that same bot anyway. Two
+   *  round trips to one process, and the first of them refused perfectly
+   *  ordinary members whenever it lost the race. Now the write carries who is
+   *  asking and the bot that has to do the work decides, which it can do without
+   *  asking anybody: see [[RespawnCommandConsumer]].
+   *
+   *  What is still checked here is that the visitor is in the guild at all, from
+   *  their own Discord login. That is not the permission — the tier and the
+   *  worlds they can see are settled at the other end — it is what stops this
+   *  bot relaying writes into guilds a signed-in stranger merely named.
+   */
+  private def withWrite(guildId: String, required: AccessTier)(inner: String => Route): Route =
+    discordAuth.authenticatedUser { userId =>
+      val theirs = guildIdsOf(userId)
+      if (!theirs.contains(guildId)) forbidden("You're not in that server.")
+      else if (!accessService.canSee(guildId)) inner(userId)
+      else read(
+        if (required.atLeast(AccessTier.Moderator)) accessService.accessIn(userId, theirs, guildId)
+        else accessService.rememberedAccessFor(userId, theirs, Some(guildId))
+      ) { granted =>
+        granted.find(_.guildId == guildId) match {
+          case Some(access) if access.tier.atLeast(required) => inner(userId)
+          case _ => forbidden("You don't have permission to do that on this server.")
+        }
+      }
+    }
+
   /** As [[withAccessAs]], but also requires the moderator tier in *this* guild.
+   *
+   *  What is left of it: the one moderator surface that is a *read* rather than
+   *  a write, and so has to be answered here from what this bot can see. Every
+   *  moderator write goes through [[withWrite]] instead, which can hand the
+   *  decision to a bot in a better position to make it.
    *
    *  Separate from the page's own hiding of these tools: that is convenience,
    *  and this is the control. Resolved per request, so somebody who lost the
@@ -185,6 +227,16 @@ final class RespawnDashboardRoute(
       boardChanged(guildId)
       json(JsObject("ok" -> JsBoolean(answer.ok), "message" -> JsString(answer.message)))
     }
+
+  /** A refusal the page can read. It used to complete with a bare string, which
+   *  arrives as text/plain — so the browser's `res.json()` threw and every
+   *  refusal, whatever its reason, reached the person as "That did not go
+   *  through". A permission problem and an unreachable bot are different things
+   *  and have to be able to say so. */
+  private def forbidden(message: String) =
+    complete(StatusCodes.Forbidden ->
+      HttpEntity(ContentTypes.`application/json`,
+        JsObject("ok" -> JsBoolean(false), "message" -> JsString(message)).compactPrint))
 
   private def badRequest(message: String) =
     complete(StatusCodes.BadRequest ->
@@ -310,7 +362,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "claim") { guildId =>
       post {
-        withAccessAs(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Member) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             fields.get("code").map(_.trim).filter(_.nonEmpty) match {
@@ -326,7 +378,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "release") { guildId =>
       post {
-        withAccessAs(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Member) { userId =>
           entity(as[String]) { body =>
             val code = RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty)
             actionResult(guildId, actions.release(guildId, userId, code))
@@ -336,7 +388,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "extend") { guildId =>
       post {
-        withAccessAs(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Member) { userId =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption) match {
               case Some(extra) if extra > 0 => actionResult(guildId, actions.extend(guildId, userId, extra))
@@ -348,7 +400,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "book") { guildId =>
       post {
-        withAccessAs(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Member) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             val parsed = for {
@@ -408,7 +460,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "cancel-booking") { guildId =>
       post {
-        withAccessAs(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Member) { userId =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("scheduleId").flatMap(s => scala.util.Try(s.toLong).toOption) match {
               case Some(id) => actionResult(guildId, actions.cancelBooking(guildId, userId, id))
@@ -422,7 +474,7 @@ final class RespawnDashboardRoute(
     // else, so hiding these on the page is convenience and this is the control.
     path("g" / Segment / "force-leave") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty) match {
               case Some(code) => actionResult(guildId, actions.forceLeave(guildId, userId, code))
@@ -434,7 +486,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "reassign") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("code").map(_.trim).filter(_.nonEmpty),
@@ -451,7 +503,7 @@ final class RespawnDashboardRoute(
     // a rule has not written down yet and those have no id to send.
     path("g" / Segment / "drop-slot") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("code").map(_.trim).filter(_.nonEmpty),
@@ -466,7 +518,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "reassign-slot") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("code").map(_.trim).filter(_.nonEmpty),
@@ -497,7 +549,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "extend-holder") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("code").map(_.trim).filter(_.nonEmpty),
@@ -512,7 +564,7 @@ final class RespawnDashboardRoute(
     } ~
     path("g" / Segment / "grant-stamina") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             (fields.get("userId").map(_.trim).filter(_.nonEmpty),
@@ -530,7 +582,7 @@ final class RespawnDashboardRoute(
     // gated the same way.
     path("g" / Segment / "spawns") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             val fields = RespawnDashboardRoute.parseBody(body)
             // Only the two that a spawn cannot do without are required here. The
@@ -553,7 +605,7 @@ final class RespawnDashboardRoute(
     // caller ends up sending a body nobody reads.
     path("g" / Segment / "remove-spawn") { guildId =>
       post {
-        withModerator(guildId) { (userId, _) =>
+        withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
             RespawnDashboardRoute.parseBody(body).get("code").map(_.trim).filter(_.nonEmpty) match {
               case Some(code) => actionResult(guildId, actions.removeSpawn(guildId, userId, code))
