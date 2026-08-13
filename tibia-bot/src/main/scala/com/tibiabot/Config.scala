@@ -127,9 +127,24 @@ object Config {
      *  `http://` redirect URIs for localhost specifically, which is what makes
      *  signing in locally possible at all. */
     val baseUrl: String = {
-      val configured = web.getString("base-url").trim.stripSuffix("/")
-      if (configured.nonEmpty) configured else s"https://$statusDomain"
+      if (configuredBaseUrl.nonEmpty) configuredBaseUrl else s"https://$statusDomain"
     }
+
+    private def configuredBaseUrl: String = web.getString("base-url").trim.stripSuffix("/")
+
+    /** Where members are sent to use the dashboard, which is not always
+     *  somewhere this bot serves.
+     *
+     *  [[baseUrl]] answers "where is *this* bot reached", and on a bot that runs
+     *  no dashboard the honest answer is nowhere — it has no `status-domain`, so
+     *  that origin comes out as a bare `https://`. This one answers the
+     *  different question the respawn board asks: where does the person reading
+     *  this post go to use the dashboard. There is one dashboard serving every
+     *  guild whichever bot runs them, so its address has a default here instead
+     *  of being something each bot has to be told, and a bot that does serve its
+     *  own still links to itself. */
+    val dashboardOrigin: String =
+      com.tibiabot.web.Origin.of(configuredBaseUrl, statusDomain, web.getString("dashboard-domain"))
 
     /** Whether session cookies may be marked `Secure`.
      *

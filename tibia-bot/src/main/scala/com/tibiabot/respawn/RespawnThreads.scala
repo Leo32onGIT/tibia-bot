@@ -326,9 +326,11 @@ object RespawnThreads extends StrictLogging {
    *  saying in worse words what the embed already says. What the card reads as
    *  is decided at the other end, by `web.LinkPreview`.
    *
-   *  Built from the configured origin rather than written out, so a bot running
-   *  against a different deployment posts its own address. */
-  def dashboardLink: String = s"${com.tibiabot.Config.Web.baseUrl.stripSuffix("/")}/dashboard"
+   *  Built from the origin members reach the dashboard at, not from the one this
+   *  bot answers on — most of the fleet serves no dashboard and has no address
+   *  of its own, and posting the board is not something only the bot with a
+   *  dashboard does. See `Config.Web.dashboardOrigin`. */
+  def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
 
   /** Post (or repost) the informational board thread, pinned to the top of the
    *  forum.
