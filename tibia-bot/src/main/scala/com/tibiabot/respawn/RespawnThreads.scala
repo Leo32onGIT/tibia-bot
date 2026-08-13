@@ -339,7 +339,11 @@ object RespawnThreads extends StrictLogging {
    *  directly underneath and speak for themselves. All this adds is the part
    *  neither can: why a member would leave Discord for the browser at all. */
   def boardIntro: String =
-    "Press **Claim** and type a code for the spawn.\nUse the web **Dashboard** if you want a simpler interface or want to **Book** a spawn much further in advance."
+    "Press\n" +
+    "**Claim** and type a code to claim a spawn right now" +
+    "**Book** to schedule/lock-in a hunt in the future" +
+    "**Dashboard** if you want a web interface or want to *book* a spawn much further in advance." +
+    "**Config** to change your default claim time & reminder settings"
 
   /** The board's card: the whole post bar the buttons.
    *
