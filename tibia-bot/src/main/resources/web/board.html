@@ -174,7 +174,6 @@
     border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 8px;
   }
   .panel-title::before { content: '##'; color: var(--accent); letter-spacing: normal; }
-  .panel-title .right { margin-left: auto; text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 11px; }
 
   /* Moderator tools for the catalogue itself. Purple throughout, the same hue
      the per-spawn moderator block and the admin tier chip already use, so
@@ -287,6 +286,15 @@
 
   .legend { display: flex; gap: 15px; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--panel-border); }
   .legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  /* Two even columns once the row stops fitting, rather than letting it wrap.
+     Wrapping put the four keys wherever they happened to land — "Booked &
+     confirmed" being twice the width of "Free" — so the second line started at
+     a different x from the first and the swatches lined up with nothing. A grid
+     gives four left edges in two columns, which is what makes it read as a key
+     rather than as a sentence that ran out of room. */
+  @media (max-width: 460px) {
+    .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  }
   /* The board legend's colour key. Named `key`, not `sw`, which the server
      switcher above already owns: two unrelated components sharing that class
      meant this rule — being the later one — sized the switcher to 12 by 12,
@@ -926,7 +934,7 @@
   </div>
 
   <div class="panel">
-    <div class="panel-title">Spawns <span class="right" id="count"></span></div>
+    <div class="panel-title">Spawns</div>
     <div class="legend">
       <span><i class="key key-free"></i>Free</span>
       <span><i class="key key-claimed"></i>Being hunted</span>
@@ -1491,10 +1499,10 @@ function renderBoard() {
   layoutBoard();
   board.spawns.forEach(paintCard);
 
-  const live = board.spawns.filter(s => s.state === 'claimed').length;
-  const booked = board.spawns.filter(s => ['booked', 'confirmed'].includes(s.state)).length;
-  setText(document.getElementById('count'),
-    `${board.spawns.length} spawns · ${live} being hunted · ${booked} booked`);
+  // No running tally beside the title any more. It counted what the board was
+  // already showing in colour, and on a phone it was a line of small print
+  // between the reader and the spawns — which is what they came for.
+  //
   // No timezone here any more: every time on the page is already drawn in the
   // reader's own clock, so naming it said nothing, and the line is better spent
   // on which Discord this board belongs to — which the header above now states.
