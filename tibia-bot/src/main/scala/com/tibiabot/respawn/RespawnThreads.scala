@@ -355,11 +355,10 @@ object RespawnThreads extends StrictLogging {
    *  it is for, which is the part a member arriving at the board for the first
    *  time does not have. */
   def boardIntro: String =
-    s"${com.tibiabot.Config.dailyEmoji} **Claim** and type a code to claim a spawn right now\n" +
-      s"$BookEmoji **Book** to schedule/lock-in a hunt in the future\n" +
-      s"$DashboardEmoji **Dashboard** if you want a web interface or want to *book* a spawn " +
-      "much further in advance\n" +
-      s"$ConfigEmoji **Config** to change your default claim time & reminder settings"
+    s"${com.tibiabot.Config.dailyEmoji} **Claim** **·** and type a code to claim a spawn right now\n" +
+      s"$BookEmoji **Book** **·** to schedule/lock-in a hunt in the future\n" +
+      s"$DashboardEmoji **Dashboard** **·** if you want to book further in advance (webui)" +
+      s"$ConfigEmoji **Config** **·** to change your default claim time & reminder settings"
 
   /** The board's card: the whole post bar the buttons.
    *
