@@ -24,8 +24,7 @@ Current features include:
 - Activity Feed
 - Server Save Notifications
 - Command Log
-- Monitoring dashboard (per-world health, throughput and recent events)
-- Respawn claims (a `📅・sᴘᴀᴡɴs` forum where each respawn is a thread showing who's on it and who's queued)
+- Respawn Claim System
 
 ## Architecture
 
