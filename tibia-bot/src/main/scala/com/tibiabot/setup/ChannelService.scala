@@ -285,7 +285,7 @@ final class ChannelService(
       .setDescription(
         s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
         s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +
-        s"${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n\n" +
+        s"${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n" +
         s"${Config.masslogEmoji}<@&$masslogRoleId> If enough enemies log in at once on **$world**\n" +
         s"${Config.bountyEmoji}$bountyMention If a character you're watching `logs in` on **$world**")
       .build()
