@@ -83,21 +83,21 @@ object LinkPreview {
    *  read as the same bot rather than as two products. */
   val Dashboard: Area = Area(
     path = "/dashboard",
-    title = "Respawn Claims /dashboard",
+    title = "Respawn Claims",
     description =
-      "Claim, book and leave respawns from the browser — this allows you to book much further in advance.\n" +
+      "Claim, book and leave respawns from the browser.\nThis allows you to book much further in advance.\n\n" +
         "Sign in with Discord to open it.",
     // The accent the dashboard is built in, so the stripe on the embed and the
     // buttons behind the link are the same blue.
-    themeColor = "#5b8cff")
+    themeColor = "#a78bfa")
 
   /** The owner's monitoring area. Its description says what is behind the link
    *  and stops there: who may open it is settled by the sign-in, and saying so
    *  on a card that anybody can unfurl only advertises the door. */
   val Status: Area = Area(
     path = "/status",
-    title = "Violent Bot /status",
-    description = "Stream health, queue depths and recent events for the bot itself.",
+    title = "Admin Panel",
+    description = "Stream health, queue depths and recent events for the bot itself.\n\nAdmin Only.",
     // The purple the dashboard already uses for its own privileged tier.
     themeColor = "#a78bfa")
 
