@@ -88,7 +88,37 @@ final class PaywallService(
       case ex: Throwable => logger.warn("Paywall: could not read the grace table at startup — every world stays active until the first sweep", ex)
     }
 
-  hydrateFromGrace(ZonedDateTime.now())
+  /** How many rows the synced Patreon snapshot currently holds, or `None` if
+   *  it couldn't be read at all.
+   *
+   *  Three-valued deliberately, because "Patreon says nobody" and "Patreon
+   *  didn't answer" have to be told apart before either is acted on — see
+   *  [[resumeOnEmptySnapshot]] and [[refreshAll]]. A `Some(0)` is a fact:
+   *  the table really is empty, which is never a legitimate answer about who
+   *  is subscribed (BotApp.syncPatreonMembers refuses to *write* one for
+   *  exactly that reason), so it means the integration isn't running rather
+   *  than that every supporter lapsed at once. A `None` is the absence of a
+   *  fact, and nothing may be concluded from it in either direction. */
+  private def patreonSnapshotSize(): Option[Int] =
+    try Some(patreonMemberRepository.snapshot().size)
+    catch {
+      case ex: Throwable =>
+        logger.warn("Paywall: could not read the Patreon snapshot", ex)
+        None
+    }
+
+  /** Seeding a pause is only meaningful against a snapshot that could have
+   *  produced it. With an empty one, the grace rows on disk were written by
+   *  sweeps that had nothing to check against (the pre-fix behaviour, or a
+   *  window where the integration was down), and honouring them here would
+   *  re-pause every world for the ~31 minutes until the first sweep clears
+   *  them — see [[refreshAll]]. An unreadable snapshot still hydrates: the
+   *  rows are the durable record of a real decision, and refusing to read a
+   *  table is no reason to discard it. */
+  patreonSnapshotSize() match {
+    case Some(0) => logger.info("Paywall: the Patreon snapshot is empty at startup — leaving every world active rather than restoring pauses from the grace table")
+    case _       => hydrateFromGrace(ZonedDateTime.now())
+  }
 
   /** The subscription check — the `/setup` command gate calls this directly;
    *  `refreshAll` calls it once per distinct seat owner.
@@ -382,8 +412,53 @@ final class PaywallService(
    *  paused presentation (channel name, online-list notice) for a world that
    *  lost it, which is possible for anything paused before a restart that
    *  [[hydrateFromGrace]] couldn't seed. It fires on every sweep for as long
-   *  as a world stays paused, so the caller must make it idempotent. */
+   *  as a world stays paused, so the caller must make it idempotent.
+   *
+   *  Sweeps at all only when there's a Patreon snapshot worth judging against
+   *  — see the match below and [[patreonSnapshotSize]]. */
   def refreshAll(setups: List[(String, String)])(
+    onLapsed: (Guild, String, String, String) => Unit,
+    onStillLapsed: (Guild, String) => Unit
+  ): Unit = patreonSnapshotSize() match {
+    // Nothing to check against. Every owner would read as lapsed at once and
+    // the sweep would start a grace timer for the whole install, pausing all
+    // of it `graceDays` later — the delay being what makes it so hard to
+    // trace back to a Patreon integration that was never running. So don't
+    // sweep, and undo any timer a sweep already started on this basis.
+    case Some(0) => resumeOnEmptySnapshot()
+    // Couldn't tell. Same fail-open rule the rest of this class runs on: a
+    // database blip costs a sweep, never anyone's tracking. Already-paused
+    // worlds stay paused (activeStatus is untouched), so this defers the
+    // decision rather than making one.
+    case None => logger.warn("Paywall: skipping the sweep — the Patreon snapshot could not be read, so nothing can be judged lapsed")
+    case Some(_) => sweep(setups)(onLapsed, onStillLapsed)
+  }
+
+  /** Grace timers written while there was no snapshot to check against are
+   *  not records of anyone lapsing, so they're dropped rather than left to
+   *  expire — otherwise an install that already paused stays paused for good,
+   *  since [[refreshAll]] no longer sweeps and nothing else clears a timer.
+   *
+   *  Also makes the recovery automatic in the other direction: an integration
+   *  that breaks long enough to pause worlds resumes them on the first sweep
+   *  after it's noticed, without waiting on a good snapshot first. Worlds are
+   *  marked active here as well as cleared, since [[isActive]] is read from
+   *  the map on every send-loop tick and only [[hydrateFromGrace]] and
+   *  [[applyRefresh]] otherwise write it. */
+  private def resumeOnEmptySnapshot(): Unit =
+    try {
+      val timers = patreonGraceRepository.allGrace()
+      timers.foreach { g =>
+        patreonGraceRepository.clearGrace(g.guildId, g.world)
+        activeStatus.put((g.guildId, g.world), true)
+      }
+      if (timers.nonEmpty)
+        logger.warn(s"Paywall: the Patreon snapshot is empty, so no subscription can be verified — dropped ${timers.size} grace timer(s) and resumed those worlds rather than pausing the whole install")
+    } catch {
+      case ex: Throwable => logger.warn("Paywall: could not clear the grace table against an empty Patreon snapshot", ex)
+    }
+
+  private def sweep(setups: List[(String, String)])(
     onLapsed: (Guild, String, String, String) => Unit,
     onStillLapsed: (Guild, String) => Unit
   ): Unit = {

@@ -77,10 +77,19 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
   }
 
   /** Stands in for the synced Patreon campaign snapshot — `activePatrons` are
-   *  the Discord ids Patreon reports as active_patron. */
+   *  the Discord ids Patreon reports as active_patron.
+   *
+   *  `snapshot` is backed by the same set rather than stubbed empty, because
+   *  the service now distinguishes an empty snapshot (the integration isn't
+   *  running — see PaywallService.refreshAll) from one that simply has no row
+   *  for a given user. A test that wants a working Patreon therefore has to
+   *  say so by naming at least one patron. `failing` fails both reads: a
+   *  database that can't answer one can't answer the other either. */
   private class FakeMemberRepository(activePatrons: Set[String] = Set.empty, failing: Boolean = false) extends PatreonMemberRepository {
     def replaceSnapshot(members: List[PatreonMember], syncedAt: ZonedDateTime): Unit = ()
-    def snapshot(): List[PatreonMember] = Nil
+    def snapshot(): List[PatreonMember] =
+      if (failing) throw new RuntimeException("database unreachable")
+      else activePatrons.toList.map(id => PatreonMember(s"member-$id", "Patron", Some("active_patron"), 500, Some(id)))
     def isActivePatron(discordUserId: String): Boolean =
       if (failing) throw new RuntimeException("database unreachable") else activePatrons.contains(discordUserId)
   }
@@ -94,7 +103,12 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     existingSeats: Int = 0,
     graceDays: Int = 7,
     grace: FakeGraceRepository = new FakeGraceRepository(),
-    activePatrons: Set[String] = Set.empty,
+    // Defaults to a working Patreon integration that this test's users happen
+    // not to be patrons of — the ordinary case, and what every test here
+    // assumed back when the snapshot couldn't be empty in a way the service
+    // noticed. An empty set now means something much stronger (no Patreon at
+    // all, so no sweep runs), so tests that want *that* say so explicitly.
+    activePatrons: Set[String] = Set("a-patron"),
     memberLookupFails: Boolean = false,
     knownUsers: Set[String] = Set.empty,
     user: User = null,
@@ -388,6 +402,69 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     stillPaused.toList shouldBe empty
   }
 
+  // An empty Patreon snapshot — the integration was never configured, or its
+  // credentials broke. Every owner reads as not-subscribed, so an unguarded
+  // sweep starts a timer for every world and pauses the whole install
+  // graceDays later, a week after the actual cause.
+
+  test("an empty Patreon snapshot pauses nothing and starts no timers at all") {
+    val grace = new FakeGraceRepository()
+    val svc = service(grace = grace, activePatrons = Set.empty, guild = stubGuild)
+    val announced = scala.collection.mutable.ListBuffer.empty[String]
+    val stillPaused = scala.collection.mutable.ListBuffer.empty[String]
+    svc.refreshAll(List(("guild-1", "Antica"), ("guild-2", "Secura")))(
+      onLapsed = (_, world, _, _) => announced += world,
+      onStillLapsed = (_, world) => stillPaused += world
+    )
+    announced.toList shouldBe empty
+    stillPaused.toList shouldBe empty
+    grace.allGrace() shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    svc.isActive("guild-2", "Secura") shouldBe true
+  }
+
+  test("an empty snapshot drops timers an earlier sweep left behind, rather than letting them expire") {
+    // Without this, an install bitten by the old behaviour stays paused for
+    // good: the guard above stops the sweep, and the sweep is the only thing
+    // that ever clears a timer.
+    val grace = new FakeGraceRepository(List(
+      PatreonGrace("guild-1", "Antica", ZonedDateTime.now().minusDays(30), notified = true),
+      PatreonGrace("guild-1", "Secura", ZonedDateTime.now().minusDays(1), notified = false)
+    ))
+    val svc = service(grace = grace, graceDays = 7, activePatrons = Set.empty, guild = stubGuild)
+    svc.refreshAll(List(("guild-1", "Antica"), ("guild-1", "Secura")))((_, _, _, _) => (), (_, _) => ())
+    grace.allGrace() shouldBe empty
+    svc.isActive("guild-1", "Antica") shouldBe true
+    svc.isActive("guild-1", "Secura") shouldBe true
+  }
+
+  test("an empty snapshot at startup leaves an already-expired world active rather than restoring the pause") {
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Antica", ZonedDateTime.now().minusDays(30), notified = true)))
+    service(grace = grace, graceDays = 7, activePatrons = Set.empty).isActive("guild-1", "Antica") shouldBe true
+  }
+
+  test("a snapshot that can't be read skips the sweep without touching the timers either way") {
+    // Distinct from an empty one: no answer is not the same as an answer of
+    // "nobody", so this defers rather than clearing anything.
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Antica", ZonedDateTime.now().minusDays(30), notified = true)))
+    val svc = service(grace = grace, graceDays = 7, memberLookupFails = true, guild = stubGuild)
+    val stillPaused = scala.collection.mutable.ListBuffer.empty[String]
+    svc.refreshAll(List(("guild-1", "Antica")))((_, _, _, _) => (), (_, world) => stillPaused += world)
+    stillPaused.toList shouldBe empty
+    grace.allGrace() should have size 1
+  }
+
+  test("a populated snapshot still pauses a genuinely lapsed world") {
+    // The guard is about the integration being absent, not about softening
+    // the paywall when it's working.
+    val grace = new FakeGraceRepository(List(PatreonGrace("guild-1", "Antica", ZonedDateTime.now().minusDays(30), notified = false)))
+    val svc = service(grace = grace, graceDays = 7, activePatrons = Set("someone-else"), guild = stubGuild)
+    val announced = scala.collection.mutable.ListBuffer.empty[String]
+    svc.refreshAll(List(("guild-1", "Antica")))((_, world, _, _) => announced += world, (_, _) => ())
+    announced.toList shouldBe List("Antica")
+    svc.isActive("guild-1", "Antica") shouldBe false
+  }
+
   test("sorting the subscription out mid-grace stops the clock and leaves no trace") {
     val grace = new FakeGraceRepository()
     val svc = service(grace = grace)
@@ -470,7 +547,7 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
   test("a positive extra-seat grant is a full paywall bypass, with no Patreon record") {
     // The whole point of the dashboard override: an arbitrary +1 gives someone
     // access without a subscription and without support-server membership.
-    val svc = service(activePatrons = Set.empty, overrides = Map("guild-leader" -> 1))
+    val svc = service(activePatrons = Set("someone-else"), overrides = Map("guild-leader" -> 1))
     svc.callerIsSubscribed("guild-leader") shouldBe true
   }
 }
