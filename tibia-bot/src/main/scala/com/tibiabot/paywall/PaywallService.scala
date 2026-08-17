@@ -35,7 +35,11 @@ import scala.jdk.CollectionConverters._
  *  untouched until that runs out. Resolving the subscription at any point
  *  before the deadline stops the clock and nothing ever happens. See
  *  `applyRefresh` — that one rule covers both cases, so an orphaned setup
- *  and a cancelled one are on identical footing. */
+ *  and a cancelled one are on identical footing.
+ *
+ *  The whole of the above steps aside on an install where Patreon was never
+ *  set up — see [[patreonNotConfigured]]. That is what lets somebody
+ *  self-host this without the gate having to be edited out of the source. */
 final class PaywallService(
   discordGateway: DiscordGateway,
   patreonSeatRepository: PatreonSeatRepository,
@@ -45,7 +49,12 @@ final class PaywallService(
   supportGuildId: String,
   seatLimit: Int,
   graceDays: Int,
-  ownerId: String
+  ownerId: String,
+  /** Whether this install has Patreon API credentials at all (see
+   *  Config.PatreonApi.enabled) — half of [[patreonNotConfigured]]. Defaults
+   *  to "configured", so anything constructing this without an opinion gets
+   *  the paywall enforced rather than bypassed. */
+  patreonApiConfigured: Boolean = true
 ) extends StrictLogging {
   private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
 
@@ -107,6 +116,28 @@ final class PaywallService(
         None
     }
 
+  /** Is Patreon provably not set up on this install? If so the whole paywall
+   *  steps aside — `/setup` is open to anyone and seats are unlimited — which
+   *  is what makes the bot self-hostable without gutting the gate for the
+   *  hosted one.
+   *
+   *  Both halves are required, because either alone is too weak in a
+   *  direction that matters. Credentials alone: a deploy that loses its
+   *  access token through an env mistake would silently throw `/setup` open
+   *  to everyone, while its member table still holds a perfectly good
+   *  snapshot to gate on. An empty table alone: a database that hasn't
+   *  finished coming up looks identical to a self-host for as long as it
+   *  takes the first sync to land. Requiring both means the paywall is only
+   *  ever bypassed where there is no evidence Patreon was ever involved.
+   *
+   *  Note the asymmetry with [[refreshAll]], which stands down on an empty
+   *  snapshot regardless of credentials. That is deliberate: pausing someone
+   *  wrongly costs them their tracking, so it fails open on the weaker
+   *  signal; letting someone in wrongly costs a subscription, so it fails
+   *  closed and demands the stronger one. */
+  private def patreonNotConfigured: Boolean =
+    !patreonApiConfigured && patreonSnapshotSize().contains(0)
+
   /** Seeding a pause is only meaningful against a snapshot that could have
    *  produced it. With an empty one, the grace rows on disk were written by
    *  sweeps that had nothing to check against (the pre-fix behaviour, or a
@@ -147,7 +178,7 @@ final class PaywallService(
    *  `applyRefresh`), so a bad sync or a database blip costs days of
    *  headroom rather than anyone's tracking. */
   def callerIsSubscribed(userId: String): Boolean =
-    if (userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
+    if (patreonNotConfigured || userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
     else try patreonMemberRepository.isActivePatron(userId)
     catch { case _: Throwable => false }
 
@@ -227,7 +258,7 @@ final class PaywallService(
    *  owner always passes: unlimited seats, same reasoning as
    *  [[callerIsSubscribed]]'s bypass. */
   def canAssignSeat(userId: String, guildId: String, world: String): Boolean =
-    userId == ownerId || canAssignSeatPure(
+    patreonNotConfigured || userId == ownerId || canAssignSeatPure(
       patreonSeatRepository.seatFor(guildId, world).map(_.userId),
       patreonSeatRepository.seatsForUser(userId).size,
       userId,
@@ -257,9 +288,14 @@ final class PaywallService(
    *  system existed — `/setup` needs to tell those apart from a seated world
    *  to offer claiming a legacy one onto a seat, while it still can (a legacy
    *  world keeps running until its grace period runs out — see
-   *  `applyRefresh`). */
+   *  `applyRefresh`).
+   *
+   *  Answers true unconditionally where Patreon isn't configured: there are
+   *  no seats on such an install by design, and the honest "no seat" would
+   *  otherwise make `/setup` offer to claim one against every world that
+   *  already exists — a prompt about a system that isn't running. */
   def hasSeat(guildId: String, world: String): Boolean =
-    patreonSeatRepository.seatFor(guildId, world).isDefined
+    patreonNotConfigured || patreonSeatRepository.seatFor(guildId, world).isDefined
 
   /** Frees every seat owned by this user. */
   def releaseAllSeats(userId: String): Unit =
