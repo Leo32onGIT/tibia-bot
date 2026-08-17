@@ -112,11 +112,15 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     memberLookupFails: Boolean = false,
     knownUsers: Set[String] = Set.empty,
     user: User = null,
-    guild: Guild = null
+    guild: Guild = null,
+    // Defaults to a credentialed install, i.e. the paywall enforced — the
+    // self-host bypass needs this *and* an empty snapshot, so no existing
+    // test can trip into it by accident.
+    patreonApiConfigured: Boolean = true
   ) =
     new PaywallService(
       new FakeGateway(knownUsers, user, guild), new FakeSeatRepository(existingSeats), new FakeSeatOverrideRepository(overrides), grace,
-      new FakeMemberRepository(activePatrons, memberLookupFails), "support-guild", seatLimit, graceDays, ownerId
+      new FakeMemberRepository(activePatrons, memberLookupFails), "support-guild", seatLimit, graceDays, ownerId, patreonApiConfigured
     )
 
   test("isActive defaults true for a (guild, world) pair that's never been checked") {
@@ -165,6 +169,58 @@ class PaywallServiceSpec extends AnyFunSuite with Matchers {
     val svc = service(ownerId = "owner-id", overrides = Map("user-1" -> 0, "user-2" -> -1))
     svc.callerIsSubscribed("user-1") shouldBe false
     svc.callerIsSubscribed("user-2") shouldBe false
+  }
+
+  // The self-host bypass — no Patreon credentials *and* nothing ever synced.
+  // Both halves are required, and the two single-signal cases below are the
+  // ones that must keep enforcing.
+
+  private def selfHosted(
+    seatLimit: Int = 3,
+    existingSeats: Int = 0,
+    grace: FakeGraceRepository = new FakeGraceRepository(),
+    guild: Guild = null
+  ) = service(
+    seatLimit = seatLimit, existingSeats = existingSeats, grace = grace, guild = guild,
+    activePatrons = Set.empty, patreonApiConfigured = false
+  )
+
+  test("an install with no Patreon credentials and no snapshot lets anyone /setup") {
+    selfHosted().callerIsSubscribed("nobody-in-particular") shouldBe true
+  }
+
+  test("the self-host bypass ignores the seat limit entirely") {
+    // Already well past the flat default, and with no override to earn it.
+    selfHosted(seatLimit = 1, existingSeats = 99).canAssignSeat("user-1", "guild-1", "Antica") shouldBe true
+  }
+
+  test("the self-host bypass reports every world as seated, so /setup offers no seat prompt") {
+    // FakeSeatRepository.seatFor is always None, so this can only be the
+    // bypass answering — a claim prompt for a seat system that isn't running
+    // is the thing being suppressed.
+    selfHosted().hasSeat("guild-1", "Antica") shouldBe true
+  }
+
+  test("credentials configured still enforce the gate, even with an empty snapshot") {
+    // A database still coming up looks exactly like a self-host on the
+    // snapshot alone; the credentials are what tell them apart.
+    val svc = service(activePatrons = Set.empty, patreonApiConfigured = true)
+    svc.callerIsSubscribed("user-1") shouldBe false
+    svc.hasSeat("guild-1", "Antica") shouldBe false
+  }
+
+  test("a populated snapshot still enforces the gate, even with no credentials configured") {
+    // An env mistake that drops the access token must not throw /setup open
+    // while there's a perfectly good snapshot left to gate on.
+    val svc = service(activePatrons = Set("someone-else"), patreonApiConfigured = false)
+    svc.callerIsSubscribed("user-1") shouldBe false
+    svc.callerIsSubscribed("someone-else") shouldBe true
+  }
+
+  test("an unreadable snapshot enforces the gate rather than falling through to the bypass") {
+    // Not the same as an empty one: no answer is no evidence that Patreon was
+    // never set up, so the paywall stays on.
+    service(memberLookupFails = true, patreonApiConfigured = false).callerIsSubscribed("user-1") shouldBe false
   }
 
   test("resolveUserId: an unreachable support guild resolves a username to None") {

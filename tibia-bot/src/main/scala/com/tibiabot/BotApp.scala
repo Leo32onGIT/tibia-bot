@@ -224,8 +224,11 @@ object BotApp extends App with StrictLogging {
   // Config.Patreon.graceDays to sort it out before anything is actually
   // paused. Seat count is Config.Patreon.seatsPerUser plus any per-user
   // adjustment granted through the dashboard (see
-  // PaywallService.effectiveSeatLimit).
-  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, patreonGraceRepository, patreonMemberRepository, Config.Patreon.supportGuildId, Config.Patreon.seatsPerUser, Config.Patreon.graceDays, discordGateway.applicationOwnerId)
+  // PaywallService.effectiveSeatLimit). Config.PatreonApi.enabled is passed
+  // in as well: an install with no Patreon credentials and nothing ever
+  // synced is a self-host, and the gate stands down there entirely rather
+  // than refusing everyone (see PaywallService.patreonNotConfigured).
+  val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, patreonGraceRepository, patreonMemberRepository, Config.Patreon.supportGuildId, Config.Patreon.seatsPerUser, Config.Patreon.graceDays, discordGateway.applicationOwnerId, Config.PatreonApi.enabled)
 
   // Direct Patreon API access — see Config.PatreonApi and syncPatreonMembers
   // below. What this syncs is the source of truth for who's subscribed, so
