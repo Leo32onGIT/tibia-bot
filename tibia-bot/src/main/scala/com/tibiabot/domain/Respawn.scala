@@ -86,7 +86,33 @@ final case class RespawnClaim(
    *  Empty only on a row from before booking over a slot became the one way to
    *  ask; those hand over the slot as it stands. */
   requestedStartsAt: Option[ZonedDateTime] = None,
-  requestedDurationMinutes: Option[Int] = None
+  requestedDurationMinutes: Option[Int] = None,
+  /** When this slot's owner said, in as many words, that they are hunting it —
+   *  by pressing Confirm on the reminder before it starts, or Take Claim once
+   *  it has. Empty on every ad-hoc claim, which needs no confirming: making one
+   *  is itself the act of turning up.
+   *
+   *  Set once and never cleared. It is what makes a booking stop being
+   *  provisional: a confirmed slot can no longer be asked for (see
+   *  [[requestable]]) and is never swept away unhunted (see [[confirmBy]]). */
+  confirmedAt: Option[ZonedDateTime] = None,
+  /** The deadline by which a booking that started on its own has to be
+   *  confirmed, or it is given up on the owner's behalf. Stamped by
+   *  `startReservation` and never cleared, so it also serves as the marker for
+   *  "this claim began as a booking rather than by somebody pressing Claim".
+   *
+   *  Empty on an ad-hoc claim, and on every row written before confirmation
+   *  existed — which is what keeps the sweep off hunts that were already
+   *  running when this shipped. */
+  confirmBy: Option[ZonedDateTime] = None,
+  /** What this person is called in the guild, as they were called when they
+   *  took the spawn — their nickname where they have one, their display name
+   *  otherwise. Stamped rather than looked up: the rows outlive membership, and
+   *  a name resolved at render time is blank for everyone who has since left.
+   *
+   *  Last in the list only so adding it left every existing construction alone.
+   *  Empty on rows written before it existed, which read as the username. */
+  nickname: String = ""
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
   def isQueued: Boolean = status == RespawnClaim.StatusQueued
@@ -109,9 +135,19 @@ final case class RespawnClaim(
    *  running hunt and must be left alone. */
   def eligibleForHandover: Boolean = limboUntil.isDefined
 
+  /** Whether its owner has said they are hunting this one. */
+  def confirmed: Boolean = confirmedAt.isDefined
+
   /** Whether this slot can still be asked for. Once its owner has been asked the
-   *  answer stands for that slot, so nobody may ask again. */
-  def requestable: Boolean = isReserved && askedAt.isEmpty
+   *  answer stands for that slot, so nobody may ask again — and a slot they have
+   *  already confirmed is not open to the question at all, which is the point of
+   *  confirming early. */
+  def requestable: Boolean = isReserved && askedAt.isEmpty && confirmedAt.isEmpty
+
+  /** A booking that started on its own and is waiting for its owner to say they
+   *  are actually there. It holds the spawn meanwhile — it is a real claim — but
+   *  is given up on their behalf if the deadline goes by (see [[confirmBy]]). */
+  def awaitingConfirmation: Boolean = isActive && confirmBy.isDefined && confirmedAt.isEmpty
 
   /** Whether somebody is waiting on the owner's answer right now. */
   def requestPending: Boolean = isReserved && requesterUserId.isDefined
@@ -208,6 +244,15 @@ object RespawnClaim {
     val GivenUp: String = "given-up"
     /** The slot's owner never answered, so it went to whoever asked. */
     val NoAnswer: String = "no-answer"
+    /** A booking started on its own and its owner never confirmed they were
+     *  there, so it was given up for them. */
+    val Unconfirmed: String = "unconfirmed"
+    /** A moderator took this one day off the calendar. The rule behind it, if
+     *  there was one, carries on — only the day is written off. */
+    val SlotRemoved: String = "slot-removed"
+    /** A moderator put this day in somebody else's name. Recorded against the
+     *  day the previous owner lost, not against the one they were given. */
+    val SlotMoved: String = "slot-moved"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -227,6 +272,9 @@ object RespawnClaim {
       case Merged      => "folded into a hunt already running"
       case GivenUp     => "given up for the night"
       case NoAnswer    => "no answer, passed on"
+      case Unconfirmed => "never confirmed, given up"
+      case SlotRemoved => "taken off the calendar by a moderator"
+      case SlotMoved   => "moved to somebody else by a moderator"
       case other       => other
     }
   }
@@ -269,7 +317,9 @@ final case class RespawnSchedule(
   createdAt: ZonedDateTime,
   /** Which weekdays this repeats on, as a bitmask — Monday is the low bit. Last
    *  in the list only so adding it left every existing construction alone. */
-  daysOfWeek: Int = RespawnSchedule.EveryDay
+  daysOfWeek: Int = RespawnSchedule.EveryDay,
+  /** As RespawnClaim.nickname. */
+  nickname: String = ""
 ) {
   /** A booking that comes back around, as opposed to a single slot held ahead of
    *  time. */
@@ -302,6 +352,29 @@ final case class RespawnSchedule(
       Iterator.iterate(firstDue)(_.plusMinutes(period))
         .take(stepsPerWeek + 1).find(coversDay)
     }
+  }
+
+  /** The next slot this rule will actually produce, skipping days it has given
+   *  up — see `persistence.ScheduleOccurrence`.
+   *
+   *  What every surface that says "your next booking is…" wants. Asking without
+   *  the days given up is what left a card naming tonight after tonight had been
+   *  handed to somebody else: the rule says every day, and by itself it has no
+   *  way to know one of those days is no longer its own to offer.
+   *
+   *  Bounded like [[occurrencesBetween]], and for the same reason — though it
+   *  cannot realistically walk far, since only a day a row was written for can
+   *  be given up and rows exist only inside the look-ahead.
+   */
+  def nextStartAtOrAfter(from: ZonedDateTime, givenUp: Set[java.time.Instant]): Option[ZonedDateTime] = {
+    var cursor = nextStartAtOrAfter(from)
+    var guard = 0
+    while (cursor.exists(start => givenUp.contains(start.toInstant)) &&
+           guard < RespawnSchedule.OccurrenceLimit) {
+      cursor = cursor.flatMap(start => nextStartAtOrAfter(start.plusMinutes(1)))
+      guard += 1
+    }
+    cursor
   }
 
   /** Every slot starting inside a window. Bounded, so a bad row cannot make this
@@ -368,6 +441,9 @@ object ClashVerdict {
   case object ManySlots extends ClashVerdict
   /** That slot's owner has already been asked once, which is the limit. */
   case object AlreadyAsked extends ClashVerdict
+  /** Its owner has already confirmed they are hunting it, so there is nothing
+   *  to ask — confirming early is exactly how somebody says "don't ask me". */
+  case object Confirmed extends ClashVerdict
 }
 
 object RespawnSchedule {
@@ -415,6 +491,34 @@ object RespawnSchedule {
     }
   }
 
+  /** Whether `schedule` has given up every day it would contest with
+   *  `candidate`, and so no longer stands in its way.
+   *
+   *  [[clash]] compares two rules, and a rule is a sentence about every day. It
+   *  cannot know that one of those days was handed to somebody else, or taken
+   *  off the calendar — that lives in the row for the day, and `settled` is the
+   *  starts of the days whose rows say they are over. Without this, giving a
+   *  Thursday away left the rule still defending it, and the next person to want
+   *  that evening was refused on behalf of a booking nobody was going to hunt.
+   *
+   *  All-or-nothing on purpose. A repeating rule that has given up one Thursday
+   *  still owns every other, so it takes every contested day being settled
+   *  before it stops counting. A day too far ahead to have a row has settled
+   *  nothing, which is what keeps [[ClashVerdict.TooFarAhead]] meaning what it
+   *  says rather than quietly becoming a yes — and why no contested day at all
+   *  inside the window is false rather than true.
+   */
+  def surrendered(schedule: RespawnSchedule, candidate: RespawnSchedule,
+                  settled: Set[java.time.Instant],
+                  from: ZonedDateTime, to: ZonedDateTime): Boolean = {
+    val theirs = candidate.occurrencesBetween(from, to)
+    val contested = schedule.occurrencesBetween(from, to).filter { start =>
+      val end = schedule.endOf(start)
+      theirs.exists(other => other.isBefore(end) && start.isBefore(candidate.endOf(other)))
+    }
+    contested.nonEmpty && contested.forall(start => settled.contains(start.toInstant))
+  }
+
   /** What a clashing booking should do about it, given the rules and the booked
    *  slots it runs over.
    *
@@ -434,6 +538,10 @@ object RespawnSchedule {
       ClashVerdict.TooFarAhead
     else slots match {
       case slot :: Nil if slot.requestable => ClashVerdict.Ask(slot)
+      // Ahead of AlreadyAsked, which it would otherwise fall into now that
+      // `requestable` covers both — and they are not the same refusal: one says
+      // the question has been used up, this one says it was never open.
+      case slot :: Nil if slot.confirmed   => ClashVerdict.Confirmed
       case _ :: Nil                        => ClashVerdict.AlreadyAsked
       case _                               => ClashVerdict.ManySlots
     }

@@ -18,6 +18,38 @@ object RespawnEmbeds {
   val RedColor: Int = 13773097
   /** The bot's yellow (see GuildActivity.activityColor) — a claim nearing its end. */
   val WarnColor: Int = 14397256
+  /** Blue — a booking, as opposed to a hunt someone claimed on the spot.
+   *
+   *  The same `#5b8cff` the member dashboard draws booked slots in (board.html's
+   *  `--st-booked`), so the colour means one thing across the website and
+   *  Discord: somebody reading a blue DM and a blue slot on the board is looking
+   *  at the same kind of thing. Keep the two in step if either moves. */
+  val BookedColor: Int = 5999871
+
+  /** The claim log's thumbnail: the in-game book, for the card that is one.
+   *
+   *  Written out rather than built through [[Urls.creatureImageUrl]] — that
+   *  helper's name parsing exists for creature names, and this is an item that
+   *  happens to resolve through the same wiki redirect. Same form as the other
+   *  fixed wiki pictures the bot uses (Rashid, Galthen's Satchel). */
+  private val LogThumbnail: String =
+    "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tome_of_Knowledge.gif"
+
+  /** A spawn as a link to its own forum post — how a spawn is named anywhere a
+   *  member is being told something about it.
+   *
+   *  `<#id>` rather than the full `discord.com/channels/…` URL, because Discord
+   *  renders it as the post's name: the sentence still reads as the spawn's name
+   *  while being somewhere to click, and it follows the post if it is ever
+   *  renamed. It also renders the same in a DM as in the guild, which a member
+   *  reading "your hunt starts soon" is relying on.
+   *
+   *  Falls back to the bold name for a spawn with no post yet. Every spawn gets
+   *  one on its first claim, so that is a catalogue row nobody has ever hunted —
+   *  rare, but plain text there beats a link to nothing. */
+  def spawnLink(respawn: Respawn): String =
+    if (respawn.threadId.isEmpty || respawn.threadId == "0") s"**${respawn.displayName}**"
+    else s"<#${respawn.threadId}>"
 
   /** Discord renders `<t:epoch:R>` as a live-updating "in 2 hours" that keeps
    *  counting down without the bot editing the message, which is why claim
@@ -30,7 +62,7 @@ object RespawnEmbeds {
 
   /** Short date *and* time, for the audit log — its entries span days, where a
    *  bare clock time would be ambiguous. */
-  private def dateTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:f>"
+  private def dateTime(when: ZonedDateTime): String = s"<t:${when.toInstant.getEpochSecond}:s>"
 
   /** "2h", "45m", "1h 30m" — durations read better than a raw minute count in
    *  an embed field. */
@@ -42,11 +74,31 @@ object RespawnEmbeds {
     else s"${remainder}m"
   }
 
-  /** How a claimant is named: their Tibia character when they gave one, always
-   *  followed by the Discord mention so they can actually be pinged. */
+  /** How a claimant is named: their Tibia character when they gave one, followed
+   *  by the Discord name the claim was made under. Both are plain text — see
+   *  [[Names.user]] for why none of these read as a mention. */
   private def claimantLabel(claim: RespawnClaim): String =
-    if (claim.characterName.nonEmpty) s"**${claim.characterName}** (<@${claim.userId}>)"
-    else s"<@${claim.userId}>"
+    (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
+      case (true, true)  => s"**${claim.characterName}** (${Names.user(claim.userName)})"
+      case (true, false) => s"**${claim.characterName}**"
+      // No character given, so the guild name is what identifies them.
+      case _             => Names.user(claim.nickname, claim.userName)
+    }
+
+  /** The same, for a booking that has not produced a slot row yet — the rule
+   *  carries the character too, so it names its owner identically. */
+  private def scheduleLabel(schedule: RespawnSchedule): String =
+    (schedule.characterName.nonEmpty, schedule.userName.nonEmpty) match {
+      case (true, true)  => s"**${schedule.characterName}** (${Names.user(schedule.userName)})"
+      case (true, false) => s"**${schedule.characterName}**"
+      case _             => Names.user(schedule.nickname, schedule.userName)
+    }
+
+  /** One line of the Booked field. The hollow marker is the one the Book panel
+   *  uses, and always hollow here: a card is one shared post rather than a reply
+   *  to somebody, so it has no reader whose rows could be filled in. */
+  private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
+    s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **·** $who$note"
 
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted
@@ -68,7 +120,11 @@ object RespawnEmbeds {
    *  chatter below it. */
   def claimCard(respawn: Respawn, claim: Option[RespawnClaim], queue: List[RespawnClaim],
                 reservations: List[RespawnClaim], settings: RespawnSettings,
-                imageUrl: String): MessageEmbed = {
+                imageUrl: String, upcoming: List[RespawnSchedule] = Nil,
+                now: ZonedDateTime = ZonedDateTime.now(),
+                /** Days each rule has given up, so one it no longer holds is
+                 *  not the evening it offers. Keyed by schedule id. */
+                givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder()
     embed.setTitle(respawn.displayName)
     embed.setImage(imageUrl)
@@ -100,21 +156,40 @@ object RespawnEmbeds {
       embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", cappedField(shown, queue.size), false)
     }
 
-    if (reservations.nonEmpty) {
-      // Booked slots that haven't started. Shown whether or not the spawn is free
-      // right now, because the point of booking ahead is that people can plan
-      // around it.
-      val shown = reservations.take(RowsPerField).map { slot =>
-        val when = slot.startsAt.map(dateTime).getOrElse("?")
-        // Somebody is waiting on an answer — worth showing, since until it is
-        // given the slot may or may not still belong to the name beside it.
-        val pending = if (slot.requestPending) " · *asked*" else ""
-        // The same hollow marker the Book panel uses, and always hollow here: a
-        // card is one shared post rather than a reply to somebody, so it has no
-        // reader whose rows could be filled in.
-        s"▹ $when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+    // Booked windows that haven't started. Shown whether or not the spawn is free
+    // right now, because the point of booking ahead is that people can plan
+    // around it.
+    //
+    // Two sources, because a booking exists before its slot does. A slot row is
+    // only written once its start comes within the look-ahead, so a booking made
+    // for Thursday has nothing but the rule behind it for days — and a card that
+    // showed only rows would answer "nothing booked" to somebody who had just
+    // booked it. `upcoming` is the rules with no row yet, and the caller is what
+    // decides that, since only it can see both.
+    val booked =
+      reservations.flatMap { slot =>
+        slot.startsAt.map { start =>
+          // Somebody is waiting on an answer — worth showing, since until it is
+          // given the slot may or may not still belong to the name beside it.
+          val pending = if (slot.requestPending) " · *asked*" else ""
+          start -> bookedRow(start, slot.durationMinutes, claimantLabel(slot), pending)
+        }
+      } ++ upcoming.flatMap { schedule =>
+        // Only the next one. A weekly booking has occurrences forever, and a card
+        // listing every Tuesday from now on would say the same thing ten times.
+        //
+        // The next one it still holds, at that: a rule that gave tonight away
+        // offers tomorrow, rather than standing beside the booking that took it
+        // and naming the same hour.
+        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
+          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+          start -> bookedRow(start, schedule.durationMinutes, scheduleLabel(schedule), repeat)
+        }
       }
-      embed.addField("Booked", cappedField(shown, reservations.size), false)
+
+    if (booked.nonEmpty) {
+      val ordered = booked.sortBy(_._1.toInstant).map(_._2)
+      embed.addField("Booked", cappedField(ordered.take(RowsPerField), ordered.size), false)
     }
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
@@ -134,7 +209,8 @@ object RespawnEmbeds {
    */
   def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
                    reservations: List[RespawnClaim], holder: Option[RespawnClaim],
-                   now: ZonedDateTime, imageUrl: String): MessageEmbed = {
+                   now: ZonedDateTime, imageUrl: String,
+                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
@@ -144,7 +220,8 @@ object RespawnEmbeds {
         s"Being hunted by ${claimantLabel(active)}$until."
       case None => "Free right now."
     }
-    val booked = mine.flatMap(schedule => schedule.nextStartAtOrAfter(now).map(schedule -> _))
+    val booked = mine.flatMap(schedule =>
+      schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map(schedule -> _))
     val yours =
       // A moderator opens this panel with nothing of their own booked here, so
       // "your booking has been and gone" would be a lie rather than an absence.
@@ -207,17 +284,16 @@ object RespawnEmbeds {
     // way to ask; the plainer opening survives for a request that was already in
     // flight when the Request button was removed, and for nothing else.
     //
-    // The asker is a mention rather than a name: Discord resolves it by id, so it
-    // reads as their current display name in a DM they are not part of, and it
-    // notifies nobody — they are not a recipient of this channel. "Someone" is
-    // the fallback for a row written before the id was recorded.
-    val asker = slot.requesterUserId.map(id => s"<@$id>").getOrElse("Someone")
+    // The name recorded on the request rather than a mention — see Names.user.
+    // "Someone" is the fallback for a row written before the name was kept.
+    // Already emphasised, so the sentences below interpolate it bare.
+    val asker = slot.requesterUserName.filter(_.nonEmpty).map(Names.user).getOrElse("**Someone**")
     val opening = wanted match {
       case Some((start, minutes)) =>
-        s"**$asker** wants to book **${respawn.displayName}** from ${clockTime(start)} " +
+        s"$asker wants to book ${spawnLink(respawn)} from ${clockTime(start)} " +
           s"for ${humanDuration(minutes)}, which runs over your slot at $window."
       case None =>
-        s"**$asker** would like **${respawn.displayName}** at $window."
+        s"$asker would like ${spawnLink(respawn)} at $window."
     }
     s"$opening\nIf you don't answer by ${relative(deadline)} the slot goes to them."
   }
@@ -233,7 +309,7 @@ object RespawnEmbeds {
       case _                        => ""
     }
     val booking = if (slot.requestedSlot.isDefined) " Your booking wasn't made." else ""
-    s"<@${slot.userId}> has confirmed they are hunting **${respawn.displayName}**$when, " +
+    s"${Names.user(slot.nickname, slot.userName)} has confirmed they are hunting ${spawnLink(respawn)}$when, " +
       s"so it stays theirs.$booking"
   }
 
@@ -241,53 +317,79 @@ object RespawnEmbeds {
    *  rather than read off the slot: what they get is what they asked for, which
    *  is the slot itself only when they asked for it with the Request button. */
   def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
-    s"**${respawn.displayName}** is yours at ${dateTime(start)} for " +
+    s"${spawnLink(respawn)} is yours at ${dateTime(start)} for " +
       s"${humanDuration(minutes)} — it'll start on its own, no need to claim it."
 
   /** DM'd to whoever asked when the slot was given up but their own window has
    *  since been booked around them. Says what happened rather than just failing:
    *  the time really is free now, and they can take it the ordinary way. */
   def slotRequestBlocked(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
-    s"The slot you asked about on **${respawn.displayName}** has been given up, but the " +
+    s"The slot you asked about on ${spawnLink(respawn)} has been given up, but the " +
       s"${humanDuration(minutes)} you wanted from ${dateTime(start)} now runs over somebody " +
       "else's booking, so it hasn't been booked for you.\n" +
       "Book a shorter slot, or claim it on the night."
 
-  /** DM'd shortly before a booked slot begins, so its owner can be there for it —
-   *  or free it up if they can't. */
+  /** DM'd shortly before a booked slot begins, so its owner can be there for it.
+   *
+   *  Says what Confirm buys them, because pressing it is optional and the reason
+   *  to bother is not otherwise visible: it settles the slot early, so nobody
+   *  can ask for it and there is nothing left to answer once it starts. */
   def slotReminder(respawn: Respawn, slot: RespawnClaim): String = {
     val start = slot.startsAt.map(relative).getOrElse("shortly")
-    s"Your booked slot on **${respawn.displayName}** starts $start for " +
-      s"${humanDuration(slot.durationMinutes)}."
+    s"Your booked slot on ${spawnLink(respawn)} starts $start for " +
+      s"${humanDuration(slot.durationMinutes)}.\n\n" +
+      "Confirm now to claim it automatically."
   }
 
-  /** DM'd when a booked slot starts. */
+  /** DM'd when a booked slot starts and its owner has already confirmed it. */
   def slotStarted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(clockTime).getOrElse("soon")
-    s"Your booked hunt on **${respawn.displayName}** has started and runs until $ends."
+    s"Your booked hunt on ${spawnLink(respawn)} has started and runs until $ends."
+  }
+
+  /** DM'd when a booked slot starts unconfirmed: the spawn is theirs from this
+   *  moment, but only if they say they are there.
+   *
+   *  Sets the deadline apart in bold, because the thing to act on is the one that
+   *  expires and it has to be findable at a glance in a notification. A booking
+   *  nobody turns up for used to hold a spawn for
+   *  its whole window while the people who would have hunted it queued behind
+   *  somebody absent. */
+  def slotStartedUnconfirmed(respawn: Respawn, claim: RespawnClaim, confirmBy: ZonedDateTime): String = {
+    val ends = claim.endsAt.map(clockTime).getOrElse("soon")
+    s"Your booked hunt on ${spawnLink(respawn)} has started and runs until $ends.\n\n" +
+      s"**Take the claim ${relative(confirmBy)}** or you will lose the claim."
+  }
+
+  /** DM'd when that deadline goes by unanswered. Says what it cost and where the
+   *  hunt went. */
+  def slotUnconfirmed(respawn: Respawn, refundedMinutes: Int): String = {
+    val refund = if (refundedMinutes > 0) s" You've had **${humanDuration(refundedMinutes)}** stamina refunded." else ""
+    s"Your booked hunt on ${spawnLink(respawn)} was given up — you didn't take the claim in " +
+      s"time, so it's gone to whoever was next.\n$refund"
   }
 
   /** DM'd when a booking comes round to find its own owner already on the spawn:
    *  the hunt simply carries on to the booked end. */
   def slotMerged(respawn: Respawn, until: ZonedDateTime): String =
-    s"You were already on **${respawn.displayName}** when your booking came round, " +
+    s"You were already on ${spawnLink(respawn)} when your booking came round, " +
       s"so it's carried straight on — your hunt now runs until ${clockTime(until)}."
 
   /** DM'd when a booked slot arrives to find somebody already hunting. */
   def slotOccupied(respawn: Respawn, holder: Option[RespawnClaim]): String = {
-    val who = holder.map(c => s" by <@${c.userId}>").getOrElse("")
+    val who = holder.map(c => s" by ${Names.user(c.nickname, c.userName)}").getOrElse("")
     val until = holder.flatMap(_.endsAt).map(end => s" until ${clockTime(end)}").getOrElse("")
-    s"**${respawn.displayName}** was already being hunted$who$until when your slot came round, " +
+    s"${spawnLink(respawn)} was already being hunted$who$until when your slot came round, " +
       "so you're first in the queue and I'll offer it to you the moment they finish."
   }
 
   /** DM'd when a booked slot can't start because the tank is spent. */
   def slotNoStamina(respawn: Respawn, needed: Int, stamina: Stamina,
                     resetsAt: ZonedDateTime): String =
-    s"Your booked slot on **${respawn.displayName}** needed " +
+    s"Your booked slot on ${spawnLink(respawn)} needed " +
       s"**${humanDuration(needed)}** but you have " +
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
-      s"Your tank refills at server save ${relative(resetsAt)}."
+      s"Your stamina refills at server save ${relative(resetsAt)}."
 
   /** Standing bookings, for the Schedule panel and `/respawn schedules`.
    *
@@ -295,7 +397,8 @@ object RespawnEmbeds {
    *  moderator sees — and names the owner, since otherwise the list is a wall of
    *  spawns with no way to tell whose is whose. */
   def schedulesEmbed(entries: List[(RespawnSchedule, Respawn)], now: ZonedDateTime,
-                     everyones: Boolean = false): MessageEmbed = {
+                     everyones: Boolean = false,
+                     givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor)
       .setTitle(if (everyones) "Booked slots on this server" else "Your bookings")
     if (entries.isEmpty) {
@@ -308,11 +411,11 @@ object RespawnEmbeds {
       // bookings is asking what is coming up, not which respawns they favour.
       // A spent one-off has no next time, and sits at the end.
       val dated = entries.map { case (schedule, respawn) =>
-        (schedule.nextStartAtOrAfter(now), schedule, respawn)
+        (schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)), schedule, respawn)
       }.sortBy { case (start, _, _) => start.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue) }
 
       embed.setDescription(truncateLines(dated.map { case (start, schedule, respawn) =>
-        val who = if (everyones) s" · <@${schedule.userId}>" else ""
+        val who = if (everyones) s" · ${Names.user(schedule.nickname, schedule.userName)}" else ""
         start match {
           case Some(from) =>
             // A repeat says which days and needs no date. A one-off is one
@@ -347,15 +450,15 @@ object RespawnEmbeds {
     new EmbedBuilder()
       .setColor(Embeds.BrandColor)
       .setTitle("Server respawn settings")
-      .setDescription("These apply to everyone here. Members can set their own claim length " +
-        "and reminder time, which override the defaults below.")
+      .setDescription("These apply to everyone here. Members set their own claim length and " +
+        "reminder time in Config, which override the defaults below.")
       .addField("Default claim", humanDuration(settings.defaultDurationMinutes), true)
       .addField("Maximum claim", humanDuration(settings.maxDurationMinutes), true)
       .addField("Queue limit", settings.queueLimit.toString, true)
       .addField("Daily stamina",
         if (settings.staminaMinutes <= 0) "unlimited" else humanDuration(settings.staminaMinutes), true)
-      .addField("Default reminder",
-        if (settings.warnMinutes <= 0) "off" else s"${humanDuration(settings.warnMinutes)} before the end", true)
+      // The reminder default is not here: it is no longer a per-guild setting, so
+      // showing it would be showing a number nobody in this panel can change.
       .addField("Handover window", humanDuration(settings.handoverMinutes), true)
       .build()
 
@@ -403,14 +506,14 @@ object RespawnEmbeds {
    *  claim time from the same getName a lookup would return, so showing it costs
    *  nothing where retrieving each entry's user would be a REST call per person
    *  per render. The trade is that it does not follow a later rename and cannot
-   *  be clicked; the mention is kept only as a last resort, for old rows that
-   *  predate the column and have no name to show at all. */
+   *  be clicked. An old row that predates the column has no name to show at all,
+   *  and says so rather than falling back to a raw id nobody can read. */
   private def logName(claim: RespawnClaim): String =
     (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)   => s"${claim.characterName} (${claim.userName})"
       case (true, false)  => claim.characterName
       case (false, true)  => claim.userName
-      case (false, false) => s"<@${claim.userId}>"
+      case (false, false) => "someone"
     }
 
   /** Who held it and how it went — the part that reads the same wherever an
@@ -488,41 +591,45 @@ object RespawnEmbeds {
    *  brings to it — who had this last night, is somebody sitting on it, did they
    *  turn up — is answered by the recent end of it.
    *
-   *  The summary sits in inline fields rather than a sentence: three short
-   *  numbers side by side is the one thing Discord's field layout genuinely does
-   *  better than prose, and it keeps the feed below starting at a predictable
-   *  place. */
-  def claimLog(scope: Option[Respawn], page: com.tibiabot.respawn.LogPage,
-               summary: com.tibiabot.respawn.LogSummary,
+   *  Nothing above the feed but the title. There used to be three inline fields
+   *  counting the week's hunts and naming the busiest spawn — read often enough
+   *  to keep, it turned out, by nobody: a moderator opens this with a question
+   *  about one spawn or one night, and a guild-wide tally answers neither while
+   *  pushing the rows that do answer them further down the card. */
+  /** `heading` names what the log is scoped to — a spawn, a member — and is
+   *  absent for the whole guild. `foldBySpawn` is separate from it rather than
+   *  derived, because the two do not move together: a member's log is scoped
+   *  *and* folded, since it runs across spawns exactly as the guild's does. */
+  def claimLog(heading: Option[String], foldBySpawn: Boolean, page: com.tibiabot.respawn.LogPage,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
     val embed = new EmbedBuilder()
       .setColor(Embeds.BrandColor)
-      .setTitle(scope.map(r => s"Claim log — ${r.displayName}").getOrElse("Claim log"))
-
-    // The summary covers the whole guild either way: on a spawn's own log it is
-    // the context the single-spawn feed below cannot give.
-    embed.addField(s"Last ${summary.days} days",
-      if (summary.total == 0) "nothing yet" else s"${summary.total} hunts", true)
-    embed.addField("Busiest",
-      summary.busiest.map { case (respawn, hunts) => s"${respawn.displayName} ($hunts)" }.getOrElse("—"), true)
-    embed.addField("Showing",
-      if (!page.hasOlder && !page.hasNewer) "all of it" else s"page ${page.page + 1}", true)
+      .setTitle(heading.map(what => s"Claim log — $what").getOrElse("Claim log"))
+      .setThumbnail(LogThumbnail)
 
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")
     } else {
       // A spawn's own log has one code and nothing to fold, so it keeps the
-      // two-line entry. The board's is folded by spawn — that is where the same
-      // name was being repeated down the page.
+      // two-line entry. Everything else is folded by spawn — that is where the
+      // same name was being repeated down the page.
       val blocks =
-        if (scope.isDefined) page.entries.map(logEntry(_, None))
-        else collapsedRuns(page.entries).map { case (respawnId, claims) =>
+        if (foldBySpawn) collapsedRuns(page.entries).map { case (respawnId, claims) =>
           logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
         }
+        else page.entries.map(logEntry(_, None))
       embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
-      // Only said at the bottom of the reachable trail, where an absent Older
-      // button would otherwise look like the history simply stopped.
-      if (page.page + 1 >= maxPages) embed.setFooter(s"That's as far back as this goes ($maxPages pages).")
+      // The footer is where a page number belongs: it is what you check when you
+      // have lost your place, not something to read on the way in. Absent
+      // entirely on a log that fits in one page, since a number that never
+      // changes is furniture.
+      //
+      // The end of the trail is said here too, sharing the one line rather than
+      // taking a field of its own — without it, a missing Next button looks like
+      // the history simply stopped.
+      val place = s"Page ${page.page + 1}"
+      if (page.page + 1 >= maxPages) embed.setFooter(s"$place · that's as far back as this goes")
+      else if (page.hasOlder || page.hasNewer) embed.setFooter(place)
     }
     embed.build()
   }
@@ -556,19 +663,19 @@ object RespawnEmbeds {
    *  rather than discovering it afterwards. */
   def handoverOffer(respawn: Respawn, claim: RespawnClaim, guildName: String,
                     expiresAt: ZonedDateTime): String =
-    s"**${respawn.displayName}** is ready for you in **$guildName**.\n" +
+    s"${spawnLink(respawn)} is ready for you in **$guildName**.\n" +
       s"This offer expires ${relative(expiresAt)} — if you don't answer you lose your place in the queue."
 
   /** Sent by DM once someone accepts their handover offer. */
   def handoverAccepted(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(relative).getOrElse("soon")
-    s"**${respawn.displayName}** is yours — your claim ends $ends."
+    s"${spawnLink(respawn)} is yours — your claim ends $ends."
   }
 
   /** Sent by DM when an offer lapsed unanswered, so losing the spot isn't a
    *  silent surprise. */
   def handoverLapsed(respawn: Respawn): String =
-    s"You didn't answer in time, so **${respawn.displayName}** has moved on to the next person " +
+    s"You didn't answer in time, so ${spawnLink(respawn)} has moved on to the next person " +
       "and you've been taken out of its queue."
 
   /** The "your time is nearly up" nudge, sent by DM rather than posted in the
@@ -580,25 +687,25 @@ object RespawnEmbeds {
    *  that is the one that gets a button. */
   def expiryWarning(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(relative).getOrElse("shortly")
-    s"Your claim on **${respawn.displayName}** ends $ends."
+    s"Your claim on ${spawnLink(respawn)} ends $ends."
   }
 
   /** DM'd to somebody a moderator has taken a hunt from. Says who has it now, so
    *  the answer to "why did my hunt stop" is in the message rather than in a
    *  card they would have to go and read. */
-  def claimReassignedFrom(respawn: Respawn, toUserId: String): String =
-    s"A moderator has given your hunt on **${respawn.displayName}** to <@$toUserId>."
+  def claimReassignedFrom(respawn: Respawn, toUserName: String): String =
+    s"A moderator has given your hunt on ${spawnLink(respawn)} to ${Names.user(toUserName)}."
 
   /** DM'd to whoever a moderator has given a hunt to. */
   def claimReassignedTo(respawn: Respawn, claim: RespawnClaim): String = {
     val ends = claim.endsAt.map(relative).getOrElse("soon")
-    s"A moderator has put you on **${respawn.displayName}** — it's yours until $ends."
+    s"A moderator has put you on ${spawnLink(respawn)} — it's yours until $ends."
   }
 
   /** Sent by DM once a claim has actually run out, so its holder knows the spawn
    *  isn't theirs any more without going to look. */
   def claimEnded(respawn: Respawn): String =
-    s"Your claim on **${respawn.displayName}** has ended."
+    s"Your claim on ${spawnLink(respawn)} has ended."
 
   /** How full a tank is, drawn.
    *
@@ -637,7 +744,7 @@ object RespawnEmbeds {
       if (openClaims.nonEmpty) {
         val lines = openClaims.map { case (respawn, claim) =>
           val state = if (claim.isActive) "holding" else s"queued #${claim.queuePosition}"
-          s"**${respawn.displayName}** — $state, ${humanDuration(claim.durationMinutes)}"
+          s"${spawnLink(respawn)} — $state, ${humanDuration(claim.durationMinutes)}"
         }
         embed.addField("Reserved by", truncateLines(lines), false)
       }

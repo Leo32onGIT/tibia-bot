@@ -32,17 +32,22 @@ services:
     # pre-existing/external database works without starting the local one.
     restart: unless-stopped
     volumes:
-      # StatusRoute reads dashboard.html fresh on every request, preferring
-      # this path over the copy baked into the jar — so editing this file
+      # Both dashboards read their page fresh on every request, preferring this
+      # path over the copy baked into the jar — so editing one of these files
       # (then just refreshing the browser) never needs a rebuild or restart.
       - ./tibia-bot/src/main/resources/web:/opt/docker/web:ro
+      # Creature sprites fetched from the wiki. Kept in a named volume so a
+      # container recreate does not throw the whole catalogue away and re-fetch
+      # it — which works, but is a few hundred needless requests to somebody
+      # else's server every deploy.
+      - sprite-cache:/opt/docker/cache/sprites
     # Status dashboard (see StatusRoute.scala) — internal-only, reached via
     # Caddy below. Deliberately no `ports:` here: the host never talks to the
     # bot directly, only through the reverse proxy that terminates TLS.
 
   # Reverse proxy in front of STATUS_DOMAIN (the bot's public apex domain, also
   # the existing GitHub Pages landing page's domain): automatic Let's Encrypt
-  # HTTPS, /dashboard* proxied to the bot's internal status port, everything
+  # HTTPS, /dashboard* and /status* proxied to the bot's internal port, everything
   # else passed through unauthenticated to GitHub Pages (see Caddyfile).
   # Requires STATUS_DOMAIN's DNS to point at this host instead of GitHub
   # Pages' IPs, and ports 80/443 forwarded to it (80 for the Let's Encrypt
@@ -122,6 +127,7 @@ volumes:
   pgdata:
   caddy-data:
   caddy-config:
+  sprite-cache:
 
 networks:
   violentbot:

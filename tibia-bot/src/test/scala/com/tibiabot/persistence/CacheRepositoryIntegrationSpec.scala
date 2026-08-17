@@ -88,6 +88,11 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
 
     repo.getBoosted(blue)
     repo.getBoosted(red)
+    // Put both back to a known state first. These rows outlive the run, and the
+    // last thing this test does is leave red's flags up — so without this it
+    // passes exactly once per database and fails on every run after that.
+    repo.updateBoosted(blue, "", "", "0", "0")
+    repo.updateBoosted(red, "", "", "0", "0")
 
     // Blue works through a whole server-save cycle: names rotate, both flags go
     // up, then it posts and clears them.

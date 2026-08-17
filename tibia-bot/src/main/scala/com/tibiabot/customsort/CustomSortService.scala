@@ -15,6 +15,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
+import com.tibiabot.presentation.Names
 
 /**
  * Per-guild custom online-list tag categories (the online_list_categories
@@ -79,7 +80,7 @@ final class CustomSortService(
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, guildName, labelCapital, emojiDupe)
               embedText = s":gear: The guild **[$guildName](${guildUrl(guildName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
-              AdminLog.post(adminChannel, s"<@$commandUser> tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} tagged the guild **[$guildName](${guildUrl(guildName)})** with: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -109,7 +110,7 @@ final class CustomSortService(
               addOnlineListCategoryToDatabase(guild, guildOrPlayer, playerName, labelCapital, emojiDupe)
               embedText = s":gear: The player **[$playerName](${charUrl(playerName)})** has been tagged with: $emojiDupe **$labelCapital** $emojiDupe"
 
-              AdminLog.post(adminChannel, s"<@$commandUser> tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
+              AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} tagged the player\n$vocation **$level** — **[$playerName](${charUrl(playerName)})**\nwith: $emojiDupe **$labelCapital** $emojiDupe", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
 
               embedBuild.setDescription(embedText)
               callback(embedBuild.build())
@@ -154,7 +155,7 @@ final class CustomSortService(
 
           embedText = s":gear: The guild **$nameLower** had its tag removed."
 
-          AdminLog.post(adminChannel, s"<@$commandUser> removed the guild **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
+          AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed the guild **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
         } else {
           embedText = s"${Config.noEmoji} The guild **$nameLower** does not have a tag assigned."
 
@@ -167,7 +168,7 @@ final class CustomSortService(
 
           embedText = s":gear: The player **$nameLower** had its tag removed."
 
-          AdminLog.post(adminChannel, s"<@$commandUser> removed the player **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
+          AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} removed the player **$nameLower** from custom tagging.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
         } else {
           embedText = s"${Config.noEmoji} The player **$nameLower** already has a tag assigned."
         }
@@ -197,7 +198,7 @@ final class CustomSortService(
 
         embedText = s":gear: The tag **$labelLower** has been cleared."
 
-        AdminLog.post(adminChannel, s"<@$commandUser> cleared everyone from the tag **$labelLower**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
+        AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} cleared everyone from the tag **$labelLower**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Library_Ticket.gif")
       } else {
         embedText = s"${Config.noEmoji} The tag **$labelLower** does not exist."
 

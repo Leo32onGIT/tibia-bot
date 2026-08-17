@@ -23,7 +23,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   private def claim(userId: String, minutes: Int = 120, status: String = RespawnClaim.StatusActive,
                     position: Int = 0, character: String = "") = RespawnClaim(
-    id = 10L, respawnId = 1L, userId = userId, userName = "someone", characterName = character,
+    id = 10L, respawnId = 1L, userId = userId, userName = s"hunter$userId", characterName = character,
     status = status, queuePosition = position, claimedAt = now, startsAt = Some(now),
     endsAt = Some(now.plusMinutes(minutes.toLong)), durationMinutes = minutes, warned = false,
     kind = RespawnClaim.KindAdHoc, limboUntil = None, offerExpiresAt = None,
@@ -50,13 +50,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99", character = "Galarzaa")), Nil, Nil, settings, image(cultOrcs))
     embed.getTitle shouldBe "415 — Cult Orcs"
     embed.getDescription should include("Galarzaa")
-    embed.getDescription should include("<@99>")
+    embed.getDescription should include("hunter99")
     embed.getColorRaw shouldBe RespawnEmbeds.RedColor
   }
 
   test("a claimant with no character is still pingable") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, Nil, settings, image(cultOrcs))
-    embed.getDescription should include("<@99>")
+    embed.getDescription should include("hunter99")
   }
 
   test("a free spawn is green and says nothing about slash commands") {
@@ -159,8 +159,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       claim("3", status = RespawnClaim.StatusQueued, position = 2))
     val shown = fields(RespawnEmbeds.claimCard(cultOrcs, Some(claim("1")), queue, Nil, settings, image(cultOrcs)))("Queue (2/20)")
     shown should include("`1.`")
-    shown should include("<@2>")
-    shown should include("<@3>")
+    shown should include("hunter2")
+    shown should include("hunter3")
   }
 
   test("a long queue is truncated so the field can't exceed Discord's limit") {
@@ -187,11 +187,49 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       claim(s"user$n", 60, RespawnClaim.StatusReserved).copy(startsAt = Some(now.plusHours(n.toLong))))
     val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, slots, settings, image(cultOrcs)))("Booked")
 
-    booked.linesIterator.count(_.contains("<@user")) shouldBe 10
+    booked.linesIterator.count(_.contains("hunteruser")) shouldBe 10
     // Same marker the Book panel uses, so the two lists read as one system.
-    booked.linesIterator.filter(_.contains("<@user")).foreach(_ should startWith("▹"))
+    booked.linesIterator.filter(_.contains("hunteruser")).foreach(_ should startWith("▹"))
     booked should include("and 4 more")
     booked.length should be <= 1024
+  }
+
+  // A booking's slot row is only written once its start comes within the
+  // look-ahead, so a booking made for later in the week has nothing but the rule
+  // behind it for days. The card has to show it anyway: booking from the
+  // dashboard's week grid and finding the thread unchanged reads as the booking
+  // having failed.
+  test("a booking with no slot row yet is still on the card") {
+    val thursday = RespawnSchedule(7L, 1L, "99", "hunter99", "Galarzaa", now.plusDays(4),
+      RespawnSchedule.Daily, 90, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(thursday), now))("Booked")
+
+    booked should include("Galarzaa")
+    booked should include(s"<t:${now.plusDays(4).toInstant.getEpochSecond}:s>")
+    booked should include("1h 30m")
+  }
+
+  test("a repeating booking with no row yet shows its next evening, once, and says it repeats") {
+    val weekly = RespawnSchedule(8L, 1L, "99", "hunter99", "", now.plusDays(3),
+      RespawnSchedule.Daily, 60, active = true, createdAt = now,
+      daysOfWeek = RespawnSchedule.maskOf(List(now.plusDays(3).getDayOfWeek)))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(weekly), now))("Booked")
+
+    // One line, not every occurrence from here to eternity.
+    booked.linesIterator.count(_.contains("hunter99")) shouldBe 1
+    booked should include(weekly.repeatLabel)
+  }
+
+  test("rows and rules are one list, in time order") {
+    val tonight = reserved("77", now.plusHours(3))
+    val thursday = RespawnSchedule(9L, 1L, "99", "hunter99", "", now.plusDays(4),
+      RespawnSchedule.Daily, 60, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, List(tonight), settings,
+      image(cultOrcs), List(thursday), now))("Booked")
+
+    booked.linesIterator.toList.map(line => line.contains("hunter77")) shouldBe List(true, false)
   }
 
   test("a long list is cut to fit the field, and owns up to it once") {
@@ -208,7 +246,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked.length should be <= 1024
     booked.linesIterator.count(_.contains("more")) shouldBe 1
     // The count covers everything missing, not just what the row cap dropped.
-    val shown = booked.linesIterator.count(_.contains("<@user"))
+    val shown = booked.linesIterator.count(_.contains("hunteruser"))
     booked should include(s"and ${14 - shown} more")
   }
 
@@ -244,22 +282,27 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   test("the server settings panel names every rule a moderator can change") {
     val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings))
     fs.keys should contain allOf ("Default claim", "Maximum claim", "Queue limit",
-      "Daily stamina", "Default reminder", "Handover window")
+      "Daily stamina", "Handover window")
     fs("Default claim") shouldBe "2h"
     fs("Queue limit") shouldBe "20"
   }
 
+  test("the panel does not show the reminder default, which is no longer a guild setting") {
+    // It survives as the fallback for members who have not set their own, but
+    // there is nowhere left to change it — and a panel of settings is a poor
+    // place to print a number that cannot be edited from it.
+    fields(RespawnEmbeds.serverSettingsEmbed(settings)).keys should not contain "Default reminder"
+  }
+
   test("the server settings panel spells out the disabled cases rather than showing 0") {
-    val off = settings.copy(staminaMinutes = 0, warnMinutes = 0)
-    val fs = fields(RespawnEmbeds.serverSettingsEmbed(off))
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(staminaMinutes = 0)))
     fs("Daily stamina") shouldBe "unlimited"
-    fs("Default reminder") shouldBe "off"
   }
 
   test("the spawn moderator panel names the holder and what force leave will do") {
     val embed = RespawnEmbeds.spawnModeratorPanel(cultOrcs, Some(claim("99", character = "Galarzaa")), 2)
     embed.getDescription should include("Galarzaa")
-    embed.getDescription should include("<@99>")
+    embed.getDescription should include("hunter99")
     fields(embed)("Hunt length") shouldBe "2h"
     fields(embed)("Waiting") shouldBe "2"
     // The consequence matters: it hands the spawn on rather than just freeing it.
@@ -277,7 +320,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the bookings list reads as a timetable, soonest first") {
-    val evening = RespawnSchedule(1L, 1L, "99", "someone", "", now.plusHours(9),
+    val evening = RespawnSchedule(1L, 1L, "99", "hunter99", "", now.plusHours(9),
       RespawnSchedule.Daily, 120, active = true, createdAt = now)
     val morning = evening.copy(id = 2L, anchorAt = now.plusHours(2), durationMinutes = 60,
       daysOfWeek = RespawnSchedule.OneOff)
@@ -291,16 +334,16 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     text should include(s"<t:${now.plusHours(11).toInstant.getEpochSecond}:t>")
     // A repeat says which days; a one-off carries its date instead.
     text should include("every day")
-    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:f>")
+    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:s>")
     // "next" was noise — the time is obviously the next one.
     text should not include "next"
   }
 
   test("a moderator's booking list names the owner of each line") {
-    val schedule = RespawnSchedule(1L, 1L, "77", "someone", "", now.plusHours(2),
+    val schedule = RespawnSchedule(1L, 1L, "77", "hunter77", "", now.plusHours(2),
       RespawnSchedule.Daily, 120, active = true, createdAt = now)
     val embed = RespawnEmbeds.schedulesEmbed(List(schedule -> cultOrcs), now, everyones = true)
-    embed.getDescription should include("<@77>")
+    embed.getDescription should include("hunter77")
   }
 
   test("an empty bookings list points at the button that makes one") {
@@ -311,8 +354,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   test("a hunt taken away names who has it now") {
     // The refund itself is unchanged — the notice simply no longer spells it
     // out, so there is nothing about stamina to assert here.
-    val text = RespawnEmbeds.claimReassignedFrom(cultOrcs, "42")
-    text should include("<@42>")
+    val text = RespawnEmbeds.claimReassignedFrom(cultOrcs, "hunter42")
+    text should include("hunter42")
+    text should not include "<@"
     text should include(cultOrcs.displayName)
     RespawnEmbeds.claimReassignedTo(cultOrcs, claim("42")) should include(":R>")
   }
@@ -321,14 +365,16 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
   private def booking(userId: String = "99", minutes: Int = 120,
                       days: Int = RespawnSchedule.EveryDay) =
-    RespawnSchedule(5L, 1L, userId, "someone", "", now.plusHours(2), RespawnSchedule.Daily,
+    RespawnSchedule(5L, 1L, userId, s"hunter$userId", "", now.plusHours(2), RespawnSchedule.Daily,
       minutes, active = true, createdAt = now, daysOfWeek = days)
 
   private def reserved(userId: String, at: ZonedDateTime, minutes: Int = 120,
                        requester: Option[String] = None) =
     claim(userId, minutes, RespawnClaim.StatusReserved).copy(
       startsAt = Some(at), endsAt = Some(at.plusMinutes(minutes.toLong)),
-      requesterUserId = requester)
+      requesterUserId = requester,
+      // Named the same way the claimant is, since that is what gets rendered.
+      requesterUserName = requester.map(id => s"hunter$id"))
 
   test("the booking panel shows the whole evening, not just your own slot") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
@@ -342,8 +388,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // Yours is marked rather than filtered out, so the order still reads as the
     // evening it is.
     booked should include("▸")
-    booked should include("<@99>")
-    booked should include("<@77>")
+    booked should include("hunter99")
+    booked should include("hunter77")
     booked.linesIterator.count(_.startsWith("▸")) shouldBe 1
     // Somebody else's row is indented rather than left bare, so the two kinds of
     // line begin at the same place.
@@ -361,8 +407,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("nothing booked here")
     // Everyone else's bookings are still listed, and none is marked as theirs.
     val booked = fields(embed)("Booked")
-    booked should include("<@99>")
-    booked should include("<@77>")
+    booked should include("hunter99")
+    booked should include("hunter77")
     booked should not include "▸"
     // Every line still starts with something, so the times share a left edge.
     booked.linesIterator.foreach(_ should startWith(indent))
@@ -371,7 +417,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   test("the booking panel says who is on the respawn now, which is a different question") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
-    embed.getDescription should include("<@55>")
+    embed.getDescription should include("hunter55")
     embed.getDescription should include("Your booking is every day")
     // The spawn's state and the reader's own bookings are separate facts, so
     // they sit on separate lines.
@@ -419,11 +465,12 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include("runs over your slot")
   }
 
-  test("the asker is a mention, so it reads as their name in a DM they aren't in") {
+  test("the asker is named, in a DM they aren't in and so cannot be pinged from") {
     val slot = reserved("99", now.plusHours(2), requester = Some("42"))
     List(None, Some((now.plusHours(1), 180))).foreach { wanted =>
       val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), wanted)
-      text should include("<@42>")
+      text should include("hunter42")
+      text should not include "<@"
       text should include("the slot goes to them")
     }
   }
@@ -435,7 +482,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     text should not include "<@"
   }
 
-  test("the slot reminder says when and how long, and stops there") {
+  test("the slot reminder says when, how long, and what confirming buys you") {
     val text = RespawnEmbeds.slotReminder(cultOrcs, reserved("99", now.plusMinutes(6)))
     text should include("415 — Cult Orcs")
     text should include("2h")
@@ -443,6 +490,46 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // No instructions to act on: it claims itself, and the one useful action was
     // buried at the end of a sentence about doing nothing.
     text should not include "cancel it"
+    // Confirm is optional, so the reason to bother has to be on the message —
+    // the button alone doesn't say what it settles.
+    text should include("Confirm now")
+    text should include("claim it automatically")
+  }
+
+  // --- confirming a booking ------------------------------------------------
+
+  test("a started booking that was confirmed early just says it has started") {
+    val text = RespawnEmbeds.slotStarted(cultOrcs, reserved("99", now).copy(endsAt = Some(now.plusHours(2))))
+    text should include("has started")
+    text should not include "Take the claim"
+  }
+
+  test("an unconfirmed start sets the deadline apart from the hunt") {
+    val started = reserved("99", now).copy(endsAt = Some(now.plusHours(2)))
+    val text = RespawnEmbeds.slotStartedUnconfirmed(cultOrcs, started, now.plusMinutes(15))
+    text should include("415 — Cult Orcs")
+    // The thing to act on is the one that expires, and it has to be findable at a
+    // glance in a notification.
+    text should include("**Take the claim")
+    text should include(":R>")
+    // And what letting it expire costs, so the deadline reads as one.
+    text should include("lose the claim")
+  }
+
+  test("giving up an unconfirmed hunt says what it cost and where the hunt went") {
+    val text = RespawnEmbeds.slotUnconfirmed(cultOrcs, 90)
+    text should include("was given up")
+    text should include("1h 30m")
+    // Why it went, and to whom. The copy no longer says the standing booking
+    // itself survives, which its own scaladoc still claims it does.
+    text should include("didn't take the claim in time")
+    text should include("whoever was next")
+  }
+
+  test("a give-up with nothing left to refund doesn't mention the tank") {
+    val text = RespawnEmbeds.slotUnconfirmed(cultOrcs, 0)
+    text should not include "tank"
+    text should include("was given up")
   }
 
   test("a refused request says when the slot they wanted runs to") {
@@ -452,8 +539,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
 
     text should include("has confirmed they are hunting")
     // Both ends: when a slot you can't have frees up is the useful part.
-    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:f>")
-    text should include(s"until <t:${now.plusHours(4).toInstant.getEpochSecond}:f>")
+    text should include(s"<t:${now.plusHours(2).toInstant.getEpochSecond}:s>")
+    text should include(s"until <t:${now.plusHours(4).toInstant.getEpochSecond}:s>")
     text should include("Your booking wasn't made")
     // Queueing is not the answer to a hunt that hasn't started yet.
     text should not include "queue"

@@ -17,11 +17,12 @@ class WorldConfigRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
     val repo = new JdbcWorldConfigRepository(provider, mergedWorlds = List.empty)
 
     repo.removeWorld(guildId, world) // clean slate
-    repo.createWorld(guildId, world, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "99")
+    repo.createWorld(guildId, world, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "99")
 
     val cfg = repo.retrieveWorld(guildId, world)
     cfg("name") shouldBe "Itestworld"
     cfg("allies_channel") shouldBe "1"
+    cfg("bounty_role") shouldBe "11"
     cfg("activity_channel") shouldBe "99"
     cfg("fullbless_level") shouldBe "250" // default applied by createWorld
 
@@ -69,6 +70,7 @@ class WorldConfigRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
           |nemesis_role VARCHAR(255) NOT NULL,
           |allypk_role VARCHAR(255) NOT NULL,
           |masslog_role VARCHAR(255) NOT NULL,
+          |bounty_role VARCHAR(255) NOT NULL DEFAULT '0',
           |fullbless_channel VARCHAR(255) NOT NULL,
           |nemesis_channel VARCHAR(255) NOT NULL,
           |fullbless_level INT NOT NULL,

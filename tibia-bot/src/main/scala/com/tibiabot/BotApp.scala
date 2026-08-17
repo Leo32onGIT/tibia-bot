@@ -24,6 +24,7 @@ import java.time.ZoneId
 import scala.util.Random
 import scala.concurrent.Await
 import com.tibiabot.presentation.Embeds.BrandColor
+import com.tibiabot.presentation.Names
 
 object BotApp extends App with StrictLogging {
 
@@ -160,6 +161,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcRenameCooldownRepository(connectionProvider)
   private val patreonMemberRepository: persistence.PatreonMemberRepository =
     new persistence.jdbc.JdbcPatreonMemberRepository(connectionProvider)
+  private val notifyRepository: persistence.NotifyRepository =
+    new persistence.jdbc.JdbcNotifyRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -206,6 +209,11 @@ object BotApp extends App with StrictLogging {
   // bot_cache database must not consume each other's server-save state.
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList, discordGateway.selfUserId)
 
+  // The mass-log and bounty DM subscriptions behind the two notification-channel
+  // autoroles. Its cache is filled after createCacheDatabase() below, which is
+  // what creates the two tables — see notify.NotifyService for why it caches.
+  val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
+
   // Ties bot activity to a Patreon subscription via a seat system (see
   // paywall.PaywallService): /setup checks the caller, then assigns one of
   // their seats to that (guild, world) pair; that pair's activity keeps
@@ -239,6 +247,9 @@ object BotApp extends App with StrictLogging {
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = discordGateway.selfUserId
+  // ...and what it is called, which is what those messages actually show. A
+  // mention would ping the bot's own role in every guild it logs to.
+  val botUserName: String = discordGateway.selfUserName
   // the application owner = the bot creator (used to gate /admin)
   val botOwner: String = discordGateway.applicationOwnerId
 
@@ -251,34 +262,192 @@ object BotApp extends App with StrictLogging {
     () => refreshBoostedMessages()
   )
 
-  // Monitoring dashboard: Discord-OAuth-gated /status endpoint + static shell,
-  // mounted at /dashboard on the bot's public domain (which also serves an
-  // unrelated, unauthenticated landing page at its root via Caddy passing
-  // through to GitHub Pages — see Caddyfile). The OAuth client id is the bot's
-  // own application id, which for a standard bot is the same snowflake as its
-  // user id.
+  // Two gated areas on the bot's public domain, which also serves an unrelated,
+  // unauthenticated landing page at its root via Caddy passing through to
+  // GitHub Pages (see Caddyfile).
+  //
+  //   /dashboard — the member-facing respawn dashboard, and where the OAuth
+  //                routes live. Primary, so a bare login lands here and the
+  //                redirect URI already registered with Discord is unchanged.
+  //   /status    — the owner-only monitoring dashboard. Named for what its own
+  //                masthead has always said (`Violent Bot /status`) rather than
+  //                something new.
+  //
+  // One login covers both: the callback sets the session cookie under each
+  // path. Deliberately not one cookie at `/`, which would hand the session to
+  // GitHub Pages on every visit to the landing page.
+  //
+  // The OAuth client id is the bot's own application id, which for a standard
+  // bot is the same snowflake as its user id.
   private val dashboardMountPath = "/dashboard"
+  private val adminMountPath = "/status"
   private val discordAuth = new web.DiscordAuth(
     clientId = botUser,
     clientSecret = Config.Web.discordClientSecret,
     sessionSecret = Config.Web.sessionSecret,
-    redirectUri = s"https://${Config.Web.statusDomain}$dashboardMountPath/auth/callback",
-    mountPath = dashboardMountPath
+    redirectUri = s"${Config.Web.baseUrl}$dashboardMountPath/auth/callback",
+    mountPath = dashboardMountPath,
+    extraCookiePaths = List(adminMountPath),
+    secureCookies = Config.Web.secureCookies,
+    // So a dashboard link pasted into Discord unfurls as this bot rather than as
+    // Discord itself, which is what the crawler found at the end of the sign-in
+    // redirect it was following. Built from the configured origin, so it names
+    // whichever domain this deployment actually answers on, and picked per area
+    // so the two mounts above describe themselves rather than the site.
+    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl))
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
     outboundSender, onlineListSender, discordGateway, web.LogCapture.instance, paywallService, patreonMemberRepository
   )
   private val patreonAdminRoute = new web.PatreonAdminRoute(discordAuth, botOwner, paywallService)
+  // Guilds another bot in the fleet runs. This one cannot resolve a visitor
+  // there — roles and channel visibility can only be read by a bot actually in
+  // the guild — so it asks, over the same Redis the write relay uses. Absent
+  // without Redis, where there is no fleet to ask.
+  private val remoteGuildAccess =
+    if (Config.redisEnabled)
+      Some(new web.RemoteGuildAccess(
+        persistence.RedisCacheProvider.cache, actorSystem.scheduler,
+        isLocal = guildId => discordGateway.guildById(guildId) != null)(ex))
+    else None
+  private val dashboardAccessService = new web.DashboardAccessService(
+    discordGateway,
+    respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
+    worldsOf = guildId => worldConfigRepository.listWorlds(guildId)
+      .map(w => web.WorldChannel(w.name, w.category)),
+    moderatorRoleOf = moderatorRoleId,
+    // Nearly everybody who uses the bot is in the support Discord, so counting
+    // it would ask almost every visitor to choose between their own community
+    // and ours. It is still reachable, and it is where somebody with no
+    // community of their own lands.
+    demoGuildId = Config.Patreon.supportGuildId,
+    remote = remoteGuildAccess
+  )
+  // Fetched on this host, which can reach the wiki even where the people
+  // looking at the dashboard cannot, and served back from our own domain.
+  private val creatureSpriteCache = new web.CreatureSpriteCache(
+    java.nio.file.Paths.get(Config.Respawn.spriteCacheDir),
+    new web.WikiSpriteFetcher()(actorSystem, ex).fetch
+  )(ex)
+  // Writes go through their own seam, which is where the "is this bot the one
+  // that runs this guild's respawns" check lives — see JdaRespawnActions.
+  // Its own small pool: every dashboard write is blocking work (JDA REST calls
+  // and database round trips), and running it on the HTTP dispatcher would let a
+  // handful of slow claims starve the server that is meant to be answering
+  // everybody else.
+  private val respawnActionPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "respawn-action")
+      thread.setDaemon(true)
+      thread
+    }))
+  private val localRespawnActions =
+    new web.JdaRespawnActions(discordGateway, respawnService, respawnOwnership)(respawnActionPool)
+  // A guild whose respawns another bot runs has its writes handed to that
+  // process through Redis; reads never relay, since every bot shares the
+  // guild's database.
+  private val relayedRespawnActions = new web.RelayedRespawnActions(
+    persistence.RedisCacheProvider.cache, actorSystem.scheduler)(respawnActionPool)
+  private val respawnActions = new web.RoutingRespawnActions(
+    localRespawnActions, relayedRespawnActions, localRespawnActions.ownsGuild)
+  // The other half: perform what somebody else's dashboard handed to us. Every
+  // bot runs one, and each only touches guilds it runs, so exactly one process
+  // executes any given command.
+  private val respawnCommandConsumer = new web.RespawnCommandConsumer(
+    persistence.RedisCacheProvider.cache, localRespawnActions,
+    localRespawnActions.ownsGuild, discordGateway.selfUserId,
+    // The permission check for every relayed write, made here because this is
+    // the process that is actually in the guild. The same resolution the access
+    // relay answers questions with, and deliberately the local one: a bot going
+    // back out over Redis to ask about its own guild would be asking itself.
+    resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId))(respawnActionPool)
+  if (Config.Respawn.enabled && Config.redisEnabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      web.RespawnCommandConsumer.SweepEvery, web.RespawnCommandConsumer.SweepEvery
+    )(() => { respawnCommandConsumer.sweep(); () })(ex)
+    logger.info("Respawn command relay listening for writes from other bots' dashboards")
+  }
+  // The other side of the access relay: answer what somebody else's dashboard
+  // asks about a guild this bot is in. Resolved locally on purpose — going back
+  // out over Redis here would have two bots asking each other the same question
+  // until both timed out.
+  private val accessQueryConsumer = new web.AccessQueryConsumer(
+    persistence.RedisCacheProvider.cache,
+    resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId),
+    canSee = guildId => discordGateway.guildById(guildId) != null)(ex)
+
+  /** Republished well inside its own TTL, so a missed beat or two never drops
+   *  this bot's guilds out of anybody's picker. */
+  private val guildRosterPublishEvery = 30.seconds
+  private val guildRosterTtl = 2.minutes
+
+  /** The guilds this bot could answer about, so the others know to ask.
+   *
+   *  Only guilds with the respawn system set up: the dashboard has nothing to
+   *  show for the rest, and naming them would have other bots asking questions
+   *  whose answer is always no. Republished rather than kept, so a bot that dies
+   *  falls out of everyone's picker within the TTL instead of being asked about
+   *  forever.
+   */
+  private def publishGuildRoster(): Unit =
+    try {
+      val guilds = discordGateway.guilds
+        .filter(g => respawnService.settings(g.getId).isDefined)
+        .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
+      persistence.RedisCacheProvider.cache.setEx(
+        web.GuildRoster.key(discordGateway.selfUserId),
+        web.GuildRoster(discordGateway.selfUserId, guilds).toJson,
+        guildRosterTtl
+      ).recover { case e: Throwable => logger.warn(s"Failed to publish guild roster: ${e.getMessage}") }(ex)
+    } catch {
+      case e: Throwable => logger.warn("Failed to build guild roster", e)
+    }
+
+  if (Config.Respawn.enabled && Config.redisEnabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      web.AccessQueryConsumer.SweepEvery, web.AccessQueryConsumer.SweepEvery
+    )(() => { accessQueryConsumer.sweep(); () })(ex)
+    // Published straight away as well as on the beat, so a bot restarting does
+    // not drop out of everybody else's server picker for half a minute.
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      scala.concurrent.duration.Duration.Zero, guildRosterPublishEvery
+    )(() => publishGuildRoster())(ex)
+    logger.info("Dashboard access relay listening for questions from other bots' dashboards")
+  }
+  // One read of a guild's board answers every tab watching it — see
+  // BoardSnapshotCache. Cleared by a dashboard write so whoever made it sees it
+  // straight away; everything else shows up within the few seconds it holds.
+  private val boardSnapshots = new web.BoardSnapshotCache(guildId => respawnService.board(guildId))
+  private val respawnDashboardRoute =
+    new web.RespawnDashboardRoute(discordAuth, dashboardAccessService, creatureSpriteCache,
+      boardOf = guildId => boardSnapshots.board(guildId),
+      // None when the guild never set the respawn system up, which is the same
+      // condition that leaves it out of the access funnel in the first place.
+      limitsOf = (guildId, userId) => respawnService.settings(guildId).map { settings =>
+        web.BoardLimits.from(
+          respawnService.stamina(guildId, userId, settings),
+          settings.maxDurationMinutes,
+          settings.defaultDurationMinutes,
+          respawnService.nextStaminaReset())
+      },
+      peopleOf = guildId => respawnService.knownMembers(guildId),
+      actions = respawnActions,
+      boardChanged = boardSnapshots.invalidate)(respawnActionPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
   if (Config.BotRole.current != Config.BotRole.Secondary) {
-    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort)
-      .bind(akka.http.scaladsl.server.Directives.pathPrefix("dashboard") {
-        akka.http.scaladsl.server.Directives.concat(statusRoute.routes, patreonAdminRoute.routes)
-      })
-    logger.info(s"Status dashboard listening internally on port ${Config.Web.statusPort}, mounted at $dashboardMountPath")
+    import akka.http.scaladsl.server.Directives._
+    // The auth routes stay under /dashboard, where their redirect URI already
+    // points; /status reaches them via the session cookie set for both paths.
+    val routes = concat(
+      pathPrefix("dashboard") { concat(discordAuth.routes, respawnDashboardRoute.routes) },
+      pathPrefix("status") { concat(statusRoute.routes, patreonAdminRoute.routes) }
+    )
+    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
+    logger.info(s"Dashboards listening internally on port ${Config.Web.statusPort}: " +
+      s"members at $dashboardMountPath, owner at $adminMountPath")
   } else {
     // Matches the dashboard's own ~10s poll cadence (StatusRoute's comment on
     // buildPatreonJson) — frequent enough that a primary's merged view feels
@@ -384,6 +553,7 @@ object BotApp extends App with StrictLogging {
     botUser,
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
+    syncPatreonBeforeCheck = () => syncPatreonMembersForSetup(),
     forgetGuild = guildId => {
       if (worldsData.contains(guildId)) modifyWorldsData(_ - guildId)
       val updatedDiscordsData = discordsData.map { case (world, discordsList) =>
@@ -391,7 +561,11 @@ object BotApp extends App with StrictLogging {
         else world -> discordsList
       }
       if (updatedDiscordsData != discordsData) modifyDiscordsData(_ => updatedDiscordsData)
+      // These live in the shared cache database, so dropping the guild's own
+      // one leaves them behind.
+      notifyService.forgetGuild(guildId)
     },
+    forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
   )
 
@@ -427,6 +601,16 @@ object BotApp extends App with StrictLogging {
   private var updateOnOdd = 0
   private var paywallCheckCounter = 0
 
+  /** (guildId, world) pairs whose paused online-list presentation has already
+   *  been applied in this process — the paywall sweep hands us every paused
+   *  world on every tick (see PaywallService.refreshAll's `onStillLapsed`),
+   *  and this is what keeps that from purging and reposting the same notice
+   *  every 30 minutes forever. Deliberately not persisted and never pruned:
+   *  one restore per paused world per process is the whole budget, and a
+   *  restart — the only thing that can knock the presentation out of sync in
+   *  the first place — clears it. */
+  private val pausedNoticeApplied = java.util.concurrent.ConcurrentHashMap.newKeySet[(String, String)]()
+
   val bossesFutures: Future[List[String]] = for {
     bosses <- bossFuture
   } yield bosses
@@ -434,6 +618,10 @@ object BotApp extends App with StrictLogging {
   val boostedBossesList: List[String] = Await.result(bossesFutures, 10.seconds)
 
   createCacheDatabase()
+
+  // Now that the tables exist. Before the world streams start below, so the
+  // first online-list sweep already sees whatever is subscribed.
+  notifyService.load()
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,
@@ -489,13 +677,29 @@ object BotApp extends App with StrictLogging {
       try {
         respawnService.settings(guild.getId)
           .filter(respawnOwnership.ownsRespawns(guild, _))
-          .foreach { _ =>
+          .foreach { config =>
             val changed = respawnService.syncSeedCreatures(guild.getId)
             if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
+            // The codes themselves, for the same reason: this is the moment an
+            // edited respawns.json reaches a guild that already exists. It used
+            // to take somebody remembering to run /repair, which meant a code
+            // added to the bundled file simply never appeared on servers that
+            // had been set up before it.
+            val sync = respawnService.syncSeed(guild.getId)
+            if (sync.changedAnything)
+              logger.info(s"Respawn catalogue in guild '${guild.getId}': ${sync.added} added, " +
+                s"${sync.updated} corrected, ${sync.retired} retired" +
+                (if (sync.inUse > 0) s", ${sync.inUse} kept because somebody is on them" else ""))
+            // And the picture of them, which is what anybody actually reads a
+            // code off. A no-op unless the catalogue really differs from what
+            // the pinned post was last drawn from, so a plain restart costs
+            // nothing.
+            if (respawnService.redrawBoardIfChanged(guild, config))
+              logger.info(s"Redrew the respawn board in guild '${guild.getId}' — its codes had changed")
           }
       } catch {
         case ex: Throwable =>
-          logger.warn(s"Could not sync respawn creature images for guild '${guild.getId}'", ex)
+          logger.warn(s"Could not bring the respawn catalogue up to date for guild '${guild.getId}'", ex)
       }
     }
 
@@ -587,20 +791,24 @@ object BotApp extends App with StrictLogging {
       paywallCheckCounter = 0
       try {
         val configuredSetups = worldsData.toList.flatMap { case (guildId, worlds) => worlds.map(w => (guildId, w.name)) }
-        paywallService.refreshAll(configuredSetups) { (guild, world, userId, userName) =>
+        paywallService.refreshAll(configuredSetups)(onLapsed = { (guild, world, userId, userName) =>
+          // This branch *is* the paused presentation being applied, so claim it
+          // before doing any of it — that leaves onStillLapsed below to repair
+          // only worlds paused in an earlier process, and keeps a guild with no
+          // admin channel (which falls through everything below) behaving as it
+          // always has rather than newly acquiring a notice.
+          pausedNoticeApplied.add((guild.getId, world))
           val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
           // Not routed through AdminLog.post — that helper's title ("a command
           // was run") is shared/fixed across every other caller, and this
           // isn't a command audit, it's a system-triggered notice.
           if (adminChannel != null && (adminChannel.canTalk() || !Config.prod)) {
             // userName is a snapshot taken at /setup time — empty for seats
-            // assigned before that field existed. An empty `` `` `` pair
-            // breaks the rest of this message's markdown (Discord treats the
-            // next stray backtick, in "`/setup`" below, as its closing one),
-            // so the username only renders when non-empty; the mention is
-            // always current regardless of username staleness.
-            val mention = s"<@$userId>"
-            val subscriber = if (userName.nonEmpty) s"`$userName` ($mention)" else mention
+            // assigned before that field existed, which Names.user renders as
+            // "someone" rather than leaving an empty `` `` `` pair to break the
+            // rest of this message's markdown (Discord would treat the next
+            // stray backtick, in "`/setup`" below, as its closing one).
+            val subscriber = Names.user(userName)
             // An empty userId means this world never had a seat at all (a
             // legacy setup whose grace period ran out) — there's no
             // subscription to describe as lapsed and nobody to name, so say
@@ -613,7 +821,7 @@ object BotApp extends App with StrictLogging {
             pausedEmbed.setDescription(s"Activity tracking has been **paused** for **`$world`**.\n\n$cause [Resubscribe](https://www.patreon.com/violentbot) and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
             pausedEmbed.setColor(presentation.Embeds.NemesisPurple)
             adminChannel.sendMessageEmbeds(pausedEmbed.build()).queue { adminMessage =>
-              postPausedOnlineListNotice(guild, world, adminMessage.getJumpUrl())
+              postPausedOnlineListNotice(guild, world, Some(adminMessage.getJumpUrl()))
             }
           }
 
@@ -645,7 +853,15 @@ object BotApp extends App with StrictLogging {
               }
             }
           }
-        }
+        }, onStillLapsed = { (guild, world) =>
+          // Paused before this process started, and announced back then — so no
+          // notice and no DM, only the online-list presentation, which a restart
+          // may have left showing a live player count and real content (see
+          // PaywallService.hydrateFromGrace for how that happened). At most once
+          // per world per process; postPausedOnlineListNotice skips a channel
+          // already carrying the paused name, so the usual case costs nothing.
+          if (pausedNoticeApplied.add((guild.getId, world))) postPausedOnlineListNotice(guild, world, None)
+        })
       } catch {
         case ex: Throwable => logger.warn("Failed to refresh Patreon paywall status", ex)
       }
@@ -924,6 +1140,10 @@ object BotApp extends App with StrictLogging {
     }
   }
 
+  // Declared ahead of the schedule below and of syncPatreonMembers, both of
+  // which stamp it — object fields initialise top-to-bottom.
+  private val patreonSyncThrottle = new patreonapi.SyncThrottle(Config.PatreonApi.setupSyncCooldown)
+
   // Own independent schedule (same reasoning as the prune sweep above) —
   // guarded by Config.PatreonApi.enabled so this is a no-op until real
   // Patreon API credentials are configured. That "no-op" is louder than it
@@ -934,12 +1154,49 @@ object BotApp extends App with StrictLogging {
   if (Config.PatreonApi.enabled) {
     logger.info(s"Patreon API sync enabled, campaign '${Config.PatreonApi.campaignId}', every ${Config.PatreonApi.syncInterval}")
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, Config.PatreonApi.syncInterval)(() => {
-      try syncPatreonMembers()
+      try syncPatreonMembers().failed.foreach(ex => logger.warn("Failed to sync Patreon members", ex))
       catch { case ex: Throwable => logger.warn("Failed to sync Patreon members", ex) }
     })(ex)
   } else {
     logger.warn("Patreon API sync disabled (no access token configured) — the paywall reads this sync, so nobody will pass the /setup subscription check")
   }
+
+  /** Runs a Patreon sync ahead of `/setup`'s subscription check, so someone who
+   *  subscribed and linked their Discord minutes ago passes on their first try
+   *  instead of being told to subscribe until the next half-hourly sweep lands.
+   *  Called from setup.ChannelService.createChannels.
+   *
+   *  Blocking, but bounded three ways, because `/setup` answering from slightly
+   *  stale data is a nuisance and `/setup` hanging is not:
+   *   - Skipped entirely if any sync started within
+   *     `Config.PatreonApi.setupSyncCooldown` — so a burst of `/setup`s, or one
+   *     right after the periodic sweep, is one fetch rather than one each (see
+   *     patreonapi.SyncThrottle).
+   *   - Waits at most `Config.PatreonApi.setupSyncTimeout`. On timeout the sync
+   *     is left running — it'll land for the next caller — and this one answers
+   *     from the previous snapshot.
+   *   - Every failure is swallowed and logged. A Patreon outage must never be
+   *     the reason `/setup` errors, and it can't cost anyone access either: a
+   *     failed fetch leaves the last good snapshot in place (see
+   *     [[syncPatreonMembers]]).
+   *
+   *  Names are deliberately not resolved on this path (`resolveNames = false`)
+   *  — that's a blocking Discord lookup per linked patron, easily the slowest
+   *  part of a sync, and it feeds only the dashboard's supporters panel. The
+   *  paywall reads patron status and the linked Discord id, both of which come
+   *  straight from Patreon. Known names are carried forward regardless, so
+   *  nothing on the dashboard blanks out; the next periodic sync refreshes
+   *  them. */
+  def syncPatreonMembersForSetup(): Unit =
+    if (Config.PatreonApi.enabled && patreonSyncThrottle.tryAcquire(System.nanoTime())) {
+      try Await.result(syncPatreonMembers(resolveNames = false), Config.PatreonApi.setupSyncTimeout)
+      catch {
+        case _: java.util.concurrent.TimeoutException =>
+          logger.warn(s"Patreon sync for /setup didn't finish within ${Config.PatreonApi.setupSyncTimeout}; leaving it running and answering from the previous snapshot")
+        case ex: Throwable =>
+          logger.warn("Patreon sync for /setup failed; answering from the previous snapshot", ex)
+      }
+    }
 
   /** Patreon's own API only gives us a linked patron's Discord *id*, not a
    *  display name — resolved here, once per sync (infrequent, unlike the
@@ -967,8 +1224,12 @@ object BotApp extends App with StrictLogging {
         }
     }
 
-  /** Best-effort periodic snapshot of the Patreon campaign's member list
-   *  (see patreonapi.PatreonApiClient), backing both the dashboard's
+  /** Best-effort snapshot of the Patreon campaign's member list (see
+   *  patreonapi.PatreonApiClient) — run on the periodic schedule above and,
+   *  with `resolveNames = false`, on demand ahead of `/setup`'s subscription
+   *  check (see [[syncPatreonMembersForSetup]], which is also where the
+   *  throttling and the reasoning for skipping name resolution live). Backs
+   *  both the dashboard's
    *  supporters panel and the paywall gate itself — this snapshot is what
    *  PaywallService.callerIsSubscribed reads, so the guards below on what
    *  gets written are load-bearing, not tidiness. It also reclaims a
@@ -983,8 +1244,9 @@ object BotApp extends App with StrictLogging {
    *  anything in the fetched member data itself. Fire-and-forget: a failed
    *  fetch just leaves the last snapshot in place until the next tick, same
    *  degrade-gracefully shape as everything else here. */
-  private def syncPatreonMembers(): Unit =
-    patreonApiClient.fetchAllMembers().foreach {
+  private def syncPatreonMembers(resolveNames: Boolean = true): Future[Unit] = {
+    patreonSyncThrottle.record(System.nanoTime())
+    patreonApiClient.fetchAllMembers().map {
       // A failed fetch must never reach replaceSnapshot: that call prunes
       // every row the sync didn't carry, so an empty list wouldn't leave the
       // snapshot stale, it would erase it — and with it every supporter's
@@ -1003,7 +1265,11 @@ object BotApp extends App with StrictLogging {
         // names already resolved, and which accounts were already linked.
         val previous = patreonMemberRepository.snapshot()
         val knownNames = previous.flatMap(m => m.discordUserId.zip(m.discordUsername)).toMap
-        val enriched = members.map(resolveDiscordUsername(_, knownNames))
+        val enriched =
+          if (resolveNames) members.map(resolveDiscordUsername(_, knownNames))
+          // The /setup path — no Discord lookups, just whatever was resolved
+          // last time, so the fetch is the only slow part of the sync.
+          else members.map(m => m.copy(discordUsername = m.discordUserId.flatMap(knownNames.get)))
         logger.info(s"Synced ${enriched.size} Patreon members (${enriched.count(_.discordUserId.isDefined)} with a linked Discord account, ${enriched.count(m => m.patronStatus.contains("active_patron") && m.discordUserId.isDefined)} of those active)")
         val previouslyLinkedIds = previous.flatMap(_.discordUserId).toSet
         try patreonMemberRepository.replaceSnapshot(enriched, ZonedDateTime.now())
@@ -1013,6 +1279,7 @@ object BotApp extends App with StrictLogging {
         val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
         if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
     }
+  }
 
   def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
     val currentTime = ZonedDateTime.now()
@@ -1235,22 +1502,32 @@ object BotApp extends App with StrictLogging {
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
 
-  /** Called once, from the Patreon paywall's lapse handler: clears whatever
-   *  online-list content is currently posted for this world and replaces it
-   *  with a paused notice linking back to the admin-channel explanation.
-   *  Targets just the combined channel in combined mode, or all three
-   *  allies/neutrals/enemies channels that still exist in separate mode —
-   *  same channels/columns TibiaBot's own recurring online-list update
-   *  reads (see TibiaBot.onlineList). No explicit "resumed" cleanup is
-   *  needed: once the world's active again, that recurring update's normal
-   *  fetch-existing-bot-messages-and-edit-in-place logic (updateMultiFields)
-   *  naturally overwrites this embed with real content on its next tick.
+  /** Clears whatever online-list content is currently posted for this world
+   *  and replaces it with a paused notice. Targets just the combined channel
+   *  in combined mode, or all three allies/neutrals/enemies channels that
+   *  still exist in separate mode — same channels/columns TibiaBot's own
+   *  recurring online-list update reads (see TibiaBot.onlineList). No
+   *  explicit "resumed" cleanup is needed: once the world's active again,
+   *  that recurring update's normal fetch-existing-bot-messages-and-edit-in-
+   *  place logic (updateMultiFields) naturally overwrites this embed with
+   *  real content on its next tick.
    *
-   *  Called from inside the admin-message send's own .queue() callback, so
-   *  every JDA call here must stay non-blocking (.queue(), never
-   *  .complete()) — JDA refuses nested .complete() calls from a callback
-   *  thread as a deadlock guard. */
-  private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: String): Unit = {
+   *  Two callers, distinguished by `adminMessageUrl`. `Some` is the lapse
+   *  handler announcing a fresh pause, and the notice links back to the
+   *  admin-channel explanation it just posted. `None` is the repair path for
+   *  a world paused in an earlier process (see the sweep's `onStillLapsed`):
+   *  there is no fresh admin message to point at, and a channel already
+   *  carrying the paused name is already showing this notice, so it's left
+   *  untouched rather than purged and reposted. That check is deliberately
+   *  not applied to the announcing path, where the notice must land even if
+   *  a previous cycle's name is still on the channel — its link would
+   *  otherwise be stale.
+   *
+   *  The announcing path calls this from inside the admin-message send's own
+   *  .queue() callback, so every JDA call here must stay non-blocking
+   *  (.queue(), never .complete()) — JDA refuses nested .complete() calls
+   *  from a callback thread as a deadlock guard. */
+  private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: Option[String]): Unit = {
     val worldConfig = worldRetrieveConfig(guild, world)
     val combined = worldConfig.getOrElse("combined_online", "false") == "true"
     val channelIds =
@@ -1266,16 +1543,23 @@ object BotApp extends App with StrictLogging {
         // it's paywall-paused (TibiaBot's own online-list update is already
         // gated on paywallService.isActive and skips it entirely).
         val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-${presentation.OnlineListEmbeds.pausedSuffix}"
-        if (channel.getName != pausedName) {
+        val alreadyPaused = channel.getName == pausedName
+        if (!alreadyPaused) {
           channel.getManager.setName(pausedName).queue(null, (ex: Throwable) =>
             logger.warn(s"Failed to rename paused online-list channel for Guild ID: '${guild.getId}' World: '$world'", ex))
         }
-        channel.getHistory.retrievePast(100).queue { history =>
+        // Nothing to repair on a channel that never lost the paused name — see
+        // the scaladoc; only the repair path (no admin message) gets to skip.
+        if (!(alreadyPaused && adminMessageUrl.isEmpty)) channel.getHistory.retrievePast(100).queue { history =>
           try {
             val existing = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
             if (!existing.isEmpty) channel.purgeMessages(existing)
             val pausedEmbed = new EmbedBuilder()
-            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently **[paused]($adminMessageUrl)**.")
+            // Linkless on the repair path: the admin-channel message announcing
+            // this pause went out in an earlier process and its jump URL wasn't
+            // kept, so the word is left plain rather than pointed somewhere wrong.
+            val pausedText = adminMessageUrl.fold("**paused**")(url => s"**[paused]($url)**")
+            pausedEmbed.setDescription(s":warning: Tracking for **`$world`** is currently $pausedText.")
             pausedEmbed.setThumbnail(Config.webHookAvatar)
             pausedEmbed.setColor(13773097)
             channel.sendMessageEmbeds(pausedEmbed.build()).queue()

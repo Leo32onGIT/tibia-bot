@@ -10,6 +10,7 @@ import net.dv8tion.jda.api.components.buttons.Button
 
 import scala.jdk.CollectionConverters._
 import java.time.ZonedDateTime
+import com.tibiabot.presentation.Names
 
 /** Handles modal submissions (boosted boss-name and galthen tag inputs).
  *  Moved verbatim from BotListener.onModalInteraction. */
@@ -53,7 +54,7 @@ object ModalHandler {
              val fullList = satchelTimeList.collect {
                case satchel =>
                  val when = domain.time.SatchelCooldown.expiresAtEpoch(satchel.when)
-                 val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+                 val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
                  s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
              }
              if (fullList.nonEmpty) {
@@ -99,7 +100,7 @@ object ModalHandler {
              val fullList = satchelTimeList.collect {
                case satchel =>
                  val when = domain.time.SatchelCooldown.expiresAtEpoch(satchel.when)
-                 val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+                 val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
                  s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
              }
              if (fullList.nonEmpty) {

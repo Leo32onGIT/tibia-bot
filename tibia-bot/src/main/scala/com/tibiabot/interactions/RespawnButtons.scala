@@ -1,12 +1,13 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.respawn.{ClaimOutcome, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
+import com.tibiabot.respawn.{ClaimOutcome, ConfirmOutcome, LogScope, OfferOutcome, ReleaseOutcome, RespawnButtonId, RespawnThreads, SlotAnswer}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
-import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
+import com.tibiabot.presentation.Names
 
 /** The buttons on a respawn's forum post, its board, and the DMs the system
  *  sends: Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
@@ -32,6 +33,13 @@ import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 object RespawnButtons extends StrictLogging {
 
   def handles(componentId: String): Boolean = RespawnButtonId.handles(componentId)
+
+  /** What the presser is called in this guild — their nickname where they have
+   *  one, their display name otherwise. Empty in a DM, where there is no member
+   *  and so no guild name to take; the row then reads as the account name. */
+  private def nicknameOf(event: net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent): String =
+    Option(event.getMember).map(_.getEffectiveName).getOrElse("")
+
 
   def handle(event: ButtonInteractionEvent): Unit = {
     val parsed = RespawnButtonId.parse(event.getComponentId)
@@ -73,8 +81,16 @@ object RespawnButtons extends StrictLogging {
       case Some(RespawnButtonId.BoardButton(what)) =>
         handleBoardButton(event, respond, what)
 
-      case Some(RespawnButtonId.LogButton(respawnId, page)) =>
-        handleLogButton(event, respawnId, page)
+      case Some(RespawnButtonId.LogButton(scope, page)) =>
+        handleLogButton(event, scope, page)
+
+      // Opens a modal, so nothing has been deferred and nothing may be: the form
+      // has to be this interaction's first response.
+      case Some(RespawnButtonId.LogFindButton) =>
+        val guild = event.getGuild
+        if (guild == null) respond.text(s"${Config.noEmoji} That only works inside a server.")
+        else if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+        else event.replyModal(RespawnModals.logFindModal).queue()
 
       // A spawn button pressed from a DM: no event guild, so it names its own.
       case Some(RespawnButtonId.DmSpawnButton(action, guildId, respawnId)) =>
@@ -107,22 +123,48 @@ object RespawnButtons extends StrictLogging {
                 com.tibiabot.domain.RespawnClaim.Outcome.GivenUp)
             answer match {
               case SlotAnswer.Kept(respawn) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** stays yours — " +
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} stays yours — " +
                   "I've let them know you're hunting it.")
                 clearOfferButtons(event)
-              case SlotAnswer.Passed(respawn, toUserId) =>
-                respond.text(s"${Config.yesEmoji} **${respawn.displayName}** has gone to " +
-                  s"<@$toUserId> for that slot. Your booking still stands for the days after.")
+              case SlotAnswer.Passed(respawn, toUserName) =>
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} has gone to " +
+                  s"${Names.user(toUserName)} for that slot. Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.PassedUnclaimed(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've given up that slot on " +
-                  s"**${respawn.displayName}** — the hunt they'd booked around it no longer fits, " +
+                  s"${RespawnEmbeds.spawnLink(respawn)} — the hunt they'd booked around it no longer fits, " +
                   "so it's simply free now. Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.NotYours =>
                 respond.text(s"${Config.noEmoji} That slot isn't yours.")
               case SlotAnswer.Gone =>
                 respond.text(s"${Config.noEmoji} That's already been answered or has expired.")
+                clearOfferButtons(event)
+            }
+        }
+
+      // "I'm here" — Confirm on a booking reminder, or Take Claim once that
+      // booking has started. Both from a DM, so the guild travels in the id.
+      case Some(RespawnButtonId.ConfirmSlotButton(guildId, claimId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None => respond.text(s"${Config.noEmoji} That server is no longer reachable.")
+          case Some(slotGuild) =>
+            BotApp.respawnService.confirmSlot(slotGuild, event.getUser.getId, claimId) match {
+              case ConfirmOutcome.Settled(respawn, _) =>
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is settled — nobody can " +
+                  "ask you for it now, and it'll start on its own with nothing left to answer.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.Taken(respawn, _) =>
+                respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours — enjoy the hunt.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.Already(respawn) =>
+                respond.text(s"${Config.yesEmoji} You've already confirmed ${RespawnEmbeds.spawnLink(respawn)}.")
+                clearOfferButtons(event)
+              case ConfirmOutcome.NotYours =>
+                respond.text(s"${Config.noEmoji} That booking isn't yours.")
+              case ConfirmOutcome.Gone =>
+                respond.text(s"${Config.noEmoji} That hunt has already been given up — you didn't " +
+                  "take the claim in time, so it's gone to whoever was next.")
                 clearOfferButtons(event)
             }
         }
@@ -181,7 +223,9 @@ object RespawnButtons extends StrictLogging {
     if (guild == null) respond.text(s"${Config.noEmoji} That button only works inside a server.")
     else {
       val entries = BotApp.respawnService.scheduleListing(guild.getId, Some(event.getUser.getId))
-      val embed = RespawnEmbeds.schedulesEmbed(entries, java.time.ZonedDateTime.now())
+      val now = java.time.ZonedDateTime.now()
+      val embed = RespawnEmbeds.schedulesEmbed(entries, now,
+        givenUp = BotApp.respawnService.daysGivenUp(guild.getId, now))
       respond.embed(embed, if (entries.isEmpty) None else Some(RespawnThreads.bookingsButtons(entries.size)))
     }
   }
@@ -213,7 +257,7 @@ object RespawnButtons extends StrictLogging {
    *  Moderator-only, re-checked here rather than trusted from the panel that
    *  offered it: an ephemeral message persists, and the role can be taken away
    *  while it sits open. */
-  private def handleLogButton(event: ButtonInteractionEvent, respawnId: Option[Long], page: Int): Unit = {
+  private def handleLogButton(event: ButtonInteractionEvent, scope: LogScope, page: Int): Unit = {
     val guild = event.getGuild
     def refuse(text: String): Unit =
       event.getHook.editOriginalEmbeds(com.tibiabot.presentation.Embeds.response(text))
@@ -221,27 +265,53 @@ object RespawnButtons extends StrictLogging {
 
     if (guild == null) refuse(s"${Config.noEmoji} That only works inside a server.")
     else if (!RespawnModals.moderates(guild, event.getMember)) refuse(notModeratorText)
-    else {
-      val service = BotApp.respawnService
-      val guildId = guild.getId
-      val scope = respawnId.flatMap(id => service.listRespawns(guildId).find(_.id == id))
-      if (respawnId.isDefined && scope.isEmpty) {
-        refuse(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-      } else {
-        val logPage = service.claimLog(guildId, respawnId, page)
-        // Only the guild-wide log needs spawn names, and only for the rows on
-        // this page — the catalogue runs to several hundred entries.
-        val names =
-          if (respawnId.isDefined) Map.empty[Long, String]
-          else service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
-        val embed = RespawnEmbeds.claimLog(scope, logPage, service.logSummary(guildId), names,
-          service.LogMaxPages)
-        val action = event.getHook.editOriginalEmbeds(embed)
-        RespawnThreads.logButtons(respawnId, logPage) match {
-          case Some(row) => action.setComponents(row).queue()
-          case None      => action.setComponents().queue()
-        }
-      }
+    else logView(guild, scope, page) match {
+      case Left(problem) => refuse(problem)
+      case Right((embed, row)) =>
+        event.getHook.editOriginalEmbeds(embed).setComponents(row).queue()
+    }
+  }
+
+  /** One page of the log as a message: the embed, and the row that pages it.
+   *
+   *  Shared with the Find form's submission, so a log arrived at by searching is
+   *  built exactly like one arrived at by pressing Log — same folding, same
+   *  buttons, same footer. `Left` is a reason it cannot be shown, which only a
+   *  spawn scope can produce: a member who has left is still a member whose
+   *  hunts happened, but a spawn dropped from the catalogue has no name to
+   *  print.
+   *
+   *  Moderator permission is the caller's business — both callers check it
+   *  against the live member rather than trusting the message they were
+   *  pressed on. */
+  private[interactions] def logView(guild: Guild, scope: LogScope,
+                                    page: Int): Either[String, (MessageEmbed, ActionRow)] = {
+    val service = BotApp.respawnService
+    val guildId = guild.getId
+    val heading: Either[String, Option[String]] = scope match {
+      case LogScope.Everything => Right(None)
+      case LogScope.Spawn(id) =>
+        service.listRespawns(guildId).find(_.id == id)
+          .toRight(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+          .map(respawn => Some(respawn.displayName))
+      // Cache-only, and deliberately not fetched: a name is all this is for, and
+      // a REST call per page turn to decorate a title is not worth it. Somebody
+      // who has left the server falls back to the plain id, which is still the
+      // right log.
+      case LogScope.Member(userId) =>
+        Right(Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)))
+    }
+    heading.map { what =>
+      val logPage = service.claimLog(guildId, scope, page)
+      // A single spawn's log is the only one with nothing to fold. The names are
+      // only needed when it does fold, and only for the rows on this page — the
+      // catalogue runs to several hundred entries.
+      val foldBySpawn = !scope.isInstanceOf[LogScope.Spawn]
+      val names =
+        if (foldBySpawn) service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
+        else Map.empty[Long, String]
+      (RespawnEmbeds.claimLog(what, foldBySpawn, logPage, names, service.LogMaxPages),
+        RespawnThreads.logButtons(scope, logPage))
     }
   }
 
@@ -288,12 +358,11 @@ object RespawnButtons extends StrictLogging {
       case "mysettings" =>
         event.replyModal(RespawnModals.configModal(guild.getId, event.getUser.getId)).queue()
 
-      case "claimrules" | "timers" =>
+      case "claimrules" =>
         // Re-checked here, not trusted from the panel: that message persists and
         // could be clicked long after the role was taken away.
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
-        else if (what == "claimrules") event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
-        else event.replyModal(RespawnModals.timersModal(guild.getId)).queue()
+        else event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
 
       case other =>
         logger.warn(s"Unknown respawn board button '$other'")
@@ -325,7 +394,7 @@ object RespawnButtons extends StrictLogging {
                 // function of the spawn's state right now, not of which button
                 // the card happened to be showing when they clicked.
                 respond.embed(claimOutcomeEmbed(
-                  service.claim(guild, user.getId, user.getName, "", respawn.code, None)))
+                  service.claim(guild, user.getId, user.getName, nicknameOf(event), "", respawn.code, None)))
 
               case "config" =>
                 // Not deferred yet — see ModalActions.
@@ -378,7 +447,8 @@ object RespawnButtons extends StrictLogging {
                   deferredRespond.embed(
                     RespawnEmbeds.bookingPanel(respawn, mine, user.getId,
                       service.reservationsFor(guildId, respawn.id, now),
-                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn)),
+                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
+                      service.daysGivenUp(guildId, now, respawnId = Some(respawn.id))),
                     Some(buttons))
                 }
 
@@ -399,10 +469,10 @@ object RespawnButtons extends StrictLogging {
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
                 else service.forceLeave(guild, respawn) match {
                   case None =>
-                    respond.text(s"${Config.noEmoji} Nobody is on **${respawn.displayName}**.")
+                    respond.text(s"${Config.noEmoji} Nobody is on ${RespawnEmbeds.spawnLink(respawn)}.")
                   case Some(holder) =>
-                    respond.text(s"${Config.yesEmoji} Freed **${respawn.displayName}** from " +
-                      s"<@${holder.userId}>. They keep their unused stamina, and whoever is next " +
+                    respond.text(s"${Config.yesEmoji} Freed ${RespawnEmbeds.spawnLink(respawn)} from " +
+                      s"${Names.user(holder.nickname, holder.userName)}. They keep their unused stamina, and whoever is next " +
                       "has been offered it.")
                 }
 
@@ -425,7 +495,7 @@ object RespawnButtons extends StrictLogging {
         clearOfferButtons(event)
 
       case OfferOutcome.Declined(respawn) =>
-        respond.text(s"${Config.yesEmoji} You've passed on **${respawn.displayName}** and left its queue.")
+        respond.text(s"${Config.yesEmoji} You've passed on ${RespawnEmbeds.spawnLink(respawn)} and left its queue.")
         clearOfferButtons(event)
 
       case OfferOutcome.NoStamina(needed, tank, resetsAt) =>
@@ -456,21 +526,23 @@ object RespawnButtons extends StrictLogging {
   /** Rendering shared with the board's Claim modal, so pressing Claim on a
    *  spawn's post and typing its code on the board give the same answer.
    *
-   *  `extra` appends a jump link to the spawn's thread when the caller has one —
-   *  worth having from the board, where the member never saw the post. */
-  private[interactions] def claimOutcomeEmbed(outcome: ClaimOutcome, extra: String = ""): MessageEmbed = {
+   *  Every outcome that knows which spawn it is about names it as a link to that
+   *  spawn's post, which is what the board's Claim used to append a jump link
+   *  for: a member who typed a code and has never seen the post still has one
+   *  click to it, and it is on the name rather than on a bare URL underneath. */
+  private[interactions] def claimOutcomeEmbed(outcome: ClaimOutcome): MessageEmbed = {
     val text = outcome match {
       case ClaimOutcome.Claimed(respawn, claim) =>
         val ends = claim.endsAt.map(e => s"<t:${e.toInstant.getEpochSecond}:R>").getOrElse("soon")
-        s"${Config.yesEmoji} **${respawn.displayName}** is yours until $ends."
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends."
 
       case ClaimOutcome.Queued(respawn, _, position) =>
-        s"${Config.yesEmoji} You're **#$position** in the queue for **${respawn.displayName}**. " +
+        s"${Config.yesEmoji} You're **#$position** in the queue for ${RespawnEmbeds.spawnLink(respawn)}. " +
           "I'll DM you when it's your turn."
 
       case ClaimOutcome.AlreadyHolding(respawn, claim) =>
-        if (claim.isActive) s"${Config.noEmoji} You're already on **${respawn.displayName}**."
-        else s"${Config.noEmoji} You're already queued for **${respawn.displayName}** " +
+        if (claim.isActive) s"${Config.noEmoji} You're already on ${RespawnEmbeds.spawnLink(respawn)}."
+        else s"${Config.noEmoji} You're already queued for ${RespawnEmbeds.spawnLink(respawn)} " +
           s"at **#${claim.queuePosition}**."
 
       case ClaimOutcome.Shortened(respawn, claim, _, reservedFrom) =>
@@ -481,23 +553,23 @@ object RespawnButtons extends StrictLogging {
         val starts = reservedFrom
           .map(from => s"at <t:${from.toInstant.getEpochSecond}:t>")
           .getOrElse("then")
-        s"${Config.yesEmoji} **${respawn.displayName}** is yours until $ends.\n" +
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends.\n" +
           s"A booked slot starts $starts, so that's all you are able to claim."
 
       case ClaimOutcome.Reserved(respawn, from) =>
-        s"${Config.noEmoji} **${respawn.displayName}** is booked from " +
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is booked from " +
           s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
           "starting a hunt now. Press **Next** to line up for it instead."
 
       case ClaimOutcome.JustTaken(respawn) =>
-        s"${Config.noEmoji} Somebody claimed **${respawn.displayName}** a moment before you. " +
+        s"${Config.noEmoji} Somebody claimed ${RespawnEmbeds.spawnLink(respawn)} a moment before you. " +
           "Press **Next** to line up behind them."
 
       case ClaimOutcome.QueueFull(respawn, limit) =>
-        s"${Config.noEmoji} The queue for **${respawn.displayName}** is full ($limit waiting)."
+        s"${Config.noEmoji} The queue for ${RespawnEmbeds.spawnLink(respawn)} is full ($limit waiting)."
 
       case ClaimOutcome.NoStamina(respawn, needed, tank, resetsAt) =>
-        s"${Config.noEmoji} **${respawn.displayName}** needs **${RespawnEmbeds.humanDuration(needed)}** but you " +
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} needs **${RespawnEmbeds.humanDuration(needed)}** but you " +
           s"have **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of stamina left. " +
           s"It refills at server save <t:${resetsAt.toInstant.getEpochSecond}:R>."
 
@@ -512,18 +584,18 @@ object RespawnButtons extends StrictLogging {
       case ClaimOutcome.NotConfigured =>
         s"${Config.noEmoji} The respawn claim system isn't set up here."
     }
-    Embeds.response(text + extra)
+    Embeds.response(text)
   }
 
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
-      val refund = if (refunded > 0) s" You got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
+      val refund = if (refunded > 0) s"\nYou got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
       val handover = offered
-        .map(claim => s" <@${claim.userId}> has been asked if they want it — it stays yours until they answer.")
+        .map(claim => s"\n\n${Names.user(claim.nickname, claim.userName)} has been asked if they want it — it stays yours until they answer.")
         .getOrElse("")
-      s"${Config.yesEmoji} You've released **${respawn.displayName}**.$refund$handover"
+      s"${Config.yesEmoji} You've released ${RespawnEmbeds.spawnLink(respawn)}.$refund$handover"
     case ReleaseOutcome.LeftQueue(respawn) =>
-      s"${Config.yesEmoji} You've left the queue for **${respawn.displayName}**."
+      s"${Config.yesEmoji} You've left the queue for ${RespawnEmbeds.spawnLink(respawn)}."
     case ReleaseOutcome.AlreadyHandingOver(spawnName) =>
       s"${Config.noEmoji} **$spawnName** is already being handed over — waiting on the next person to answer."
     case ReleaseOutcome.NothingHeld =>

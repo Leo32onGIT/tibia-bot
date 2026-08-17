@@ -16,6 +16,7 @@ import net.dv8tion.jda.api.modals.Modal
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
+import com.tibiabot.presentation.Names
 
 /** The two modals behind the board post's buttons.
  *
@@ -39,8 +40,25 @@ object RespawnModals extends StrictLogging {
   private val WarnField = "warn"
   private val HolderField = "holder"
   private val MinutesField = "minutes"
+  private val LogMemberField = "logmember"
+  private val LogSpawnField = "logspawn"
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
+
+  /** Whether this form answers by rewriting the message it was opened from,
+   *  rather than with an ephemeral reply of its own.
+   *
+   *  Only the log's search does. It is opened from a log panel and replaces what
+   *  that panel is showing, so a reply would leave the old log sitting above the
+   *  new one — and pressing Find twice would stack three. `BotListener` reads
+   *  this to choose `deferEdit` over `deferReply`, which has to be decided before
+   *  the handler runs. */
+  def editsOriginal(modalId: String): Boolean = modalId == RespawnButtonId.modalLogFind
+
+  /** As RespawnButtons.nicknameOf: what the caller is called in this guild. */
+  private def nicknameOf(event: ModalInteractionEvent): String =
+    Option(event.getMember).map(_.getEffectiveName).getOrElse("")
+
 
   /** Discord rejects a modal outright if a label runs past 45 characters or its
    *  description past 100 — the interaction fails rather than the text being
@@ -193,13 +211,16 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** Server-wide claim rules: how long a hunt runs, how many may wait for one,
-   *  and how much hunting a member gets in a day.
+  /** Every server-wide setting a moderator can change, in one modal.
    *
-   *  Split from the timers below because a modal takes five inputs
-   *  (`Modal.MAX_COMPONENTS`) and there are six settings. The split is by what
-   *  a setting *is* rather than by what fits: these four are the rules of who may
-   *  claim what, and the two below are how long the bot waits before acting. */
+   *  There used to be a second one called Timers holding the handover window and
+   *  a default reminder. The reminder went: members set their own, and a server
+   *  default that only applies to people who never opened Config was a setting
+   *  about the absence of a setting. That left the handover window on its own,
+   *  which is not a panel — so it moved here, and Timers went with it.
+   *
+   *  Five inputs is `Modal.MAX_COMPONENTS` exactly. The next server-wide setting
+   *  after this one needs somewhere new to live; there is no sixth slot. */
   def claimRulesModal(guildId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
@@ -212,28 +233,46 @@ object RespawnModals extends StrictLogging {
           numberInput("queue", settings.map(_.queueLimit))),
         label("Daily stamina per member (minutes)",
           "0 means unlimited. Turning a limit on refills everyone.",
-          numberInput("stamina", settings.map(_.staminaMinutes)))
-      )
-      .build()
-  }
-
-  /** Server-wide timers: the default reminder, and how long a handover offer
-   *  stays open. The daily budget used to live here and now sits with the claim
-   *  rules, which is what it is — nobody looking for stamina looked under
-   *  "timers". */
-  def timersModal(guildId: String): Modal = {
-    val settings = BotApp.respawnService.settings(guildId)
-    Modal.create(RespawnButtonId.modalTimers, "Server timers")
-      .addComponents(
-        label("Default reminder (minutes before the end)",
-          "Members can override this for themselves. 0 turns it off.",
-          numberInput("warn", settings.map(_.warnMinutes))),
+          numberInput("stamina", settings.map(_.staminaMinutes))),
         label("Handover window (minutes)",
           "How long the next in line has to accept before it passes on.",
           numberInput("handover", settings.map(_.handoverMinutes)))
       )
       .build()
   }
+
+  /** The claim log's search form: whose hunts, or which spawn's.
+   *
+   *  A picker for the member rather than a name to type, which is the whole
+   *  reason this is two fields instead of one. A name typed into a box has to be
+   *  matched against nicknames, display names and account names, and can collide
+   *  with a creature — a picker hands back an id and none of that arises. What is
+   *  left to interpret is the spawn, which is one job for one box.
+   *
+   *  Both optional, so either can be the question. Neither Discord nor JDA can
+   *  express "exactly one of these", so that rule lives in the submission.
+   *
+   *  The picker needs `setRequired(false)` as well as a zero minimum, and both
+   *  are load-bearing: a select defaults to required, and Discord rejects the
+   *  whole form with `COMPONENT_REQUIRED_ZERO_MIN_VALUES` if a required
+   *  component asks for none. The range is still worth setting for its *upper*
+   *  bound — one member, since two would be two different logs. */
+  def logFindModal: Modal =
+    Modal.create(RespawnButtonId.modalLogFind, "Find in the claim log")
+      .addComponents(
+        label("Member", "Their whole claim history in this server.",
+          EntitySelectMenu.create(LogMemberField, EntitySelectMenu.SelectTarget.USER)
+            .setRequiredRange(0, 1)
+            .setRequired(false)
+            .build()),
+        label("Spawn", "A code, or a spawn or creature name. Leave empty if you picked a member.",
+          TextInput.create(LogSpawnField, TextInputStyle.SHORT)
+            .setPlaceholder("816, or Energy Library")
+            .setRequired(false)
+            .setMaxLength(64)
+            .build())
+      )
+      .build()
 
   private def numberInput(id: String, current: Option[Int]): TextInput =
     TextInput.create(id, TextInputStyle.SHORT)
@@ -385,8 +424,8 @@ object RespawnModals extends StrictLogging {
         case RespawnButtonId.modalBoardSchedule => submitBoardSchedule(event)
         case RespawnButtonId.modalClaim      => submitClaim(event)
         case RespawnButtonId.modalConfig     => submitConfig(event)
-        case RespawnButtonId.modalClaimRules => submitSettings(event, claimRules = true)
-        case RespawnButtonId.modalTimers     => submitSettings(event, claimRules = false)
+        case RespawnButtonId.modalClaimRules => submitSettings(event)
+        case RespawnButtonId.modalLogFind    => submitLogFind(event)
         case RespawnButtonId.modalGiveStamina => submitGiveStamina(event)
         case other =>
           logger.warn(s"Unknown respawn modal '$other'")
@@ -446,11 +485,12 @@ object RespawnModals extends StrictLogging {
         else {
           val firstStart = java.time.Instant.ofEpochSecond(startEpoch)
             .atZone(java.time.ZoneOffset.UTC)
-          service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName, "",
+          service.addSchedule(guild, respawn, event.getUser.getId, event.getUser.getName,
+            nicknameOf(event), "",
             firstStart, duration, daysOfWeek) match {
             case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
             case Right(ScheduleResult.Booked(schedule)) =>
-              reply(event, s"${Config.yesEmoji} Booked **${respawn.displayName}** " +
+              reply(event, s"${Config.yesEmoji} Booked ${RespawnEmbeds.spawnLink(respawn)} " +
                 s"${schedule.repeatLabel} for " +
                 s"${RespawnEmbeds.humanDuration(schedule.durationMinutes)}, starting " +
                 s"<t:${schedule.anchorAt.toInstant.getEpochSecond}:f>.")
@@ -458,9 +498,9 @@ object RespawnModals extends StrictLogging {
             // for them, and telling somebody they have a slot they may not get
             // is worse than making them wait for the answer.
             case Right(ScheduleResult.Requested(_, slot, deadline)) =>
-              reply(event, s"${Config.yesEmoji} That time is <@${slot.userId}>'s, so I've asked " +
+              reply(event, s"${Config.yesEmoji} That time is ${Names.user(slot.nickname, slot.userName)}'s, so I've asked " +
                 "whether they're actually hunting it.\nIf they say no, or don't answer by " +
-                s"<t:${deadline.toInstant.getEpochSecond}:t>, **${respawn.displayName}** is " +
+                s"<t:${deadline.toInstant.getEpochSecond}:t>, ${RespawnEmbeds.spawnLink(respawn)} is " +
                 s"booked for you from <t:$startEpoch:t> for " +
                 s"${RespawnEmbeds.humanDuration(duration)} and I'll DM you. " +
                 "Nothing is held for you until then.")
@@ -473,7 +513,52 @@ object RespawnModals extends StrictLogging {
   private[interactions] def moderates(guild: Guild, member: Member): Boolean =
     Permissions.isModerator(member, BotApp.moderatorRoleId(guild.getId))
 
-  private def submitSettings(event: ModalInteractionEvent, claimRules: Boolean): Unit = {
+  /** The log's search, answered by rewriting the log it was opened from.
+   *
+   *  Anything that isn't a search — no answer, two answers, a spawn nobody
+   *  recognises — comes back as an ephemeral note *beside* the panel instead,
+   *  leaving what they were reading where it was. Replacing a perfectly good log
+   *  with an error message is a poor trade for a typo.
+   *
+   *  Always page 0: this is a new question, not a continuation of the old one. */
+  private def submitLogFind(event: ModalInteractionEvent): Unit = {
+    val guild = event.getGuild
+    def aside(text: String): Unit =
+      event.getHook.sendMessageEmbeds(Embeds.response(text)).setEphemeral(true).queue()
+
+    def show(scope: com.tibiabot.respawn.LogScope): Unit =
+      RespawnButtons.logView(guild, scope, 0) match {
+        case Left(problem)       => aside(problem)
+        case Right((embed, row)) => event.getHook.editOriginalEmbeds(embed).setComponents(row).queue()
+      }
+
+    // Re-checked on submit, like every other form here: a modal can sit open long
+    // after somebody's role was taken away.
+    if (!moderates(guild, event.getMember)) {
+      aside(s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
+    } else {
+      val member = selected(event, LogMemberField).headOption
+      val query = value(event, LogSpawnField)
+      (member, query.nonEmpty) match {
+        case (None, false) =>
+          aside(s"${Config.noEmoji} Pick a member, or name a spawn.")
+        case (Some(_), true) =>
+          aside(s"${Config.noEmoji} That's both at once — pick a member, or name a spawn.")
+        case (Some(userId), _) =>
+          show(com.tibiabot.respawn.LogScope.Member(userId))
+        case (None, _) =>
+          BotApp.respawnService.resolve(guild.getId, query) match {
+            case Some(respawn) => show(com.tibiabot.respawn.LogScope.Spawn(respawn.id))
+            case None =>
+              aside(s"${Config.noEmoji} I don't know a respawn matching **$query**. " +
+                "Try its code, or the creature it's known for.")
+          }
+      }
+    }
+  }
+
+  private def submitSettings(event: ModalInteractionEvent): Unit = {
     val guildId = event.getGuild.getId
     // Re-checked on submit rather than trusted from when the panel opened: a modal
     // can sit open long after somebody's role was taken away.
@@ -482,17 +567,12 @@ object RespawnModals extends StrictLogging {
         s"or the **${Permissions.ModeratorRoleName}** role.")
     } else {
       def field(id: String): Option[Int] = Try(value(event, id).toInt).toOption
-      val ids = if (claimRules) List("default", "max", "queue", "stamina") else List("warn", "handover")
+      val ids = List("default", "max", "queue", "stamina", "handover")
       if (ids.exists(field(_).isEmpty)) {
         reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
       } else {
-        val result =
-          if (claimRules)
-            BotApp.respawnService.updateSettings(guildId, field("default"), field("max"), field("queue"),
-              field("stamina"), None, None)
-          else
-            BotApp.respawnService.updateSettings(guildId, None, None, None,
-              None, field("warn"), field("handover"))
+        val result = BotApp.respawnService.updateSettings(guildId, field("default"), field("max"),
+          field("queue"), field("stamina"), field("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
@@ -524,7 +604,7 @@ object RespawnModals extends StrictLogging {
         val reassigned = giveTo match {
           case None       => Right(None)
           case Some(user) => service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName)
-                               .map(_ => Some(user.getId))
+                               .map(_ => Some(user.getId -> user.getName))
         }
 
         reassigned match {
@@ -532,25 +612,30 @@ object RespawnModals extends StrictLogging {
           case Right(movedTo) =>
             // Whose claim the length applies to: whoever now holds it after any
             // handover, or the caller when they came through their own Config.
-            val target =
-              if (!forHolder) Some(event.getUser.getId)
-              else movedTo.orElse(service.holderOf(event.getGuild.getId, respawnId).map(_.userId))
+            // Carried with their name, since the reply names them and every
+            // source of it already knows what they are called.
+            val target: Option[(String, String)] =
+              if (!forHolder) Some(event.getUser.getId -> event.getUser.getName)
+              else movedTo.orElse(
+                service.holderOf(event.getGuild.getId, respawnId).map(c => c.userId -> c.userName))
 
             target match {
               case None =>
                 reply(event, s"${Config.noEmoji} Nobody is holding that respawn any more.")
-              case Some(userId) =>
+              case Some((userId, userName)) =>
                 service.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
                   case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
                   case Right((respawn, applied)) =>
-                    val whose = if (forHolder && userId != event.getUser.getId) s" for <@$userId>" else ""
-                    val moved = movedTo.map(id => s"\nIt's <@$id>'s hunt now.").getOrElse("")
+                    val whose =
+                      if (forHolder && userId != event.getUser.getId) s" for ${Names.user(userName)}" else ""
+                    val moved = movedTo.map { case (_, name) => s"\nIt's ${Names.user(name)}'s hunt now." }
+                      .getOrElse("")
                     val note =
                       if (applied != minutes)
                         s"\nThe hunt had already run longer than that, so it's set to " +
                           s"${RespawnEmbeds.humanDuration(applied)} and ends now."
                       else ""
-                    reply(event, s"${Config.yesEmoji} **${respawn.displayName}**$whose is now set to " +
+                    reply(event, s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)}$whose is now set to " +
                       s"${RespawnEmbeds.humanDuration(applied)}.$moved$note")
                 }
             }
@@ -578,7 +663,7 @@ object RespawnModals extends StrictLogging {
             val tank = BotApp.respawnService.grantStamina(guild.getId, user.getId, minutes, config)
             val verb = if (minutes > 0) "Gave" else "Took"
             reply(event, s"${Config.yesEmoji} $verb **${RespawnEmbeds.humanDuration(math.abs(minutes))}** " +
-              s"${if (minutes > 0) "to" else "from"} <@${user.getId}> — they now have " +
+              s"${if (minutes > 0) "to" else "from"} ${Names.user(user.getName)} — they now have " +
               s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
               s"${RespawnEmbeds.humanDuration(config.staminaMinutes)} left.")
         }
@@ -593,14 +678,10 @@ object RespawnModals extends StrictLogging {
 
     // No duration passed, so the member's own default (or the guild's) applies —
     // which is the point of pairing this with the Config button.
-    val outcome = service.claim(guild, user.getId, user.getName, "", query, None)
-    val threadLink = service.resolve(guild.getId, query)
-      .map(_.threadId)
-      .filter(id => id.nonEmpty && id != "0")
-      .map(id => s"\n<#$id>")
-      .getOrElse("")
-
-    replyEmbed(event, RespawnButtons.claimOutcomeEmbed(outcome, threadLink))
+    val outcome = service.claim(guild, user.getId, user.getName, nicknameOf(event), "", query, None)
+    // No jump link appended any more: the spawn is named as a link to its own
+    // post now, so a second one on its own line was the same destination twice.
+    replyEmbed(event, RespawnButtons.claimOutcomeEmbed(outcome))
   }
 
   private def submitConfig(event: ModalInteractionEvent): Unit = {

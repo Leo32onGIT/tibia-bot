@@ -1,6 +1,14 @@
 {$STATUS_DOMAIN} {
-	# The bot's OAuth-gated monitoring dashboard.
+	# The bot's two OAuth-gated areas: the members' respawn dashboard, and the
+	# owner's monitoring one. Both are served by the same process on 8080, and a
+	# single sign-in under /dashboard covers both — but each path has to be
+	# proxied explicitly, or it falls through to the GitHub Pages handler below
+	# and the area simply is not there.
 	handle /dashboard* {
+		reverse_proxy bot:8080
+	}
+
+	handle /status* {
 		reverse_proxy bot:8080
 	}
 

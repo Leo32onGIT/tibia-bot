@@ -18,6 +18,7 @@ import net.dv8tion.jda.api.modals.Modal
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
+import com.tibiabot.presentation.Names
 
 /** Handles all button-click interactions (galthen, boosted, screenshot nav,
  *  role toggles). Moved verbatim from BotListener.onButtonInteraction; the
@@ -38,7 +39,7 @@ object ButtonHandler extends StrictLogging {
       event.deferEdit().queue();
       val when = SatchelCooldown.expiresAtEpoch(ZonedDateTime.now())
       BotApp.galthenService.add(user.getId, ZonedDateTime.now(), tagId)
-      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
       responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
       val newEmbed = new EmbedBuilder()
       newEmbed.setDescription(responseText)
@@ -47,7 +48,7 @@ object ButtonHandler extends StrictLogging {
     } else if (button == "galthenRemove") {
       event.deferEdit().queue()
       BotApp.galthenService.del(user.getId, tagId)
-      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
       responseText = s"${Config.satchelEmoji} cooldown tracker for $tagDisplay has been **Disabled**."
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
@@ -75,7 +76,7 @@ object ButtonHandler extends StrictLogging {
       event.deferEdit().queue()
       val when = SatchelCooldown.expiresAtEpoch(ZonedDateTime.now())
       BotApp.galthenService.add(user.getId, ZonedDateTime.now(), tagId)
-      val tagDisplay = if (tagId == "") s"<@${event.getUser.getId}>" else s"**`$tagId`**"
+      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
       responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
       event.getHook().editOriginalComponents().queue();
       val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).setFooter("You will be sent a message when the cooldown expires").build()
@@ -159,7 +160,7 @@ object ButtonHandler extends StrictLogging {
           val fullList = satchelTimeList.collect {
             case satchel =>
               val when = SatchelCooldown.expiresAtEpoch(satchel.when)
-              val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+              val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
               s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
           }
           if (fullList.nonEmpty) {
@@ -249,32 +250,6 @@ object ButtonHandler extends StrictLogging {
       val world = title.replace(":crossed_swords:", "").trim
       val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
       val role = guild.getRoleById(worldConfigData("allypk_role"))
-      if (role != null) {
-        guild.retrieveMemberById(user.getId).queue { member =>
-          val hasRole = member.getRoles.contains(role)
-          val action =
-            if (hasRole) guild.removeRoleFromMember(member, role)
-            else guild.addRoleToMember(member, role)
-
-          action.queue(
-            _ => {
-              val msg =
-                if (hasRole)
-                  s":gear: You have been removed from the <@&${role.getId}> role."
-                else
-                  s":gear: You have been added to the <@&${role.getId}> role."
-
-              event.getHook.sendMessageEmbeds(new EmbedBuilder().setDescription(msg).build()).queue()
-            },
-            _ => ()
-          )
-        }
-      }
-    } else if (button == "masslog") {
-      event.deferReply(true).queue()
-      val world = title.replace(":crossed_swords:", "").trim
-      val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
-      val role = guild.getRoleById(worldConfigData("masslog_role"))
       if (role != null) {
         guild.retrieveMemberById(user.getId).queue { member =>
           val hasRole = member.getRoles.contains(role)
@@ -483,7 +458,7 @@ object ButtonHandler extends StrictLogging {
       if (BotApp.paywallService.canReassignSeat(user.getId, guildId, world)) {
         BotApp.paywallService.reassignSeat(user.getId, user.getName, guildId, world)
         val embed = new EmbedBuilder()
-          .setDescription(s"${Config.yesEmoji} Tracking for **$world** has been reassigned to <@${user.getId}> and resumed.")
+          .setDescription(s"${Config.yesEmoji} Tracking for **$world** has been reassigned to ${Names.user(user.getName)} and resumed.")
           .setColor(presentation.Embeds.BrandColor)
           .build()
         event.getHook.editOriginalEmbeds(embed).setComponents().queue()
@@ -507,7 +482,7 @@ object ButtonHandler extends StrictLogging {
       if (BotApp.paywallService.canAssignSeat(user.getId, guildId, world)) {
         BotApp.paywallService.assignSeat(user.getId, user.getName, guildId, world)
         val embed = new EmbedBuilder()
-          .setDescription(s"${Config.yesEmoji} **$world** has been assigned to <@${user.getId}>")
+          .setDescription(s"${Config.yesEmoji} **$world** has been assigned to ${Names.user(user.getName)}")
           .setColor(presentation.Embeds.BrandColor)
           .build()
         event.getHook.editOriginalEmbeds(embed).setComponents().queue()

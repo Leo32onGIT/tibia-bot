@@ -39,6 +39,17 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN masslog_role VARCHAR(255) DEFAULT '0'")
     }
 
+    val bountyExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'bounty_role'")
+    val bountyExists = bountyExistsQuery.next()
+    bountyExistsQuery.close()
+
+    // '0' rather than a real id: a world set up before bounties existed has no
+    // role yet, and /repair is what creates one — the same path masslog_role
+    // above takes.
+    if (!bountyExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN bounty_role VARCHAR(255) DEFAULT '0'")
+    }
+
     val activityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'activity_channel'")
     val activityExists = activityExistsQuery.next()
     activityExistsQuery.close()
@@ -66,7 +77,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN show_neutral_activity VARCHAR(255) DEFAULT 'true'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,show_neutral_activity FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,show_neutral_activity FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -81,6 +92,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val nemesisRole = Option(result.getString("nemesis_role")).getOrElse(null)
       val allyPkRole = Option(result.getString("allypk_role")).getOrElse(null)
       val masslogRole = Option(result.getString("masslog_role")).getOrElse(null)
+      val bountyRole = Option(result.getString("bounty_role")).getOrElse("0")
       val fullblessChannel = Option(result.getString("fullbless_channel")).getOrElse(null)
       val nemesisChannel = Option(result.getString("nemesis_channel")).getOrElse(null)
       val fullblessLevel = Option(result.getInt("fullbless_level")).getOrElse(250)
@@ -100,7 +112,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, showNeutralActivity)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, showNeutralActivity)
       }
     }
 
@@ -111,9 +123,9 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
   def createWorld(guildId: String, world: String, alliesChannel: String, enemiesChannel: String,
                   neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String,
                   fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String,
-                  fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
+                  bountyRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, masslog_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, masslog_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
+    val statement = conn.prepareStatement("INSERT INTO worlds(name, allies_channel, enemies_channel, neutrals_channel, levels_channel, deaths_channel, category, fullbless_role, nemesis_role, allypk_role, masslog_role, bounty_role, fullbless_channel, nemesis_channel, fullbless_level, show_neutral_levels, show_neutral_deaths, show_allies_levels, show_allies_deaths, show_enemies_levels, show_enemies_deaths, detect_hunteds, levels_min, deaths_min, exiva_list, activity_channel, online_combined) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET allies_channel = ?, enemies_channel = ?, neutrals_channel = ?, levels_channel = ?, deaths_channel = ?, category = ?, fullbless_role = ?, nemesis_role = ?, allypk_role = ?, masslog_role = ?, bounty_role = ?, fullbless_channel = ?, nemesis_channel = ?, fullbless_level = ?, show_neutral_levels = ?, show_neutral_deaths = ?, show_allies_levels = ?, show_allies_deaths = ?, show_enemies_levels = ?, show_enemies_deaths = ?, detect_hunteds = ?, levels_min = ?, deaths_min = ?, exiva_list = ?, activity_channel = ?, online_combined = ?;")
     val formalQuery = WorldName.formal(world)
     statement.setString(1, formalQuery)
     statement.setString(2, alliesChannel)
@@ -126,46 +138,48 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     statement.setString(9, nemesisRole)
     statement.setString(10, allyPkRole)
     statement.setString(11, masslogRole)
-    statement.setString(12, fullblessChannel)
-    statement.setString(13, nemesisChannel)
-    statement.setInt(14, 250)
-    statement.setString(15, "true")
+    statement.setString(12, bountyRole)
+    statement.setString(13, fullblessChannel)
+    statement.setString(14, nemesisChannel)
+    statement.setInt(15, 250)
     statement.setString(16, "true")
     statement.setString(17, "true")
     statement.setString(18, "true")
     statement.setString(19, "true")
     statement.setString(20, "true")
-    statement.setString(21, "on")
-    statement.setInt(22, 8)
+    statement.setString(21, "true")
+    statement.setString(22, "on")
     statement.setInt(23, 8)
-    statement.setString(24, "false")
-    statement.setString(25, activityChannel)
-    statement.setString(26, "true")
-    statement.setString(27, alliesChannel)
-    statement.setString(28, enemiesChannel)
-    statement.setString(29, neutralsChannels)
-    statement.setString(30, levelsChannel)
-    statement.setString(31, deathsChannel)
-    statement.setString(32, category)
-    statement.setString(33, fullblessRole)
-    statement.setString(34, nemesisRole)
-    statement.setString(35, allyPkRole)
-    statement.setString(36, masslogRole)
-    statement.setString(37, fullblessChannel)
-    statement.setString(38, nemesisChannel)
-    statement.setInt(39, 250)
-    statement.setString(40, "true")
-    statement.setString(41, "true")
+    statement.setInt(24, 8)
+    statement.setString(25, "false")
+    statement.setString(26, activityChannel)
+    statement.setString(27, "true")
+    statement.setString(28, alliesChannel)
+    statement.setString(29, enemiesChannel)
+    statement.setString(30, neutralsChannels)
+    statement.setString(31, levelsChannel)
+    statement.setString(32, deathsChannel)
+    statement.setString(33, category)
+    statement.setString(34, fullblessRole)
+    statement.setString(35, nemesisRole)
+    statement.setString(36, allyPkRole)
+    statement.setString(37, masslogRole)
+    statement.setString(38, bountyRole)
+    statement.setString(39, fullblessChannel)
+    statement.setString(40, nemesisChannel)
+    statement.setInt(41, 250)
     statement.setString(42, "true")
     statement.setString(43, "true")
     statement.setString(44, "true")
     statement.setString(45, "true")
-    statement.setString(46, "on")
-    statement.setInt(47, 8)
-    statement.setInt(48, 8)
-    statement.setString(49, "false")
-    statement.setString(50, activityChannel)
-    statement.setString(51, "true")
+    statement.setString(46, "true")
+    statement.setString(47, "true")
+    statement.setString(48, "on")
+    statement.setInt(49, 8)
+    statement.setInt(50, 8)
+    statement.setString(51, "false")
+    statement.setString(52, activityChannel)
+    statement.setString(53, "true")
     statement.executeUpdate()
 
     statement.close()
@@ -191,6 +205,10 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       configMap += ("nemesis_role" -> result.getString("nemesis_role"))
       configMap += ("allypk_role" -> result.getString("allypk_role"))
       configMap += ("masslog_role" -> result.getString("masslog_role"))
+      // Read defensively, like combined_online below: this is a `SELECT *`, so a
+      // guild whose database hasn't picked the column up yet (listWorlds adds it)
+      // would throw here rather than simply have no bounty role.
+      configMap += ("bounty_role" -> Try(Option(result.getString("bounty_role")).getOrElse("0")).getOrElse("0"))
       configMap += ("fullbless_channel" -> result.getString("fullbless_channel"))
       configMap += ("nemesis_channel" -> result.getString("nemesis_channel"))
       configMap += ("fullbless_level" -> result.getInt("fullbless_level").toString)

@@ -12,6 +12,8 @@ case class Worlds(name: String,
   nemesisRole: String,
   allyPkRole: String,
   masslogRole: String,
+  /** Marks members subscribed to bounty login DMs on this world. */
+  bountyRole: String,
   fullblessChannel: String,
   nemesisChannel: String,
   fullblessLevel: Int,

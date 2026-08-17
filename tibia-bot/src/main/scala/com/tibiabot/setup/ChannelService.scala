@@ -24,6 +24,7 @@ import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
+import com.tibiabot.presentation.Names
 
 /** createChannels' result: an embed always, plus confirm/cancel buttons only
  *  when it's prompting to reassign a paused world's seat (see
@@ -37,9 +38,11 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  itself stays in BotApp via the `forgetGuild` callback.
  *
  *  @param forgetGuild         drops a guild's in-memory state (worldsData/discordsData)
+ *  @param forgetWorldSubscriptions drops the mass-log/bounty DM subscriptions for a removed world; a callback rather than the service itself, since this is the only thing here that needs it
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
  *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
+ *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
  */
 final class ChannelService(
   streamSupervisor: StreamSupervisor,
@@ -53,7 +56,9 @@ final class ChannelService(
   botUser: String,
   startBot: (Option[Guild], Option[String]) => Unit,
   serverSaveExtraEmbeds: String => List[MessageEmbed],
+  syncPatreonBeforeCheck: () => Unit,
   forgetGuild: String => Unit,
+  forgetWorldSubscriptions: (String, String) => Unit,
   sharedConfigGuilds: Set[String]
 )(implicit ex: ExecutionContextExecutor) extends StrictLogging {
 
@@ -62,8 +67,8 @@ final class ChannelService(
   private def worldConfig(guild: Guild): List[Worlds] =
     worldConfigRepository.listWorlds(guild.getId)
 
-  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
-    worldConfigRepository.createWorld(guild.getId, world, alliesChannel, enemiesChannel, neutralsChannels, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, fullblessChannel, nemesisChannel, activityChannel)
+  private def worldCreateConfig(guild: Guild, world: String, alliesChannel: String, enemiesChannel: String, neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String, fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String, bountyRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit =
+    worldConfigRepository.createWorld(guild.getId, world, alliesChannel, enemiesChannel, neutralsChannels, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, activityChannel)
 
   private def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
@@ -123,6 +128,7 @@ final class ChannelService(
         .grant(Permission.MESSAGE_HISTORY)
         .grant(Permission.MANAGE_THREADS)
         .grant(Permission.MANAGE_CHANNEL)
+        .grant(Permission.MESSAGE_MANAGE)
         .grant(Permission.MANAGE_PERMISSIONS)
         .complete()
     } catch {
@@ -144,7 +150,7 @@ final class ChannelService(
    *  the deny. `visible` is false on the path that hides the category entirely. */
   private def setCategoryPublicPerms(category: Category, publicRole: Role, visible: Boolean): Unit = {
     val action = category.upsertPermissionOverride(publicRole)
-      .deny(Permission.CREATE_PUBLIC_THREADS)
+      .grant(Permission.CREATE_PUBLIC_THREADS)
     (if (visible) action.grant(Permission.VIEW_CHANNEL) else action.deny(Permission.VIEW_CHANNEL)).queue()
   }
 
@@ -243,26 +249,47 @@ final class ChannelService(
     }
   }
 
-  /** The role-subscription buttons under the fullbless/notifications embed. */
+  /** The role-subscription buttons under the fullbless/notifications embed.
+   *
+   *  The first three toggle a role that gets pinged in a channel. The last two
+   *  stand for a standing DM subscription instead, so pressing them opens a form
+   *  (see interactions.NotifyButtons) rather than toggling anything on the spot
+   *  — the role follows whatever the form settles on. */
   def fullblessRoleButtons: List[Button] = List(
     Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(Config.inqEmoji)),
     Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(Config.bossEmoji)),
     Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(Config.hazardEmoji)),
-    Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(Config.masslogEmoji))
+    Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(Config.masslogEmoji)),
+    Button.secondary("bounty", " ").withEmoji(Emoji.fromFormatted(Config.bountyEmoji))
   )
 
   /** The "the bot will poke" role-notification embed for a world. Built by
    *  /setup (initial post), /fullbless (edits the existing message) and
    *  /repair (reposts it). `level` is a String because /repair reads it
-   *  straight out of the stored world config; it is only ever interpolated. */
-  def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, level: String): MessageEmbed =
+   *  straight out of the stored world config; it is only ever interpolated.
+   *
+   *  The last two lines describe a DM rather than a channel poke, so they say
+   *  so: a role that only ever messages you privately is a different promise
+   *  from one that mentions you in a channel, and the difference has to be
+   *  readable before anyone presses the button. */
+  def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, bountyRoleId: String, level: String): MessageEmbed = {
+    // A world configured before bounties existed carries '0' here until /repair
+    // creates the role. `<@&0>` renders as a deleted role, which reads as
+    // something broken rather than as something not set up yet.
+    val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
     new EmbedBuilder()
-      .setTitle(s":crossed_swords: $world :crossed_swords:", s"https://www.tibia.com/community/?subtopic=worlds&world=$world")
+      .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
       .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
       .setColor(BrandColor)
       .setFooter("Add or remove yourself from the role using the buttons below:")
-      .setDescription(s"The bot will poke:\n${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n${Config.masslogEmoji}<@&$masslogRoleId> If enemies masslog on **$world**")
+      .setDescription(
+        s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
+        s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +
+        s"${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n" +
+        s"${Config.masslogEmoji}<@&$masslogRoleId> If enough enemies log in at once on **$world**\n" +
+        s"${Config.bountyEmoji}$bountyMention If a character you're watching `logs in` on **$world**")
       .build()
+  }
 
   /** What a seed sync did, in words. Silent when nothing changed, so a repair
    *  run for some other reason doesn't report a catalogue that is already right.
@@ -381,11 +408,16 @@ final class ChannelService(
             val boardId = com.tibiabot.respawn.RespawnThreads.postBoard(existing, settings,
               respawnService.listRespawns(guild.getId))
             respawnService.updateChannels(guild.getId, existing.getId, boardId)
+            respawnService.recordBoardDrawn(guild.getId)
             s"${Config.yesEmoji} The <#${existing.getId}> channel already exists — its board post was " +
               s"missing, so I've recreated it. ${seedSummary(sync)}"
           } else {
             val redrawn = com.tibiabot.respawn.RespawnThreads
               .redrawBoard(guild, settings, respawnService.listRespawns(guild.getId))
+            // Noted so the next boot does not redraw what was just drawn. Repair
+            // itself redraws whatever the fingerprint says, since a board can be
+            // wrong in ways the catalogue cannot show — deleted, or never posted.
+            if (redrawn) respawnService.recordBoardDrawn(guild.getId)
             if (redrawn)
               s"${Config.yesEmoji} Redrew the board on <#${existing.getId}>. ${seedSummary(sync)}"
             else
@@ -411,6 +443,7 @@ final class ChannelService(
             com.tibiabot.respawn.RespawnThreads.createForum(guild, adminCategory, settings,
               ensureModeratorRole(guild), respawnService.listRespawns(guild.getId))
           respawnService.updateChannels(guild.getId, forumId, boardId)
+          respawnService.recordBoardDrawn(guild.getId)
 
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           com.tibiabot.presentation.AdminLog.post(adminChannel,
@@ -476,6 +509,13 @@ final class ChannelService(
     // error, channel cap) the server is left half-built and the slash interaction
     // would otherwise hang with no reply — so report it cleanly and point at /repair.
     val embedText = try {
+      // Subscribing is what someone does immediately *before* running this, so
+      // the periodic sync is exactly the wrong thing to make them wait on —
+      // refresh the snapshot the check below reads first. Throttled and
+      // time-bounded on the other side, and swallows its own failures, so the
+      // worst case here is that the check answers from data that was already
+      // good enough before this line existed.
+      syncPatreonBeforeCheck()
       if (!paywallService.callerIsSubscribed(event.getUser.getId)) {
         // Both halves matter and neither is guessable: an active pledge alone
         // isn't enough, because Patreon only tells us who a patron is on
@@ -488,15 +528,62 @@ final class ChannelService(
       // no-op if the guild's database already exists (initGuild checks first)
       createConfigDatabase(guild)
 
+      // touch the worlds config so listWorlds runs its ALTER TABLE column
+      // migrations on older databases before /setup reads or writes the table
+      worldConfig(guild)
+
+      // Answered before any role or channel work is attempted. A world that is
+      // already configured needs none of it, and on a bot missing Manage Roles
+      // the role creation below throws a PermissionException — which would bury
+      // the seat prompts under a "grant me permissions" reply, for a server that
+      // only ever needed a database write.
+      val worldConfigData = worldRetrieveConfig(guild, world)
+      if (worldConfigData.nonEmpty) {
+        if (!paywallService.isActive(guild.getId, world)) {
+          // channels already exist, but tracking is paused — offer to hand the
+          // seat to this caller instead of the plain "already been setup" reply
+          if (paywallService.canReassignSeat(event.getUser.getId, guild.getId, world)) {
+            buttons = List(
+              Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
+              Button.secondary("paywall_reassign_no", "Cancel")
+            )
+            // A paused world with no seat is a legacy setup that ran out its
+            // grace period, not a lapsed subscription — there was never one to
+            // lapse, so don't claim there was.
+            val reason =
+              if (paywallService.hasSeat(guild.getId, world)) "the Patreon subscription tied to it lapsed"
+              else "it isn't tied to a Patreon subscription"
+            s":warning: Tracking for **$world** is currently paused — $reason.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
+          } else {
+            s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
+          }
+        } else if (!paywallService.hasSeat(guild.getId, world)) {
+          // channels exist and tracking is active, but this (guild, world) was
+          // never tied to a seat — a legacy setup from before the seat system
+          // existed. isActive's grandfather rule leaves it running either way,
+          // but offer to claim it onto one of the caller's seats rather than
+          // leaving it ungated forever.
+          if (paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+            buttons = List(
+              Button.success(s"paywall_claim_yes_$world", "Assign as a seat"),
+              Button.secondary("paywall_claim_no", "Cancel")
+            )
+            s":warning: The channels for **$world** already exist, but this world isn't tied to one of your Patreon seats yet.\nAssign this world to a seat now?"
+          } else {
+            s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+          }
+        } else {
+          // channels already exist
+          logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
+          s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
+        }
+      } else {
       val botRole = guild.getBotRole
       val fullblessRole = getOrCreateRole(guild, s"$world Fullbless", new Color(0, 156, 70))
       val nemesisRole = getOrCreateRole(guild, s"$world Rare Boss", new Color(164, 76, 230))
       val allyPkRole = getOrCreateRole(guild, s"$world PVP", new Color(220, 0, 0))
       val masslogRole = getOrCreateRole(guild, s"$world Masslog", new Color(219, 175, 72))
-
-      // touch the worlds config so listWorlds runs its ALTER TABLE column
-      // migrations on older databases before /setup writes to the table
-      worldConfig(guild)
+      val bountyRole = getOrCreateRole(guild, s"$world Bounty", new Color(139, 69, 19))
 
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
@@ -531,7 +618,7 @@ final class ChannelService(
           // admin category has been deleted
           val adminCategory = guild.createCategory("Violent Bot").complete()
           setCategoryBotPerms(adminCategory, botRole)
-          setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = false)
+          setCategoryPublicPerms(adminCategory, guild.getPublicRole, visible = true)
           discordUpdateConfig(guild, adminCategory.getId, "", "", "", world)
           adminCategoryCheck = adminCategory
         }
@@ -558,12 +645,9 @@ final class ChannelService(
           postBoostedNotifications(boostedChannel, guild, world)
         }
       }
-      // check if world has already been setup
-      val worldConfigData = worldRetrieveConfig(guild, world)
-      if (worldConfigData.isEmpty) {
-        if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
-          s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
-        } else {
+      if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+        s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
+      } else {
         // captured before worldCreateConfig runs below, since afterward this
         // would never be empty — gates the one-time command-set expansion
         val isFirstWorldForGuild = worldConfig(guild).isEmpty
@@ -585,7 +669,7 @@ final class ChannelService(
         if (notificationsChannel != null) {
           if (notificationsChannel.canTalk()) {
 
-            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "250"))
+            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "250"))
               .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
             }
@@ -603,7 +687,7 @@ final class ChannelService(
         postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
-        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, "0", "0", activityId)
+        worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "0", "0", activityId)
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
           val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
@@ -641,47 +725,10 @@ final class ChannelService(
 
         // matches the audit pattern used by /repair and /remove
         val adminChannel = guild.getTextChannelById(discordRetrieveConfig(guild).getOrElse("admin_channel", "0"))
-        com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+        com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/setup` for the world **$world** and created its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
 
         s":gear: The channels for **$world** have been configured successfully.\n⚠️ *You should probably mute the <#$levelsId> channel*$respawnNote"
         }
-      } else if (!paywallService.isActive(guild.getId, world)) {
-        // channels already exist, but tracking is paused — offer to hand the
-        // seat to this caller instead of the plain "already been setup" reply
-        if (paywallService.canReassignSeat(event.getUser.getId, guild.getId, world)) {
-          buttons = List(
-            Button.success(s"paywall_reassign_yes_$world", "Take over tracking"),
-            Button.secondary("paywall_reassign_no", "Cancel")
-          )
-          // A paused world with no seat is a legacy setup that ran out its
-          // grace period, not a lapsed subscription — there was never one to
-          // lapse, so don't claim there was.
-          val reason =
-            if (paywallService.hasSeat(guild.getId, world)) "the Patreon subscription tied to it lapsed"
-            else "it isn't tied to a Patreon subscription"
-          s":warning: Tracking for **$world** is currently paused — $reason.\nYou currently hold an active Patreon subscription. Take over this world's seat and resume tracking?"
-        } else {
-          s"${Config.noEmoji} Tracking for **$world** is currently paused, and you don't have a free Patreon seat to take it over. Free one up with `/remove` on another world, then try again."
-        }
-      } else if (!paywallService.hasSeat(guild.getId, world)) {
-        // channels exist and tracking is active, but this (guild, world) was
-        // never tied to a seat — a legacy setup from before the seat system
-        // existed. isActive's grandfather rule leaves it running either way,
-        // but offer to claim it onto one of the caller's seats rather than
-        // leaving it ungated forever.
-        if (paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
-          buttons = List(
-            Button.success(s"paywall_claim_yes_$world", "Assign as a seat"),
-            Button.secondary("paywall_claim_no", "Cancel")
-          )
-          s":warning: The channels for **$world** already exist, but this world isn't tied to one of your Patreon seats yet.\nAssign this world to a seat now?"
-        } else {
-          s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
-        }
-      } else {
-        // channels already exist
-        logger.info(s"The channels have already been setup on '${guild.getName} - ${guild.getId}'.")
-        s"${Config.noEmoji} The channels for **$world** have already been setup.\nUse `/repair` if you need to recreate channels for **$world** that you have deleted."
       }
       } else {
         s"${Config.noEmoji} This is not a valid World on Tibia."
@@ -804,9 +851,13 @@ final class ChannelService(
             val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
             val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
             val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
+            // Worlds set up before bounties existed have '0' here, so this is
+            // also the path that gives them the role for the first time.
+            val bountyRoleCheck = guild.getRoleById(worldConfigData.getOrElse("bounty_role", "0"))
+            val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
 
             // Fullbless Role
-            boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, fullblessLevel))
+            boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
               .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
               .queue()
 
@@ -815,6 +866,7 @@ final class ChannelService(
             worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
             worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
             worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
+            worldRepairConfig(guild, worldFormal, "bounty_role", bountyRole.getId)
 
             // update the record in worldsData
             if (streamState.worldsData.contains(guild.getId)) {
@@ -857,7 +909,7 @@ final class ChannelService(
               val worldsList = streamState.worldsData(guild.getId)
               val updatedWorldsList = worldsList.map { world =>
                 if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(masslogRole = masslogRole.getId)
+                  world.copy(masslogRole = masslogRole.getId, bountyRole = bountyRole.getId)
                 } else {
                   world
                 }
@@ -1059,9 +1111,11 @@ final class ChannelService(
           val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
           val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
           val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
+          val bountyRoleCheck = guild.getRoleById(worldConfigData.getOrElse("bounty_role", "0"))
+          val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
 
           // Fullbless Role
-          boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, fullblessLevel))
+          boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
             .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
             .queue()
           // Update role id if it changed
@@ -1112,13 +1166,14 @@ final class ChannelService(
 
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
+          worldRepairConfig(guild, worldFormal, "bounty_role", bountyRole.getId)
 
           // update the record in worldsData
           if (streamState.worldsData.contains(guild.getId)) {
             val worldsList = streamState.worldsData(guild.getId)
             val updatedWorldsList = worldsList.map { world =>
               if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(masslogRole = masslogRole.getId)
+                world.copy(masslogRole = masslogRole.getId, bountyRole = bountyRole.getId)
               } else {
                 world
               }
@@ -1156,7 +1211,7 @@ final class ChannelService(
           discordUpdateConfig(guild, adminCategory.getId, newAdminChannel.getId, "", "", worldFormal)
           updateAdminChannel(guild.getId, newAdminChannel.getId)
         }
-        com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@$commandUser> has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+        com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/repair` on the world **$worldFormal** and recreated missing channels.\n\nYou may need to rearrange their position within your discord server.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         embedBuild.setDescription(s":gear: The missing channels for **$worldFormal** have been recreated.\nYou may need to rearrange their position within your discord server.")
       }
       // Recreate the moderator role if it was deleted, and re-store its id. Not
@@ -1237,16 +1292,25 @@ final class ChannelService(
         val nemesisRoleId = worldConfigData("nemesis_role")
         val allyPkRoleId = worldConfigData("allypk_role")
         val masslogRoleId = worldConfigData("masslog_role")
+        val bountyRoleId = worldConfigData.getOrElse("bounty_role", "0")
 
         val fullblessRole = guild.getRoleById(fullblessRoleId)
         val nemesisRole = guild.getRoleById(nemesisRoleId)
         val allyPkRole = guild.getRoleById(allyPkRoleId)
         val masslogRole = guild.getRoleById(masslogRoleId)
+        val bountyRole = guild.getRoleById(bountyRoleId)
 
         deleteRoleQuietly(fullblessRole, fullblessRoleId, guild)
         deleteRoleQuietly(nemesisRole, nemesisRoleId, guild)
         deleteRoleQuietly(allyPkRole, allyPkRoleId, guild)
         deleteRoleQuietly(masslogRole, masslogRoleId, guild)
+        deleteRoleQuietly(bountyRole, bountyRoleId, guild)
+
+        // The DM subscriptions live in the shared cache database, so dropping
+        // this guild's own tables below would leave them behind — and a world
+        // that comes back later would start by messaging people who unsubscribed
+        // by deleting it.
+        forgetWorldSubscriptions(guild.getId, world)
 
         // remove the guild from the world stream, cancelling it if now unused
         streamSupervisor.removeGuildFromWorld(world, guild.getId)
@@ -1300,7 +1364,7 @@ final class ChannelService(
           if (adminCategory != null) adminCategory.delete().complete()
         } else {
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
-          com.tibiabot.presentation.AdminLog.post(adminChannel, s"<@${event.getUser.getId}> has run `/remove` on the world **$world** and deleted its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+          com.tibiabot.presentation.AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} has run `/remove` on the world **$world** and deleted its channels.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
         }
 
         s":gear: The world **$world** has been removed."

@@ -2,8 +2,8 @@ package com.tibiabot.respawn
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{ClashVerdict, Respawn, RespawnClaim, RespawnSchedule, RespawnSettings, RespawnUserPrefs, Stamina}
-import com.tibiabot.persistence.{RespawnRepository, SeedSync}
-import com.tibiabot.presentation.RespawnEmbeds
+import com.tibiabot.persistence.{RespawnRepository, ScheduleOccurrence, SeedSync}
+import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.Guild
@@ -11,6 +11,8 @@ import net.dv8tion.jda.api.entities.channel.concrete.{ForumChannel, ThreadChanne
 
 import java.time.ZonedDateTime
 import scala.util.Try
+import scala.util.control.NonFatal
+import com.tibiabot.presentation.Names
 
 /** What a claim attempt did, for the command/button layer to render. Modelled
  *  as a result type rather than the handler poking at the repository itself, so
@@ -81,17 +83,145 @@ final case class LogPage(entries: List[RespawnClaim], page: Int, hasOlder: Boole
   def hasNewer: Boolean = page > 0
 }
 
-/** The Log panel's summary line: how much hunting happened recently, and where
- *  most of it happened. */
-final case class LogSummary(total: Int, busiest: Option[(Respawn, Int)], days: Int)
+/** What a page of the claim log is about.
+ *
+ *  The board's Log opens on [[LogScope.Everything]], a spawn's own post on that
+ *  spawn, and Find produces either a spawn or a member. It travels in the button
+ *  id rather than being remembered anywhere, because a Next press has to know
+ *  what it is paging through and the message it edits cannot say. */
+sealed trait LogScope {
+  /** The id-safe form. A colon separates the parts of a button id, so no token
+   *  may contain one — and since a spawn id and a Discord snowflake are both
+   *  bare digits, the member form carries a `u` to tell them apart. */
+  def token: String
+}
+
+object LogScope {
+  case object Everything extends LogScope { val token: String = "all" }
+  final case class Spawn(respawnId: Long) extends LogScope { def token: String = respawnId.toString }
+  final case class Member(userId: String) extends LogScope { def token: String = s"u$userId" }
+
+  def fromToken(token: String): Option[LogScope] =
+    if (token == "all") Some(Everything)
+    else if (token.startsWith("u")) {
+      val id = token.drop(1)
+      // Digits only: the token is echoed straight back into a database lookup,
+      // and anything else in there did not come from a button this bot drew.
+      if (id.nonEmpty && id.forall(_.isDigit)) Some(Member(id)) else None
+    }
+    else scala.util.Try(token.toLong).toOption.map(Spawn(_))
+}
+
+/** One spawn as the web board shows it: the catalogue row, whoever holds it,
+ *  who is waiting, what is booked ahead, and when it was last touched.
+ *
+ *  Assembled in bulk by [[RespawnService.board]]. `lastActivity` is what the
+ *  board's fade is computed from — a spawn nobody has ever claimed has none,
+ *  and reads as fully dormant rather than as missing data.
+ */
+final case class RespawnBoardEntry(
+  respawn: Respawn,
+  active: Option[RespawnClaim],
+  queue: List[RespawnClaim],
+  reservations: List[RespawnClaim],
+  lastActivity: Option[ZonedDateTime]
+) {
+  /** The soonest booking the card has anything to say about.
+   *
+   *  A slot with an unanswered request is skipped. The question is between two
+   *  people about a future evening, and the card is about now — its owner may
+   *  yet say they aren't hunting it, at which point it belongs to somebody
+   *  else. Neither answer changes anything about the spawn this minute, so the
+   *  card looks past it to the next booking that is actually settled, and says
+   *  "free" if there is none.
+   *
+   *  The request is still there, and the calendar still draws it in full: that
+   *  is the surface where a future evening is the subject.
+   */
+  def nextReservation: Option[RespawnClaim] =
+    reservations.find(_.requesterUserId.isEmpty)
+
+  /** When each queued claim would start, if every hunt ahead of it ran its full
+   *  length: the current hunt's end, then each person in turn.
+   *
+   *  A projection and nothing more, which is why it is offered as one rather
+   *  than written to a claim's `startsAt` — that field means "this really began
+   *  then". Somebody releasing early brings every one of these forward, an offer
+   *  that goes unanswered expires and does the same, and a hunt run to the wire
+   *  still hands over a minute or two late. Surfaces that show it are expected to
+   *  mark it as approximate.
+   *
+   *  Computed here rather than in the page so that everything showing a queue is
+   *  showing the same arithmetic. A spawn with a queue and no live hunt — which
+   *  should not happen, but does if a claim ends between the two reads — starts
+   *  counting from `now`, since the next person's turn is not in the past.
+   */
+  def projectedQueueStarts(now: ZonedDateTime): List[(RespawnClaim, ZonedDateTime)] = {
+    val first = active.flatMap(_.endsAt).filter(_.isAfter(now)).getOrElse(now)
+    queue.foldLeft((first, List.empty[(RespawnClaim, ZonedDateTime)])) {
+      case ((cursor, acc), claim) =>
+        (cursor.plusMinutes(claim.durationMinutes.toLong), acc :+ (claim -> cursor))
+    }._2
+  }
+
+  /** How this spawn reads on the board, as one of
+   *  [[RespawnBoardEntry.States]] other than
+   *  [[RespawnBoardEntry.Asked]], which is a calendar state only.
+   *
+   *  Being hunted right now outranks anything booked for later: a card has one
+   *  state, and "somebody is in there" is the one that matters.
+   *
+   *  The two booked states come out of how a slot records having been asked
+   *  about (see `keepOccurrence`): `askedAt` is set the moment somebody asks
+   *  and never cleared, while the requester fields are cleared once it is
+   *  answered. So a booking nobody has queried and one that has been queried
+   *  and settled are both bookings — the second simply has its question closed.
+   */
+  def state: String =
+    if (active.isDefined) RespawnBoardEntry.Claimed
+    else nextReservation match {
+      case None => RespawnBoardEntry.Free
+      // Two ways a booking reads as settled, and the card does not distinguish
+      // them: its owner said so outright, or somebody asked and the question has
+      // been answered. Before Confirm existed only the second was possible, and
+      // reading the word off `askedAt` alone would now leave a booking whose
+      // owner has explicitly confirmed it showing as merely booked.
+      case Some(slot) if slot.confirmed || slot.askedAt.isDefined => RespawnBoardEntry.Confirmed
+      case Some(_) => RespawnBoardEntry.Booked
+    }
+
+  /** Whoever the card should name: the holder if it is being hunted, otherwise
+   *  whoever booked it next. Their Tibia character when they gave one, since
+   *  that is who the team recognises. */
+  def holderLabel: Option[String] =
+    active.orElse(nextReservation).map { claim =>
+      if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+    }
+}
+
+object RespawnBoardEntry {
+  val Free = "free"
+  val Claimed = "claimed"
+  val Booked = "booked"
+  val Confirmed = "confirmed"
+  /** A slot whose owner has been asked whether they are actually hunting it.
+   *  A calendar state only: it describes a question about a future evening, and
+   *  a board card describes now. */
+  val Asked = "asked"
+
+  /** What a board card can read as. Deliberately without [[Asked]]. */
+  val States: Set[String] = Set(Free, Claimed, Booked, Confirmed)
+}
 
 /** The result of a slot owner answering "are you hunting tonight?". */
 sealed trait SlotAnswer
 object SlotAnswer {
   /** They are hunting it, so the request is refused and the slot stays theirs. */
   final case class Kept(respawn: Respawn) extends SlotAnswer
-  /** They are not, so it passes to whoever asked. */
-  final case class Passed(respawn: Respawn, toUserId: String) extends SlotAnswer
+  /** They are not, so it passes to whoever asked. Carries the asker's name
+   *  rather than their id: the only thing done with it is naming them in the
+   *  reply, and the row already knows what they are called. */
+  final case class Passed(respawn: Respawn, toUserName: String) extends SlotAnswer
   /** They are not — but the asker had booked a longer window than the slot they
    *  asked about, and the rest of it is somebody else's now. The slot is given up
    *  all the same; it simply goes back to being free rather than to them. */
@@ -99,6 +229,23 @@ object SlotAnswer {
   /** Already answered, lapsed, or the slot is gone. */
   case object Gone extends SlotAnswer
   case object NotYours extends SlotAnswer
+}
+
+/** The result of a booking's owner confirming they are there — Confirm on the
+ *  reminder, or Take Claim once the slot has started. */
+sealed trait ConfirmOutcome
+object ConfirmOutcome {
+  /** Confirmed ahead of the start: the slot is settled and nobody may ask for
+   *  it now. */
+  final case class Settled(respawn: Respawn, slot: RespawnClaim) extends ConfirmOutcome
+  /** Confirmed a hunt already under way, so it is no longer at risk of being
+   *  given up. */
+  final case class Taken(respawn: Respawn, claim: RespawnClaim) extends ConfirmOutcome
+  /** Already confirmed — a second press, which changes nothing. */
+  final case class Already(respawn: Respawn) extends ConfirmOutcome
+  /** The window went by and it was given up, or the slot is otherwise gone. */
+  case object Gone extends ConfirmOutcome
+  case object NotYours extends ConfirmOutcome
 }
 
 /** The result of answering a handover offer DM. */
@@ -168,8 +315,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  can't drift on what counts as a legal combination — a default claim longer
    *  than the maximum being the one that actually bites, since every later claim
    *  would be refused for exceeding a ceiling nobody set deliberately. */
+  /** `warnMinutes` is deliberately absent: it is the fallback reminder for
+   *  members who have not set their own, and there is no longer anywhere to
+   *  change it per guild — it sits at `Config.Respawn.warnMinutes` for everybody.
+   *  Members set their own in Config, which is the setting that was ever
+   *  actually used. */
   def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
-                     queueLimit: Option[Int], stamina: Option[Int], warn: Option[Int],
+                     queueLimit: Option[Int], stamina: Option[Int],
                      handover: Option[Int]): Either[String, RespawnSettings] =
     settings(guildId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
@@ -179,7 +331,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           maxDurationMinutes = maxDuration.getOrElse(current.maxDurationMinutes),
           queueLimit = queueLimit.getOrElse(current.queueLimit),
           staminaMinutes = stamina.getOrElse(current.staminaMinutes),
-          warnMinutes = warn.getOrElse(current.warnMinutes),
           handoverMinutes = handover.getOrElse(current.handoverMinutes)
         )
         if (updated.defaultDurationMinutes < 5 || updated.maxDurationMinutes < 5)
@@ -187,8 +338,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else if (updated.defaultDurationMinutes > updated.maxDurationMinutes)
           Left(s"The default claim (${RespawnEmbeds.humanDuration(updated.defaultDurationMinutes)}) can't be " +
             s"longer than the maximum (${RespawnEmbeds.humanDuration(updated.maxDurationMinutes)}).")
-        else if (updated.queueLimit < 0 || updated.staminaMinutes < 0 || updated.warnMinutes < 0)
-          Left("Queue limit, stamina and reminder time can't be negative.")
+        else if (updated.queueLimit < 0 || updated.staminaMinutes < 0)
+          Left("Queue limit and stamina can't be negative.")
         else if (updated.handoverMinutes < 1)
           Left("The handover window has to be at least a minute, or nobody could ever accept one.")
         else {
@@ -215,25 +366,29 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   def listRespawns(guildId: String): List[Respawn] = repository.listRespawns(guildId)
 
-  /** Resolve what a user typed — a code ("415"), or a name — to a catalogue
-   *  entry. Autocomplete sends the code back, so the code path is the common
-   *  one; the name fallbacks exist for people who type it out by hand. */
+  /** Everybody this guild's respawn system knows, for a moderator to pick from.
+   *
+   *  Capped because it feeds a picker rather than a report: a guild that has run
+   *  this for years has thousands of rows behind it and nobody scrolls a list
+   *  that long — they type a name. Anyone beyond the cap is still reachable by
+   *  their Discord id, which the same field accepts. */
+  def knownMembers(guildId: String): List[com.tibiabot.persistence.KnownMember] =
+    repository.knownMembers(guildId, RespawnService.MaxKnownMembers)
+
+  /** Resolve what a user typed — a code ("415"), a name, or the creature the
+   *  place is known for — to a catalogue entry. Autocomplete sends the code back,
+   *  so the code path is the common one; the rest exist for people typing by
+   *  hand.
+   *
+   *  The creature is tried last and only as a whole word or a substring, after
+   *  every name test has missed. It is the loosest of the three — several spawns
+   *  can share a monster — so it settles a query only when exactly one row
+   *  matches, the same rule the name substring already answered to. */
   def resolve(guildId: String, query: String): Option[Respawn] = {
     val trimmed = query.trim
     if (trimmed.isEmpty) None
-    else repository.findByCode(guildId, trimmed).orElse {
-      val all = repository.listRespawns(guildId)
-      val lower = trimmed.toLowerCase
-      // "415 — Cult Orcs" comes back from autocomplete as the display name in
-      // some clients, so match that shape too before falling back to a
-      // substring search.
-      all.find(_.displayName.equalsIgnoreCase(trimmed))
-        .orElse(all.find(_.name.equalsIgnoreCase(trimmed)))
-        .orElse(all.filter(_.name.toLowerCase.contains(lower)) match {
-          case single :: Nil => Some(single)
-          case _             => None // ambiguous: make them pick rather than guessing
-        })
-    }
+    else repository.findByCode(guildId, trimmed)
+      .orElse(RespawnService.resolveIn(repository.listRespawns(guildId), trimmed))
   }
 
   def removeRespawn(guildId: String, respawnId: Long): Unit = repository.removeRespawn(guildId, respawnId)
@@ -265,6 +420,127 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  edit to respawns.json reaches a guild that was set up before it. */
   def syncSeed(guildId: String): SeedSync =
     repository.syncSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
+
+  /** Put the pinned board post back in step with the catalogue, if it isn't.
+   *
+   *  The board post *is* the catalogue — every code somebody can claim is on
+   *  that image and nowhere else — so a catalogue that has changed and a board
+   *  that has not is a list of codes people will type and be refused for.
+   *
+   *  Called at boot, which is the moment a new `respawns.json` reaches a guild
+   *  that already exists, and again whenever a moderator adds a code. Guarded by
+   *  a fingerprint rather than run unconditionally: a redraw is a REST edit per
+   *  guild, restarts are frequent and catalogue changes are not, so it follows
+   *  the codes rather than the process. A board post that has gone missing is
+   *  reposted instead, since there is nothing left to edit.
+   *
+   *  Returns whether Discord was actually touched. Nothing here is fatal — a
+   *  board that fails to redraw is out of date, not broken — and the digest is
+   *  only recorded on success, so a failure is retried on the next boot rather
+   *  than remembered as done.
+   */
+  /** Add a spawn a guild wants that the bundled list does not have.
+   *
+   *  The same four fields `respawns.json` carries, because it is the same thing:
+   *  a code to claim by, the city it is in, what it is called and which monster
+   *  represents it. Written as a `custom` row, which is what keeps `syncSeed`
+   *  off it — the bundled file has no opinion about a code it never shipped, and
+   *  must not retire one because of that.
+   *
+   *  Refusals are worded for the person typing, since this is reached from a
+   *  form rather than from code. A code already in the catalogue is the common
+   *  one and is refused rather than overwritten: quietly rewriting an existing
+   *  spawn would rename whatever people are already claiming under that code.
+   */
+  def addCustomSpawn(guildId: String, addedBy: String, code: String, region: String,
+                     name: String, creature: String): Either[String, Respawn] = {
+    val trimmedCode = code.trim
+    val trimmedName = name.trim
+    val trimmedRegion = region.trim
+    val trimmedCreature = creature.trim
+
+    RespawnService.spawnFault(trimmedCode, trimmedRegion, trimmedName, trimmedCreature) match {
+      case Some(fault) => Left(fault)
+      case None => repository.findByCode(guildId, trimmedCode) match {
+        case Some(existing) =>
+          Left(s"${existing.displayName} already uses that code.")
+        case None =>
+          val added = repository.addRespawn(guildId, trimmedCode, trimmedName, trimmedCreature,
+            trimmedRegion, world = "", mapperLink = "", source = Respawn.SourceCustom, addedBy = addedBy)
+          logger.info(s"'$addedBy' added respawn '${added.code}' (${added.name}) to guild '$guildId'")
+          Right(added)
+      }
+    }
+  }
+
+  /** Take a spawn a guild added back out of its catalogue.
+   *
+   *  Only a `custom` row. A seed code cannot be removed this way and is refused
+   *  rather than quietly ignored: the bundled file is the authority on those, so
+   *  deleting one would last until the next boot and then reappear, which looks
+   *  like the button not working.
+   *
+   *  Refused, too, while anybody is holding, waiting for or has booked it.
+   *  `removeRespawn` deletes those rows along with the spawn, and somebody's
+   *  evening disappearing because a moderator was tidying up is not a trade
+   *  worth making silently — the same guard `syncSeed` applies to a retired
+   *  code. Free it first and the removal goes through.
+   */
+  def removeCustomSpawn(guildId: String, code: String): Either[String, Respawn] =
+    resolve(guildId, code) match {
+      case None => Left(s"No spawn matches '$code'.")
+      case Some(respawn) if respawn.source != Respawn.SourceCustom =>
+        Left(s"${respawn.displayName} comes from the bundled list, so it can't be removed here.")
+      case Some(respawn) =>
+        val now = ZonedDateTime.now()
+        val busy = repository.activeClaim(guildId, respawn.id).isDefined ||
+          repository.queueFor(guildId, respawn.id).nonEmpty ||
+          repository.reservationsFor(guildId, respawn.id, now).nonEmpty ||
+          repository.schedulesForRespawn(guildId, respawn.id).nonEmpty
+        if (busy)
+          Left(s"${respawn.displayName} is claimed, queued for or booked. " +
+            "Clear those first — removing it would take somebody's hunt with it.")
+        else {
+          repository.removeRespawn(guildId, respawn.id)
+          logger.info(s"Removed custom respawn '${respawn.code}' (${respawn.name}) from guild '$guildId'")
+          Right(respawn)
+        }
+    }
+
+  /** Note that the board post now shows the catalogue as it currently stands.
+   *
+   *  For the paths that redraw unconditionally — `/repair`, whose whole job is
+   *  to fix a board that may be missing or wrong whatever a fingerprint says.
+   *  Without this the next boot would find no record of that redraw and do it
+   *  again. */
+  def recordBoardDrawn(guildId: String): Unit =
+    repository.setBoardDigest(guildId, RespawnBoardImage.digestOf(repository.listRespawns(guildId)))
+
+  def redrawBoardIfChanged(guild: Guild, config: RespawnSettings): Boolean = {
+    val guildId = guild.getId
+    val spawns = repository.listRespawns(guildId)
+    val digest = RespawnBoardImage.digestOf(spawns)
+    if (repository.boardDigest(guildId).contains(digest)) false
+    else RespawnThreads.findForum(guild, config).exists { forum =>
+      val drawn = RespawnThreads.resolveThread(guild, forum, config.boardThread) match {
+        case Some(_) => RespawnThreads.redrawBoard(guild, config, spawns)
+        case None =>
+          // The channel survived and the post did not. Nothing to edit, so it is
+          // posted afresh and the guild pointed at the new thread.
+          Try {
+            val boardId = RespawnThreads.postBoard(forum, config, spawns)
+            repository.updateChannels(guildId, forum.getId, boardId)
+            logger.info(s"Reposted the missing respawn board in guild '$guildId'")
+            true
+          }.recover { case NonFatal(error) =>
+            logger.warn(s"Could not repost the respawn board in guild '$guildId'", error)
+            false
+          }.get
+      }
+      if (drawn) repository.setBoardDigest(guildId, digest)
+      drawn
+    }
+  }
 
   // --- stamina ------------------------------------------------------------
 
@@ -321,27 +597,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the claim is refused with an explanation instead. */
   val MinimumClaimMinutes: Int = 5
 
-  /** How far into their own hunt a slot's owner may still answer a request.
-   *
-   *  A deadline landing exactly on the start punishes somebody who is logging in
-   *  on time: they arrive to find the slot already gone. A few minutes past it
-   *  costs the asker very little — the hunt they take over runs its full length
-   *  from whenever it starts — and turns "you were a minute late" into "you never
-   *  turned up", which is the thing the question was actually asking. */
-  val RequestGraceMinutes: Int = 5
-
-  /** When an owner has to answer by: `minutes` from now, but never longer than a
-   *  short grace past the start of the slot in question.
-   *
-   *  Both request paths clamp the same way. The clamp is what stops a request
-   *  made hours ahead from waiting hours, and the grace is what stops one made
-   *  minutes ahead from being no time at all. */
-  private[respawn] def answerDeadline(now: ZonedDateTime, slotStart: ZonedDateTime,
-                                      minutes: Int): ZonedDateTime = {
-    val latest = slotStart.plusMinutes(RequestGraceMinutes.toLong)
-    val wanted = now.plusMinutes(minutes.toLong)
-    if (wanted.isAfter(latest)) latest else wanted
-  }
 
   /** When the next booked slot on a spawn starts, if there is one. */
   def nextReservationStart(guildId: String, respawnId: Long,
@@ -356,7 +611,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  leaves a valid claim with a stale-looking post rather than losing the
    *  claim.
    */
-  def claim(guild: Guild, userId: String, userName: String, characterName: String,
+  def claim(guild: Guild, userId: String, userName: String, nickname: String, characterName: String,
             query: String, requestedMinutes: Option[Int],
             now: ZonedDateTime = ZonedDateTime.now()): ClaimOutcome =
     settings(guild.getId) match {
@@ -380,7 +635,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 case None =>
                   val boundary = resetBoundary(now)
                   val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-                  if (!tank.canAfford(minutes))
+                  // Not being able to afford the whole hunt is no longer a
+                  // refusal — beginClaim shortens it to whatever is left. Only
+                  // a tank with nothing worth starting in it is refused, and it
+                  // is refused here so that somebody with none is not put in a
+                  // queue they could never take their turn in.
+                  if (!tank.unlimited && tank.remainingMinutes < MinimumClaimMinutes)
                     ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
                   // An outstanding offer means the spawn is already spoken for,
                   // even though its previous holder may already have been closed
@@ -388,9 +648,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   // claims the moment the offer was accepted.
                   else if (repository.activeClaim(guildId, respawn.id).isDefined ||
                            repository.offeredClaim(guildId, respawn.id).isDefined)
-                    enqueue(guild, respawn, config, userId, userName, characterName, minutes)
+                    enqueue(guild, respawn, config, userId, userName, nickname, characterName, minutes)
                   else
-                    beginClaim(guild, respawn, config, userId, userName, characterName, minutes,
+                    beginClaim(guild, respawn, config, userId, userName, nickname, characterName, minutes,
                       RespawnClaim.KindAdHoc, now)
               }
             }
@@ -402,7 +662,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  scheduled claim all come through here, so stamina reservation and the
    *  thread update can't be forgotten by one of them. */
   def beginClaim(guild: Guild, respawn: Respawn, config: RespawnSettings, userId: String,
-                 userName: String, characterName: String, minutes: Int, kind: String,
+                 userName: String, nickname: String, characterName: String, minutes: Int, kind: String,
                  now: ZonedDateTime): ClaimOutcome = {
     val guildId = guild.getId
     val boundary = resetBoundary(now)
@@ -413,18 +673,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     // exempt, or it would truncate against itself.
     val reservation =
       if (kind == RespawnClaim.KindScheduled) None else nextReservationStart(guildId, respawn.id, now)
-    val end = endsAtFor(now, minutes, reservation)
-    val granted = math.max(0, java.time.Duration.between(now, end).toMinutes).toInt
+    val untilBooking = endsAtFor(now, minutes, reservation)
+    val allowedByBooking = math.max(0, java.time.Duration.between(now, untilBooking).toMinutes).toInt
+    if (allowedByBooking < MinimumClaimMinutes)
+      return ClaimOutcome.Reserved(respawn, reservation.getOrElse(untilBooking))
+
+    // A tank that cannot cover the whole hunt shortens it rather than refusing
+    // it. Somebody with forty minutes left wants those forty minutes, and being
+    // told to come back after server save because they cannot afford two hours
+    // is a refusal that helps nobody — the spawn sits empty and they hunt
+    // nothing. The same rule a booking already gets: take what is there, charge
+    // for what was taken, and say it was shortened.
+    val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
+    val granted = RespawnService.grantedMinutes(allowedByBooking, tank)
+    // Below the floor there is genuinely nothing worth starting, and that is a
+    // stamina refusal rather than a booking one.
     if (granted < MinimumClaimMinutes)
-      return ClaimOutcome.Reserved(respawn, reservation.getOrElse(end))
-    // Re-check under the reservation itself rather than trusting the earlier
-    // read: a second claim from the same user may have taken the room in
-    // between, and reserveStamina writing nothing is the authoritative answer.
+      return ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
+    val end = now.plusMinutes(granted.toLong)
+
+    // Re-check under the reservation itself rather than trusting the read above:
+    // a second claim from the same user may have taken the room in between, and
+    // reserveStamina writing nothing is the authoritative answer.
     if (!repository.reserveStamina(guildId, userId, granted, config.staminaMinutes, boundary)) {
-      val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
-      ClaimOutcome.NoStamina(respawn, granted, tank, ServerSaveSchedule.nextServerSave(now))
+      val fresh = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
+      ClaimOutcome.NoStamina(respawn, granted, fresh, ServerSaveSchedule.nextServerSave(now))
     } else {
-      repository.insertActiveClaim(guildId, respawn.id, userId, userName, characterName,
+      repository.insertActiveClaim(guildId, respawn.id, userId, userName, nickname, characterName,
         now, end, granted, kind) match {
         case None =>
           // Somebody claimed it between the check above and this insert. Hand the
@@ -436,21 +711,26 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         case Some(claim) =>
           refreshThread(guild, respawn, config)
           // The caller is told when the hunt was shortened, rather than quietly
-          // getting less than they asked for.
-          if (granted < minutes) ClaimOutcome.Shortened(respawn, claim, minutes, reservation)
+          // getting less than they asked for. The booking is named only when the
+          // booking is what did it — a hunt cut short by an empty tank has no
+          // booking to blame, and saying otherwise would send somebody looking
+          // for a slot that isn't there.
+          val shortenedByBooking = reservation.isDefined && granted >= allowedByBooking
+          if (granted < minutes)
+            ClaimOutcome.Shortened(respawn, claim, minutes, if (shortenedByBooking) reservation else None)
           else ClaimOutcome.Claimed(respawn, claim)
       }
     }
   }
 
   private def enqueue(guild: Guild, respawn: Respawn, config: RespawnSettings, userId: String,
-                      userName: String, characterName: String, minutes: Int): ClaimOutcome = {
+                      userName: String, nickname: String, characterName: String, minutes: Int): ClaimOutcome = {
     // Queueing deliberately does NOT reserve stamina. A queue that may never
     // reach the front would otherwise let people park their whole tank in other
     // people's queues; the reservation happens at promotion instead, and
     // someone who can't afford it by then is skipped rather than blocking the
     // line (see sweepGuild).
-    repository.enqueueClaim(guild.getId, respawn.id, userId, userName, characterName, minutes,
+    repository.enqueueClaim(guild.getId, respawn.id, userId, userName, nickname, characterName, minutes,
       config.queueLimit, RespawnClaim.KindAdHoc) match {
       case None =>
         repository.openClaimsForUser(guild.getId, userId).find(_.respawnId == respawn.id) match {
@@ -653,9 +933,56 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       release(guild, holder.userId, Some(respawn.code), now, RespawnClaim.Outcome.Forced)
       RespawnThreads.dm(guild, holder.userId,
         RespawnEmbeds.dmEmbed("Claim ended by a moderator",
-          s"A moderator has freed **${respawn.displayName}**, so it's no longer yours.",
+          s"A moderator has freed ${RespawnEmbeds.spawnLink(respawn)}, so it's no longer yours.",
           imageFor(respawn), RespawnEmbeds.RedColor))
       holder
+    }
+  }
+
+  /** Give whoever holds a spawn more time on it, for a moderator putting right a
+   *  hunt that lost some — a crash, a server issue, a dispute that ate half of it.
+   *
+   *  Deliberately unlike the member's own extend in two ways, both because this
+   *  is an override rather than a request:
+   *
+   *  Nobody's stamina is charged. The holder asked for the window they paid for
+   *  and is being handed the difference; billing them for a moderator's decision
+   *  would be the opposite of the repair. Handing somebody time *in the tank* is
+   *  a separate tool, and the one to reach for when that is what is meant.
+   *
+   *  The guild's maximum claim length does not apply. It is a rule about what
+   *  members may ask for, and enforcing it here would make the button quietly
+   *  refuse on exactly the long hunts most likely to need rescuing.
+   *
+   *  What happens to everybody else falls out of the claim simply running
+   *  longer: the queue is served when it ends, so each person waits the extra
+   *  time, and a booking that starts inside the new window is cut into — the
+   *  same thing a member's own extend has always done.
+   */
+  def extendHolder(guild: Guild, respawn: Respawn, extraMinutes: Int,
+                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, (RespawnClaim, ZonedDateTime)] = {
+    val guildId = guild.getId
+    if (extraMinutes <= 0) Left("That would add no time.")
+    else settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server.")
+      case Some(config) =>
+        // A claim in limbo has already been offered on to the next person; adding
+        // time to it would extend a hunt that is on its way out of somebody's
+        // hands, and the offer would still stand.
+        repository.activeClaim(guildId, respawn.id).filter(_.limboUntil.isEmpty) match {
+          case None => Left(s"Nobody is hunting ${respawn.displayName} right now.")
+          case Some(claim) =>
+            val newEnd = claim.endsAt.getOrElse(now).plusMinutes(extraMinutes.toLong)
+            repository.extendClaim(guildId, claim.id, newEnd, claim.durationMinutes + extraMinutes)
+            refreshThread(guild, respawn, config)
+            RespawnThreads.dm(guild, claim.userId,
+              RespawnEmbeds.dmEmbed("Your hunt was extended",
+                s"A moderator has added **${RespawnEmbeds.humanDuration(extraMinutes)}** to your claim on " +
+                  s"${RespawnEmbeds.spawnLink(respawn)}. It now runs until <t:${newEnd.toEpochSecond}:t>, and it " +
+                  "hasn't cost you any stamina.",
+                imageFor(respawn), RespawnEmbeds.FreeColor))
+            Right((claim, newEnd))
+        }
     }
   }
 
@@ -687,7 +1014,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (remaining > 0 &&
                 !repository.reserveStamina(guildId, toUserId, remaining, config.staminaMinutes, boundary)) {
               val tank = repository.stamina(guildId, toUserId, config.staminaMinutes, boundary)
-              Left(s"<@$toUserId> has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
+              Left(s"${Names.user(toUserName)} has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
                 s"stamina left, and the rest of this hunt needs " +
                 s"**${RespawnEmbeds.humanDuration(remaining)}**.")
             } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName) match {
@@ -696,7 +1023,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 if (remaining > 0) repository.refundStamina(guildId, claim.userId, remaining, boundary)
                 RespawnThreads.dm(guild, claim.userId,
                   RespawnEmbeds.dmEmbed("Your hunt was reassigned",
-                    RespawnEmbeds.claimReassignedFrom(respawn, toUserId), imageFor(respawn),
+                    RespawnEmbeds.claimReassignedFrom(respawn, toUserName), imageFor(respawn),
                     RespawnEmbeds.RedColor))
                 RespawnThreads.dm(guild, toUserId,
                   RespawnEmbeds.dmEmbed("The hunt is yours",
@@ -723,35 +1050,21 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  at a time is not something to invite people to do. */
   val LogMaxPages: Int = 10
 
-  /** The window the Log panel's summary line covers. */
-  val LogSummaryDays: Int = 7
-
-  /** One page of the claim log, newest first. `respawnId` empty reads the whole
-   *  guild — the board's Log — and set reads one spawn's.
+  /** One page of the claim log, newest first, for whichever [[LogScope]] is
+   *  asked for.
    *
    *  Asks for one row more than a page so the caller can tell "there is more"
    *  from "this is the end" without a second count query; [[LogPage.hasOlder]]
    *  consumes that and hands back only the page itself. */
-  def claimLog(guildId: String, respawnId: Option[Long], page: Int): LogPage = {
+  def claimLog(guildId: String, scope: LogScope, page: Int): LogPage = {
     val safePage = math.max(0, math.min(page, LogMaxPages - 1))
-    val fetched = repository.claimHistory(guildId, respawnId, LogPageSize + 1, safePage * LogPageSize)
+    val respawnId = scope match { case LogScope.Spawn(id) => Some(id); case _ => None }
+    val userId = scope match { case LogScope.Member(id) => Some(id); case _ => None }
+    val fetched = repository.claimHistory(guildId, respawnId, userId, LogPageSize + 1, safePage * LogPageSize)
     LogPage(
       entries = fetched.take(LogPageSize),
       page = safePage,
       hasOlder = fetched.size > LogPageSize && safePage < LogMaxPages - 1
-    )
-  }
-
-  /** Hunts finished in the last [[LogSummaryDays]] days, and the spawn that saw
-   *  the most of them — the Log panel's one-line summary. `None` for the busiest
-   *  when nothing finished in the window, which is also when `total` is 0. */
-  def logSummary(guildId: String, now: ZonedDateTime = ZonedDateTime.now()): LogSummary = {
-    val counts = repository.claimCountsSince(guildId, now.minusDays(LogSummaryDays.toLong))
-    val byId = listRespawns(guildId).map(r => r.id -> r).toMap
-    LogSummary(
-      total = counts.map(_._2).sum,
-      busiest = counts.sortBy(-_._2).headOption.flatMap { case (id, n) => byId.get(id).map(_ -> n) },
-      days = LogSummaryDays
     )
   }
 
@@ -782,7 +1095,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  instead depends on the clash: a one-off over a single booked slot nobody has
    *  asked about becomes a question for that slot's owner (see `askForClash`),
    *  and anything else is still refused outright. */
-  def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String,
+  def addSchedule(guild: Guild, respawn: Respawn, userId: String, userName: String, nickname: String,
                   characterName: String, firstStart: ZonedDateTime, durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay,
                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, ScheduleResult] =
@@ -800,15 +1113,36 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else {
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
             firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
-          val schedules = repository.schedulesForRespawn(guildId, respawn.id).filter(overlaps(_, candidate))
-          val slots = clashingReservations(guildId, respawn.id, candidate, now)
-          if (schedules.isEmpty && slots.isEmpty) {
-            val saved = repository.addSchedule(guildId, respawn.id, userId, userName, characterName,
-              firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek)
-            materialise(guildId, saved, now)
-            refreshThread(guild, respawn, config)
-            Right(ScheduleResult.Booked(saved))
-          } else askForClash(guild, respawn, config, candidate, schedules, slots, now)
+          // Checking for a clash and then writing the booking is two decisions
+          // on one picture, and without the lock two people booking the same
+          // evening at the same moment each got the picture from before the
+          // other wrote. Nothing downstream would have caught it — the unique
+          // index on an occurrence sees two schedule ids, not one evening — so
+          // the read and the write are serialised on the spawn.
+          //
+          // Only they are. Everything after — materialising, the card, and the
+          // DM a clash sends — is outside, because holding a row lock across a
+          // Discord round trip would stall every other claim on the spawn for
+          // as long as Discord felt like taking. A rule is visible to the next
+          // booker the moment it is written, so nothing is lost by letting go
+          // before the slots behind it exist.
+          repository.withRespawnLock(guildId, respawn.id) {
+            val schedules = repository.schedulesForRespawn(guildId, respawn.id)
+              .filter(overlaps(_, candidate))
+              .filterNot(surrendered(guildId, _, candidate, now))
+            val slots = clashingReservations(guildId, respawn.id, candidate, now)
+            if (schedules.isEmpty && slots.isEmpty)
+              Right(repository.addSchedule(guildId, respawn.id, userId, userName, nickname,
+                characterName, firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek))
+            else Left((schedules, slots))
+          } match {
+            case Right(saved) =>
+              materialise(guildId, saved, now)
+              refreshThread(guild, respawn, config)
+              Right(ScheduleResult.Booked(saved))
+            case Left((schedules, slots)) =>
+              askForClash(guild, respawn, config, candidate, schedules, slots, now)
+          }
         }
     }
 
@@ -846,12 +1180,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         refuse(" It's too far ahead to ask them about — try again nearer the day.")
       case ClashVerdict.AlreadyAsked =>
         refuse(" Its owner has already been asked about that slot once, which is the limit.")
+      case ClashVerdict.Confirmed =>
+        refuse(" Its owner has confirmed they're hunting it, so there's nothing to ask.")
       case ClashVerdict.ManySlots =>
         refuse(" It runs over more than one booking, so there's nobody single to ask.")
 
       case ClashVerdict.Ask(slot) =>
-        val deadline = answerDeadline(now, slot.startsAt.getOrElse(now),
-          Config.Respawn.bookingRequestResponseMinutes)
+        val deadline = RespawnService.answerDeadline(slot.startsAt.getOrElse(now),
+          Config.Respawn.bookingRequestGraceMinutes)
         val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
 
         repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
@@ -878,13 +1214,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def clashMessage(schedules: List[RespawnSchedule], slots: List[RespawnClaim],
                            now: ZonedDateTime): String = {
     val (who, when, minutes) = slots.headOption match {
-      case Some(slot) => (slot.userId, slot.startsAt, slot.durationMinutes)
+      case Some(slot) => (Names.user(slot.nickname, slot.userName), slot.startsAt, slot.durationMinutes)
       case None =>
         val schedule = schedules.head
-        (schedule.userId, schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
+        (Names.user(schedule.nickname, schedule.userName),
+          schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
     }
     val at = when.map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
-    s"That clashes with <@$who>'s slot on this respawn ($at for ${RespawnEmbeds.humanDuration(minutes)})."
+    s"That clashes with $who's slot on this respawn " +
+      s"($at for ${RespawnEmbeds.humanDuration(minutes)})."
   }
 
   /** Booked slots on a spawn that any occurrence of `candidate` would run over.
@@ -906,6 +1244,29 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  itself lives in the domain, where it is testable without a database. */
   private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean =
     RespawnSchedule.clash(a, b)
+
+  /** Whether `schedule` has given up every day it would contest with
+   *  `candidate`, and so no longer stands in the way of it.
+   *
+   *  A rule is a sentence about every day; what became of one of those days
+   *  lives in the row for it. Comparing rules alone, a booking handed to
+   *  somebody else — or one a moderator took off the calendar — left the
+   *  original rule still defending an evening nobody was going to hunt, so the
+   *  next person to want it was refused on behalf of a booking that no longer
+   *  existed.
+   *
+   *  Deliberately all-or-nothing. A repeating rule that has given up one
+   *  Thursday still owns every other, so it takes every contested day being
+   *  settled before it stops counting — and a day too far ahead to have a row
+   *  yet has settled nothing, which is what keeps `TooFarAhead` meaning what it
+   *  says rather than quietly becoming a yes. */
+  private def surrendered(guildId: String, schedule: RespawnSchedule,
+                          candidate: RespawnSchedule, now: ZonedDateTime): Boolean = {
+    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    val settled = daysGivenUp(guildId, now, Some(horizon), Some(schedule.respawnId))
+      .getOrElse(schedule.id, Set.empty)
+    RespawnSchedule.surrendered(schedule, candidate, settled, now, horizon)
+  }
 
   /** Retire a schedule and drop the slots it had booked but not yet started. */
   /** Drop every booking one member holds anywhere in the guild.
@@ -989,7 +1350,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
     schedule.occurrencesBetween(now, horizon).count { start =>
       repository.reserveOccurrence(guildId, schedule.id, schedule.respawnId, schedule.userId,
-        schedule.userName, schedule.characterName, start, schedule.durationMinutes).isDefined
+        schedule.userName, schedule.nickname, schedule.characterName, start, schedule.durationMinutes).isDefined
     }
   }
 
@@ -999,20 +1360,29 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  stays theirs. */
   def keepSlot(guild: Guild, userId: String, claimId: Long): SlotAnswer =
     withOwnedSlot(guild, userId, claimId) { (config, respawn, slot) =>
-      repository.keepOccurrence(guild.getId, claimId) match {
-        case None => SlotAnswer.Gone
-        case Some(_) =>
-          slot.requesterUserId.foreach { requester =>
-            RespawnThreads.dm(guild, requester,
-              RespawnEmbeds.dmEmbed("Slot request declined",
-                RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
-                RespawnEmbeds.RedColor))
-          }
-          // Nor here: the slot stays exactly where it was, with the same owner
-          // and the same time. Only the *asked* note goes, which is not worth an
-          // edit of its own.
-          SlotAnswer.Kept(respawn)
-      }
+      if (settleRequestOn(guild, respawn, slot)) SlotAnswer.Kept(respawn) else SlotAnswer.Gone
+    }
+
+  /** Take a pending request off a slot its owner is keeping, and tell whoever
+   *  asked. Shared by the two ways of saying yes: **Keep** on the request DM, and
+   *  **Confirm** on the reminder, which settles the slot outright and so has to
+   *  answer any outstanding question with it.
+   *
+   *  `askedAt` deliberately survives (see `keepOccurrence`), so the slot still
+   *  cannot be asked about a second time. No card rewrite either: the slot stays
+   *  exactly where it was, with the same owner and the same time — only the
+   *  *asked* note goes, which is not worth an edit of its own. */
+  private def settleRequestOn(guild: Guild, respawn: Respawn, slot: RespawnClaim): Boolean =
+    repository.keepOccurrence(guild.getId, slot.id) match {
+      case None => false
+      case Some(_) =>
+        slot.requesterUserId.foreach { requester =>
+          RespawnThreads.dm(guild, requester,
+            RespawnEmbeds.dmEmbed("Slot request declined",
+              RespawnEmbeds.slotRequestDeclined(respawn, slot), imageFor(respawn),
+              RespawnEmbeds.RedColor))
+        }
+        true
     }
 
   /** The owner isn't hunting it, or never answered: the slot passes to whoever
@@ -1051,12 +1421,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // longer an occurrence of anybody's standing rule, and the audit trail
             // keeps both halves of what happened.
             repository.reserveFor(guildId, respawn.id, requester,
-              slot.requesterUserName.getOrElse(""), start, minutes)
+              slot.requesterUserName.getOrElse(""), "", start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
                 RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
-            SlotAnswer.Passed(respawn, requester)
+            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""))
           }
       }
     }
@@ -1116,10 +1486,17 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           Try {
             repository.markWarned(guildId, slot.id)
             repository.findById(guildId, slot.respawnId).foreach { respawn =>
+              // Blue rather than the warning yellow it used to be: this is a
+              // booking, and booking is what blue means on the board too (see
+              // RespawnEmbeds.BookedColor). Nothing is wrong here — it is a hunt
+              // about to start, not a deadline running out.
               RespawnThreads.dm(guild, slot.userId,
                 RespawnEmbeds.dmEmbed("Your hunt starts soon",
                   RespawnEmbeds.slotReminder(respawn, slot), imageFor(respawn),
-                  RespawnEmbeds.WarnColor))
+                  RespawnEmbeds.BookedColor),
+                // Optional, and worth pressing: it settles the slot early, so
+                // nobody can ask for it and the start needs no answer.
+                Some(RespawnThreads.confirmSlotButtons(guildId, slot.id, "Confirm")))
             }
           }.failed.foreach { error =>
             logger.warn(s"Failed to remind about respawn slot ${slot.id} in guild '$guildId'", error)
@@ -1203,27 +1580,66 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
 
-      // Reminder lead time is per member, so every running claim is considered
-      // and each one's own owner decides whether it is due yet.
-      repository.unwarnedActiveClaims(guildId, now).foreach { claim =>
+      // Bookings that started on their own and whose owner never said they were
+      // there. Given up on their behalf, exactly as if they had pressed Leave:
+      // the unused minutes go back in the tank and the spawn moves on through
+      // the ordinary handover, to whoever is queued or to nobody.
+      //
+      // The point is the people behind them. A booking nobody turned up for used
+      // to hold a spawn for its whole window while everyone who would have hunted
+      // it waited on somebody absent.
+      repository.unconfirmedClaims(guildId, now).foreach { claim =>
         Try {
-          val lead = repository.userPrefs(guildId, claim.userId).warnMinutesOr(config.warnMinutes)
-          val due = lead > 0 && claim.endsAt.exists(!_.isAfter(now.plusMinutes(lead.toLong)))
-          if (due) {
-            repository.markWarned(guildId, claim.id)
-            repository.findById(guildId, claim.respawnId).foreach { respawn =>
-              // DM only, with no thread fallback: a nudge about your own claim
-              // isn't worth pinging a shared thread for, and missing it costs
-              // nothing — the claim ends the same way either way.
-              RespawnThreads.dm(guild, claim.userId,
-                RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
-                  imageFor(respawn), RespawnEmbeds.WarnColor))
-            }
+          repository.findById(guildId, claim.respawnId).foreach { respawn =>
+            val refunded = refundFor(claim, now)
+            if (refunded > 0) repository.refundStamina(guildId, claim.userId, refunded, resetBoundary(now))
+            RespawnThreads.dm(guild, claim.userId,
+              RespawnEmbeds.dmEmbed("Hunt given up", RespawnEmbeds.slotUnconfirmed(respawn, refunded),
+                imageFor(respawn), RespawnEmbeds.RedColor))
+            logger.info(s"Gave up unconfirmed respawn claim ${claim.id} on '${respawn.code}' in " +
+              s"guild '$guildId' — user ${claim.userId} never took it")
+            // Not finished here, same as an early release: the next person gets
+            // their answer window and the spawn stays put until they take it, so
+            // a third party cannot snipe it in between. beginHandover closes the
+            // claim itself when there is nobody to hand it to.
+            beginHandover(guild, respawn, config, now, outgoing = Some(claim),
+              outgoingOutcome = RespawnClaim.Outcome.Unconfirmed)
           }
         }.failed.foreach { error =>
-          logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
+          logger.warn(s"Failed to give up unconfirmed respawn claim ${claim.id} in guild '$guildId'", error)
         }
       }
+
+      // The claim-ending reminder, kept but not sent. It was one DM per hunt
+      // telling somebody something their own claim card already says, and the
+      // confirmation prompts above are now the DMs a booking produces — three
+      // notifications for one evening's hunt was more than the feature is worth.
+      //
+      // Left here rather than deleted because turning it back on is a matter of
+      // uncommenting it: `unwarnedActiveClaims`, `markWarned` and
+      // RespawnEmbeds.expiryWarning are all still in place and still tested.
+      //
+      // // Reminder lead time is per member, so every running claim is considered
+      // // and each one's own owner decides whether it is due yet.
+      // repository.unwarnedActiveClaims(guildId, now).foreach { claim =>
+      //   Try {
+      //     val lead = repository.userPrefs(guildId, claim.userId).warnMinutesOr(config.warnMinutes)
+      //     val due = lead > 0 && claim.endsAt.exists(!_.isAfter(now.plusMinutes(lead.toLong)))
+      //     if (due) {
+      //       repository.markWarned(guildId, claim.id)
+      //       repository.findById(guildId, claim.respawnId).foreach { respawn =>
+      //         // DM only, with no thread fallback: a nudge about your own claim
+      //         // isn't worth pinging a shared thread for, and missing it costs
+      //         // nothing — the claim ends the same way either way.
+      //         RespawnThreads.dm(guild, claim.userId,
+      //           RespawnEmbeds.dmEmbed("Claim ending soon", RespawnEmbeds.expiryWarning(respawn, claim),
+      //             imageFor(respawn), RespawnEmbeds.WarnColor))
+      //       }
+      //     }
+      //   }.failed.foreach { error =>
+      //     logger.warn(s"Failed to warn respawn claim ${claim.id} in guild '$guildId'", error)
+      //   }
+      // }
     }
 
   /** Turn a booked slot into a live claim.
@@ -1290,7 +1706,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // Somebody else is on it. Cancel the booking and take a queue place
         // instead, so the existing hunt is not interrupted mid-flight.
         repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.TakenOver)
-        repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.characterName,
+        repository.enqueueClaim(guildId, respawn.id, slot.userId, slot.userName, slot.nickname, slot.characterName,
           slot.durationMinutes, config.queueLimit, RespawnClaim.KindScheduled)
         RespawnThreads.dm(guild, slot.userId,
           RespawnEmbeds.dmEmbed("Your slot is taken", RespawnEmbeds.slotOccupied(respawn, holder),
@@ -1308,16 +1724,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       } else {
         // Only what is left of the booked window is charged for, so a late start
         // costs its owner nothing out of the day's tank beyond the hunt they get.
-        repository.startReservation(guildId, slot.id, now, bookedEnd) match {
+        // Capped at the slot's own end, so a booking shorter than the confirm
+        // window is never outlived by its own deadline — a 10-minute slot with a
+        // 15-minute window would simply run out first and be swept as finished,
+        // which reads as the deadline never having applied.
+        val window = now.plusMinutes(Config.Respawn.slotConfirmMinutes.toLong)
+        val confirmBy = if (window.isBefore(bookedEnd)) window else bookedEnd
+        repository.startReservation(guildId, slot.id, now, bookedEnd, confirmBy) match {
           case None =>
             // Something else already started it; hand the stamina straight back.
             repository.refundStamina(guildId, slot.userId, remaining, boundary)
-          case Some(started) =>
+          case Some(started) if started.confirmed =>
+            // Settled from the reminder, so there is nothing left to ask.
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your hunt has started",
                 RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn),
                 RespawnEmbeds.FreeColor))
+          case Some(started) =>
+            // The spawn is genuinely theirs from this moment — the card shows
+            // them on it and nobody else can take it — but only until the
+            // deadline above, which the sweep enforces.
+            refreshThread(guild, respawn, config)
+            RespawnThreads.dm(guild, slot.userId,
+              RespawnEmbeds.dmEmbed("Your hunt has started",
+                RespawnEmbeds.slotStartedUnconfirmed(respawn, started, confirmBy), imageFor(respawn),
+                RespawnEmbeds.BookedColor),
+              Some(RespawnThreads.confirmSlotButtons(guildId, started.id, "Take Claim")))
         }
       }
     }
@@ -1409,6 +1842,51 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
+  /** Someone pressed **Confirm** on a booking reminder, or **Take Claim** on the
+   *  hunt it grew into. One method for both, because it is one answer to one
+   *  question — "yes, I'm here" — and which of the two they pressed is decided by
+   *  where the claim had got to, not by the button.
+   *
+   *  Confirming early is worth something on its own: it takes the slot out of
+   *  reach of anyone trying to book over it (see `RespawnClaim.requestable`) and
+   *  means the start needs no answer. Confirming a started hunt is what keeps it,
+   *  and the sweep gives up on one nobody confirms.
+   *
+   *  No card rewrite either way. Confirming changes nothing a card shows — the
+   *  same person holds (or has booked) the same spawn for the same window — and
+   *  card edits are the system's scarcest resource. */
+  def confirmSlot(guild: Guild, userId: String, claimId: Long,
+                  now: ZonedDateTime = ZonedDateTime.now()): ConfirmOutcome = {
+    val guildId = guild.getId
+    repository.findClaimById(guildId, claimId) match {
+      case None => ConfirmOutcome.Gone
+      case Some(claim) if claim.userId != userId => ConfirmOutcome.NotYours
+      case Some(claim) =>
+        repository.findById(guildId, claim.respawnId) match {
+          case None => ConfirmOutcome.Gone
+          case Some(respawn) =>
+            repository.confirmClaim(guildId, claimId, now) match {
+              // Either it was confirmed already — a second press, from the
+              // reminder after Take Claim, say — or it is neither reserved nor
+              // active any more, which is the deadline having gone by while the
+              // DM sat open. Those are different answers to the presser.
+              case None =>
+                if (claim.confirmed) ConfirmOutcome.Already(respawn) else ConfirmOutcome.Gone
+              case Some(confirmed) if confirmed.isActive => ConfirmOutcome.Taken(respawn, confirmed)
+              case Some(confirmed) =>
+                // Confirming answers an outstanding "are you hunting tonight?"
+                // too — it is the same yes. Left alone, the request would sit
+                // there and the sweep would hand this slot to whoever asked,
+                // hours after its owner said they were coming; worse, a slot
+                // with a request still on it never starts at all, since
+                // `dueReservations` waits for one to be resolved.
+                if (claim.requestPending) settleRequestOn(guild, respawn, claim)
+                ConfirmOutcome.Settled(respawn, confirmed)
+            }
+        }
+    }
+  }
+
   /** Someone pressed **Claim** on their handover offer DM. */
   def acceptOffer(guild: Guild, userId: String, claimId: Long,
                   now: ZonedDateTime = ZonedDateTime.now()): OfferOutcome =
@@ -1495,8 +1973,19 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the post to redraw the card and never closed it again. So a spawn's post
    *  stayed open on every path but one. Tying it to `active` instead makes the
    *  post's state a function of the claim state, like the card and the tag are. */
-  def refreshThread(guild: Guild, respawn: Respawn, config: RespawnSettings): Option[ThreadChannel] =
-    RespawnThreads.findForum(guild, config).flatMap { forum =>
+  def refreshThread(guild: Guild, respawn: Respawn, config: RespawnSettings): Option[ThreadChannel] = {
+    // A forum this bot cannot see used to end the whole refresh in silence: the
+    // claim landed, the reply said so, and nothing in Discord moved — with
+    // nothing anywhere to say why. Every other way this can fail already says
+    // so, and it is the one that leaves a guild's posts permanently stale, so
+    // it says so too.
+    val forum = RespawnThreads.findForum(guild, config)
+    if (forum.isEmpty) {
+      logger.warn(s"No respawn forum to update for '${respawn.code}' in guild '${guild.getId}': " +
+        s"configured channel '${config.forumChannel}' is not one this bot can see. " +
+        "Claims and bookings will keep working; their posts will not change.")
+    }
+    forum.flatMap { forum =>
       val guildId = guild.getId
       val active = repository.activeClaim(guildId, respawn.id)
       // The person holding an unanswered offer is still shown at the head of the
@@ -1504,17 +1993,37 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       // are next — and what makes an offer going out change nothing on the card,
       // so it needs no edit at all.
       val queue = repository.offeredClaim(guildId, respawn.id).toList ++ repository.queueFor(guildId, respawn.id)
-      val reservations = repository.reservationsFor(guildId, respawn.id, ZonedDateTime.now())
-      val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config, imageFor(respawn))
+      val now = ZonedDateTime.now()
+      val reservations = repository.reservationsFor(guildId, respawn.id, now)
+      // Bookings that exist only as a rule so far. A slot is written when its
+      // start comes within the look-ahead, so anything booked further out than
+      // that has nothing to show for itself for days — and the card would have
+      // read "nothing booked" straight after somebody booked it, which is what
+      // the dashboard's week-wide grid made easy to hit and Discord's own
+      // half-day picker never could.
+      //
+      // Only rules with no slot at all. A repeating booking whose next evening is
+      // already written down is on the card once through that row; adding its
+      // rule as well would list the same booking twice.
+      val written = reservations.flatMap(_.scheduleId).toSet
+      val upcoming = repository.schedulesForRespawn(guildId, respawn.id).filterNot(s => written.contains(s.id))
+      // A rule whose next evening has been given away must name the one after
+      // it. Without this the card listed tonight twice — once as the booking
+      // that had taken it, and once as the rule that used to hold it.
+      val givenUp = daysGivenUp(guildId, now, respawnId = Some(respawn.id))
+      val card = RespawnEmbeds.claimCard(respawn, active, queue, reservations, config,
+        imageFor(respawn), upcoming, now, givenUp)
       val buttons = RespawnThreads.claimButtons(respawn.id, active.isDefined)
 
       // Re-read after a possible create so the row carries the new thread id;
       // the create callback writes it, but the local `respawn` is a snapshot.
-      val thread = RespawnThreads.openThread(guild, forum, respawn, card, buttons,
+      val opened = RespawnThreads.openThread(guild, forum, respawn, card, buttons,
         threadId => repository.setThreadId(guildId, respawn.id, threadId))
 
-      thread.foreach { channel =>
-        RespawnThreads.applyTag(forum, channel, RespawnThreads.tagFor(claimed = active.isDefined))
+      opened.foreach { post =>
+        // Card, tag and sleep together, in that order — see RespawnThreads.settle
+        // for why they cannot be asked for side by side.
+        //
         // Archived, not locked: people can still leave notes on a spawn between
         // hunts, and reviving it doesn't need a moderator. Archiving is what keeps
         // the forum's front page to the spawns people are actually on — a free
@@ -1525,19 +2034,169 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // still nobody's hunt, and its diary is on the card for whoever opens it.
         // `active` covers a claim in limbo, so a post stays awake for the whole of
         // a handover rather than flickering shut between two hunts.
-        if (active.isEmpty) RespawnThreads.archive(channel)
+        RespawnThreads.settle(forum, post.thread,
+          if (post.created) None else Some(card -> buttons),
+          RespawnThreads.tagFor(claimed = active.isDefined),
+          sleep = active.isEmpty)
       }
-      thread
+      opened.map(_.thread)
     }
+  }
 
   /** Booked slots on a spawn that haven't started yet. */
   def reservationsFor(guildId: String, respawnId: Long,
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
+  /** Days each rule has given up, as the surfaces that draw rules need them:
+   *  keyed by schedule, so asking "when is this one next" costs a lookup rather
+   *  than a scan. See [[com.tibiabot.persistence.ScheduleOccurrence]].
+   *
+   *  Both bounds narrow the same question — one spawn's week for the calendar,
+   *  every spawn from now on for somebody's list of bookings. */
+  def daysGivenUp(guildId: String, from: ZonedDateTime,
+                  to: Option[ZonedDateTime] = None,
+                  respawnId: Option[Long] = None): Map[Long, Set[java.time.Instant]] =
+    repository.settledOccurrences(guildId, from, to, respawnId)
+      .groupBy(_.scheduleId)
+      .map { case (id, days) => id -> days.map(_.startsAt.toInstant).toSet }
+
+  // --- putting the calendar right ------------------------------------------
+
+  /** Take one day off the calendar, leaving the rule behind it alone.
+   *
+   *  The moderator counterpart to a member cancelling a booking, and pointedly
+   *  narrower: cancelling is about a standing arrangement, this is about one
+   *  evening that has gone wrong. A repeating booking keeps repeating.
+   *
+   *  A day that has been materialised is cancelled; one that has not is written
+   *  down as already cancelled, which is the only way to record "not this day"
+   *  about a rule — and is what both the calendar and the next person to book
+   *  that evening read. Either way the day ends up settled, so the two cases
+   *  differ only in whether there was a row to begin with.
+   */
+  def dropSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime,
+               now: ZonedDateTime = ZonedDateTime.now()): Either[String, String] = {
+    val guildId = guild.getId
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val outcome = repository.withRespawnLock(guildId, respawn.id) {
+          repository.slotAt(guildId, respawn.id, startsAt) match {
+            // Ending a hunt somebody is on is a different act — it has a queue
+            // to advance behind it — and Remove Claim on the board is what does
+            // it. Quietly doing that instead would be a surprise.
+            case Some(slot) if slot.isActive =>
+              Left("That one is being hunted now. Use Remove Claim on the board to end a running hunt.")
+            case Some(slot) =>
+              repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotRemoved)
+              Right(Names.user(slot.nickname, slot.userName))
+            case None =>
+              predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
+                case None => Left("Nothing is booked at that time.")
+                case Some(schedule) =>
+                  repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+                    schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+                    schedule.durationMinutes, RespawnClaim.Outcome.SlotRemoved)
+                  Right(Names.user(schedule.nickname, schedule.userName))
+              }
+          }
+        }
+        outcome.foreach(_ => refreshThread(guild, respawn, config))
+        outcome
+    }
+  }
+
+  /** Put one day in somebody else's name.
+   *
+   *  What they get is a booking of their own rather than a rewritten occurrence
+   *  of the old owner's rule — the same shape a slot takes when its owner gives
+   *  it up to whoever asked, and for the same reason: it is no longer a day of
+   *  anybody's standing arrangement, and the trail keeps both halves of what
+   *  happened. So the old owner's day is settled and a fresh booking is written
+   *  beside it.
+   *
+   *  Refused for a day that is already running. Moving a hunt somebody is on is
+   *  a different act with different consequences — see [[reassignClaim]], which
+   *  is what the board's Hand To does — and quietly doing that instead would be
+   *  a surprise.
+   */
+  def reassignSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime,
+                   toUserId: String, toUserName: String, toNickname: String,
+                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, String] = {
+    val guildId = guild.getId
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val outcome = repository.withRespawnLock(guildId, respawn.id) {
+          repository.slotAt(guildId, respawn.id, startsAt) match {
+            case Some(slot) if slot.isActive =>
+              Left("That one is being hunted now. Use Hand To on the board to move a running claim.")
+            case Some(slot) if slot.userId == toUserId =>
+              Left(s"That slot is already ${Names.user(slot.nickname, slot.userName)}'s.")
+            case Some(slot) =>
+              // An occurrence of a rule is settled and replaced, so the rule
+              // stops speaking for the day; a booking that belongs to nobody's
+              // rule is simply renamed, since there is nothing behind it to
+              // leave a record against.
+              if (slot.scheduleId.isDefined) {
+                repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotMoved)
+                repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
+                  startsAt, slot.durationMinutes)
+                Right(Names.user(slot.nickname, slot.userName))
+              } else
+                repository.reassignReservation(guildId, slot.id, toUserId, toUserName, toNickname)
+                  .map(_ => Names.user(slot.nickname, slot.userName))
+                  .toRight("That booking has already gone.")
+            case None =>
+              predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
+                case None => Left("Nothing is booked at that time.")
+                case Some(schedule) if schedule.userId == toUserId =>
+                  Left(s"That slot is already ${Names.user(schedule.nickname, schedule.userName)}'s.")
+                case Some(schedule) =>
+                  repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+                    schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+                    schedule.durationMinutes, RespawnClaim.Outcome.SlotMoved)
+                  repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
+                    startsAt, schedule.durationMinutes)
+                  Right(Names.user(schedule.nickname, schedule.userName))
+              }
+          }
+        }
+        outcome.foreach(_ => refreshThread(guild, respawn, config))
+        outcome
+    }
+  }
+
+  /** The rule that would put somebody on this spawn at this exact time, for a
+   *  day the sweep has not written down yet. None when no rule names it — which
+   *  is what tells a moderator they are pointing at nothing. */
+  private def predictedOwnerOf(guildId: String, respawnId: Long, startsAt: ZonedDateTime,
+                               now: ZonedDateTime): Option[RespawnSchedule] =
+    repository.schedulesForRespawn(guildId, respawnId)
+      .filter(_.startsAt(startsAt))
+      .find(_ => !startsAt.isBefore(now))
+
   /** `/respawn status <spawn>` — one spawn's current state. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =
     (repository.activeClaim(guildId, respawn.id), repository.queueFor(guildId, respawn.id))
+
+  /** The whole catalogue with its live state, for the web dashboard's board.
+   *
+   *  Five queries whatever the catalogue's size, rather than the three per
+   *  spawn the single-spawn accessors would cost — a few hundred spawns on a
+   *  polling page makes that difference the whole performance story.
+   *
+   *  `lastActivity` is absent for a spawn nobody has ever claimed, which the
+   *  board renders as its most faded state rather than as an error. */
+  def board(guildId: String, now: ZonedDateTime = ZonedDateTime.now()): List[RespawnBoardEntry] =
+    RespawnService.assembleBoard(
+      repository.listRespawns(guildId),
+      repository.allActiveClaims(guildId),
+      repository.allQueuedClaims(guildId),
+      repository.allReservations(guildId, now),
+      repository.lastActivityByRespawn(guildId).toMap
+    )
 
   /** Stop tracking respawns for this guild entirely — claims, catalogue and
    *  settings all go. Called when the guild's last world is removed; the forum
@@ -1590,4 +2249,187 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   /** Look up the guild's forum channel, for callers that need to link to it. */
   def forumChannel(guild: Guild): Option[ForumChannel] =
     settings(guild.getId).flatMap(RespawnThreads.findForum(guild, _))
+}
+
+object RespawnService {
+
+  /** Match a typed query against a guild's catalogue, when it wasn't a code.
+   *
+   *  A ladder from exact to loose, stopping at the first rung that lands on
+   *  exactly one row. Every rung that can match several answers `None` instead
+   *  of picking one, because a search that guesses is worse than one that says
+   *  it doesn't know — the caller shows the query back and the reader tries
+   *  again.
+   *
+   *  The last rung is the word one: every word of the query somewhere in the
+   *  row, in any order, so "fire library" finds "Secret Library (Fire)" — which
+   *  no substring of that name does, since the words are the wrong way round and
+   *  have a bracket between them. It searches the name and the creature as one
+   *  piece of text, so "burning library" gets there too. Only for multi-word
+   *  queries: on a single word it is precisely the substring rungs above, and
+   *  running it again would say nothing new.
+   *
+   *  Pure and separated from the repository so it can be read against a handful
+   *  of rows in a test rather than a database.
+   */
+  private[respawn] def resolveIn(all: List[Respawn], query: String): Option[Respawn] = {
+    val trimmed = query.trim
+    if (trimmed.isEmpty) return None
+    val lower = trimmed.toLowerCase
+
+    val words = lower.split("\\s+").filter(_.nonEmpty).toList
+    def allWordsIn(respawn: Respawn): Boolean = {
+      val haystack = s"${respawn.name} ${respawn.creature}".toLowerCase
+      words.forall(haystack.contains)
+    }
+
+    // "415 — Cult Orcs" comes back from autocomplete as the display name in
+    // some clients, so match that shape too before falling back to a substring
+    // search. `creature.nonEmpty` guards the substring rung because "" is a
+    // substring of everything, and the many rows with no creature set must not
+    // match whatever was typed.
+    val rungs = List(
+      all.filter(_.displayName.equalsIgnoreCase(trimmed)),
+      all.filter(_.name.equalsIgnoreCase(trimmed)),
+      all.filter(_.name.toLowerCase.contains(lower)),
+      all.filter(_.creature.equalsIgnoreCase(trimmed)),
+      all.filter(r => r.creature.nonEmpty && r.creature.toLowerCase.contains(lower)),
+      if (words.sizeIs < 2) Nil else all.filter(allWordsIn)
+    )
+
+    // Nothing on a rung means try the next one. Several means stop — and stay
+    // unresolved. That second part is the one worth stating: "cult" naming two
+    // spawns is a real ambiguity, and answering it from some looser field
+    // further down would be exactly the guess this is built to refuse. Only a
+    // rung that finds silence hands on to the next.
+    rungs.iterator
+      .map {
+        case Nil           => None
+        case single :: Nil => Some(Some(single))
+        case _             => Some(None)
+      }
+      .collectFirst { case Some(answer) => answer }
+      .flatten
+  }
+
+  /** Limits on a spawn somebody adds by hand.
+   *
+   *  Well under what the columns hold. They are about what stays readable rather
+   *  than what fits: a code is typed to claim by and shown on a chip, and every
+   *  name is drawn in full on the board image, so one absurdly long entry makes
+   *  the picture wider for every other guild member who opens it.
+   */
+  /** How many people the stamina picker is willing to offer. Generous for a
+   *  guild and small enough that the payload stays a list rather than a dump. */
+  val MaxKnownMembers: Int = 500
+
+  val MaxCodeLength: Int = 16
+  val MaxSpawnNameLength: Int = 60
+  val MaxRegionLength: Int = 40
+
+  /** What is wrong with a spawn somebody typed, or None if nothing is.
+   *
+   *  Everything about the fields themselves, which is everything that can be
+   *  decided without asking the guild's catalogue anything — so the rules can be
+   *  read back in a test without a database. Whether the code is already taken
+   *  is the caller's question, since only it can answer that.
+   *
+   *  Expects the four fields already trimmed. Worded for whoever typed them,
+   *  because a form is the only way in.
+   */
+  def spawnFault(code: String, region: String, name: String, creature: String): Option[String] =
+    if (code.isEmpty) Some("A spawn needs a code — it is what people type to claim it.")
+    // Letters, digits and hyphens: what the bundled codes look like, and a code
+    // travels in a URL and in a thread title, so it stays to characters that
+    // mean the same thing everywhere.
+    else if (!code.forall(c => c.isLetterOrDigit || c == '-'))
+      Some(s"'$code' has characters I can't use in a code — letters, numbers and hyphens only.")
+    else if (code.length > MaxCodeLength)
+      Some(s"That code is longer than $MaxCodeLength characters.")
+    else if (name.isEmpty) Some("A spawn needs a name, so the code means something on the board.")
+    else if (name.length > MaxSpawnNameLength)
+      Some(s"That name is longer than $MaxSpawnNameLength characters. The board post draws every " +
+        "name in full, so a long one pushes the whole image wider.")
+    else if (region.length > MaxRegionLength)
+      Some(s"That city is longer than $MaxRegionLength characters.")
+    // Checked here rather than left to fail quietly: an unusable creature name
+    // costs nothing at all until somebody wonders why their spawn is the only
+    // one on the board without a picture.
+    else if (creature.nonEmpty && com.tibiabot.web.CreatureSprites.safeFileName(creature).isEmpty)
+      Some(s"I can't fetch a picture for '$creature'. Use the creature's wiki name, " +
+        "or leave it empty and the spawn goes without one.")
+    else None
+
+  /** When an owner has to answer by: a little way into the slot itself,
+   *  whenever they were asked.
+   *
+   *  It used to be a fixed hour from the question, cut short if that ran past
+   *  the slot. That measured the wrong thing. Somebody asked at lunchtime about
+   *  an evening slot lost it by mid-afternoon without ever having been near a
+   *  computer, and the question was never about the afternoon — it was "are you
+   *  hunting this tonight", which only the evening can answer. So the clock runs
+   *  to the hunt rather than from the asking, and the whole of the answer is
+   *  whether they turned up.
+   *
+   *  Past the start rather than on it, because a deadline landing exactly on the
+   *  start punishes somebody logging in on time: they arrive to find the slot
+   *  already gone. It costs the asker very little — the hunt they take over runs
+   *  its full length from whenever it starts — and turns "you were a minute
+   *  late" into "you never turned up".
+   *
+   *  Always in the future when it is set. A slot stops being requestable once it
+   *  starts, since by then it is a running claim rather than a booking, so there
+   *  is no way to be asked about an evening that has already gone. */
+  def answerDeadline(slotStart: ZonedDateTime, graceMinutes: Int): ZonedDateTime =
+    slotStart.plusMinutes(graceMinutes.toLong)
+
+  /** How long a claim actually runs for, given what a booking leaves and what
+   *  is in the tank.
+   *
+   *  Both limits shorten rather than refuse. A booking has always worked that
+   *  way; stamina now does too, because "you cannot afford two hours" was a
+   *  refusal that left the spawn empty and the person hunting nothing, when
+   *  what they wanted was the forty minutes they had.
+   *
+   *  Pure, so the table — which limit binds, and what happens when the tank is
+   *  unlimited or empty — is checkable without a database or a Discord guild.
+   *  The floor, and what the shortfall is blamed on, stay with the caller that
+   *  has the spawn and the booking to name.
+   */
+  def grantedMinutes(allowedByBooking: Int, tank: Stamina): Int =
+    if (tank.unlimited) allowedByBooking else math.min(allowedByBooking, tank.remainingMinutes)
+
+  /** Stitch a board together from the bulk reads that feed it.
+   *
+   *  Pure, so the part that can actually be wrong — which claim wins when a
+   *  spawn somehow has more than one active, what order a queue comes out in,
+   *  what a never-claimed spawn looks like — is checkable without a database.
+   *  [[RespawnService.board]] is then only the five reads.
+   */
+  private[respawn] def assembleBoard(
+    respawns: List[Respawn],
+    active: List[RespawnClaim],
+    queued: List[RespawnClaim],
+    reserved: List[RespawnClaim],
+    lastActivity: Map[Long, ZonedDateTime]
+  ): List[RespawnBoardEntry] = {
+    val activeByRespawn = active.groupBy(_.respawnId)
+    val queuedByRespawn = queued.groupBy(_.respawnId)
+    val reservedByRespawn = reserved.groupBy(_.respawnId)
+
+    respawns.map { respawn =>
+      RespawnBoardEntry(
+        respawn = respawn,
+        // A spawn should only ever have one active claim; if the data says
+        // otherwise the earliest-ending one is the honest answer, since that is
+        // the one whose end is about to change the spawn's state.
+        active = activeByRespawn.getOrElse(respawn.id, Nil)
+          .sortBy(_.endsAt.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue)).headOption,
+        queue = queuedByRespawn.getOrElse(respawn.id, Nil).sortBy(_.queuePosition),
+        reservations = reservedByRespawn.getOrElse(respawn.id, Nil)
+          .sortBy(_.startsAt.map(_.toInstant.toEpochMilli).getOrElse(Long.MaxValue)),
+        lastActivity = lastActivity.get(respawn.id)
+      )
+    }
+  }
 }

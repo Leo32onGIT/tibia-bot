@@ -1,15 +1,16 @@
 package com.tibiabot.respawn
 
 import com.tibiabot.domain.{Respawn, RespawnSchedule, RespawnSettings}
-import com.tibiabot.presentation.{RespawnBoardImage, RespawnEmbeds}
+import com.tibiabot.presentation.{Embeds, RespawnBoardImage, RespawnEmbeds}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.Permission
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, ForumChannel, ThreadChannel}
 import net.dv8tion.jda.api.entities.channel.forums.{ForumTag, ForumTagData, ForumTagSnowflake}
 import net.dv8tion.jda.api.entities.emoji.Emoji
-import net.dv8tion.jda.api.entities.{Guild, MessageEmbed, Role}
+import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
+import net.dv8tion.jda.api.managers.channel.concrete.ThreadChannelManager
 import net.dv8tion.jda.api.utils.FileUpload
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
 
@@ -20,10 +21,18 @@ import scala.util.Try
  *  post, and the one reused post per spawn.
  *
  *  Split out from [[RespawnService]] so the claim rules stay separable from the
- *  JDA calls. Calls here are blocking (`.complete()`) in the same style as
- *  `setup.ChannelService`, because each step depends on the previous one's id —
- *  callers are expected to be on the slash-command pool or the respawn sweep's
- *  own thread, never on JDA's event thread or the Akka dispatcher.
+ *  JDA calls. Anything whose result is needed to carry on — creating a thread,
+ *  because the next step needs its id — is blocking (`.complete()`) in the same
+ *  style as `setup.ChannelService`, and callers are expected to be on the
+ *  slash-command pool or the respawn sweep's own thread, never on JDA's event
+ *  thread or the Akka dispatcher.
+ *
+ *  The three that merely *tell Discord about a change* — rewriting a card,
+ *  swapping a tag, archiving a post — are handed over instead (`.queue()`).
+ *  Nothing downstream reads their result, and they were the reason a button
+ *  press sat through two or three sequential round trips after it had already
+ *  been acknowledged. Failures still surface: they are logged from the callback
+ *  rather than the call.
  */
 object RespawnThreads extends StrictLogging {
 
@@ -39,6 +48,17 @@ object RespawnThreads extends StrictLogging {
   /** What every Claim button wears. A custom emoji, so it is parsed from the
    *  configured `<:name:id>` form rather than built from a code point. */
   private def claimEmoji: Emoji = Emoji.fromFormatted(com.tibiabot.Config.dailyEmoji)
+
+  /** The other three buttons' faces, as text.
+   *
+   *  Named here rather than written into [[boardButtons]] because the board's
+   *  description lists the buttons and wears the same emoji against each line.
+   *  Two copies of "📅" that could drift is exactly the kind of thing nobody
+   *  notices until the picture and the label disagree. Claim's is
+   *  `Config.dailyEmoji`, already in that form and already shared. */
+  private val BookEmoji: String = "📅"
+  private val ConfigEmoji: String = "⚙️"
+  private val DashboardEmoji: String = "🌐"
 
   private val tagSeeds: List[(String, String)] =
     List(TagFree -> "🟢", TagClaimed -> "🔴")
@@ -75,12 +95,21 @@ object RespawnThreads extends StrictLogging {
    *  usable without touching a slash command: a spawn with no post yet can't
    *  have a Claim button of its own, so the board carries one. Book is here for
    *  the same reason — booking a spawn nobody has claimed yet would otherwise
-   *  mean finding a post that does not exist. */
+   *  mean finding a post that does not exist.
+   *
+   *  Dashboard is a link button, so it carries no custom id: Discord opens the
+   *  URL itself and the press never reaches the bot. That is why it can sit in
+   *  the same row as the three that do — [[RespawnButtonId.parse]] never sees
+   *  it, and there is no handler to add.
+   *
+   *  In the order [[boardIntro]] lists them, which is roughly how often they are
+   *  wanted: the three ways to get a spawn first, and settings last. */
   def boardButtons: ActionRow =
     ActionRow.of(
       Button.success(RespawnButtonId.boardClaim, "Claim").withEmoji(claimEmoji),
-      Button.secondary(RespawnButtonId.boardBook, "Book").withEmoji(Emoji.fromUnicode("📅")),
-      Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode("⚙️"))
+      Button.secondary(RespawnButtonId.boardBook, "Book").withEmoji(Emoji.fromUnicode(BookEmoji)),
+      Button.link(dashboardLink, "Dashboard").withEmoji(Emoji.fromUnicode(DashboardEmoji)),
+      Button.secondary(RespawnButtonId.boardConfig, "Config").withEmoji(Emoji.fromUnicode(ConfigEmoji))
     )
 
   /** The Config panel a moderator gets from a spawn's card, instead of going
@@ -96,7 +125,8 @@ object RespawnThreads extends StrictLogging {
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
       if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
-      Some(Button.secondary(RespawnButtonId.logPage(Some(respawnId), 0), "Log").withEmoji(Emoji.fromUnicode("📜")))
+      Some(Button.secondary(RespawnButtonId.logPage(LogScope.Spawn(respawnId), 0), "Log")
+        .withEmoji(Emoji.fromUnicode("📜")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -104,23 +134,36 @@ object RespawnThreads extends StrictLogging {
   }
 
   /** The Config panel a moderator gets from the board: their own settings, or the
-   *  server's rules. */
+   *  server's rules.
+   *
+   *  Timers used to sit between them. Everything it held is under Claim rules
+   *  now — see [[com.tibiabot.interactions.RespawnModals.claimRulesModal]]. */
   def boardModeratorButtons: ActionRow =
     ActionRow.of(
       Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
-      Button.primary(RespawnButtonId.boardTimers, "Timers"),
-      Button.secondary(RespawnButtonId.logPage(None, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
+      Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
     )
 
-  /** Newer/Older under a page of the claim log. Only the directions that lead
-   *  somewhere are offered, so neither button ever answers with the same page. */
-  def logButtons(respawnId: Option[Long], page: LogPage): Option[ActionRow] = {
+  /** Previous/Next under a page of the claim log, and Find beside them.
+   *
+   *  Only the directions that lead somewhere are offered, so neither ever
+   *  answers with the page you are already on. The log runs newest first, so
+   *  Next goes backwards in time — which Newer/Older used to say outright and
+   *  this pair does not, traded for the arrangement people expect under a page
+   *  number.
+   *
+   *  Find is always there, including on a log with a single page and nothing to
+   *  turn: a search is not a direction, and a one-page log is exactly where
+   *  somebody is most likely to want a different one. That is also why this now
+   *  always returns a row. */
+  def logButtons(scope: LogScope, page: LogPage): ActionRow = {
     val buttons = List(
-      if (page.hasNewer) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page - 1), "Newer")) else None,
-      if (page.hasOlder) Some(Button.secondary(RespawnButtonId.logPage(respawnId, page.page + 1), "Older")) else None
+      if (page.hasNewer) Some(Button.secondary(RespawnButtonId.logPage(scope, page.page - 1), "Previous")) else None,
+      if (page.hasOlder) Some(Button.secondary(RespawnButtonId.logPage(scope, page.page + 1), "Next")) else None,
+      Some(Button.primary(RespawnButtonId.logFind, "Find").withEmoji(Emoji.fromUnicode("🔍")))
     ).flatten
-    if (buttons.isEmpty) None else Some(ActionRow.of(buttons.asJava))
+    ActionRow.of(buttons.asJava)
   }
 
   /** The Yes/No pair on a "are you hunting tonight?" DM. */
@@ -180,6 +223,16 @@ object RespawnThreads extends StrictLogging {
       .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
   }
 
+  /** The single button on a booking's confirmation DMs.
+   *
+   *  `label` is the only difference between the two: **Confirm** on the reminder
+   *  before a slot starts, where it is optional and settles the slot early, and
+   *  **Take Claim** on the started hunt, where the hunt is lost without it. Both
+   *  carry the same id — the claim's own status is what decides which question
+   *  was answered — so a reminder pressed a minute late still works. */
+  def confirmSlotButtons(guildId: String, claimId: Long, label: String): ActionRow =
+    ActionRow.of(Button.success(RespawnButtonId.confirmSlot(guildId, claimId), label).withEmoji(claimEmoji))
+
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
    *  exactly like leaving it. */
@@ -213,6 +266,24 @@ object RespawnThreads extends StrictLogging {
       Try(existing.delete().complete()).failed.foreach { error =>
         logger.warn(s"Could not clear the @everyone override on the respawn forum " +
           s"in guild '${forum.getGuild.getId}'", error)
+      }
+    }
+
+  /** Delete the post that represents a spawn, for a spawn that no longer exists.
+   *
+   *  Archiving is what happens when a spawn merely goes free; this is for a code
+   *  removed from the catalogue outright, where leaving the post would offer a
+   *  Claim button for something nothing can resolve.
+   *
+   *  Best effort, and says so in the log rather than to the caller: the spawn is
+   *  gone from the catalogue either way, and a post that outlives it is untidy
+   *  rather than broken. */
+  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit =
+    if (threadId.nonEmpty) {
+      findForum(guild, settings).flatMap(forum => resolveThread(guild, forum, threadId)).foreach { thread =>
+        Try(thread.delete().complete()).failed.foreach { error =>
+          logger.warn(s"Could not delete the post for a removed spawn in guild '${guild.getId}'", error)
+        }
       }
     }
 
@@ -282,8 +353,62 @@ object RespawnThreads extends StrictLogging {
     (forum.getId, boardId)
   }
 
+  /** Where the board's Dashboard button sends a member.
+   *
+   *  Built from the origin members reach the dashboard at, not from the one this
+   *  bot answers on — most of the fleet serves no dashboard and has no address
+   *  of its own, and posting the board is not something only the bot with a
+   *  dashboard does. See `Config.Web.dashboardOrigin`. */
+  def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
+
+  /** The text above the board, inside the card.
+   *
+   *  One line per button, in the order they sit underneath and each wearing the
+   *  same emoji, so the list reads as a key to the row rather than as prose that
+   *  happens to mention it. A label says what a button is called; these say what
+   *  it is for, which is the part a member arriving at the board for the first
+   *  time does not have. */
+  def boardIntro: String =
+    s"${com.tibiabot.Config.dailyEmoji} **Claim** **·** and type a code to claim a spawn right now\n" +
+      s"$BookEmoji **Book** **·** to schedule/lock-in a hunt in the future\n" +
+      s"$DashboardEmoji **Dashboard** **·** if you want to book further in advance (webui)\n" +
+      s"$ConfigEmoji **Config** **·** to change your default claim time & reminder settings"
+
+  /** The board's card: the whole post bar the buttons.
+   *
+   *  The bot builds this itself rather than pasting the link and letting Discord
+   *  unfurl `web.LinkPreview`'s page into a card of its own. Same shape, but this
+   *  one can hold the board image, which the unfurled card cannot, and it appears
+   *  with the message instead of whenever the crawler gets round to it.
+   *
+   *  The title is a second way to the dashboard, for anyone who reads a card
+   *  before they look at a button — and it is a plain link rather than a masked
+   *  one, so nothing here can unfurl a second card underneath the first.
+   *
+   *  Thumbnail and image are both set and are not the same picture: Discord puts
+   *  the thumbnail small in the top corner (the bot's avatar, so the card is
+   *  recognisably ours at a glance) and the image full width underneath, which is
+   *  where the board goes. `attachment://` refers to the file uploaded with the
+   *  message — the name has to match [[RespawnBoardImage.FileName]] exactly or
+   *  the embed renders with an empty space where the board should be. */
+  private def boardEmbed(hasImage: Boolean): MessageEmbed = {
+    val embed = new EmbedBuilder()
+      .setColor(Embeds.NemesisPurple)
+      .setTitle("Respawn Claims", dashboardLink)
+      .setDescription(boardIntro)
+      .setThumbnail(com.tibiabot.Config.webHookAvatar)
+    if (hasImage) embed.setImage(s"attachment://${RespawnBoardImage.FileName}")
+    embed.build()
+  }
+
   /** Post (or repost) the informational board thread, pinned to the top of the
    *  forum.
+   *
+   *  One message: the card and the buttons under it are both the post's starter
+   *  message. It used to be two, because the dashboard link had to sit above the
+   *  board and nothing can be inserted before a forum post's first message —
+   *  which stops mattering once the link lives inside a card the bot builds.
+   *  [[redrawBoard]] folds an older two-message board back into this shape.
    *
    *  Deliberately **not** locked, even though it is purely informational.
    *  Discord greys out message components for anyone who cannot post in the
@@ -298,13 +423,7 @@ object RespawnThreads extends StrictLogging {
    *  activity of its own to keep the timer alive. [[refreshBoard]] revives it if
    *  it slips through anyway. */
   def postBoard(forum: ForumChannel, settings: RespawnSettings, spawns: List[Respawn]): String = {
-    // The image is the whole post: no embed above it, because everything one
-    // would have said is either on the image or on the buttons under it.
-    val message = new MessageCreateBuilder().setComponents(boardButtons)
-    RespawnBoardImage.render(spawns)
-      .foreach(png => message.setFiles(FileUpload.fromData(png, RespawnBoardImage.FileName)))
-
-    val post = forum.createForumPost("📅 Respawn Claims", message.build())
+    val post = forum.createForumPost("📅 Respawn Claims", boardMessage(spawns))
       .setAutoArchiveDuration(ThreadChannel.AutoArchiveDuration.TIME_1_WEEK)
       .complete()
     val thread = post.getThreadChannel
@@ -315,12 +434,72 @@ object RespawnThreads extends StrictLogging {
     thread.getId
   }
 
+  /** The whole board post as one message: the card, and the buttons under it.
+   *
+   *  The image is best effort, which is why the card is told whether there is
+   *  one. A board that fails to render still posts — a thread with the card and
+   *  the buttons is one people can claim from, the codes are the part they are
+   *  missing, and the next redraw brings them — but it posts without an
+   *  `attachment://` pointing at a file that was never uploaded. */
+  private def boardMessage(spawns: List[Respawn]) = {
+    val png = RespawnBoardImage.render(spawns)
+    val builder = new MessageCreateBuilder()
+      .setEmbeds(boardEmbed(png.isDefined))
+      .setComponents(boardButtons)
+    png.foreach(bytes => builder.setFiles(FileUpload.fromData(bytes, RespawnBoardImage.FileName)))
+    builder.build()
+  }
+
+  /** How far into the board thread [[legacyBoardMessages]] will look.
+   *
+   *  It is looking for the image message of a two-message board, which sat
+   *  directly under the opening one, so a page of history is generous already —
+   *  it only has to be deeper than the stray replies a moderator left in
+   *  between. */
+  private val BoardSearchLimit = 25
+
+  /** The bot's own messages below the starter, which on a board built before the
+   *  two were merged is where the image and its buttons live.
+   *
+   *  Only the bot's own, and only ones carrying an attachment or components, so
+   *  a moderator's reply in the thread is never a candidate for deletion. */
+  private def legacyBoardMessages(thread: ThreadChannel): List[Message] = {
+    val self = thread.getJDA.getSelfUser.getId
+    Try(thread.getHistoryAfter(thread.getId, BoardSearchLimit).complete()
+      .getRetrievedHistory.asScala.toList)
+      .recover { case error =>
+        logger.warn(s"Could not read the respawn board thread '${thread.getId}'", error)
+        Nil
+      }
+      .getOrElse(Nil)
+      .filter(message => message.getAuthor.getId == self)
+      .filter(message => !message.getAttachments.isEmpty || !message.getComponents.isEmpty)
+  }
+
+  /** Clear out the second message of an older two-message board.
+   *
+   *  Runs after the starter has been redrawn, never before: if the delete
+   *  succeeds and the edit then fails, the thread has lost its board entirely,
+   *  whereas this order can only ever leave one duplicate behind for the next
+   *  redraw to find. Best effort for the same reason. */
+  private def removeLegacyBoardMessages(thread: ThreadChannel): Unit =
+    legacyBoardMessages(thread).foreach { message =>
+      Try(message.delete().complete()).failed.foreach { error =>
+        logger.warn(s"Could not remove the old board image message '${message.getId}' " +
+          s"in thread '${thread.getId}'", error)
+      }
+    }
+
   /** Redraw an existing board in place, for a catalogue that has changed.
    *
-   *  Edits the post's own opening message rather than replacing the post, so the
-   *  thread keeps its id, its pin and anything said in it. The old attachment has
-   *  to be cleared explicitly — an edit that only adds files keeps the ones
-   *  already there, which would leave two boards stacked in one message.
+   *  Edits the post's starter message rather than replacing the post, so the
+   *  thread keeps its id, its pin and anything said in it. `setReplace` is what
+   *  makes this the repair path for the layout too: everything not set here is
+   *  cleared, so a board from any older build — one opening with a bare link and
+   *  its unfurled card, or with the image and an embed above it — is edited into
+   *  the current shape in a single call rather than needing to be recognised
+   *  first. It is also what clears the previous attachment, which an edit that
+   *  only adds files would keep, leaving two boards stacked in one message.
    *
    *  Returns whether it managed to. Nothing here is fatal: a board that fails to
    *  redraw is out of date, not broken, and the codes it shows still work. */
@@ -328,18 +507,21 @@ object RespawnThreads extends StrictLogging {
     (for {
       forum <- findForum(guild, settings)
       thread <- resolveThread(guild, forum, settings.boardThread)
-      png <- RespawnBoardImage.render(spawns)
     } yield Try {
-      val start = thread.retrieveStartMessage().complete()
-      start.editMessage(new MessageEditBuilder()
-          // Cleared explicitly: a board posted by an older build carries an embed
-          // above the image, and an edit that only sets the attachment keeps it.
-          .setEmbeds(java.util.Collections.emptyList[MessageEmbed]())
-          .setComponents(boardButtons)
-          .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
-          .build())
-        .complete()
-      true
+      RespawnBoardImage.render(spawns) match {
+        case None => false
+        case Some(png) =>
+          thread.retrieveStartMessage().complete()
+            .editMessage(new MessageEditBuilder()
+                .setReplace(true)
+                .setEmbeds(boardEmbed(hasImage = true))
+                .setComponents(boardButtons)
+                .setAttachments(FileUpload.fromData(png, RespawnBoardImage.FileName))
+                .build())
+            .complete()
+          removeLegacyBoardMessages(thread)
+          true
+      }
     }.recover { case error =>
       logger.warn(s"Could not redraw the respawn board in guild '${guild.getId}'", error)
       false
@@ -407,7 +589,7 @@ object RespawnThreads extends StrictLogging {
    *  it on the catalogue row; it isn't called when an existing post is reused.
    */
   def openThread(guild: Guild, forum: ForumChannel, respawn: Respawn, card: MessageEmbed,
-                 buttons: ActionRow, onCreated: String => Unit): Option[ThreadChannel] = {
+                 buttons: ActionRow, onCreated: String => Unit): Option[OpenedThread] = {
     val existing = resolveThread(guild, forum, respawn.threadId)
     existing match {
       case Some(thread) =>
@@ -416,8 +598,7 @@ object RespawnThreads extends StrictLogging {
             logger.warn(s"Could not un-archive respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
           }
         }
-        updateCard(thread, card, buttons)
-        Some(thread)
+        Some(OpenedThread(thread, created = false))
 
       case None =>
         Try {
@@ -425,7 +606,7 @@ object RespawnThreads extends StrictLogging {
           val post = forum.createForumPost(respawn.displayName, message).complete()
           val thread = post.getThreadChannel
           onCreated(thread.getId)
-          thread
+          OpenedThread(thread, created = true)
         }.toOption.orElse {
           logger.warn(s"Could not create a respawn thread for '${respawn.code}' in guild '${guild.getId}'")
           None
@@ -433,37 +614,75 @@ object RespawnThreads extends StrictLogging {
     }
   }
 
-  /** Rewrite a spawn's claim card in place. A forum post's starter message
-   *  shares the thread's id, so this needs no extra fetch to find it. */
-  def updateCard(thread: ThreadChannel, card: MessageEmbed, buttons: ActionRow): Unit =
-    Try(thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons).complete()).failed.foreach { error =>
-      logger.warn(s"Could not update the claim card in thread '${thread.getId}'", error)
-    }
+  /** A spawn's post, and whether it had to be made. A post created a moment ago
+   *  already carries the card it was created with, so there is nothing to
+   *  rewrite on it. */
+  final case class OpenedThread(thread: ThreadChannel, created: Boolean)
 
-  /** Put the spawn's post to sleep once nobody holds it, so the forum's front
-   *  page stays the spawns people are actually on. Not locked — a locked thread
-   *  needs MANAGE_THREADS to reopen and would also stop people leaving notes on
-   *  a spawn between hunts. */
-  def archive(thread: ThreadChannel): Unit =
-    Try(thread.getManager.setArchived(true).complete()).failed.foreach { error =>
-      logger.warn(s"Could not archive respawn thread '${thread.getId}'", error)
-    }
-
-  /** Swap a post's status tag. Tags are looked up by name on the parent forum,
-   *  so a guild that deleted them just gets no tag rather than an error. */
-  def applyTag(forum: ForumChannel, thread: ThreadChannel, tagName: String): Unit = {
-    val tag: Option[ForumTag] = forum.getAvailableTags.asScala.find(_.getName.equalsIgnoreCase(tagName))
-    tag.foreach { found =>
-      // Skip when the thread already carries exactly this tag. Applying it again
-      // is a REST call that changes nothing, and the card is refreshed far more
-      // often than a spawn actually flips between taken and free. The current
-      // tags come from JDA's cache, so the check itself costs nothing.
-      val alreadyApplied = thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId)
-      if (!alreadyApplied) {
-        Try(thread.getManager.setAppliedTags(ForumTagSnowflake.fromId(found.getId)).complete()).failed.foreach { error =>
-          logger.warn(s"Could not apply the '$tagName' tag to thread '${thread.getId}'", error)
-        }
+  /** Bring a spawn's post into line with what has just happened: its card, its
+   *  status tag, and whether it should be awake.
+   *
+   *  These go out as one ordered chain rather than three requests fired side by
+   *  side. Every one of them is asynchronous and each takes a different REST
+   *  route, so nothing ordered them against one another — and Discord refuses to
+   *  edit a message in, or retag, a thread that has already been archived.
+   *  Queued alongside the edit, the archive could overtake it, and the post
+   *  would be left showing the state from before whatever had just happened.
+   *
+   *  It only ever bit a spawn nobody holds, because that is the only time a post
+   *  is put to sleep. Claiming one leaves it held and so always looked right;
+   *  booking one leaves it unheld, which is why a booking was the thing that
+   *  went missing from the card.
+   *
+   *  `card` is None for a post that was just created with it.
+   */
+  def settle(forum: ForumChannel, thread: ThreadChannel, card: Option[(MessageEmbed, ActionRow)],
+             tagName: String, sleep: Boolean): Unit = {
+    // Handed over rather than waited on. The card is the thing a person is
+    // looking at, so it wants to be quick — but nothing the caller goes on to do
+    // depends on the edit having landed, and waiting for it put a whole Discord
+    // round trip between a button press and the reply to it.
+    val failed: java.util.function.Consumer[_ >: Throwable] = (error: Throwable) =>
+      logger.warn(s"Could not settle respawn thread '${thread.getId}'", error)
+    Try {
+      (card, postState(forum, thread, tagName, sleep)) match {
+        case (Some((embed, buttons)), Some(state)) =>
+          editCard(thread, embed, buttons).flatMap((_: net.dv8tion.jda.api.entities.Message) => state)
+            .queue(_ => (), failed)
+        case (Some((embed, buttons)), None) => editCard(thread, embed, buttons).queue(_ => (), failed)
+        case (None, Some(state))            => state.queue(_ => (), failed)
+        case (None, None)                   => ()
       }
+    }.failed.foreach { error =>
+      logger.warn(s"Could not ask to settle respawn thread '${thread.getId}'", error)
+    }
+  }
+
+  /** A spawn's claim card, rewritten in place. A forum post's starter message
+   *  shares the thread's id, so this needs no extra fetch to find it. */
+  private def editCard(thread: ThreadChannel, card: MessageEmbed, buttons: ActionRow) =
+    thread.editMessageEmbedsById(thread.getId, card).setComponents(buttons)
+
+  /** The post's own state — its tag, and whether it sleeps — as a single
+   *  request, or nothing at all when it is already as it should be. Both live on
+   *  the same manager, so asking for both costs one PATCH rather than two.
+   *
+   *  A tag that is already exactly right is skipped: applying it again is a REST
+   *  call that changes nothing, and the card is refreshed far more often than a
+   *  spawn actually flips between taken and free. Tags come from JDA's cache, so
+   *  the check itself costs nothing. A guild that deleted them just gets no tag
+   *  rather than an error.
+   */
+  private def postState(forum: ForumChannel, thread: ThreadChannel,
+                        tagName: String, sleep: Boolean): Option[ThreadChannelManager] = {
+    val retag = forum.getAvailableTags.asScala
+      .find(_.getName.equalsIgnoreCase(tagName))
+      .filterNot(found => thread.getAppliedTags.asScala.map(_.getId) == Seq(found.getId))
+    if (retag.isEmpty && !sleep) None
+    else {
+      val base = thread.getManager
+      val tagged = retag.fold(base)(found => base.setAppliedTags(ForumTagSnowflake.fromId(found.getId)))
+      Some(if (sleep) tagged.setArchived(true) else tagged)
     }
   }
 
@@ -593,10 +812,13 @@ object RespawnButtonId {
   val boardBook: String = s"${Prefix}board:book"
 
   /** A page of the claim log. Opening it and paging through it are the same id
-   *  shape, so a press is handled one way wherever it came from: `all` reads
-   *  the whole guild, a spawn id reads that spawn. */
-  def logPage(respawnId: Option[Long], page: Int): String =
-    s"${Prefix}log:${respawnId.map(_.toString).getOrElse("all")}:$page"
+   *  shape, so a press is handled one way wherever it came from — see
+   *  [[LogScope.token]] for what the middle part can say. */
+  def logPage(scope: LogScope, page: Int): String = s"${Prefix}log:${scope.token}:$page"
+
+  /** Search the log. Carries no scope of its own: it produces one rather than
+   *  paging an existing one, so which log it was pressed on does not matter. */
+  val logFind: String = s"${Prefix}logfind"
 
   /** Config on a spawn's own card, for whoever holds it or is waiting on it. */
   def spawnConfig(respawnId: Long): String = s"${Prefix}config:$respawnId"
@@ -637,7 +859,6 @@ object RespawnButtonId {
   /** A moderator handing stamina to somebody, from /stamina. */
   val giveStamina: String = s"${Prefix}board:givestamina"
   val boardClaimRules: String = s"${Prefix}board:claimrules"
-  val boardTimers: String = s"${Prefix}board:timers"
 
   /** Modal ids, kept next to the buttons that open them. */
   val ModalPrefix: String = s"${Prefix}modal:"
@@ -652,10 +873,10 @@ object RespawnButtonId {
   val modalBoardSchedule: String = s"${ModalPrefix}boardschedule"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
 
-  /** Guild-wide settings, split across two modals because Discord caps a modal at
-   *  five inputs and there are six settings. */
+  /** Every guild-wide setting, in one modal — exactly the five Discord allows. */
   val modalClaimRules: String = s"${ModalPrefix}claimrules"
-  val modalTimers: String = s"${ModalPrefix}timers"
+  /** The claim log's search form. */
+  val modalLogFind: String = s"${ModalPrefix}logfind"
   val modalGiveStamina: String = s"${ModalPrefix}givestamina"
 
   /** ("duration", 415L) from "respawn:modal:duration:415" — the kind and the spawn
@@ -678,6 +899,13 @@ object RespawnButtonId {
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
 
+  /** One id for both confirmation prompts — the reminder's Confirm and the
+   *  started hunt's Take Claim. They ask the same question at two moments, and
+   *  the claim's own status is what tells them apart, so a single id keeps a
+   *  reminder pressed late (after the slot has started) working rather than
+   *  answering "out of date". */
+  def confirmSlot(guildId: String, claimId: Long): String = s"${Prefix}confirmslot:$guildId:$claimId"
+
   def handles(componentId: String): Boolean = componentId.startsWith(Prefix)
 
   /** What a respawn button press means. Parsing to an ADT rather than a tuple
@@ -694,16 +922,21 @@ object RespawnButtonId {
   final case class DmSpawnButton(action: String, guildId: String, respawnId: Long) extends Action
   /** A booked slot's owner answering whether they are hunting it, from a DM. */
   final case class SlotAnswerButton(keep: Boolean, guildId: String, claimId: Long) extends Action
+  /** A booked slot's owner confirming they are there — from the reminder before
+   *  it starts, or from the started-hunt DM after. */
+  final case class ConfirmSlotButton(guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
-  /** A page of the claim log — `respawnId` empty for the board's guild-wide view. */
-  final case class LogButton(respawnId: Option[Long], page: Int) extends Action
+  /** A page of the claim log, for whatever it is scoped to. */
+  final case class LogButton(scope: LogScope, page: Int) extends Action
+  /** The claim log's Find button, which opens the search form. */
+  case object LogFindButton extends Action
 
   /** Actions that always end in a modal, and so must not be deferred. The two
    *  Config buttons are absent deliberately: what they open depends on whether
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
-    Set("claim", "book", "mysettings", "claimrules", "timers", "selfcfg", "holdercfg", "schedule",
+    Set("claim", "book", "mysettings", "claimrules", "selfcfg", "holdercfg", "schedule",
         "booknew", "givestamina")
 
   /** Whether this press has to answer with a modal, and so cannot be
@@ -730,6 +963,10 @@ object RespawnButtonId {
     parse(componentId) match {
       case Some(BoardButton(what)) if what == "config" || ModalActions.contains(what) => Ack.OpensModal
       case Some(SpawnButton(action, _)) if action == "config" || ModalActions.contains(action) => Ack.OpensModal
+      // Find sits on a log message but must not be deferred at all: it answers
+      // with a modal, and `replyModal` has to be an interaction's first response.
+      // It is listed before LogButton for exactly that reason.
+      case Some(LogFindButton)   => Ack.OpensModal
       case Some(LogButton(_, _)) => Ack.EditsMessage
       case _                     => Ack.Replies
     }
@@ -745,15 +982,15 @@ object RespawnButtonId {
         Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = true, guildId, _))
       case Array("passslot", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = false, guildId, _))
+      case Array("confirmslot", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(ConfirmSlotButton(guildId, _))
       case Array("accept", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = true, guildId, _))
       case Array("decline", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(OfferButton(accept = false, guildId, _))
+      case Array("logfind") => Some(LogFindButton)
       case Array("log", target, page) =>
-        Try(page.toInt).toOption.flatMap { p =>
-          if (target == "all") Some(LogButton(None, p))
-          else Try(target.toLong).toOption.map(id => LogButton(Some(id), p))
-        }
+        Try(page.toInt).toOption.flatMap(p => LogScope.fromToken(target).map(LogButton(_, p)))
       case Array(action, id) =>
         Try(id.toLong).toOption.map(SpawnButton(action, _))
       case _ => None

@@ -38,6 +38,14 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     var sets = 0
     def get(key: String): Future[Option[String]] = { gets += 1; Future.successful(store.get(key)) }
     def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = { sets += 1; store.put(key, value); Future.unit }
+    /** Real enough to be useful: wins only when nothing holds the key, which
+     *  is the property anything relying on this actually depends on. */
+    def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
+      synchronized {
+        if (store.contains(key)) Future.successful(false)
+        else { store(key) = value; Future.successful(true) }
+      }
+    def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = {
       val regex = ("^" + java.util.regex.Pattern.quote(pattern).replace("*", "\\E.*\\Q") + "$").r
       Future.successful(store.keys.filter(k => regex.pattern.matcher(k).matches()).toList)

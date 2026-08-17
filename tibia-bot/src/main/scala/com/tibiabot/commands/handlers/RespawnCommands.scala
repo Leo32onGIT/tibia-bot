@@ -70,8 +70,11 @@ object RespawnCommands {
                                       guild: net.dv8tion.jda.api.entities.Guild,
                                       owner: Option[String]): Unit = {
     val entries = BotApp.respawnService.scheduleListing(guild.getId, owner)
-    val embed = RespawnEmbeds.schedulesEmbed(entries, java.time.ZonedDateTime.now(),
-      everyones = owner.isEmpty)
+    val now = java.time.ZonedDateTime.now()
+    val embed = RespawnEmbeds.schedulesEmbed(entries, now, everyones = owner.isEmpty,
+      // So a booking whose next evening has been given away names the one after
+      // it, rather than an evening its owner no longer has.
+      givenUp = BotApp.respawnService.daysGivenUp(guild.getId, now))
     val buttons =
       if (owner.isEmpty) Some(RespawnThreads.moderatorBookingsButtons)
       else if (entries.nonEmpty) Some(RespawnThreads.bookingsButtons(entries.size))

@@ -10,7 +10,7 @@ trait WorldConfigRepository {
   def createWorld(guildId: String, world: String, alliesChannel: String, enemiesChannel: String,
                   neutralsChannels: String, levelsChannel: String, deathsChannel: String, category: String,
                   fullblessRole: String, nemesisRole: String, allyPkRole: String, masslogRole: String,
-                  fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit
+                  bountyRole: String, fullblessChannel: String, nemesisChannel: String, activityChannel: String): Unit
   /** Retrieve a single world's config as a column->value map. */
   def retrieveWorld(guildId: String, world: String): Map[String, String]
   def removeWorld(guildId: String, world: String): Unit

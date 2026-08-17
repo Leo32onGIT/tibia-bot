@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Violent Bot - Dashboard</title>
-<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
+<link rel="icon" type="image/png" href="/status/images/avatar.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
   :root {
@@ -451,7 +451,7 @@
   </div>
   <div class="kpis-strip">
     <div class="masthead-brand">
-      <img src="/dashboard/images/avatar.png" alt="">
+      <img src="/status/images/avatar.png" alt="">
       <span>Violent Bot<span class="brand-suffix">/status</span>
         <span class="masthead-sub" id="masthead-sub">&nbsp;</span>
       </span>
@@ -585,8 +585,8 @@ function heatRgbForEdits(edits) {
   return heatRgbForRatio(edits / 250);
 }
 
-const BE_ICON_GREEN = '/dashboard/images/be-icon-green.gif';
-const BE_ICON_YELLOW = '/dashboard/images/be-icon-yellow.gif';
+const BE_ICON_GREEN = '/status/images/be-icon-green.gif';
+const BE_ICON_YELLOW = '/status/images/be-icon-yellow.gif';
 
 function renderSidebar(worlds) {
   const el = document.getElementById('world-list');
@@ -1221,7 +1221,7 @@ async function patreonAction(method, path, body) {
 async function removeSeat(guildId, world, guildName) {
   if (!confirm(`Remove the seat for ${guildName} · ${world}?`)) return;
   try {
-    await patreonAction('DELETE', '/dashboard/patreon/seats', { guildId, world });
+    await patreonAction('DELETE', '/status/patreon/seats', { guildId, world });
     poll();
   } catch (e) {
     alert(e.message);
@@ -1250,7 +1250,7 @@ document.getElementById('patreon-extra-form').addEventListener('submit', async (
   const extraSeats = Number(extraSeatsRaw);
   if (!Number.isInteger(extraSeats)) { alert('Extra seats must be a whole number'); return; }
   try {
-    await patreonAction('PUT', '/dashboard/patreon/extra-seats', { username, extraSeats });
+    await patreonAction('PUT', '/status/patreon/extra-seats', { username, extraSeats });
     e.target.reset();
     e.target.classList.remove('open');
     poll();
@@ -1316,7 +1316,7 @@ function render() {
 
 async function poll() {
   try {
-    const res = await fetch('/dashboard/status');
+    const res = await fetch('/status/data');
     if (!res.ok) return;
     lastData = await res.json();
     render();

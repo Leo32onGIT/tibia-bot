@@ -12,6 +12,7 @@ class DiscordGatewaySpec extends AnyFunSuite with Matchers {
     def guildById(id: String): Guild = null
     def guilds: List[Guild] = Nil
     def retrieveUser(id: String): User = null
+    def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = None
     def selfUserId: String = "self-1"
     def selfUserName: String = "ViolentBot"
     def selfUserAvatarUrl: String = "https://example.com/avatar.png"

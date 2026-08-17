@@ -1,9 +1,35 @@
 package com.tibiabot.presentation
 
+import com.typesafe.config.{ConfigFactory, ConfigValueType}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.jdk.CollectionConverters._
+import scala.util.Try
+
 class DeathEffectSpec extends AnyFunSuite with Matchers {
+
+  /** Every creature name the bot knows about, read straight out of mappings.conf.
+   *
+   *  [[com.tibiabot.Config]] itself cannot initialise here — it resolves
+   *  discord.conf, which needs a populated environment — but this file is plain
+   *  data with no substitutions in it, so it parses on its own.
+   *
+   *  Gathered from every list in the file rather than a named few, so adding a
+   *  new creature list does not quietly narrow what this spec will accept.
+   */
+  private lazy val knownCreatures: Set[String] = {
+    val mappings = ConfigFactory.parseResources("mappings.conf").getConfig("mapping-config")
+    val entries = mappings.root().asScala.toList
+    val fromLists = entries.flatMap {
+      case (key, value) if value.valueType == ConfigValueType.LIST =>
+        Try(mappings.getStringList(key).asScala.toList).getOrElse(Nil)
+      case _ => Nil
+    }
+    val fromUrlMappings = Try(mappings.getObject("creature-url-mappings").asScala.keys.toList)
+      .getOrElse(Nil)
+    (fromLists ++ fromUrlMappings).map(_.toLowerCase.trim).toSet
+  }
 
   test("environmental damage-type killers resolve to an effect animation") {
     DeathEffect.thumbnail("drowning")   shouldBe defined
@@ -40,11 +66,34 @@ class DeathEffectSpec extends AnyFunSuite with Matchers {
     DeathEffect.suicide should endWith ("Ghost_Smoke_Effect.gif")
   }
 
-  test("every mapped damage type is a real substance death source (no never-matching keys)") {
-    // Killers.substanceSources is the author's canonical set of environmental
-    // killer names; a DeathEffect key outside it could never match a real death.
+  test("every mapped effect is a killer something can actually die to (no never-matching keys)") {
+    // A key is matched against the killer name exactly as TibiaData reports it
+    // (TibiaBot passes it through untouched, lowercased here), so a key nothing
+    // is ever called by can never fire — a silently dead animation rather than
+    // anything that would show up as a failure in the wild. This is the guard
+    // against a typo in the map.
+    //
+    // Two kinds of killer legitimately earn an effect of their own: an
+    // environmental damage source, and a creature we would rather draw
+    // ourselves than take from the wiki — "mushroom" is a boss summon, and its
+    // entry is deliberate. It is *not* a substance source, and must not be
+    // added to that set to satisfy this: Killers.sourceArticle reads the same
+    // set to decide whether a death line says "killed by mushroom" or "killed by
+    // a mushroom", and only the second is right for a creature.
     DeathEffect.mappedDamageTypes should not be empty
-    DeathEffect.mappedDamageTypes.subsetOf(com.tibiabot.domain.Killers.substanceSources) shouldBe true
+    val known = com.tibiabot.domain.Killers.substanceSources ++ knownCreatures
+    withClue("keys matching no known killer: ") {
+      DeathEffect.mappedDamageTypes.diff(known) shouldBe empty
+    }
+  }
+
+  test("a damage type still reads as a substance, so its death line takes no article") {
+    // The half of the old invariant worth keeping: anything here that *is* an
+    // environmental source has to be one Killers agrees about, or the effect and
+    // the wording of the line beside it would disagree.
+    val substances = DeathEffect.mappedDamageTypes.intersect(com.tibiabot.domain.Killers.substanceSources)
+    substances should contain allOf ("death", "ice", "drowning", "life drain")
+    substances.foreach(name => com.tibiabot.domain.Killers.sourceArticle(name) shouldBe "")
   }
 
   test("all effect resources share the resource base url") {

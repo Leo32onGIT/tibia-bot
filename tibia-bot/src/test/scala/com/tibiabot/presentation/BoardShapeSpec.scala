@@ -92,6 +92,39 @@ class BoardShapeSpec extends AnyFunSuite with Matchers {
     after.getHeight should be > before.getHeight
   }
 
+  // The fingerprint that decides whether a board already posted to Discord still
+  // shows the right thing. Its whole job is to be equal when a redraw would
+  // change nothing and different when it would.
+  test("the same catalogue fingerprints the same however the rows arrive") {
+    val spawns = List(spawn("101", "Thais"), spawn("201", "Carlin"), spawn("1001", "Svargrond"))
+    RespawnBoardImage.digestOf(spawns.reverse) shouldBe RespawnBoardImage.digestOf(spawns)
+  }
+
+  test("anything the board draws changes the fingerprint") {
+    val base = List(spawn("101", "Thais", "Cult Orcs"))
+    val added = base :+ spawn("102", "Thais")
+    val renamed = List(spawn("101", "Thais", "Cult Orc Cave"))
+    val moved = List(spawn("101", "Carlin", "Cult Orcs"))
+    val recoded = List(spawn("101a", "Thais", "Cult Orcs"))
+    List(added, renamed, moved, recoded).foreach { changed =>
+      RespawnBoardImage.digestOf(changed) should not be RespawnBoardImage.digestOf(base)
+    }
+  }
+
+  test("a creature change does not, since the board does not draw one") {
+    // Which monster represents a spawn is curated continually and shows up on
+    // the dashboard, not here. Redrawing an identical image for it would spend a
+    // REST edit per guild for no visible difference.
+    val base = List(spawn("101", "Thais"))
+    RespawnBoardImage.digestOf(base.map(_.copy(creature = "Orc Berserker"))) shouldBe
+      RespawnBoardImage.digestOf(base)
+  }
+
+  test("a field boundary cannot be forged by moving a character across it") {
+    RespawnBoardImage.digestOf(List(spawn("41", "5Thais", "Orcs"))) should not be
+      RespawnBoardImage.digestOf(List(spawn("415", "Thais", "Orcs")))
+  }
+
   private def read(bytes: Array[Byte]): java.awt.image.BufferedImage =
     javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes))
 }

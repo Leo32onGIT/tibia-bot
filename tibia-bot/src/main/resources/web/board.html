@@ -1,0 +1,3789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Violent Bot - <!--TITLE--></title>
+<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151c; --panel-border: #1f2430;
+    --text: #d7dce3; --text-strong: #e8ebf0; --muted: #7c8698;
+    --accent: #5b8cff; --warn: #e0a93e; --bad: #e0563e; --purple: #a78bfa;
+
+    /* Lifted from the Discord side so a spawn looks the same in both places:
+       the code colour is RespawnBoardImage.CodeColor, free and claimed are
+       RespawnEmbeds' own FreeColor and RedColor. */
+    --code: #f0b232;
+    --spawn-name: #e8e9ea;
+
+    /* One definition for every state, used by the cards and by the calendar
+       inside the spawn window. Booked and confirmed share a hue deliberately: a
+       confirmed slot is the same booking with the question settled, so it reads
+       as a stronger version of it (dashed outline -> solid, plus a tick) rather
+       than a fourth colour. That keeps the palette three hues wide, which stays
+       legible with a red-green colour vision deficiency, and the tick carries
+       the distinction with no colour at all. */
+    --st-free: #2ecc71;
+    --st-claimed: #d23369;
+    --st-booked: #5b8cff;
+    --st-confirmed: #5b8cff;
+    --st-asked: #e0a93e;
+
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  /* `hidden` means hidden, whatever else an element is styled as.
+     The attribute works through a browser default of `display: none`, which any
+     author `display:` on the same element silently beats — so a flex or grid
+     component that sets its own display is shown regardless of the attribute,
+     and the script toggling it appears to do nothing. That caught the foot of
+     the spawn window once and the moderator panel again; this rule ends the
+     class of bug rather than patching each instance as it turns up. */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+    background-size: 46px 46px;
+  }
+  /* A page that cannot move cannot drag the window about with it. The spawn
+     window is `position: fixed`, and on a phone a fixed element is only really
+     fixed while the document behind it is still: rubber-banding at either end of
+     the board — or the address bar sliding in and out on the way — repaints it a
+     frame late and the whole panel jitters under the thumb. So while the window
+     is up the document is pinned where it stood, and put back on the way out.
+     `top` is written by the script, since pinning it at 0 would otherwise scroll
+     the board back to the beginning behind the window. */
+  body.locked { position: fixed; left: 0; right: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
+  main { max-width: 1180px; margin: 0 auto; padding: 26px 24px 70px; }
+  .muted { color: var(--muted); }
+
+  .masthead {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 13px 18px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-strong); }
+  .brand img { width: 32px; height: 32px; border-radius: 8px; }
+  .brand .sub { display: block; font-size: 10px; font-weight: 400; color: var(--muted); letter-spacing: 0.04em; margin-top: 3px; }
+  /* Which Discord this board belongs to. Somebody can be a member of several
+     communities that run the bot, and every code, every claim and every booking
+     on the page belongs to exactly one of them — so the name is stated rather
+     than left to be inferred from the tab. The Discord glyph is what says the
+     name is a server's and not the board's. */
+  .brand .server { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
+  .brand .server i { font-size: 13px; color: var(--muted); }
+  /* Which page of the bot this is, in the same muted voice /status wears after
+     the bot's name — so the two mastheads read as the same family. */
+  .brand-suffix { color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  /* ---- Switching server --------------------------------------------------
+     A menu under the name rather than a link to a page of choices: swapping
+     server is a thing you do from a board, and throwing that board away to be
+     asked a question is a poor trade for one press. Drawn server-side — see
+     RespawnDashboardRoute.serverChip — and only when there is more than one
+     server to switch to; the single-server case stays the plain label above and
+     never grows a chevron. */
+  .sw { position: relative; display: inline-flex; min-width: 0; }
+  /* The server's name, given a ceiling and cut with an ellipsis rather than
+     allowed to set the masthead's width.
+     Without one it wrapped: the button is inline-flex and the name was a bare
+     anonymous item with nothing telling it to stay on one line, so a long name
+     broke across three of them and painted up out of the header and over the
+     page behind it. A fixed width and a clean cut is the whole of the fix —
+     the full name is on the row in the menu below, and in the title. */
+  /* `flex: 0 0 auto` and not a bare max-width: as a flex item it would
+     otherwise be free to shrink, and on a narrow screen — where the row beside
+     it takes the full width — it shrank all the way to nothing and the name
+     disappeared entirely. This takes its content's width up to the ceiling, and
+     gives up none of it. */
+  .sw-title { flex: 0 0 auto; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sw-btn {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0;
+    background: transparent; border: 1px solid transparent; border-radius: 7px;
+    padding: 4px 8px; margin: -4px -8px;
+    color: inherit; font-family: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit;
+  }
+  .sw-btn > i { font-size: 13px; color: var(--muted); }
+  .sw-btn:hover { background: rgba(255,255,255,0.04); border-color: var(--panel-border); }
+  .sw-btn .chev { font-size: 11px; opacity: 0.7; transition: transform 0.15s ease; }
+  .sw.open .sw-btn { background: rgba(255,255,255,0.05); border-color: var(--panel-border); }
+  .sw.open .sw-btn .chev { transform: rotate(180deg); }
+  .sw-menu {
+    position: absolute; top: calc(100% + 7px); left: -8px; z-index: 30;
+    min-width: 260px; max-width: 340px;
+    background: var(--panel); border: 1px solid #2a3142; border-radius: 10px;
+    box-shadow: 0 18px 44px rgba(0,0,0,0.6); padding: 5px; display: none;
+    max-height: 320px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
+  }
+  .sw.open .sw-menu { display: block; }
+  .sw-label {
+    display: block; font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--muted); padding: 7px 10px 5px;
+  }
+  .sw-item {
+    display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px;
+    color: var(--text); text-decoration: none; font-family: var(--sans); font-weight: 400;
+  }
+  .sw-item:hover { background: rgba(255,255,255,0.05); }
+  .sw-item.on { background: rgba(91,140,255,0.13); }
+  /* The server's own face. Sized to the row rather than to the brand mark above
+     — this is a list to pick from, not a masthead — and squared off with the
+     same radius the bot's own avatar wears.
+     Written as `.sw-item .sw-icon` and not `.sw-icon`, because the menu lives
+     inside .brand and `.brand img` would otherwise win on specificity and blow
+     every avatar up to the masthead's 32px. */
+  .sw-item .sw-icon {
+    width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+    object-fit: cover; background: rgba(255,255,255,0.05);
+  }
+  /* What a guild with no icon of its own gets, in exactly the space the icon
+     would have taken — same width so the names line up down the column, same
+     height so the rows do. */
+  .sw-glyph {
+    width: 22px; height: 22px; font-size: 14px; line-height: 22px;
+    color: var(--muted); flex-shrink: 0; text-align: center;
+  }
+  .sw-item.on .sw-glyph { color: var(--accent); }
+  .sw-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Reusing the masthead's tier colours, so what "moderator" looks like is one
+     thing across the page. */
+  .sw-item .tier { flex-shrink: 0; }
+  .sw-check { color: var(--accent); font-size: 14px; flex-shrink: 0; }
+  .tier { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; border-radius: 4px; padding: 2px 7px; }
+  .tier-member { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .tier-moderator { background: rgba(91,140,255,0.15); color: var(--accent); }
+  .tier-admin { background: rgba(167,139,250,0.15); color: var(--purple); }
+  .masthead-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .filter {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 6px 10px; width: 190px;
+  }
+  .filter::placeholder { color: var(--muted); font-family: var(--sans); }
+  .filter:focus { outline: none; border-color: var(--accent); }
+  .stale-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; }
+  .panel-title {
+    padding: 12px 16px; font-family: var(--mono); font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
+    border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::before { content: '##'; color: var(--accent); letter-spacing: normal; }
+
+  /* Moderator tools for the catalogue itself. Purple throughout, the same hue
+     the per-spawn moderator block and the admin tier chip already use, so
+     "something only some people can do" looks like one thing across the page. */
+  .mod-panel { margin-bottom: 16px; border-color: rgba(167,139,250,0.28); }
+  .mod-panel-head {
+    width: 100%; background: none; border: 0; cursor: pointer; color: inherit; text-align: left;
+    padding: 11px 16px; display: flex; align-items: center; gap: 8px; font-family: inherit;
+  }
+  .mod-panel-head:hover { background: rgba(167,139,250,0.06); }
+  .mod-panel-head > i:first-child { color: var(--purple); font-size: 15px; }
+  .mod-panel-head[aria-expanded="true"] { border-bottom: 1px solid var(--panel-border); }
+  .mod-panel-head[aria-expanded="true"] .fold-chevron { transform: rotate(180deg); }
+  .mod-panel-body { display: flex; flex-direction: column; }
+  /* One band per job. The panel does two unrelated things, and a heading with a
+     ground of its own is what makes each read as a section — a hairline between
+     them only ever said "something ends here". */
+  .mod-band { padding: 13px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .mod-band.alt { border-top: 1px solid var(--panel-border); background: rgba(255,255,255,0.012); }
+  .mod-section { display: flex; align-items: baseline; gap: 8px; }
+  .mod-section-title {
+    font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--purple); display: flex; align-items: center; gap: 6px;
+  }
+  /* The shield the panel's own header wears, quarter size, so a band reads as
+     part of it rather than as a heading that wandered in. */
+  .mod-section-title::before { content: '◈'; font-size: 10px; }
+  .mod-section-hint { color: var(--muted); font-size: 11px; margin-left: auto; }
+  /* One field per column while there is room, stacking on a narrow screen. The
+     code is the short one and gets the narrow track. */
+  .mod-form { display: grid; grid-template-columns: 110px 1fr 1fr 1fr; gap: 10px; align-items: end; }
+  .mod-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .mod-field input {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 7px 9px; width: 100%;
+  }
+  /* A range has no box of its own to draw — the rule above would put a border
+     round the track and pad it away from its own thumb. */
+  .mod-field input[type="range"] { background: none; border: 0; padding: 0; }
+  .mod-field input::placeholder { color: var(--muted); font-family: var(--sans); }
+  .mod-field input:focus { outline: none; border-color: var(--purple); }
+  .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .mod-note code { font-family: var(--mono); color: var(--text); }
+  .mod-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .mod-actions .mod-note { flex: 1 1 220px; min-width: 0; }
+  /* The answer sits with the button that caused it, not at the top of the page:
+     this panel is its own little form and its reply belongs inside it. */
+  /* Always the last thing in the panel, whatever said it. Bordered off, so a
+     reply reads as the panel answering rather than as a caption on whichever
+     control happens to sit above it. */
+  .mod-answer { font-size: 12px; min-width: 0; }
+  .mod-answer:not(:empty) { border-top: 1px solid var(--panel-border); padding: 11px 16px; }
+  .mod-answer.ok { color: var(--st-free); }
+  .mod-answer.no { color: var(--st-claimed); }
+  /* What this server added, and the way back out. Scrolls rather than growing
+     without limit: a guild fifty codes deep should not push the board itself off
+     the screen every time this panel is opened. */
+  .mod-owned { display: flex; flex-direction: column; gap: 7px; }
+  .mod-list { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+              scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .mod-list-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(31,36,48,0.6); }
+  .mod-list-row:last-child { border-bottom: 0; }
+  .mod-list-name { color: var(--spawn-name); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-list-region { color: var(--muted); font-size: 11px; margin-left: auto; padding-left: 8px;
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-list-row .btn { flex-shrink: 0; }
+  /* Purple until it is pointed at, red once it is armed: removal takes the
+     spawn's claims and bookings with it, so the second press should not look
+     like the first. */
+  .btn.danger-hover:hover:not([disabled]) { color: var(--st-claimed); border-color: rgba(210,51,105,0.5); background: rgba(210,51,105,0.1); }
+  .btn.mod-btn.armed { color: var(--st-claimed); border-color: rgba(210,51,105,0.65); background: rgba(210,51,105,0.14); }
+
+  /* Handing somebody minutes in their tank. A person and an amount, side by side
+     while there is room and stacked when there is not. */
+  /* Two labelled controls side by side, aligned on their labels rather than
+     centred: the boxes under them are within a pixel of each other, and centring
+     unequal ones puts the two labels on different lines. */
+  .mod-give { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+  .mod-who { position: relative; }
+  /* Chips rather than a slider. The amounts are a short known list — a hunt's
+     worth and its fractions — and a slider asks somebody to aim at a value they
+     could have named. Built on the shared .seg, so only what differs is set
+     here: equal widths, a thumb-sized target, and the panel's purple for the
+     chosen one where the board's own segments use blue. */
+  .mod-give .seg { width: 100%; }
+  .mod-give .seg button { flex: 1; padding: 7px 0; }
+  .mod-give .seg button[aria-pressed="true"] { color: var(--purple); background: rgba(167,139,250,0.14); }
+  /* Over the content rather than pushing it down: a list that grows moves the
+     buttons under it, and a moderator who is halfway to pressing one should not
+     have it walk away as they type. */
+  .mod-suggest {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px;
+    max-height: 200px; overflow-y: auto; box-shadow: 0 8px 22px rgba(0,0,0,0.45);
+  }
+  .mod-suggest-row {
+    display: block; width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 7px 10px;
+  }
+  .mod-suggest-row:hover { background: rgba(167,139,250,0.14); }
+  @media (max-width: 720px) {
+    .mod-give { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .mod-form { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 460px) {
+    .mod-form { grid-template-columns: 1fr; }
+  }
+
+  .legend { display: flex; gap: 15px; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--panel-border); }
+  .legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  /* Two even columns once the row stops fitting, rather than letting it wrap.
+     Wrapping put the four keys wherever they happened to land — "Booked &
+     confirmed" being twice the width of "Free" — so the second line started at
+     a different x from the first and the swatches lined up with nothing. A grid
+     gives four left edges in two columns, which is what makes it read as a key
+     rather than as a sentence that ran out of room. */
+  @media (max-width: 460px) {
+    .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  }
+  /* The board legend's colour key. Named `key`, not `sw`, which the server
+     switcher above already owns: two unrelated components sharing that class
+     meant this rule — being the later one — sized the switcher to 12 by 12,
+     its contents spilled out of a box that small, and the tier chip beside it
+     was laid out on top of them. */
+  .key { width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0; border: 1.5px solid; }
+  .key-free { border-color: var(--st-free); background: rgba(46,204,113,0.26); }
+  .key-claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
+  .key-booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
+  .key-confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 10px; padding: 14px 16px; }
+  .card {
+    position: relative; overflow: hidden; cursor: pointer;
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .card:hover { border-color: var(--accent); }
+  /* State also shows as a hairline down the leading edge, because on a busy
+     watermark the dot alone gets lost against the art. */
+  .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--edge, transparent); }
+
+  /* Never mirrored. Tibia sprites are drawn facing a deliberate direction and
+     flipping one reads as wrong art rather than as a design choice — and it
+     would disagree with the same creature shown the right way round in the
+     Discord thread's thumbnail. */
+  .sprite {
+    position: absolute; right: -10px; bottom: -12px; width: 84px; height: 84px;
+    opacity: 0.17; pointer-events: none;
+    image-rendering: pixelated; object-fit: contain;
+    filter: grayscale(var(--drain, 0));
+  }
+  /* The avatar stand-in is always fully drained — it is a placeholder for
+     missing art and must never be the brightest thing on a board of real
+     sprites. */
+  .sprite.placeholder { filter: grayscale(1); opacity: 0.1; }
+
+  .card-body { position: relative; }
+  .card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .code-chip {
+    display: inline-flex; align-items: center; font-family: var(--mono); font-weight: 700;
+    font-size: 12px; font-variant-numeric: tabular-nums; color: var(--code);
+    background: rgba(240,178,50,0.13); border: 1px solid rgba(240,178,50,0.32);
+    border-radius: 5px; padding: 2px 7px; flex-shrink: 0;
+  }
+  .code-chip.live { color: #ffd98a; border-color: rgba(240,178,50,0.75); animation: pulse 2.6s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(240,178,50,0.42); } 70% { box-shadow: 0 0 0 6px rgba(240,178,50,0); } 100% { box-shadow: 0 0 0 0 rgba(240,178,50,0); } }
+  @media (prefers-reduced-motion: reduce) { .code-chip.live { animation: none; box-shadow: 0 0 0 2px rgba(240,178,50,0.3); } }
+
+  .spawn-name { color: var(--spawn-name); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-state { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid; }
+  .dot.free { border-color: var(--st-free); background: var(--st-free); }
+  .dot.claimed { border-color: var(--st-claimed); background: var(--st-claimed); }
+  .dot.booked { border-color: var(--st-booked); background: transparent; }
+  .dot.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  .who { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who.free { color: var(--st-free); }
+  .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
+  .queue { font-family: var(--mono); font-size: 10px; color: var(--muted); flex-shrink: 0; }
+  .card-state .queue { margin-left: auto; }
+
+  .card-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.07); margin-top: 8px; overflow: hidden; }
+  .card-bar span { display: block; height: 100%; border-radius: 2px; background: var(--st-claimed); transition: width 1s linear; }
+
+  .empty-note { padding: 26px 16px; color: var(--muted); font-size: 13px; text-align: center; }
+
+  /* ---- The spawn window ---------------------------------------------------
+     One window per spawn, big enough to hold the whole decision: what is
+     happening on it now, and the week it is booked into. Booking used to be a
+     link somewhere else, which made planning a hunt feel like a separate errand
+     from taking one — they are the same thought, so they are one window. */
+  .veil { position: fixed; inset: 0; background: rgba(4,5,8,0.72); backdrop-filter: blur(2px); z-index: 40; display: none; }
+  .veil.open { display: block; }
+  .window {
+    position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(1120px, calc(100vw - 28px)); height: min(792px, calc(100vh - 40px));
+    background: var(--panel); border: 1px solid #2a3142; border-radius: 14px;
+    box-shadow: 0 30px 90px rgba(0,0,0,0.6);
+    display: none; overflow: hidden;
+    /* Nothing inside hands its leftover scroll to the page behind it. Reaching
+       the bottom of the week and carrying on used to bounce the document, which
+       is the other half of the jitter the body lock deals with. */
+    overscroll-behavior: contain;
+  }
+  .window.open { display: flex; flex-direction: column; }
+
+  /* The creature, filling the window rather than tucked in a corner. Kept far
+     enough back that everything on top of it stays readable — the scrim does
+     that work, so the art can be large without becoming noise. Never mirrored,
+     for the same reason as the card sprites. */
+  .watermark {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; object-position: center 46%;
+    image-rendering: pixelated; pointer-events: none; user-select: none;
+    opacity: 0.09; filter: saturate(0.85);
+  }
+  .watermark.placeholder { opacity: 0.05; filter: grayscale(1); }
+  .scrim {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 50% 45%, rgba(18,21,28,0.12) 0%, rgba(18,21,28,0.7) 62%, rgba(18,21,28,0.93) 100%),
+      linear-gradient(rgba(18,21,28,0.55), rgba(18,21,28,0.18) 30%, rgba(18,21,28,0.75));
+  }
+  .window > .win-head, .window > .win-body { position: relative; }
+
+  /* One row, always. Wrapping put the close button on a line of its own the
+     moment a long spawn name met a narrow phone, which cost a row of the panel
+     and moved the one control that should never move. So the row does not wrap
+     and the two things that can be any length give way instead: the region
+     first — where a spawn is, is the least of what this row says — and the name
+     ellipsises only once that is gone. */
+  .win-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px 13px; border-bottom: 1px solid var(--panel-border); flex-wrap: nowrap; }
+  .win-head .code-chip { font-size: 15px; padding: 4px 11px; border-radius: 7px; flex-shrink: 0; }
+  .win-title {
+    font-size: 17px; color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em;
+    flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* A shrink factor far above the title's, so this is what disappears first. */
+  .win-region {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .win-close:hover { color: var(--text-strong); }
+  /* A column, so the week inside it can be handed whatever height is left over
+     rather than guessing at it. `min-height: 0` on each link of that chain is
+     what lets a flex child be *shorter* than its contents — without it every
+     one of them sizes to the full grid and the panel grows past the window,
+     which is the scrolling this is meant to do away with. */
+  .win-body { flex: 1; min-height: 0; display: flex; flex-direction: column;
+              overflow-y: auto; overscroll-behavior: contain;
+              scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .cal-section.open, .cal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .win-body::-webkit-scrollbar { width: 10px; }
+  .win-body::-webkit-scrollbar-track { background: transparent; }
+  .win-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
+
+  .strip {
+    display: flex; align-items: center; gap: 11px; padding: 10px 20px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+  }
+  .strip i { font-size: 14px; }
+  .now-strip { background: rgba(255,255,255,0.02); }
+  .fold { cursor: pointer; user-select: none; }
+  .fold:hover { background: rgba(255,255,255,0.03); }
+  .fold-title { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
+  .fold-chevron { transition: transform 0.15s ease; margin-left: auto; }
+  .fold.open .fold-chevron { transform: rotate(180deg); }
+
+  /* ---- Up next -----------------------------------------------------------
+     What is actually coming to this spawn, which "+2 queued" never said. The
+     queue first — it happens soonest, and its times run off the hunt on now —
+     then bookings by start. Shut by default: it is reference, not the thing
+     anybody opened the panel to do, and its header carries the one row worth
+     having without opening it.
+
+     A rail with a pip per entry rather than a table, because the list is short
+     and in time order, and a rail reads as an evening where a table reads as
+     data. */
+  .up-head {
+    display: flex; align-items: center; gap: 9px; padding: 9px 20px;
+    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+    cursor: pointer; user-select: none;
+  }
+  .up-head:hover { background: rgba(255,255,255,0.03); }
+  .up-head .fold-chevron { transform: rotate(180deg); }
+  .up-head.open .fold-chevron { transform: rotate(0deg); }
+  .up-peek {
+    font-family: var(--mono); font-size: 11px; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .up-peek b { color: var(--text); font-weight: 600; }
+  .up-count {
+    font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 9px;
+    background: rgba(255,255,255,0.05); color: var(--muted); flex-shrink: 0; margin-left: auto;
+  }
+  .up-list {
+    border-bottom: 1px solid var(--panel-border); padding: 6px 20px 9px;
+    max-height: 190px; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  /* Fixed tracks throughout, and a width on the trailing one: a column that only
+     some rows fill is a column that moves. */
+  .up-row {
+    /* The time track holds "≈11:30pm" — the widest an hour of the day gets once
+       it carries am/pm — without the day label under it wrapping. */
+    display: grid; grid-template-columns: 66px 14px minmax(0, 1fr) 44px;
+    gap: 8px; align-items: center; padding: 5px 0; line-height: 1.4;
+  }
+  .up-when { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .up-when small { display: block; font-size: 9px; color: var(--muted); }
+  /* The rail is drawn off each row's own box, joining pip to pip, and stops at
+     the first and last so it does not dangle past either end of the list. */
+  .up-rail { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .up-rail::before {
+    content: ''; position: absolute; top: -50%; bottom: -50%; left: 50%; width: 1px;
+    background: var(--panel-border); transform: translateX(-0.5px);
+  }
+  .up-row:first-child .up-rail::before { top: 50%; }
+  .up-row:last-child .up-rail::before { bottom: 50%; }
+  .up-pip { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--st-booked); }
+  .up-queued .up-pip { background: var(--st-claimed); }
+  .up-asked .up-pip { background: var(--st-asked); }
+  .up-mine .up-pip { background: var(--st-free); }
+  .up-body { min-width: 0; }
+  .up-who { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .up-sub { color: var(--muted); font-size: 10px; }
+  /* A booking's countdown is definite and coloured; a queue place's is a
+     projection off hunts that may not run their length, so it stays muted. */
+  .up-sub .up-rel { color: var(--accent); }
+  .up-queued .up-sub .up-rel { color: var(--muted); }
+  .up-tag {
+    font-family: var(--sans); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.09em;
+    padding: 1px 5px; border-radius: 3px; justify-self: end;
+  }
+  .up-tag.queue { color: var(--st-claimed); background: rgba(210,51,105,0.16); }
+  .up-tag.asked { color: var(--st-asked); background: rgba(224,169,62,0.16); }
+  .up-tag.you { color: var(--st-free); background: rgba(46,204,113,0.16); }
+  .up-more { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding-top: 6px; }
+  .field { display: flex; align-items: center; gap: 7px; }
+  .field-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+  .live-bar { flex: 1; min-width: 80px; max-width: 220px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .live-bar span { display: block; height: 100%; background: var(--st-claimed); transition: width 1s linear; }
+
+  .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: transparent; border: none; border-left: 1px solid var(--panel-border);
+    color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg button:first-child { border-left: none; }
+  .seg button:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .seg button.on { background: rgba(91,140,255,0.18); color: #cfdcff; }
+
+  .dur-cap { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  /* ---- How long: the day's tank ------------------------------------------
+     Not a nought-to-ceiling slider but the stamina itself — grey for what today
+     has already taken, accent for what this hunt would take, empty for what
+     would be left. The ceiling stops being a rule that refuses you and becomes
+     the end of the bar, which you can see yourself approaching.
+     It is also why the strip above no longer carries a stamina readout of its
+     own: that was the same quantity stated twice, once as a bar you could not
+     touch and once as a number, and neither of them was the thing you were
+     about to change. */
+  .tank {
+    display: block; position: relative; width: 240px; height: 34px; border-radius: 8px;
+    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.02);
+    overflow: hidden; touch-action: none; user-select: none; cursor: ew-resize;
+  }
+  .tank:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Nothing to set when there is nothing left to spend. Still drawn, because a
+     full grey bar is the clearest possible statement of why. */
+  .tank[aria-disabled="true"] { cursor: default; }
+  .tank-zones { position: absolute; inset: 5px; border-radius: 4px; background: rgba(255,255,255,0.05); overflow: hidden; display: flex; }
+  .tank-spent { background: rgba(124,134,152,0.3); }
+  .tank-hunt { background: var(--accent); }
+  /* Where this hunt would end. */
+  .tank-edge {
+    position: absolute; top: 3px; bottom: 3px; width: 3px; border-radius: 2px;
+    background: var(--text-strong); box-shadow: 0 0 6px rgba(0,0,0,0.7); z-index: 2; pointer-events: none;
+  }
+  /* The guild's own ceiling, drawn only when it bites before the tank does.
+     Without it the bar would just stop following the finger part way along with
+     nothing on screen to say why. */
+  .tank-cap { position: absolute; top: 4px; bottom: 4px; border-left: 1px dashed var(--warn); opacity: 0.75; z-index: 1; pointer-events: none; }
+  /* Each figure inside the block it is about, both sliding with the boundary. */
+  .tank-in, .tank-out {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
+    white-space: nowrap; pointer-events: none; font-family: var(--mono); font-variant-numeric: tabular-nums;
+  }
+  .tank-in { font-size: 12.5px; font-weight: 600; color: #06122e; }
+  /* A short hunt is narrower than the word for it, so the figure steps outside
+     the block and takes the page's own text colour to stay readable. */
+  .tank-in.outside { color: var(--text-strong); }
+  .tank-out { font-size: 10.5px; color: var(--muted); }
+  /* The blue has reached it and is now behind it, so it wears the blue's type
+     colour rather than moving out of the way. */
+  .tank-out.on-hunt { color: #06122e; font-weight: 600; }
+
+  /* The booking controls, in named groups rather than one flat run of spans.
+     On a wide panel the groups sit on one line and read exactly as they did; on
+     a phone each becomes a row of its own, which is the only way any of them can
+     be centred — a flat strip left to wrap puts things wherever they happen to
+     fall, which is how "Once | Weekly" ended up off to one side. */
+  .cal-controls { gap: 10px 14px; }
+  .cc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .cc-week { margin-left: auto; gap: 10px; }
+
+  .btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 6px;
+    color: var(--bg); font-size: 12.5px; font-weight: 600; padding: 6px 15px; cursor: pointer;
+    /* Inline-flex so a button that carries an icon spaces it from its label
+       without every such button having to say so itself. A button with only a
+       label is laid out exactly as it was. */
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn > i { font-size: 14px; line-height: 1; }
+  .btn:hover:not([disabled]) { filter: brightness(1.08); }
+  .btn[disabled] { background: transparent; color: var(--muted); border-color: var(--panel-border); cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--text); border-color: var(--panel-border); }
+  .btn.ghost:hover:not([disabled]) { border-color: var(--accent); }
+  .btn.danger { background: transparent; color: var(--st-claimed); border-color: rgba(210,51,105,0.5); }
+  .btn.danger:hover:not([disabled]) { background: rgba(210,51,105,0.12); }
+  .btn.small { font-size: 11px; padding: 4px 10px; }
+  .btn.mod-btn { background: transparent; color: var(--purple); border-color: rgba(167,139,250,0.4); }
+  .btn.mod-btn:hover:not([disabled]) { background: rgba(167,139,250,0.12); }
+  /* Claiming is green here because it is green in Discord — Button.success on
+     the same action, wearing the same emoji. Somebody who has used the one
+     should recognise the other without reading it. */
+  .btn.claim { background: var(--st-free); border-color: var(--st-free); color: #06301a; }
+  .btn.claim[disabled] { background: transparent; border-color: var(--panel-border); }
+  .btn-emoji { width: 15px; height: 15px; flex-shrink: 0; }
+  .btn[disabled] .btn-emoji { opacity: 0.4; filter: grayscale(1); }
+
+  /* Everything the panel has to say, on one row of its own above the row you act
+     on. A verdict about the slot selected and a reply to something just pressed
+     are the same kind of thing at different moments, so they share a row rather
+     than stacking two — and the reply wins while there is one, being the newer
+     news. The row below never changes height, so the button never moves; this
+     one grows upward instead. */
+  .foot-msg {
+    padding: 9px 20px; border-top: 1px solid var(--panel-border);
+    display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.45;
+  }
+  .foot-msg > i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .foot-msg.ok { color: var(--st-free); }
+  .foot-msg.no { color: var(--st-asked); }
+  /* Standing advice rather than news, so it is quieter than either — it is what
+     the row holds when there is nothing to report. */
+  .foot-msg.hint-msg { color: var(--muted); font-size: 11.5px; }
+  .foot-msg.hint-msg > i { font-size: 14px; opacity: 0.75; }
+  /* Sized by its content and never scrolled away, so neither the button nor a
+     reply can be left off the bottom of a panel whose body is taller than the
+     window. Its children carry their own top borders, so it adds none. */
+  .win-foot { position: relative; flex-shrink: 0; }
+
+  /* Moderator tools, walled off from the member ones. Acting on somebody else's
+     claim is a different kind of act from taking a free spawn, and a strip that
+     mixed them would make it easy to do the first while meaning the second. */
+  .mod { border-top: 1px dashed var(--panel-border); padding: 12px 20px 18px; display: flex; flex-direction: column; gap: 9px; }
+  .mod-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
+  .mod-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+  /* The same tools one evening at a time, under the calendar. Dashed top border
+     and the purple label of the block above, so a moderator reads them as the
+     same kind of act rather than as part of the booking controls they sit
+     beside — what is being changed here is somebody else's evening.
+
+     Folded away by default, because it is the rarest thing on this panel and
+     the only one that acts on somebody else. What is left when it is closed is
+     one line naming the evening it would act on, which is what keeps it from
+     being a box somebody has to open to find out what is in it. */
+  .slot-tools { border-top: 1px dashed var(--panel-border); }
+  .slot-strip {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 20px;
+    background: none; border: 0; cursor: pointer; color: var(--purple); text-align: left;
+  }
+  .slot-strip:hover { background: rgba(167,139,250,0.06); }
+  .slot-tools.open .slot-strip { background: rgba(167,139,250,0.08); }
+  .slot-strip-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; }
+  /* Pushed to the end and allowed to shrink first: on a narrow screen the label
+     and the chevron are what must survive, and a long name truncates rather
+     than pushing the chevron off the strip. */
+  .slot-strip-who {
+    margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 10px;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .slot-body { padding: 0 20px 12px; display: flex; flex-direction: column; gap: 9px; }
+  .slot-ctx { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+  .slot-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.45; }
+  .slot-row { display: flex; gap: 8px; }
+  /* Both actions share the row equally and each is a thumb's worth tall, so the
+     pair works the same under a finger as under a pointer. Cancel keeps its own
+     width — it is the way out, not half the decision. */
+  .btn.slot-act { flex: 1; justify-content: center; min-height: 38px; }
+  .btn.slot-cancel { flex: 0 0 auto; min-height: 38px; }
+  @media (max-width: 420px) {
+    .slot-strip, .slot-body { padding-left: 14px; padding-right: 14px; }
+    /* Stacked rather than squeezed: two full-width targets beat two that are
+       each too narrow to read the label of. */
+    .slot-row { flex-direction: column; }
+    .btn.slot-cancel { flex: 1 1 auto; }
+  }
+
+  /* ---- Week grid ---------------------------------------------------------- */
+  .cal-legend { display: flex; gap: 14px; padding: 9px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .cal-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; border: 1.5px solid; }
+  .sw-claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
+  .sw-booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
+  .sw-confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
+  .sw-asked { border-color: var(--st-asked); background: rgba(224,169,62,0.28); }
+  .sw-pick { border-color: var(--purple); border-style: dashed; background: rgba(167,139,250,0.4); }
+
+  /* The headings ride inside the scroller with the columns they name, stuck to
+     its top. They used to be a grid of their own above it, which is fine while
+     the week is only ever as wide as the panel — but a phone shows four days of
+     seven and slides sideways for the rest, and a heading row outside that
+     movement would sit still while its own columns went past underneath. */
+  .wk-headrow, .wk-rows { display: grid; grid-template-columns: var(--gutter, 56px) repeat(7, 1fr); }
+  .wk-headrow { position: sticky; top: 0; z-index: 7; background: var(--panel); }
+  .wk-head { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
+  .wk-head.today { color: var(--accent); }
+  .wk-head .dnum { display: block; font-size: 13px; color: var(--text-strong); margin-top: 2px; letter-spacing: 0; }
+  /* The corner the two sticky axes meet in, above both of them. */
+  .wk-corner { position: sticky; left: 0; z-index: 8; background: var(--panel); border-bottom: 1px solid var(--panel-border); }
+  /* Sized off the viewport rather than fixed, so on a laptop screen the grid
+     gives ground to the strips above and below it instead of pushing the
+     booking controls off the bottom of the window. */
+  /* The one thing on the panel that scrolls. It takes the height left after the
+     strips above and below have had theirs, rather than the viewport arithmetic
+     this used to do — which had to be re-guessed whenever anything around it
+     changed height, and was wrong on a phone. */
+  .wk-body { position: relative; flex: 1; min-height: 120px; overflow: auto; overscroll-behavior: contain;
+             margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+  .wk-body::-webkit-scrollbar { width: 10px; }
+  .wk-body::-webkit-scrollbar-track { background: transparent; }
+  .wk-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
+  /* A week whose bookings have not landed yet. The grid itself is a function of
+     the date and is already right, so the only thing outstanding is what is
+     drawn on it — which makes a thread at the top the honest signal, rather than
+     blanking a panel that is not actually wrong. */
+  .wk-body.pending::before {
+    /* Pulled back out of the flow it takes up, so the grid does not step down
+       two pixels while a week is loading and back up when it arrives. */
+    content: ''; position: sticky; top: 0; z-index: 9; display: block;
+    height: 2px; margin-bottom: -2px; pointer-events: none;
+    background-image: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 40% 100%; background-repeat: no-repeat;
+    animation: sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes sweep { from { background-position: -45% 0; } to { background-position: 145% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .wk-body.pending::before { animation: none; background-image: none; background-color: rgba(91,140,255,0.45); }
+  }
+  /* Two grids of identical shape, stacked: the headings and the day columns.
+     Everything absolutely placed on the week — the now line, the selection —
+     belongs to the lower one, so its coordinates stay measured from midnight and
+     owe nothing to how tall the headings happen to be. */
+  .wk-grid { position: relative; --gutter: 56px; }
+  .wk-rows { position: relative; }
+  /* Relative only so the now flag can hang off it; it earns a background and a
+     layer of its own on a phone, where it is stuck to the left edge and has the
+     rest of the week passing behind it. */
+  .wk-hours { border-right: 1px solid var(--panel-border); position: relative; z-index: 5; }
+  .wk-hour {
+    height: 28px; font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+    text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
+  }
+  /* The server-time echo, so a Berlin-anchored rule can be read off a local axis
+     without doing the arithmetic in your head. */
+  .wk-hour .srv { display: block; font-size: 8px; opacity: 0.5; margin-top: -3px; }
+  .wk-col { border-left: 1px solid var(--panel-border); position: relative; }
+  .wk-cell { height: 28px; border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
+  .wk-cell:hover { background: rgba(91,140,255,0.07); }
+  .wk-cell.past { cursor: not-allowed; background: rgba(0,0,0,0.3); }
+  .wk-cell.past:hover { background: rgba(0,0,0,0.3); }
+  .wk-block {
+    position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; overflow: hidden;
+    font-family: var(--mono); font-size: 9.5px; line-height: 1.25; cursor: pointer; border: 1px solid;
+  }
+  .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
+     half on the next is not a shorter label, it is a wrong-looking one. */
+  .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; display: block; white-space: nowrap; }
+  /* Who the character on the first line belongs to. Quieter than either of the
+     lines above it: it answers a question about the block rather than saying
+     what the block is, and it is the line that may be cut when the name is
+     longer than the column. */
+  .wk-block .acct {
+    display: block; opacity: 0.6; font-size: 8.5px; margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* State decides the colour; whose it is decides how loud. Two hues would have
+     meant a booking of yours and a booking of theirs looked like different
+     kinds of thing, which they are not. */
+  .b-claimed { background: rgba(210,51,105,0.26); border-color: var(--st-claimed); color: #f3a6c0; }
+  .b-booked { background: rgba(91,140,255,0.16); border-color: var(--st-booked); border-style: dashed; color: #cfdcff; }
+  .b-confirmed { background: rgba(91,140,255,0.3); border-color: var(--st-confirmed); color: #cfdcff; }
+  .b-asked { background: rgba(224,169,62,0.2); border-color: var(--st-asked); color: #e8c887; }
+  .b-mine { box-shadow: inset 3px 0 0 currentColor; }
+  /* A rule that will produce this slot but has not booked a row for it yet.
+     Real enough to plan around, not yet real enough for its owner to be asked. */
+  .b-predicted { opacity: 0.62; }
+  .b-pick { background: rgba(167,139,250,0.34); border: 1px dashed var(--purple); color: #ddd0ff; z-index: 3; }
+  /* The selection is the one block on the grid you can pick up and move. */
+  .b-drag { cursor: grab; touch-action: none; }
+  .b-drag.dragging { cursor: grabbing; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
+  /* An evening the weekly rule will also take. Fainter than the one being
+     picked, because it is a consequence rather than a choice. */
+  .b-echo { background: rgba(167,139,250,0.14); opacity: 0.8; }
+  /* The foot of the selection, for dragging its length. Given a real target
+     height rather than a hairline, since it has to be grabbable with a mouse
+     and with a thumb. */
+  .stretch {
+    position: absolute; left: 0; right: 0; bottom: -3px; height: 9px;
+    cursor: ns-resize; touch-action: none; z-index: 4;
+  }
+  .stretch::after {
+    content: ''; position: absolute; left: 50%; bottom: 4px; width: 18px; height: 2px;
+    transform: translateX(-50%); border-radius: 1px; background: var(--purple); opacity: 0.85;
+  }
+  /* A block clipped by local midnight keeps a flat edge, so it reads as
+     continuing rather than as a booking that really stops there. */
+  .clip-top { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
+  .clip-bottom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: dashed; }
+
+  .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
+  .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: 8px; color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
+  .now-line { position: absolute; left: var(--gutter, 56px); right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  /* Carried by the hour gutter rather than by the grid, so that on a phone — where
+     the gutter is stuck to the left edge and the days slide past it — the time
+     stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
+  .now-flag {
+    position: absolute; left: 2px; transform: translateY(-50%); z-index: 6; pointer-events: none;
+    font-family: var(--mono); font-size: 8.5px; font-weight: 600; color: var(--bg);
+    background: var(--bad); border-radius: 3px; padding: 1px 4px; font-variant-numeric: tabular-nums;
+  }
+
+  /* How long, and the thing that acts on it, in one row. The tank used to live
+     up in the booking controls, a screen away from the button it feeds; the
+     verdict that shared this row has moved to .foot-msg above. What is left is
+     two objects whose height never changes, which is what keeps the button in
+     one place however much the panel has to say. */
+  .readout { padding: 10px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+  .foot-dur { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
+  .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .readout i { font-size: 15px; }
+  .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
+  /* Neither a yes nor a no: somebody clicked a hunt in progress and is being
+     told whose it is. */
+  .verdict-info { color: var(--muted); }
+  .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+
+  @media (max-width: 900px) { .wk-grid { --gutter: 44px; } }
+  @media (max-width: 620px) {
+    main { padding: 18px 12px 50px; }
+    .masthead-right { margin-left: 0; width: 100%; }
+    .filter { flex: 1; width: auto; }
+    /* Less room to give it, so it is cut sooner rather than pushing the
+       avatar and the chevron off the row. */
+    .sw-title { max-width: 150px; }
+    /* dvh, not vh: on a phone `100vh` is the viewport with the browser's own
+       chrome pretended away, so a full-height panel is taller than the screen
+       actually showing it and the whole thing scrolls by exactly the height of
+       the address bar. dvh is the height there really is. The vh line stays
+       ahead of it for anything too old to know the unit. */
+    .window { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
+    .wk-body { margin: 0 10px; }
+    /* Nothing outside the week scrolls: it is the part that is too big for a
+       phone, and everything else earns its place by being small enough. */
+    .win-body { overflow-y: hidden; }
+    /* Tighter, so the grid keeps as much of a short screen as it can. */
+    .win-head { padding: 11px 14px 9px; }
+    .strip { padding: 8px 14px; }
+    .readout { padding: 9px 14px; gap: 10px; }
+    .foot-msg { padding: 8px 14px; }
+    .up-head { padding: 8px 14px; }
+    .up-list { padding: 5px 14px 8px; max-height: 168px; }
+    .cal-legend { display: none; }
+
+    /* ---- Four days, not seven -------------------------------------------
+       A seventh of a phone is about forty pixels, which is not enough to say
+       who has a slot or when it runs — every block was an ellipsis. So the
+       columns are given a width worth reading and the week slides sideways for
+       the rest of itself, opened on yesterday so today and the two days worth
+       planning are already in view. The hour gutter and the day headings stay
+       put while it does, which is what the sticky rules above are for. */
+    .wk-grid {
+      --gutter: 44px;
+      /* The four that fit: the body's own width (the window, less its margins)
+         less the gutter, split four ways. */
+      --daycol: calc((100vw - 20px - var(--gutter)) / 4);
+      width: max-content;
+    }
+    .wk-headrow, .wk-rows { grid-template-columns: var(--gutter) repeat(7, var(--daycol)); }
+    .wk-hours { position: sticky; left: 0; background: var(--panel); }
+    /* Every pixel of a narrow column goes to the label, so a whole time fits on
+       one line and the name has somewhere to be above it. The size follows the
+       screen, because a quarter of a 320px phone is not a quarter of a 430px one
+       and "19:00–21:00" has to survive both — clamped at the top so a big phone
+       gets the desktop size rather than an inflated one. */
+    .wk-block { padding: 2px 4px; font-size: clamp(8px, 2.4vw, 9.5px); }
+
+    /* ---- Booking controls, on one row -----------------------------------
+       Stacked and centred, these took four rows of a short screen. "Book" goes,
+       because the heading immediately above says it; Now keeps its crosshair and
+       drops its word. What is left is two objects that fit inside 320px with
+       room to spare, so the row cannot wrap and never has to be centred twice.
+       The weekday mask is still a row of its own — seven targets need the
+       width. */
+    .cal-controls { justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .cc-week { margin-left: 0; gap: 8px; }
+    .cc-repeat .field-label { display: none; }
+    .cc-week .btn span { display: none; }
+    .cc-week .btn { padding: 5px 8px; }
+    .cc-days { flex: 1 1 100%; justify-content: center; }
+    .cc-days .seg { flex: 1; max-width: 320px; }
+    .cc-days .seg button { flex: 1; padding: 7px 0; font-size: 12px; }
+
+    /* The tank takes what is left of the foot beside the button it feeds. */
+    .foot-dur { flex: 1 1 auto; }
+    .foot-dur .tank { width: auto; flex: 1; height: 40px; }
+    .tank-in { font-size: 13px; }
+    .tank-out { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="masthead">
+    <div class="brand">
+      <img src="/dashboard/images/avatar.png" alt="">
+      <span><!--SERVER--><span class="sub" id="sub">loading…</span></span>
+    </div>
+    <span class="tier tier-<!--TIER-->"><!--TIER--></span>
+    <div class="masthead-right">
+      <span class="stale-note" id="stale"></span>
+      <input class="filter" id="filter" type="search" placeholder="Filter by code, name or creature…" aria-label="Filter spawns by code, name or creature">
+    </div>
+  </div>
+
+  <!-- Moderator tools that belong to the catalogue rather than to any one spawn.
+       Shut until asked for, and above the list because what it does — adding a
+       code — changes the list underneath it. Drawn only for a moderator, and
+       removed outright otherwise: see modPanel(). -->
+  <div class="panel mod-panel" id="mod-panel" hidden>
+    <button class="mod-panel-head" id="mod-panel-head" type="button" aria-expanded="false" aria-controls="mod-panel-body">
+      <i class="ti ti-shield-half" aria-hidden="true"></i>
+      <span class="fold-title">Moderator Tools</span>
+      <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>
+    </button>
+    <div class="mod-panel-body" id="mod-panel-body" hidden></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Spawns</div>
+    <div class="legend">
+      <span><i class="key key-free"></i>Free</span>
+      <span><i class="key key-claimed"></i>Being hunted</span>
+      <span><i class="key key-booked"></i>Booked</span>
+      <span><i class="key key-confirmed"></i>Booked &amp; confirmed</span>
+    </div>
+    <div class="cards" id="cards"></div>
+  </div>
+</main>
+
+<div class="veil" id="veil"></div>
+<div class="window" id="window" role="dialog" aria-modal="true" aria-labelledby="win-title">
+  <img class="watermark" id="watermark" alt="">
+  <div class="scrim"></div>
+  <div class="win-head">
+    <span class="code-chip" id="win-code"></span>
+    <span class="win-title" id="win-title"></span>
+    <span class="win-region" id="win-region"></span>
+    <button class="win-close" id="win-close" aria-label="Close">&times;</button>
+  </div>
+  <div class="win-body" id="win-body"></div>
+  <!-- What the bot said back. Outside the scrolling body on purpose: it is the
+       reply to something just pressed, and it belongs in one fixed place at the
+       foot of the panel rather than wherever the body's current contents happen
+       to push it. -->
+  <div class="win-foot" id="win-foot" hidden></div>
+</div>
+
+<script>
+const GUILD_ID = '<!--GUILD_ID-->';
+// Presentation only. Which tools are drawn; never whether they are allowed,
+// which every endpoint decides for itself against the live guild.
+const TIER = '<!--TIER-->';
+// The clock a repeat rule's weekdays and the stamina reset are read in. The page
+// cannot guess it, and one that guessed wrong would book the wrong day.
+const SERVER_TZ = '<!--SERVER_TZ-->';
+const SS_SERVER_HOUR = Number('<!--SERVER_SAVE_HOUR-->');
+const PLACEHOLDER = '/dashboard/images/avatar.png';
+// The guild's `daily-emoji`, resolved to its CDN image server-side. Empty when
+// it is not a custom emoji, in which case Claim goes without a face.
+const CLAIM_EMOJI = '<!--CLAIM_EMOJI-->';
+
+const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
+// What dragging a selection about snaps to. Finer than SLOT, which is the step a
+// hunt's *length* moves in: a quarter of an hour is a start time somebody means,
+// and being made to choose between 20:00 and 20:30 for the sake of one number
+// governing both is a worse answer than having two.
+const DRAG_SNAP = 15;
+// The shortest hunt worth starting — RespawnService.MinimumClaimMinutes. Below
+// a whole step the tank's remainder is offered exactly as it stands, because
+// eighteen minutes is still eighteen minutes of hunting and rounding it away
+// would refuse somebody a hunt to keep the numbers tidy.
+const MIN_CLAIM = 5;
+// How many rows "Up next" shows before it owns up to the rest. Matches
+// RespawnDashboardRoute.UpNextRows and RespawnEmbeds.RowsPerField, so the panel
+// and the Discord card are the same list rather than two answers to one
+// question. The server has already capped what it sends; this is the guard for
+// the two lists together.
+const UP_NEXT_ROWS = 10;
+// Whether to say "tap" or "click", and whether to mention right-clicking at all
+// — a phone has no right button, so that sentence would be advice nobody can
+// take. Read once: it is a property of the device, not of the moment.
+const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches;
+const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+const pad = n => String(n).padStart(2, '0');
+/** An hour of the day as a twelve-hour clock reads it. Midnight and noon are
+ *  12, not 0 — "0 AM" is not a time anybody writes. */
+const twelveHour = h => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
+const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** A time of day on a twelve-hour clock, minutes and all.
+ *
+ *  For the times somebody reads one at a time and out of context — when their
+ *  turn comes, when a booking starts — where "9:30pm" is the way they would say
+ *  it out loud. The grid keeps the 24-hour form: a column of times read against
+ *  each other wants every one the same width, and am/pm is a suffix that makes
+ *  them ragged. Midnight is 12:00am, not 0:00, for the same reason as
+ *  [[twelveHour]].
+ */
+const fmtClock12 = d =>
+  `${d.getHours() % 12 === 0 ? 12 : d.getHours() % 12}:${pad(d.getMinutes())}${d.getHours() < 12 ? 'am' : 'pm'}`;
+const fmtDur = m =>
+  m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
+
+// Quantised rather than continuous, for the same reason the monitoring
+// dashboard's heat ramp is: a spawn should sit at a recognisable level rather
+// than a slightly different shade every poll. `drain` desaturates the sprite in
+// step, because full-colour art is the one thing on a faded card that still
+// shouts.
+const FADE = [
+  { maxHours: 1,        opacity: 1.00, drain: 0.00 },
+  { maxHours: 24,       opacity: 0.88, drain: 0.15 },
+  { maxHours: 72,       opacity: 0.68, drain: 0.40 },
+  { maxHours: 168,      opacity: 0.50, drain: 0.65 },
+  { maxHours: 720,      opacity: 0.34, drain: 0.85 },
+  { maxHours: Infinity, opacity: 0.20, drain: 1.00 }
+];
+/** Total by construction. A spawn nobody has ever claimed has no age at all,
+ *  and `Infinity < Infinity` is false — so relying on the last step to match
+ *  everything left over silently returned undefined and took the whole render
+ *  down with it. The floor is explicit instead. */
+function fadeFor(hours) {
+  const dormant = FADE[FADE.length - 1];
+  if (hours == null || !isFinite(hours)) return dormant;
+  return FADE.find(step => hours < step.maxHours) || dormant;
+}
+
+
+/** Rendered in the reader's own zone — every time on the wire is an absolute
+ *  instant precisely so this can be done here.
+ *
+ *  Twelve-hour, like the "Up next" rows: this is the same fact — when the next
+ *  booking is due — said on the card instead of in the list, and one page
+ *  writing one instant two ways reads as two different times. */
+function clockTime(iso) {
+  return fmtClock12(new Date(iso));
+}
+
+function minutesLeft(endsAt) {
+  return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
+}
+
+/** How far off something is, at the coarseness worth reading at that distance.
+ *  Minutes while it is soon enough to wait for, hours through the evening, days
+ *  once it is another day's problem — an evening seven days out does not become
+ *  more useful for being told it is 168 hours. */
+function relTime(at) {
+  const mins = Math.round((new Date(at).getTime() - Date.now()) / 60000);
+  if (mins <= 0) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60), rest = mins % 60;
+  if (hours < 24) return rest ? `${hours}h${pad(rest)}` : `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/** Today, tomorrow, or the weekday — for a list whose whole point is *when*, a
+ *  date is a thing to decode where "Tomorrow" is a thing to read. */
+function dayLabel(at) {
+  const day = new Date(at); day.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((day - today) / DAY_MS);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  const d = new Date(at);
+  return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()}`;
+}
+
+/** Who a block's owner actually is, under whatever name is on the front of it.
+ *
+ *  A block is labelled with a Tibia character nine times in ten, and a character
+ *  name is no use to somebody who wants to go and ask about the slot — so the
+ *  Discord account goes underneath, with the server's own nickname beside it.
+ *  Said in that order, and nowhere as a `<@id>` mention: it matches how the bot
+ *  names people in Discord (`Names.user`), so the same person reads the same way
+ *  in the thread and on the grid.
+ *
+ *  Everything that would merely repeat the line above is dropped. A block with
+ *  no character on it is already labelled with the account, so only the nickname
+ *  is left to add; a nickname equal to the account name is not a second fact.
+ *  Empty when there is nothing to say — most bookings made before nicknames were
+ *  recorded — and the caller then draws no line at all rather than a blank one.
+ */
+function accountLine(b) {
+  const acct = (b.account || '').trim();
+  const nick = (b.nickname || '').trim();
+  const shown = (b.owner || '').trim().toLowerCase();
+  const at = nick && nick.toLowerCase() !== acct.toLowerCase() ? `@${nick}` : '';
+  if (!acct || acct.toLowerCase() === shown) return at;
+  return at ? `${acct} (${at})` : acct;
+}
+
+/** How a card reads its state, and never a crash if it meets one it does not
+ *  know. A missing branch here took the whole render down once before, and a
+ *  board that has just learnt a new word should degrade to that word rather
+ *  than to a blank page. */
+function stateText(spawn) {
+  const text = STATE_TEXT[spawn.state];
+  return text ? text(spawn) : spawn.state;
+}
+
+const STATE_TEXT = {
+  free: () => 'free',
+  claimed: s => `${s.holder || 'someone'}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  booked: s => `${s.holder || 'someone'} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  confirmed: s => `${s.holder || 'someone'} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+};
+
+// ---- Timezone -------------------------------------------------------------
+// The calendar's axis is the reader's own clock, but a repeat rule's weekdays
+// and the stamina reset are read on the server's. Rather than hide that, both
+// are shown: the hour gutter carries a server echo, and server save is drawn
+// where the server's 10:00 actually falls here.
+//
+// Both formatters are built once and kept. Constructing an Intl.DateTimeFormat
+// is among the most expensive ordinary things a page can do, and a single draw
+// of the grid asks for around forty readings — twenty-four for the hour gutter's
+// echo, two per day to place server save, one per day for a repeat preview. Built
+// per call, that alone was a visible part of the pause on changing week.
+const tzFormats = new Map();
+function tzFormat(tz) {
+  let fmt = tzFormats.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    tzFormats.set(tz, fmt);
+  }
+  return fmt;
+}
+function offsetMinutes(date, tz) {
+  const parts = tzFormat(tz).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day,
+    parts.hour === '24' ? 0 : parts.hour, parts.minute, parts.second);
+  return (asUtc - date.getTime()) / 60000;
+}
+/** A server wall-clock reading -> the instant it names. Resolved twice so a
+ *  daylight saving changeover lands on the right side of the jump. */
+function serverToInstant(y, mo, d, h, mi) {
+  let guess = new Date(Date.UTC(y, mo, d, h, mi));
+  for (let i = 0; i < 2; i++) guess = new Date(Date.UTC(y, mo, d, h, mi) - offsetMinutes(guess, SERVER_TZ) * 60000);
+  return guess;
+}
+// Built on first use rather than on load. It is the same formatter either way,
+// but a timezone the browser will not accept then takes the calendar down with
+// it instead of the whole page — the board itself has no use for this.
+let serverFmt = null;
+/** Answers held by the minute they describe, which is the finest the reading
+ *  distinguishes. The hour gutter asks the same twenty-four questions on every
+ *  draw of the same week, so a week paged away from and back to costs nothing
+ *  the second time. */
+const serverPartsCache = new Map();
+function serverParts(date) {
+  const key = Math.floor(date.getTime() / 60000);
+  const hit = serverPartsCache.get(key);
+  if (hit) return hit;
+  if (!serverFmt) {
+    serverFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: SERVER_TZ, hour12: false, weekday: 'short',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+    });
+  }
+  const p = serverFmt.formatToParts(date).reduce((acc, x) => (acc[x.type] = x.value, acc), {});
+  const answer = { weekday: p.weekday, hour: Number(p.hour === '24' ? 0 : p.hour), minute: Number(p.minute) };
+  // Bounded, so a long visit paging through months cannot grow it without
+  // limit. A reading thrown away costs one formatter call to get back.
+  if (serverPartsCache.size > 2048) serverPartsCache.clear();
+  serverPartsCache.set(key, answer);
+  return answer;
+}
+/** The weekday bit the bot would read for this instant — server time, Monday
+ *  low. The page never expands a rule itself, but it does have to send the mask
+ *  for a weekly booking, and that mask is in the server's terms. */
+function serverDayBit(date) {
+  return 1 << DAY_NAMES.indexOf(serverParts(date).weekday);
+}
+
+// ---- State ----------------------------------------------------------------
+let board = null;          // the two halves, stitched: what the spawns are and what is happening
+/** code -> the unchanging half of a spawn. Fetched once. */
+let catalogue = null;
+let filterText = '';
+let slots = [];            // the week on screen, as drawn blocks
+/** True while the week on screen is one we have never read. Distinct from
+ *  "read, and nothing is booked in it": an empty grid means one thing and does
+ *  not get to mean the other. */
+let weekPending = false;
+/** The last read of the week on screen came back empty-handed. Kept apart from
+ *  `weekPending` because the two say different things and only one of them is
+ *  worth interrupting somebody over. */
+let weekError = false;
+/** Everybody the guild's respawn system has seen, once anything has asked for
+ *  them. Module-scope rather than owned by the moderator panel, because the
+ *  calendar's own "give this day to" needs the same list and reading it twice
+ *  would be two round trips for one answer. Null until first asked. */
+let people = null;
+
+/** `code|weekOffset` -> { slots, at }: weeks already read.
+ *
+ *  A week of bookings is not a live board. It changes when somebody books
+ *  something, which is minutes apart, so holding one for half a minute costs
+ *  nothing anybody can see — and paging back to the week you were just looking
+ *  at should not go to the server at all. What the cache actually buys is that
+ *  the arrows stop waiting on a round trip before they will move.
+ */
+const weekCache = new Map();
+const WEEK_TTL = 30000;
+/** Reads in the air, so a click, a prefetch and a poll landing on the same week
+ *  make one request between them rather than three. */
+const weekInflight = new Map();
+const weekKey = (code, offset) => `${code}|${offset}`;
+
+const view = {
+  code: null,              // the spawn whose window is open, or null
+  weekOffset: 0,
+  duration: null,
+  repeat: 'once',
+  days: new Set(),
+  pick: null,
+  answer: null,
+  busy: false,
+  // Set for real by openWindow, which opens the week — this only covers the
+  // moment before any spawn has been opened at all.
+  calendarOpen: false,
+  // Shut on every open. Deliberately not remembered between spawns: it is
+  // reference, and a section that stayed open would take the grid's height on
+  // every spawn after the one somebody wanted it on.
+  upNextOpen: false
+};
+
+let gridEl = null;
+let scrolledOnce = false;
+/** code -> the card element and the pieces of it that change, so painting never
+ *  has to search the DOM for them. */
+const cardParts = new Map();
+/** The order the cards are in, so the list is only rearranged when it really
+ *  differs — reordering under somebody mid-click is its own kind of flicker. */
+let lastOrder = null;
+
+const limits = () => (board && board.limits) || null;
+const step = () => (limits() ? limits().step : SLOT);
+/** The longest claim that can actually be made: the shorter of the guild's
+ *  ceiling and what is left in the tank, already snapped to the step. */
+/** The longest hunt that could start at `when`.
+ *
+ *  Stamina is an allowance per server-save day, and it is spent when a hunt
+ *  *starts*, not when it is arranged — so a slot booked for after the next
+ *  server save is paid out of that day's allowance rather than out of what is
+ *  left of this one. Measuring a booking against today's remainder made a spent
+ *  tank shrink what could be booked for tomorrow, and at nothing left it barred
+ *  booking a future day at all: the ceiling reached zero, the length with it,
+ *  and Book was refused for a hunt the server would have accepted quite happily.
+ *
+ *  A day yet to begin is worth the guild's whole allowance, since that is what
+ *  the tank refills to — the true figure is unknowable from here anyway, being
+ *  whatever they have not spent by the time it comes round.
+ */
+function capAt(when) {
+  const l = limits();
+  if (!l) return 0;
+  const resets = l.resetsAt ? new Date(l.resetsAt).getTime() : null;
+  if (when && resets && when.getTime() >= resets) {
+    return l.budgetMinutes == null
+      ? l.maxDurationMinutes
+      : Math.max(0, Math.min(l.maxDurationMinutes, l.budgetMinutes));
+  }
+  return l.claimableMinutes;
+}
+
+/** The ceiling for the hunt currently being arranged: the selected slot if
+ *  there is one, otherwise a claim starting now. One length serves both, so it
+ *  is measured against whichever the button is about to do. */
+const cap = () => capAt(view.pick);
+const openSpawn = () => (board && view.code ? board.spawns.find(s => s.code === view.code) : null);
+
+function hoursSince(iso) {
+  if (!iso) return null;
+  return (Date.now() - new Date(iso).getTime()) / 3600000;
+}
+
+/** Code, name, or the creature the spawn is known for — the last of those
+ *  because people remember what they went there to kill more readily than what
+ *  the place is called. The creature arrives with the catalogue and is empty for
+ *  the many rows that deliberately have none, which simply never match it.
+ *
+ *  Every word has to appear somewhere, but they may appear in any order and in
+ *  any of the three: "fire library" finds "Secret Library (Fire)", which no
+ *  substring of that name does. A single word behaves exactly as a substring
+ *  search over the three fields, which is what this used to be. */
+function matches(spawn) {
+  const q = filterText.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = `${spawn.code} ${spawn.name} ${spawn.creature || ''}`.toLowerCase();
+  return q.split(/\s+/).every(word => haystack.includes(word));
+}
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
+/** Anything that came from Discord — a spawn name, a booking owner — is escaped
+ *  before it goes anywhere near innerHTML. */
+function esc(s) {
+  const node = document.createElement('div');
+  node.textContent = s == null ? '' : s;
+  return node.innerHTML;
+}
+
+// ---- The board ------------------------------------------------------------
+/** One card, built once. Everything that can change later is written by
+ *  paintCard, so this runs once per spawn rather than once per second. */
+function cardFor(spawn) {
+  const card = el('div', 'card');
+  card.dataset.code = spawn.code;
+
+  const img = document.createElement('img');
+  img.className = 'sprite' + (spawn.sprite ? '' : ' placeholder');
+  img.src = spawn.sprite || PLACEHOLDER;
+  img.alt = '';
+  img.loading = 'lazy';
+  // A sprite the cache has not fetched yet 404s; the fetch has just been started
+  // by that very request, so a later poll will have it.
+  img.addEventListener('error', () => {
+    img.src = PLACEHOLDER;
+    img.classList.add('placeholder');
+  });
+  card.appendChild(img);
+
+  const body = el('div', 'card-body', `
+    <div class="card-top">
+      <span class="code-chip"></span>
+      <span class="spawn-name"></span>
+    </div>
+    <div class="card-state">
+      <span class="dot"></span>
+      <i class="ti ti-check tick" aria-hidden="true" hidden></i>
+      <span class="who"></span>
+      <span class="queue"></span>
+    </div>
+    <div class="card-bar" hidden><span></span></div>`);
+  card.appendChild(body);
+
+  // The pieces are held onto rather than looked up again later: painting runs
+  // every second across every card, and a querySelector per field per card
+  // would put back the cost this whole change exists to remove.
+  const parts = {
+    card, img,
+    chip: body.querySelector('.code-chip'),
+    name: body.querySelector('.spawn-name'),
+    dot: body.querySelector('.dot'),
+    tick: body.querySelector('.tick'),
+    who: body.querySelector('.who'),
+    queue: body.querySelector('.queue'),
+    bar: body.querySelector('.card-bar'),
+    fill: body.querySelector('.card-bar span')
+  };
+
+  // The only three things that never change while the page is open.
+  parts.chip.textContent = spawn.code;
+  parts.name.textContent = spawn.name;
+  card.title = `${spawn.code} — ${spawn.name}${spawn.region ? ' · ' + spawn.region : ''}`;
+
+  card.addEventListener('click', () => openWindow(spawn.code));
+  cardParts.set(spawn.code, parts);
+  paintCard(spawn);
+  return card;
+}
+
+/** Write the changeable parts of a card.
+ *
+ *  Assigning a string that is already there costs nothing — the browser does no
+ *  work and nothing repaints — which is what lets this run every second. The
+ *  version this replaces rebuilt all 285 cards once a second, so every image
+ *  element was thrown away and made again, and every hover and scroll position
+ *  went with them. That was the flicker.
+ */
+function paintCard(spawn) {
+  const p = cardParts.get(spawn.code);
+  if (!p) return;
+  const hours = hoursSince(spawn.lastActivity);
+  const fade = fadeFor(hours);
+  const state = spawn.state;
+
+  const opacity = String(fade.opacity);
+  if (p.card.style.opacity !== opacity) {
+    p.card.style.opacity = opacity;
+    p.card.style.setProperty('--drain', fade.drain);
+  }
+  const edge = `var(--st-${state})`;
+  if (p.card.style.getPropertyValue('--edge') !== edge) {
+    p.card.style.setProperty('--edge', edge);
+  }
+
+  const chipClass = 'code-chip' + (state === 'claimed' ? ' live' : '');
+  if (p.chip.className !== chipClass) p.chip.className = chipClass;
+
+  const dotClass = 'dot ' + state;
+  if (p.dot.className !== dotClass) p.dot.className = dotClass;
+  if (p.tick.hidden !== (state !== 'confirmed')) p.tick.hidden = state !== 'confirmed';
+
+  const whoClass = 'who' + (state === 'free' ? ' free' : '');
+  if (p.who.className !== whoClass) p.who.className = whoClass;
+  p.who.textContent = stateText(spawn);
+  p.queue.textContent = spawn.queueLength > 0 ? `+${spawn.queueLength} queued` : '';
+
+  if (state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    const from = new Date(spawn.startsAt).getTime();
+    const to = new Date(spawn.endsAt).getTime();
+    const done = Math.min(1, Math.max(0, (Date.now() - from) / Math.max(1, to - from)));
+    if (p.bar.hidden) p.bar.hidden = false;
+    p.fill.style.width = `${(done * 100).toFixed(1)}%`;
+  } else if (!p.bar.hidden) {
+    p.bar.hidden = true;
+  }
+}
+
+/** Which spawns are shown, and in what order: most recently claimed first, and
+ *  a spawn nobody has ever claimed last.
+ *
+ *  The same rule Discord's forum follows — a post is bumped when somebody takes
+ *  the spawn and keeps that place until something else is taken, so letting a
+ *  spawn go does not cost you the top of the list. Whether it is *currently*
+ *  held is deliberately not part of the order: a hunt claimed three hours ago
+ *  and still running is older news than one claimed a minute ago and finished.
+ *
+ *  This briefly sorted held spawns into a group of their own, which looked like
+ *  the fix for claiming not reaching the top. It was not: a booked slot's
+ *  starts_at counted as activity that had already happened, so a spawn booked
+ *  for tomorrow outranked everything until tomorrow — see lastActivityByRespawn,
+ *  where that is now excluded until the slot actually comes round.
+ */
+function shownSpawns() {
+  const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
+  return board.spawns.filter(matches).slice().sort((a, b) => since(a) - since(b));
+}
+
+/** Put the cards in the right order, making and removing only what changed.
+ *
+ *  Order is the one thing that cannot be patched into a card, so it is done by
+ *  moving the elements that already exist. They keep their images, and the
+ *  browser keeps what it had already decoded.
+ */
+function layoutBoard() {
+  const container = document.getElementById('cards');
+  const shown = shownSpawns();
+  const order = shown.map(s => s.code).join(',');
+  if (order === lastOrder) return;
+  lastOrder = order;
+
+  if (!shown.length) {
+    cardParts.clear();
+    container.innerHTML = `<div class="empty-note">${
+      board.spawns.length ? 'No spawns match that filter.' : 'This server has no spawns in its catalogue yet.'
+    }</div>`;
+    return;
+  }
+  const first = container.firstElementChild;
+  if (first && first.classList.contains('empty-note')) container.innerHTML = '';
+
+  const wanted = new Set(shown.map(s => s.code));
+  cardParts.forEach((p, code) => {
+    if (!wanted.has(code)) { p.card.remove(); cardParts.delete(code); }
+  });
+
+  let previous = null;
+  shown.forEach(spawn => {
+    const existing = cardParts.get(spawn.code);
+    const card = existing ? existing.card : cardFor(spawn);
+    const expected = previous ? previous.nextElementSibling : container.firstElementChild;
+    if (card !== expected) {
+      if (previous) previous.after(card); else container.prepend(card);
+    }
+    previous = card;
+  });
+}
+
+function renderBoard() {
+  if (!board) return;
+  layoutBoard();
+  board.spawns.forEach(paintCard);
+
+  // No running tally beside the title any more. It counted what the board was
+  // already showing in colour, and on a phone it was a line of small print
+  // between the reader and the spawns — which is what they came for.
+  //
+  // No timezone here any more: every time on the page is already drawn in the
+  // reader's own clock, so naming it said nothing, and the line is better spent
+  // on which Discord this board belongs to — which the header above now states.
+  setText(document.getElementById('sub'), `${board.spawns.length} spawns`);
+}
+
+function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+/** The once-a-second beat. Only a live hunt moves on its own — its countdown
+ *  and its progress bar — so only those cards are touched. Everything else
+ *  changes when the poll says it changed, and not before. */
+function tick() {
+  if (!board) return;
+  board.spawns.forEach(spawn => { if (spawn.state === 'claimed') paintCard(spawn); });
+}
+
+// ---- Data -----------------------------------------------------------------
+/** What the spawns are — names, regions, sprites — which changes only when an
+ *  admin edits the catalogue.
+ *
+ *  Fetched once and kept. It is most of the bytes and almost none of the
+ *  change, so sending it on every ten-second poll was the bulk of the traffic
+ *  for no information at all. The browser's own cache handles repeat visits;
+ *  this only refetches when a spawn turns up that we have never heard of.
+ */
+async function loadCatalogue() {
+  // `reload` rather than a plain fetch: the catalogue is served with a two-minute
+  // max-age, which is right for the ordinary case and exactly wrong for the two
+  // that get here — a code has just been added, or one has turned up that we
+  // have never heard of. Both mean the copy in the browser's cache is the one
+  // thing we know to be out of date. The ETag still saves the body when nothing
+  // has really changed.
+  const res = await fetch(`/dashboard/g/${GUILD_ID}/catalogue`,
+    { headers: { 'Accept': 'application/json' }, cache: 'reload' });
+  if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
+  const data = await res.json();
+  catalogue = new Map(data.spawns.map(s => [s.code, s]));
+}
+
+async function loadBoard() {
+  const res = await fetch(`/dashboard/g/${GUILD_ID}/board`, { headers: { 'Accept': 'application/json' } });
+  // A session that expired mid-visit lands here; the redirect to login is not
+  // something fetch can follow usefully, so say so rather than looping.
+  if (!res.ok) throw new Error(res.status === 403 ? 'no longer have access' : 'could not refresh');
+  const live = await res.json();
+
+  if (!catalogue) await loadCatalogue();
+  // A spawn nobody has told us about means the catalogue moved under us — an
+  // admin added one. Refetch once rather than drawing a card with no name.
+  if (live.spawns.some(s => !catalogue.has(s.code))) await loadCatalogue();
+
+  // The two halves are stitched back together here, so everything downstream
+  // still sees one flat spawn with a name and a state on it.
+  board = {
+    ...live,
+    spawns: live.spawns.map(s => Object.assign({}, catalogue.get(s.code), s))
+  };
+  if (view.duration == null && limits()) {
+    view.duration = Math.max(SLOT, Math.min(limits().defaultDurationMinutes, cap()));
+  }
+}
+
+/** The open spawn's week.
+ *
+ *  The window asked for is an absolute range covering the *local* week, not the
+ *  server week. A booking near either edge belongs to a different server day
+ *  than the column it is drawn in, and asking for the server week would drop it
+ *  from the view entirely — silently, which is the worst way for a calendar to
+ *  be wrong.
+ */
+function fetchWeek(code, offset) {
+  const key = weekKey(code, offset);
+  const already = weekInflight.get(key);
+  if (already) return already;
+
+  const start = weekStart(offset);
+  const end = new Date(start.getTime() + 7 * DAY_MS);
+  const url = `/dashboard/g/${GUILD_ID}/slots?code=${encodeURIComponent(code)}`
+    + `&from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`;
+
+  const reading = (async () => {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error('could not read that week');
+    const data = await res.json();
+    const week = data.slots.map(s => ({ ...s, start: new Date(s.startsAt), end: new Date(s.endsAt) }));
+    // Bounded, so paging through a lot of spawns cannot grow this without
+    // limit. A week thrown away costs the one read that brings it back.
+    if (weekCache.size > 48) weekCache.clear();
+    weekCache.set(key, { slots: week, at: Date.now() });
+    return week;
+  })();
+
+  weekInflight.set(key, reading);
+  // Cleared either way: a failed read must not leave a promise nobody can
+  // retry sitting in front of every later attempt at that week.
+  reading.catch(() => {}).then(() => weekInflight.delete(key));
+  return reading;
+}
+
+/** Read the week on screen from the server, whatever the cache says. */
+async function loadSlots() {
+  if (!view.code) { slots = []; return; }
+  const code = view.code, offset = view.weekOffset;
+  const week = await fetchWeek(code, offset);
+  // The reader may have moved on while this was in the air. A late answer for a
+  // week nobody is looking at goes into the cache and no further — drawing it
+  // would put last week's bookings on this week's grid.
+  if (view.code === code && view.weekOffset === offset) {
+    slots = week;
+    weekPending = false;
+    weekError = false;
+  }
+}
+
+/** Draw whatever week `view.weekOffset` now names, at once.
+ *
+ *  The grid is a function of the date and nothing else — its columns, its hour
+ *  gutter, where server save falls, whether the now line belongs in it — so it
+ *  is drawn immediately from a cached week or from none, and the bookings are
+ *  filled in when the read lands. Waiting on a round trip before moving at all
+ *  is what made the arrows feel broken: nothing on screen answered the click
+ *  until the server had been to the database and back.
+ */
+function showWeek() {
+  if (!view.code) return;
+  const code = view.code, offset = view.weekOffset;
+  const held = weekCache.get(weekKey(code, offset));
+  slots = held ? held.slots : [];
+  weekPending = !held;
+  weekError = false;
+  renderWindow();
+
+  const fresh = held && Date.now() - held.at < WEEK_TTL;
+  if (fresh) { prefetchNeighbours(); return; }
+  // A stale week is left on screen while it is checked, rather than blanked:
+  // it is almost certainly still right, and flashing it away to draw it again
+  // is a worse answer than being a few seconds behind.
+  const stillHere = () => view.code === code && view.weekOffset === offset;
+  loadSlots().then(
+    () => {
+      if (view.code === code) prefetchNeighbours();
+      if (stillHere()) { weekPending = false; renderWindow(); }
+    },
+    () => {
+      // An empty grid must not be allowed to read as "nothing is booked" when
+      // the truth is that we never found out.
+      if (stillHere()) { weekPending = false; weekError = true; renderWindow(); }
+    });
+}
+
+/** The weeks either side, read quietly once this one has settled.
+ *
+ *  Somebody paging through a month presses the same arrow several times over,
+ *  so the week after the one being looked at is nearly always the next one
+ *  wanted. Two reads per week visited buys arrows that answer with no wait at
+ *  all — and only while the grid is actually open, since a window opened to
+ *  claim something now never looks at another week.
+ */
+function prefetchNeighbours() {
+  if (!view.code || !view.calendarOpen) return;
+  const code = view.code;
+  [view.weekOffset - 1, view.weekOffset + 1].forEach(offset => {
+    const held = weekCache.get(weekKey(code, offset));
+    if (held && Date.now() - held.at < WEEK_TTL) return;
+    fetchWeek(code, offset).catch(() => {});
+  });
+}
+
+/** Everything read about this spawn is now suspect. Called after a write:
+ *  a weekly booking lands in every week at once, so throwing away only the week
+ *  on screen would leave the neighbours confidently wrong. */
+function forgetWeeks() {
+  weekCache.clear();
+}
+
+async function refresh() {
+  try {
+    await loadBoard();
+    await loadSlots();
+    document.getElementById('stale').textContent = '';
+  } catch (e) {
+    document.getElementById('stale').textContent = e.message || 'offline';
+  }
+  renderBoard();
+  if (view.code) renderWindow();
+}
+
+// ---- The week -------------------------------------------------------------
+function weekStart(offset = view.weekOffset) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offset * 7);   // local Monday
+  return d;
+}
+const dayStart = (start, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; };
+const localMinutes = d => d.getHours() * 60 + d.getMinutes();
+
+function weekLabel(start) {
+  const end = new Date(start.getTime() + 6 * DAY_MS);
+  const month = d => d.toLocaleDateString(undefined, { month: 'short' });
+  return view.weekOffset === 0 ? 'This week'
+    : `${start.getDate()} ${month(start)} – ${end.getDate()} ${month(end)}`;
+}
+
+// ---- Verdict --------------------------------------------------------------
+// Advisory only. The bot decides what a clash means — whether it can be put to
+// the other person, whether they have already been asked — and its answer is
+// what the window shows after booking. This exists so the button is not a blind
+// guess, not to duplicate ClashVerdict.
+function overlapping(start, minutes) {
+  const end = new Date(start.getTime() + minutes * 60000);
+  return slots.filter(b => start < b.end && b.start < end);
+}
+
+/** Who a block belongs to, said in full, for a sentence rather than for a label.
+ *
+ *  Built on [[accountLine]] so the grid and the message under it name the same
+ *  person the same way: the character the team recognises, then the account and
+ *  the nickname behind it. Never a mention — see `Names.user`, which is the same
+ *  convention on the Discord side.
+ */
+function nameOf(b) {
+  const account = accountLine(b);
+  const shown = (b.owner || '').trim();
+  if (!account) return shown || 'somebody';
+  // A leading @ means the line is a nickname alone, which happens when the block
+  // is already labelled with the account — so it goes in brackets after it
+  // rather than being introduced as a second, separate name.
+  if (account.startsWith('@')) return shown ? `${shown} (${account})` : account;
+  return shown ? `${shown} — ${account}` : account;
+}
+
+/** Whatever is actually happening at an instant — the block covering it, if any.
+ *
+ *  A hunt in progress rather than a window overlapping one, which is why it asks
+ *  about a moment instead of a range. */
+function runningAt(at) {
+  const t = at.getTime();
+  return slots.find(b => b.start.getTime() <= t && t < b.end.getTime() && !b.predicted);
+}
+
+function judge(start) {
+  const end = new Date(start.getTime() + view.duration * 60000);
+  if (start.getTime() <= Date.now()) {
+    // Clicking a block that is running sets the pick to its start, which is
+    // always in the past — so the honest reading of "that time has passed" was
+    // the answer to a question nobody asked. What they clicked was somebody's
+    // hunt, and what they wanted to know is whose. Named the way the bot names
+    // people in Discord, so the person on the card and the person in the thread
+    // are recognisably the same one.
+    const live = runningAt(start);
+    if (live) {
+      const who = live.mine ? 'You are' : `${nameOf(live)} is`;
+      const verb = live.state === 'claimed' ? 'hunting' : 'booked for';
+      // The advice names whatever the button is currently offering, which for
+      // your own hunt is giving it back rather than booking anything.
+      const next = live.mine && live.state === 'claimed'
+        ? 'Leave to give it back, or pick a later time to book it.'
+        : 'Pick a later time to book it.';
+      return {
+        type: 'info',
+        text: `${who} ${verb} this until ${fmtClock12(live.end)}. ${next}`
+      };
+    }
+    return { type: 'no', text: 'That start time has already passed.' };
+  }
+  const hit = overlapping(start, view.duration);
+  if (!hit.length) return { type: 'ok', text: `Free — ${fmtLocal(start)}–${fmtLocal(end)}, ${fmtDur(view.duration)}` };
+  if (hit.some(b => b.mine)) return { type: 'no', text: 'That runs over a booking of your own.' };
+  if (hit.some(b => b.state === 'claimed')) return { type: 'no', text: 'Somebody is hunting that right now.' };
+  if (view.repeat === 'week') return { type: 'no', text: 'A repeating booking cannot be settled by asking about one evening.' };
+  if (hit.length > 1) return { type: 'no', text: 'That runs over more than one booking — nobody single to ask.' };
+  if (hit[0].state === 'asked') return { type: 'no', text: `${hit[0].owner} has already been asked about that slot.` };
+  if (hit[0].predicted) return { type: 'no', text: `${hit[0].owner} books that every week — too far ahead to ask about yet.` };
+  return { type: 'ask', text: `Taken by ${hit[0].owner}. Booking asks whether they are actually hunting it.` };
+}
+
+function canBook() {
+  if (!view.pick || view.busy || !view.duration) return false;
+  if (view.repeat === 'week' && view.days.size === 0) return false;
+  // `ok` and `ask` are the two that lead somewhere: a free slot, or one whose
+  // owner can be asked about it. Anything else — a refusal, or the note about a
+  // hunt already running — is not a booking waiting to be made.
+  const verdict = judge(view.pick).type;
+  return verdict === 'ok' || verdict === 'ask';
+}
+
+// ---- The spawn window -----------------------------------------------------
+const veil = document.getElementById('veil');
+const windowEl = document.getElementById('window');
+
+/** The open card as a history entry, so a phone's Back closes it.
+ *
+ *  Without one the card is pure DOM state and the browser has no idea anything
+ *  happened, so Back does the only thing it can — leaves the dashboard, which
+ *  is a long way to fall for shutting a panel.
+ *
+ *  The URL is left alone: `pushState` with the current href adds an entry
+ *  without changing what the address bar says or what a refresh would load.
+ *  That does mean a reload with a card open comes back to the board rather than
+ *  to the card, which is the trade for not having to define what a bookmarked
+ *  card means.
+ *
+ *  `history.state` rather than a variable of our own, because a reload keeps the
+ *  state and would not keep the variable — and the two disagreeing is exactly
+ *  how a Back button ends up needing two presses. */
+const cardEntryOpen = () => !!(history.state && history.state.spawn);
+
+/** Shut the card the way a reader asked for it: through the history entry, so
+ *  the ✕, the veil, Escape and Back are one action rather than four that have
+ *  to be kept in step. The teardown itself happens in `closeWindow`, when the
+ *  `popstate` below arrives.
+ *
+ *  The fallback matters as much as the normal path. `renderWindow` shuts the
+ *  card on its own when a spawn has gone from the catalogue under somebody, and
+ *  a card opened before this code shipped has no entry behind it — neither has
+ *  a `history.back()` to spend, and calling one would take the reader off the
+ *  dashboard instead. */
+/** Set between asking to go back and the `popstate` that answers, since the two
+ *  are a tick apart. `renderWindow` can shut the card while it draws and is
+ *  called freely, so without this a spawn that vanished could spend two Backs
+ *  in that gap — and the second one leaves the dashboard. */
+let dismissing = false;
+
+function dismissWindow() {
+  if (dismissing) return;
+  if (cardEntryOpen()) { dismissing = true; history.back(); }
+  else closeWindow();
+}
+
+window.addEventListener('popstate', () => {
+  // Only ever a close. The entry is pushed on open and spent on Back, so
+  // arriving here with the card already shut means the reader has gone back
+  // past the board itself, and there is nothing of ours to undo.
+  if (view.code) closeWindow();
+});
+
+function openWindow(code) {
+  // Guarded rather than assumed: two entries for one card would need two Backs
+  // to shut it. The cards sit behind the veil so this should not arise, but the
+  // cost of being wrong is a button that looks broken.
+  if (!view.code) history.pushState({ spawn: code }, '');
+  view.code = code;
+  view.weekOffset = 0;
+  view.pick = null;
+  view.answer = null;
+  view.repeat = 'once';
+  view.days = new Set();
+  // Open on the week rather than on a fold that has to be found and pressed.
+  // It is also where the length of a hunt is set, the strip above having no
+  // control of its own, so a spawn opened straight to a claim would otherwise
+  // offer no way to change how long it runs for.
+  view.calendarOpen = true;
+  view.upNextOpen = false;
+  scrolledOnce = false;
+  const l = limits();
+  // Start at the guild's default, but never above what is actually claimable —
+  // a default of 2h is meaningless if only 18m of stamina is left, and a floor
+  // of half an hour would put the figure straight back above the ceiling.
+  view.duration = l ? Math.min(l.defaultDurationMinutes, l.claimableMinutes) : null;
+  veil.classList.add('open');
+  windowEl.classList.add('open');
+  lockPage();
+  // Read even while the week is folded away, because the header says how much is
+  // in it and a header that lied until you opened it would be worse than no
+  // header. Drawn first and filled in after, so the window itself is up as soon
+  // as it is asked for.
+  showWeek();
+}
+
+function closeWindow() {
+  dismissing = false;
+  view.code = null;
+  slots = [];
+  // The weeks themselves are kept — reopening a spawn a moment later should not
+  // go back to the server — but nothing is outstanding once the window is shut.
+  weekPending = false;
+  weekError = false;
+  gridEl = null;
+  veil.classList.remove('open');
+  windowEl.classList.remove('open');
+  unlockPage();
+}
+
+/** Hold the board still behind the window, and put it back afterwards.
+ *
+ *  The window is fixed to the viewport, which on a phone only means anything
+ *  while the viewport is not itself moving. Scrolling past either end of the
+ *  board rubber-bands the document, the address bar comes and goes on the way,
+ *  and a fixed panel is repainted against all of it a frame behind — which is
+ *  the jitter. Nothing behind the window is reachable anyway, so the cheapest
+ *  answer is for there to be nothing to scroll.
+ *
+ *  Pinning is `position: fixed` rather than `overflow: hidden`, which iOS
+ *  ignores on the body; the offset is what stops the board jumping to the top
+ *  while it is pinned, and it is undone on the way out.
+ */
+let pinnedAt = 0;
+function lockPage() {
+  if (document.body.classList.contains('locked')) return;
+  pinnedAt = window.scrollY;
+  document.body.style.top = -pinnedAt + 'px';
+  document.body.classList.add('locked');
+}
+function unlockPage() {
+  if (!document.body.classList.contains('locked')) return;
+  document.body.classList.remove('locked');
+  document.body.style.top = '';
+  window.scrollTo(0, pinnedAt);
+}
+
+/** What lengths actually exist. Half hours on the way up, but the ceiling wins:
+ *  the last of a tank is claimable exactly as it stands, so the floor is a whole
+ *  step only while there is a whole step to be had. */
+function snapDuration(minutes) {
+  const s = step();
+  return Math.max(Math.min(s, cap()), Math.min(cap(), Math.round(minutes / s) * s));
+}
+
+function setDuration(minutes) {
+  view.duration = snapDuration(minutes);
+  view.answer = null;
+  renderWindow();
+}
+
+/** Keep the chosen length inside what the hunt being arranged can actually run
+ *  for.
+ *
+ *  The ceiling moves with the selection — a slot after the next server save is
+ *  paid from that day's allowance — so a length that was impossible a moment ago
+ *  may have become possible, and one that was fine may now be too long. Only
+ *  ever raised from below the floor, never from a length somebody chose: picking
+ *  half an hour deliberately and finding it stretched to two would be the page
+ *  overruling them.
+ */
+function fitDuration() {
+  const l = limits();
+  if (!l) return;
+  const ceiling = cap();
+  if (ceiling <= 0) { view.duration = 0; return; }
+  const floor = Math.min(SLOT, ceiling);
+  if (!view.duration || view.duration < floor) {
+    view.duration = Math.min(l.defaultDurationMinutes, ceiling);
+  } else if (view.duration > ceiling) {
+    view.duration = ceiling;
+  }
+}
+
+/** The three quantities the duration control is drawn against.
+ *
+ *  `span` is what the whole bar is worth. With stamina switched off there is no
+ *  tank to show — the guild's ceiling is the only limit — so the bar becomes the
+ *  claim's own range and nothing is spent, which degrades to an ordinary slider
+ *  without needing a second control for the case.
+ */
+function tankState() {
+  const l = limits();
+  const budget = l && l.budgetMinutes ? l.budgetMinutes : 0;
+  const remaining = budget ? Math.max(0, l.remainingMinutes || 0) : null;
+  const ceiling = cap();
+  return {
+    span: budget || Math.max(SLOT, ceiling),
+    spent: budget ? budget - remaining : 0,
+    remaining,
+    cap: ceiling
+  };
+}
+
+/** Draw the tank at a given length.
+ *
+ *  Called on every render and directly on every frame of a drag — the second is
+ *  why it takes the length as an argument rather than reading `view.duration`.
+ *  Rebuilding the panel per frame of a drag fights the pointer, exactly as it
+ *  does for the selection on the grid.
+ */
+function paintTank(root, minutes) {
+  const t = tankState();
+  const zones = root.querySelector('.tank-zones');
+  root.querySelector('.tank-spent').style.width = (t.spent / t.span * 100) + '%';
+  root.querySelector('.tank-hunt').style.width = (minutes / t.span * 100) + '%';
+
+  // Measured rather than computed, because the markers are placed on the face
+  // and the zones sit inset within it.
+  const box = zones.getBoundingClientRect(), face = root.getBoundingClientRect();
+  const left = box.left - face.left, w = box.width;
+  const at = left + ((t.spent + minutes) / t.span) * w;
+
+  const edge = root.querySelector('.tank-edge');
+  edge.style.left = (at - edge.offsetWidth / 2) + 'px';
+
+  const ceiling = root.querySelector('.tank-cap');
+  const bound = t.remaining !== null && t.cap < t.remaining;
+  ceiling.hidden = !bound;
+  if (bound) ceiling.style.left = (left + ((t.spent + t.cap) / t.span) * w) + 'px';
+
+  // Both figures are anchored to an end rather than floating beside the boundary:
+  // the length to the head of the blue, what is left to the tail of the bar.
+  // Neither moves while you drag — only the boundary and the fill do — and
+  // neither can be pushed out of the bar, which is what the caption-line
+  // fallback used to be for.
+  const head = left + (t.spent / t.span) * w;
+  const inLabel = root.querySelector('.tank-in'), outLabel = root.querySelector('.tank-out');
+  // A tank with nothing in it has no length to state — "0m" beside "no stamina"
+  // is the same news twice, and the second telling is the one that reads like a
+  // choice somebody made.
+  inLabel.textContent = minutes ? fmtDur(minutes) : '';
+  // A short hunt is narrower than the word for it, so its figure steps just past
+  // the boundary into the empty and takes the page's text colour to stay
+  // readable. Still inside the bar.
+  const fits = (minutes / t.span) * w > inLabel.offsetWidth + 12;
+  inLabel.classList.toggle('outside', !fits);
+  inLabel.style.left = (fits ? head + 7 : at + 7) + 'px';
+
+  // What the tank would have left afterwards — of the tank, not of this
+  // control's own range. A guild whose per-claim ceiling bites before stamina
+  // does would otherwise report a full tank as empty.
+  const rest = t.remaining === null ? null : Math.max(0, t.remaining - minutes);
+  const text = rest === null ? '' : rest ? `${fmtDur(rest)} left` : 'no stamina';
+  outLabel.textContent = text;
+  // It stays put and lets the blue arrive underneath it, going dark when it
+  // does. Moving it would mean shoving it off the end on a full tank, which is
+  // the one moment "no stamina" is the thing you want to read.
+  const outLeft = left + w - outLabel.offsetWidth - 7;
+  outLabel.style.left = outLeft + 'px';
+  outLabel.classList.toggle('on-hunt', at > outLeft - 2);
+  // The single case where something has to give: a hunt too short to hold its
+  // own figure puts it where this one is. The length wins.
+  outLabel.style.visibility =
+    text && !(!fits && at + 7 + inLabel.offsetWidth > outLeft - 6) ? 'visible' : 'hidden';
+
+  root.setAttribute('aria-valuemin', Math.min(SLOT, t.cap));
+  root.setAttribute('aria-valuemax', t.cap);
+  root.setAttribute('aria-valuenow', minutes);
+  root.setAttribute('aria-valuetext', fmtDur(minutes) + (text ? `, ${text}` : ''));
+}
+
+/** Drag it, tap it, or arrow it. There are no buttons on either end, so the face
+ *  has to take every gesture there is. */
+function wireTank(root) {
+  const t = tankState();
+  if (t.cap < MIN_CLAIM) { root.setAttribute('aria-disabled', 'true'); return; }
+
+  // A position on the bar is a point in the day, and the hunt is what is left of
+  // it once the spent part is taken off — which is why dragging into the grey
+  // pins at the floor rather than going negative.
+  const at = clientX => {
+    const r = root.getBoundingClientRect();
+    return snapDuration(((clientX - r.left) / r.width) * t.span - t.spent);
+  };
+
+  root.addEventListener('pointerdown', down => {
+    if (down.button > 0) return;
+    down.preventDefault();
+    // Capture keeps the drag alive once the pointer leaves the bar, which is
+    // most of a drag on a control this short. Not worth losing the drag over,
+    // though, so a refusal is allowed rather than left to abort the handler.
+    try { root.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+    let preview = at(down.clientX);
+    paintTank(root, preview);
+
+    const move = ev => {
+      const next = at(ev.clientX);
+      if (next === preview) return;
+      preview = next;
+      paintTank(root, next);
+    };
+    const up = () => {
+      root.removeEventListener('pointermove', move);
+      root.removeEventListener('pointerup', up);
+      root.removeEventListener('pointercancel', up);
+      // One render at the end, against the length actually settled on — it
+      // redraws the selection on the grid and the verdict under it.
+      if (preview !== view.duration) setDuration(preview);
+    };
+    root.addEventListener('pointermove', move);
+    root.addEventListener('pointerup', up);
+    root.addEventListener('pointercancel', up);
+  });
+
+  root.addEventListener('keydown', e => {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+    if (d) { e.preventDefault(); setDuration(view.duration + d * step()); }
+  });
+}
+
+/** Put the selection down without making another one.
+ *
+ *  The weekday mask is deliberately left standing. It survives changing week and
+ *  folding the calendar away already, and it is as often something ticked on
+ *  purpose as something inferred from the slot that was clicked — throwing away
+ *  a chosen set of days because the start time was withdrawn would be taking
+ *  back more than was asked for.
+ */
+function clearPick() {
+  view.pick = null;
+  // The verdict on screen is about the slot being given up, as is any refusal
+  // still sitting above it, so neither outlives it.
+  view.answer = null;
+  renderWindow();
+}
+
+function renderWindow() {
+  const spawn = openSpawn();
+  // Through the same door as the ✕, so the history entry the card was opened
+  // with is spent rather than left behind as a Back that does nothing.
+  if (!spawn) { dismissWindow(); return; }
+  fitDuration();
+  // Both axes: on a phone the week is wider than the screen as well as taller,
+  // and a render that put the hours back but not the days would jump the reader
+  // to Monday every time the selection moved.
+  const keepScroll = gridEl ? { top: gridEl.scrollTop, left: gridEl.scrollLeft } : null;
+
+  const watermark = document.getElementById('watermark');
+  const wanted = spawn.sprite || PLACEHOLDER;
+  if (watermark.getAttribute('src') !== wanted) {
+    watermark.src = wanted;
+    watermark.className = 'watermark' + (spawn.sprite ? '' : ' placeholder');
+    watermark.onerror = () => { watermark.src = PLACEHOLDER; watermark.className = 'watermark placeholder'; };
+  }
+
+  const chip = document.getElementById('win-code');
+  chip.textContent = spawn.code;
+  chip.className = 'code-chip' + (spawn.state === 'claimed' ? ' live' : '');
+  document.getElementById('win-title').textContent = spawn.name;
+  document.getElementById('win-region').textContent = spawn.region || '';
+
+  const body = document.getElementById('win-body');
+  body.innerHTML = '';
+  body.appendChild(nowStrip(spawn));
+  const upNext = upNextSection(spawn);
+  if (upNext) body.appendChild(upNext);
+  body.appendChild(calendarSection());
+  if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
+
+  // The foot of the panel: whatever it has to say, then how long and the button
+  // that acts on it. Outside the part that scrolls, so all of it sits in the same
+  // corner however tall the body above happens to be and whether or not the week
+  // is open.
+  //
+  // The message goes above the action row, not below it. Below, every reply the
+  // bot gave changed the height of the thing under the button and shifted the
+  // button itself; above, it grows upward into the panel and the button keeps the
+  // corner it had.
+  const foot = document.getElementById('win-foot');
+  foot.innerHTML = '';
+  const message = footMessage();
+  if (message) foot.appendChild(message);
+  // Between the two: a moderator repairing an evening is answering the message
+  // above it, and the action row below stays where it always is.
+  const tools = slotTools(openSpawn());
+  if (tools) foot.appendChild(tools);
+  const action = readout();
+  if (action) foot.appendChild(action);
+  foot.hidden = !foot.firstChild;
+
+  wireWindow();
+  if (keepScroll !== null && gridEl) {
+    gridEl.style.scrollBehavior = 'auto';
+    gridEl.scrollTop = keepScroll.top;
+    gridEl.scrollLeft = keepScroll.left;
+  } else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
+}
+
+/** Already holding it, or already standing in its queue, means there is nothing
+ *  to ask for — the service would refuse either way, and offering the button
+ *  anyway just invites a pointless round trip. */
+function canClaimNow(spawn) {
+  const l = limits();
+  return !spawn.mine && !spawn.queued && !!l && l.claimableMinutes >= MIN_CLAIM;
+}
+
+/** The Discord emoji the Claim button wears there, worn here too. */
+function claimEmojiImg() {
+  if (!CLAIM_EMOJI) return null;
+  const img = document.createElement('img');
+  img.className = 'btn-emoji';
+  img.src = CLAIM_EMOJI;
+  img.alt = '';
+  // A CDN that will not answer should cost the label nothing — better a button
+  // that reads "Claim" than one with a broken image nailed to the front of it.
+  img.addEventListener('error', () => img.remove());
+  return img;
+}
+
+/** Giving a spawn back, or standing out of its queue.
+ *
+ *  "Leave" either way, and the same word the Discord post's own button uses —
+ *  giving a spawn back and standing out of its queue are the same act to
+ *  somebody doing it, and only one of the two is ever on offer at a time.
+ */
+function leaveButton(spawn) {
+  const holding = spawn.mine;
+  return button(holding ? 'Leave' : 'Leave queue', 'btn danger',
+    () => post(`/dashboard/g/${GUILD_ID}/release`, { code: spawn.code }, s => {
+      if (holding) {
+        s.mine = false;
+        // Free unless somebody is waiting, in which case it passes to them. Who
+        // that is, is not ours to guess — naming the wrong person for a second
+        // is worse than saying "someone" until the poll says.
+        s.state = (s.queueLength || 0) > 0 ? 'claimed' : 'free';
+        delete s.holder;
+        delete s.startsAt;
+        delete s.endsAt;
+      } else {
+        s.queued = false;
+        s.queueLength = Math.max(0, (s.queueLength || 1) - 1);
+      }
+    }), 'ti-logout');
+}
+
+/** The one thing this panel is most likely to be asked to do, whatever that
+ *  currently is.
+ *
+ *  Every way of taking this spawn on or letting it go is the same decision at a
+ *  different moment, so they are one button in one corner rather than several
+ *  competing ones scattered around the panel. In order of precedence:
+ *
+ *    - a time picked on the grid means booking it, even for a spawn already
+ *      held — booking a later evening and hunting one now are different acts,
+ *      and the pick is the reader saying which they meant;
+ *    - holding it offers giving it back, and standing in its queue offers
+ *      leaving that queue;
+ *    - otherwise it offers taking the spawn now.
+ *
+ *  Nothing at all when none of those apply — no stamina left, say — which the
+ *  strip above explains rather than leaving a dead button to be pressed.
+ */
+function primaryAction(spawn) {
+  // Clicking your own hunt on the grid is not picking a time to book. The block
+  // starts in the past, so nothing could ever be booked from it — which left a
+  // Book button that was permanently dead. What somebody wants from their own
+  // running hunt is the thing they always want from it, so the pick is ignored
+  // and the ordinary Leave falls through.
+  const own = view.pick && runningAt(view.pick);
+  if (own && own.mine && own.state === 'claimed') return leaveButton(spawn);
+
+  if (view.pick) {
+    const verdict = judge(view.pick);
+    const book = button(view.busy ? 'Working…' : verdict.type === 'ask' ? 'Book & ask' : 'Book',
+      'btn', doBook, 'ti-calendar-plus');
+    book.disabled = !canBook();
+    return book;
+  }
+
+  // Giving it up outranks taking it on, and the two can never both apply:
+  // holding a spawn or queueing for it is exactly what stops you claiming it.
+  if (spawn.mine || spawn.queued) return leaveButton(spawn);
+
+  if (!canClaimNow(spawn)) return null;
+
+  // Wording follows what will actually happen, so nobody presses "Claim" and is
+  // surprised to find themselves in a queue. Only a *live hunt* produces a
+  // queue: booked and confirmed both mean nobody is on it right now, so claiming
+  // succeeds — cut short by the booking, which the answer explains.
+  const joining = spawn.state === 'claimed';
+  const claim = button(joining ? 'Join queue' : 'Claim', joining ? 'btn' : 'btn claim',
+    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
+      if (joining) {
+        // Behind whoever is on it. The position is theirs to know, so the count
+        // moves and nothing claims to know where in the line they are.
+        s.queued = true;
+        s.queueLength = (s.queueLength || 0) + 1;
+      } else {
+        // Theirs from now until the duration runs out — subject to a booking or
+        // a tank the server knows more about, which the answer corrects.
+        s.state = 'claimed';
+        s.mine = true;
+        s.holder = 'you';
+        s.startsAt = new Date().toISOString();
+        s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
+        s.lastActivity = s.startsAt;
+      }
+    }));
+  // Joining a queue is not the claim action and does not borrow its face.
+  if (!joining) {
+    const face = claimEmojiImg();
+    if (face) claim.insertBefore(face, claim.firstChild);
+  }
+  return claim;
+}
+
+/** What is happening on this spawn right now, and what can be done about it
+ *  this minute — as against the calendar below, which is about later. */
+function nowStrip(spawn) {
+  const l = limits();
+  const strip = el('div', 'strip now-strip');
+  const tick = spawn.state === 'confirmed' ? '<i class="ti ti-check tick" aria-hidden="true"></i>' : '';
+  // No "+2 queued" here. On a card, before the panel is open, a count is the
+  // whole story; once it is open the question has moved on to who and when, and
+  // the section below answers that with the rows themselves.
+  strip.innerHTML = `<span class="dot ${spawn.state}"></span>${tick}
+    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>`;
+
+  if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    const start = new Date(spawn.startsAt).getTime(), end = new Date(spawn.endsAt).getTime();
+    const done = Math.min(1, Math.max(0, (Date.now() - start) / Math.max(1, end - start)));
+    strip.appendChild(el('span', 'live-bar', `<span style="width:${(done * 100).toFixed(1)}%"></span>`));
+  }
+
+  // Nothing about the ceiling here either. "up to 5h · stamina" was a third
+  // telling of a thing the tank says by being the tank — the bar ends where the
+  // ceiling is, and you can watch yourself arrive at it.
+  if (!canClaimNow(spawn) && l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
+    strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
+  }
+
+  // No buttons here at all. Claim, Book, Release and Leave queue are all the
+  // same decision about this spawn at different moments, so they are one button
+  // in one corner of the panel — see primaryAction.
+  //
+  // Nor any stamina, which used to sit at the right of this row as a bar and a
+  // figure. The duration control below is that same tank, drawn at a size you
+  // can read and act on, so this said it a second time in a place where nothing
+  // could be done about it.
+  return strip;
+}
+
+/** What is actually coming to this spawn: the queue, then the bookings.
+ *
+ *  Shut by default. It is reference rather than the thing anybody opened the
+ *  panel to do, and ten rows is more height than a phone can spare beside the
+ *  grid — so the header carries the one row worth having without opening
+ *  anything, and the rest is a press away.
+ *
+ *  The queue comes first because it happens soonest and because its times are
+ *  derived from the hunt running now. Those times are projections: the server
+ *  works them out from the current hunt's end plus everyone ahead
+ *  (`RespawnBoardEntry.projectedQueueStarts`), and a hunt released early brings
+ *  every one of them forward. They are marked `≈` and their countdown is left
+ *  muted, where a booking's is definite and coloured.
+ */
+function upNextRows(spawn) {
+  const waiting = (spawn.waiting || []).map(w => ({
+    at: w.startsAt, minutes: w.minutes, who: w.mine ? 'You' : w.name,
+    kind: 'queued', tag: 'queue', projected: true
+  }));
+  const booked = (spawn.booked || []).map(b => ({
+    at: b.startsAt, minutes: b.minutes, who: b.mine ? 'You' : b.name,
+    kind: b.asked ? 'asked' : b.mine ? 'mine' : 'booked',
+    tag: b.asked ? 'asked' : b.mine ? 'you' : ''
+  }));
+  // Everything there was before any cap, so one note covers the lot — the
+  // server has already trimmed each list to ten, and `bookedTotal` is what it
+  // trimmed from.
+  const total = waiting.length + (spawn.bookedTotal || booked.length);
+  return { rows: waiting.concat(booked), total };
+}
+
+function upNextSection(spawn) {
+  const { rows, total } = upNextRows(spawn);
+  if (!rows.length) return null;
+
+  const wrap = document.createDocumentFragment();
+  const soonest = rows[0];
+  const head = el('div', 'up-head' + (view.upNextOpen ? ' open' : ''), `
+    <i class="ti ti-clock-hour-4" aria-hidden="true"></i>
+    <span class="fold-title">Up next</span>
+    <span class="up-peek">next in <b>${esc(relTime(soonest.at))}</b> — ${esc(soonest.who)}</span>
+    <span class="up-count">${total}</span>
+    <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
+  head.setAttribute('role', 'button');
+  head.setAttribute('aria-expanded', String(!!view.upNextOpen));
+  head.addEventListener('click', () => { view.upNextOpen = !view.upNextOpen; renderWindow(); });
+  wrap.appendChild(head);
+
+  if (view.upNextOpen) {
+    const shown = rows.slice(0, UP_NEXT_ROWS);
+    const hidden = total - shown.length;
+    const list = el('div', 'up-list', shown.map(r => `
+      <div class="up-row up-${r.kind}">
+        <span class="up-when">${r.projected ? '≈' : ''}${fmtClock12(new Date(r.at))}<small>${esc(dayLabel(r.at))}</small></span>
+        <span class="up-rail"><span class="up-pip"></span></span>
+        <span class="up-body">
+          <span class="up-who">${esc(r.who)}</span>
+          <span class="up-sub">in <span class="up-rel">${esc(relTime(r.at))}</span> · ${fmtDur(r.minutes)}</span>
+        </span>
+        ${r.tag ? `<span class="up-tag ${r.tag}">${r.tag}</span>` : '<span></span>'}
+      </div>`).join('')
+      + (hidden > 0 ? `<div class="up-more">…and ${hidden} more</div>` : ''));
+    wrap.appendChild(list);
+  }
+  return wrap;
+}
+
+/** The week, folded away until it is wanted.
+ *
+ *  Most visits to a spawn are about right now — take it, or see who has it —
+ *  and a week of grid above the fold makes that ordinary case read as the
+ *  complicated one. So the header states what the week holds and opens it on
+ *  request, which is also where the first scroll-to-now happens: scrolling
+ *  something nobody has looked at yet is wasted work.
+ */
+function calendarSection() {
+  // `open` is what lets the week claim the height left over in the panel — see
+  // the flex chain in the stylesheet. Folded away it must not, or the fold
+  // header would be pushed about by space it is not using.
+  const wrap = el('div', 'cal-section' + (view.calendarOpen ? ' open' : ''));
+  const booked = slots.filter(b => b.state !== 'claimed').length;
+  // A week we have not read yet, or could not, says so. "Nothing booked" is a
+  // claim about the week, and it is not one to make on no information.
+  const summary = weekError ? 'could not read that week'
+    : weekPending ? 'reading that week…'
+    : booked === 0 ? 'nothing booked this week'
+    : `${booked} booked this week`;
+
+  const head = el('div', 'strip fold' + (view.calendarOpen ? ' open' : ''), `
+    <i class="ti ti-calendar-month" aria-hidden="true"></i>
+    <span class="fold-title">Book a time</span>
+    <span class="muted">${summary}</span>
+    <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
+  head.setAttribute('role', 'button');
+  head.setAttribute('aria-expanded', String(view.calendarOpen));
+  head.addEventListener('click', () => {
+    view.calendarOpen = !view.calendarOpen;
+    // Nothing to book while it is shut, and the grid it was picked on is about
+    // to be thrown away — holding onto the element would have the next render
+    // restore a scroll position from a node that is no longer in the page,
+    // which is what stopped `scrolledOnce` from ever taking effect on reopening.
+    if (!view.calendarOpen) { view.pick = null; gridEl = null; }
+    scrolledOnce = false;
+    // Opening it is also when the weeks either side become worth having, and
+    // when a week held from an earlier visit is worth checking.
+    if (view.calendarOpen) showWeek(); else renderWindow();
+  });
+  wrap.appendChild(head);
+  // The standing instructions used to sit here, under this heading. They have
+  // moved into the message row at the foot — see footMessage — because they and
+  // the verdict on a selection are the same row's job at different moments, and
+  // giving them a row of their own meant the panel carried two strips of text
+  // where one would do.
+  if (view.calendarOpen) wrap.appendChild(calendar());
+  return wrap;
+}
+
+function calendar() {
+  const wrap = el('div', 'cal');
+  const now = new Date();
+  const start = weekStart();
+
+  // --- booking controls
+  // One group per decision — how often, which days, which week. How *long* is not
+  // among them any more: it sits in the foot beside the button it feeds, which is
+  // where the decision it belongs to actually gets made. See .cal-controls for
+  // why these are groups rather than a flat run of spans.
+  wrap.appendChild(el('div', 'strip cal-controls', `
+    <span class="cc-row cc-repeat">
+      <span class="field-label">Book</span>
+      <span class="seg" data-seg="repeat">
+        <button data-v="once" class="${view.repeat === 'once' ? 'on' : ''}">Once</button>
+        <button data-v="week" class="${view.repeat === 'week' ? 'on' : ''}">Weekly</button>
+      </span>
+    </span>
+    <span class="cc-row cc-week">
+      <span class="seg" data-seg="week">
+        <button data-v="-1" aria-label="Previous week">&lsaquo;</button>
+        <button data-v="0" class="${view.weekOffset === 0 ? 'on' : ''}">${weekLabel(start)}</button>
+        <button data-v="1" aria-label="Next week">&rsaquo;</button>
+      </span>
+      <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> <span>Now</span></button>
+    </span>
+    ${view.repeat === 'week'
+      ? `<span class="cc-row cc-days"><span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
+          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span></span>`
+      : ''}`));
+
+  wrap.appendChild(el('div', 'cal-legend', `
+    <span><i class="swatch sw-claimed"></i>Being hunted</span>
+    <span><i class="swatch sw-booked"></i>Booked</span>
+    <span><i class="swatch sw-confirmed"></i>Booked &amp; confirmed</span>
+    <span><i class="swatch sw-asked"></i>Asked</span>
+    <span><i class="swatch sw-pick"></i>Your selection</span>
+    <span style="margin-left:auto"><i class="swatch" style="border:none;border-left:2px solid var(--bad);border-radius:0;width:2px"></i>Now</span>
+    <span><i class="swatch" style="border:none;border-left:2px dashed var(--warn);border-radius:0;width:2px"></i>Server save</span>`));
+
+  // --- grid
+  const body = el('div', 'wk-body' + (weekPending ? ' pending' : ''));
+  const grid = el('div', 'wk-grid');
+
+  // --- day headings, inside the scroller so they slide with their own columns
+  grid.appendChild(el('div', 'wk-headrow', '<div class="wk-corner"></div>' + [0,1,2,3,4,5,6].map(i => {
+    const d = dayStart(start, i);
+    const today = d.toDateString() === now.toDateString();
+    return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[i]}<span class="dnum">${d.getDate()}</span></div>`;
+  }).join('')));
+
+  const rows = el('div', 'wk-rows');
+
+  // Built as one string and written once. Appending to innerHTML in the loop
+  // made the browser reserialise and reparse the whole gutter twenty-four times
+  // over, for a run of markup that is the same shape every hour of every week.
+  //
+  // The same local hour said twice, twelve-hour over twenty-four. This used to
+  // carry the server's hour underneath instead; the axis is the reader's own
+  // clock either way, and which of the two ways of writing it they think in is
+  // the thing that actually varies between people. Server time has not gone
+  // from the page — the readout gives it for whatever is selected, and server
+  // save is still drawn where it falls.
+  const hourRows = [];
+  for (let h = 0; h < 24; h++) {
+    hourRows.push(`<div class="wk-hour">${twelveHour(h)}<span class="srv">${pad(h)}:00</span></div>`);
+  }
+  const hours = el('div', 'wk-hours', hourRows.join(''));
+  rows.appendChild(hours);
+
+  // Worked out once for the week rather than once per column: the answer does
+  // not depend on which column is being drawn, and each entry may well belong
+  // in two of them.
+  const selection = view.duration ? previews(start) : [];
+
+  for (let day = 0; day < 7; day++) {
+    const col = el('div', 'wk-col');
+    const colStart = dayStart(start, day).getTime(), colEnd = colStart + DAY_MS;
+
+    for (let h = 0; h < 24; h++) {
+      const cell = el('div', 'wk-cell');
+      if (colStart + (h + 1) * 3600000 <= Date.now()) cell.classList.add('past');
+      cell.addEventListener('click', e => {
+        const half = e.offsetY > cell.offsetHeight / 2 ? SLOT : 0;
+        const picked = new Date(colStart + (h * 60 + half) * 60000);
+        if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
+        view.pick = picked;
+        view.answer = null;
+        // A weekly booking defaults to the day it was picked on, read in server
+        // time — which is not always the column it was clicked in.
+        if (view.repeat === 'week' && view.days.size === 0) {
+          view.days.add(DAY_NAMES.indexOf(serverParts(picked).weekday));
+        }
+        renderWindow();
+      });
+      col.appendChild(cell);
+    }
+
+    // Blocks, clipped to this local day. A window crossing local midnight is
+    // drawn as two clipped pieces rather than dropped or overflowing.
+    slots.filter(b => b.start.getTime() < colEnd && colStart < b.end.getTime()).forEach(b => {
+      const from = Math.max(b.start.getTime(), colStart), to = Math.min(b.end.getTime(), colEnd);
+      const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
+        + (b.start.getTime() < colStart ? ' clip-top' : '')
+        + (b.end.getTime() > colEnd ? ' clip-bottom' : ''));
+      // The third line only goes on a block with room for a whole one. A block is
+      // as tall as its hunt is long, and half a line of clipped text under the
+      // time would read as a rendering fault rather than as information.
+      const height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2);
+      const account = accountLine(b);
+      block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
+      block.style.height = height + 'px';
+      block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
+        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(b.end)}</span>`
+        + (account && height >= 40 ? `<span class="acct">${esc(account)}</span>` : '');
+      // The tooltip carries it whatever the block's height, so a half-hour
+      // booking is not the one block you cannot find out who owns.
+      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(b.end)} your time`
+        + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '');
+      block.addEventListener('click', e => {
+        e.stopPropagation();
+        view.pick = b.start;
+        view.answer = null;
+        renderWindow();
+      });
+      col.appendChild(block);
+    });
+
+    // The selection, drawn over everything so its extent is obvious — and, for a
+    // weekly booking, every evening it will actually take, not only the one that
+    // was clicked. A rule that quietly recurs on days the reader never saw is
+    // how somebody ends up holding four evenings they meant to hold one of.
+    //
+    // Clipped to this column exactly as the bookings above are, so a hunt
+    // running past local midnight is drawn as two pieces — the tail of one day
+    // and the head of the next — rather than stopping at the bottom of the
+    // column it started in.
+    {
+      selection.forEach(p => {
+        const pEnd = new Date(p.at.getTime() + view.duration * 60000);
+        if (p.at.getTime() >= colEnd || colStart >= pEnd.getTime()) return;
+        const from = Math.max(p.at.getTime(), colStart), to = Math.min(pEnd.getTime(), colEnd);
+        const sel = el('div', 'wk-block b-pick' + (p.echo ? ' b-echo' : '')
+          + (p.at.getTime() < colStart ? ' clip-top' : '')
+          + (pEnd.getTime() > colEnd ? ' clip-bottom' : ''));
+        sel.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
+        sel.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+        sel.innerHTML = `<span class="who">${p.label}</span>
+          <span class="tm">${fmtLocal(p.at)}–${fmtLocal(pEnd)}</span>`;
+        // Taking a selection back. Every piece of it answers, echoes included:
+        // the echoes are the same selection seen on another day, and having to
+        // hunt for the original block to be rid of them would be a puzzle.
+        // Before this there was no way to unpick at all short of shutting the
+        // week — picking somewhere else was the only move.
+        sel.title = p.echo
+          ? 'Right-click to clear this selection'
+          : 'Drag to move it · drag its foot to change how long · right-click to clear';
+        sel.addEventListener('contextmenu', e => { e.preventDefault(); clearPick(); });
+        // Only the real selection is draggable. An echo is a consequence of the
+        // rule rather than a thing to take hold of, and moving one would have to
+        // mean moving the anchor it is derived from — which is the block the
+        // reader is not pointing at.
+        if (!p.echo) { sel.classList.add('b-drag'); dragSelection(sel, p.at, start, day); }
+        // The handle goes only on the piece carrying the hunt's end — the half
+        // above a midnight split is not where it finishes.
+        if (!p.echo && pEnd.getTime() <= colEnd) sel.appendChild(stretchHandle(sel));
+        col.appendChild(sel);
+      });
+    }
+
+    // Server save, drawn where the server's 10:00 actually falls on this local day.
+    const anchor = dayStart(start, day);
+    const ss = serverToInstant(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), SS_SERVER_HOUR, 0);
+    if (ss.getTime() >= colStart && ss.getTime() < colEnd) {
+      const y = ((ss.getTime() - colStart) / 3600000) * ROW_H;
+      const line = el('div', 'ss-line'); line.style.top = y + 'px'; col.appendChild(line);
+      const lbl = el('div', 'ss-label', `SS ${fmtLocal(ss)}`); lbl.style.top = y + 'px'; col.appendChild(lbl);
+    }
+    rows.appendChild(col);
+  }
+
+  // Now line, if this week contains it. The line belongs to the days, the time
+  // to the hour axis — which is what keeps the time on screen when a phone has
+  // slid the days sideways.
+  const nowDay = Math.floor((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
+  if (nowDay >= 0 && nowDay < 7) {
+    const y = (localMinutes(now) / 60) * ROW_H;
+    const line = el('div', 'now-line'); line.style.top = y + 'px';
+    const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
+    rows.appendChild(line); hours.appendChild(flag);
+  }
+
+  grid.appendChild(rows);
+  body.appendChild(grid);
+  wrap.appendChild(body);
+  gridEl = body;
+  // The verdict and the button that acts on it live in the panel's footer, not
+  // here — see readout. They were part of the week once, which is what made them
+  // move when it was folded away.
+  return wrap;
+}
+
+/** Every instant the selection occupies in the week starting `start`.
+ *
+ *  One entry for the slot that was actually picked, and — when the booking
+ *  repeats — an echo on every other day the mask names, at the same local time
+ *  of day. The echoes are a preview of the rule, not slots that exist: the bot
+ *  produces them from the anchor plus whole days, so a local daylight saving
+ *  change between here and there would move one by an hour.
+ *
+ *  The whole week at once, rather than one column's worth. Each entry is a start
+ *  and the caller clips it to whichever columns it runs through, so a hunt begun
+ *  before local midnight is drawn in both the day it starts and the day it ends.
+ *  Asking per column could only ever produce the piece that began there, which
+ *  is why the far side of midnight went missing.
+ */
+function previews(start) {
+  if (!view.pick) return [];
+  const weekly = view.repeat === 'week' && view.days.size > 0;
+  const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
+  const picked = new Date(view.pick).setSeconds(0, 0);
+  const out = [];
+  for (let day = 0; day < 7; day++) {
+    const at = dayStart(start, day);
+    at.setHours(view.pick.getHours(), view.pick.getMinutes(), 0, 0);
+    if (at.getTime() === picked) {
+      // The day that was clicked is only a slot if the mask names it. When it
+      // does not, the click was just the time of day — drawing it as a booking
+      // there would promise an evening nobody is going to get.
+      out.push(weekly && !covers(view.pick)
+        ? { at: view.pick, echo: true, label: 'Start time' }
+        : { at: view.pick, echo: false, label: 'You' });
+    } else if (weekly && covers(at)) {
+      // The mask is in server weekdays, so which local column an echo belongs in
+      // is a question about that instant, not about this column's heading.
+      out.push({ at, echo: true, label: 'Repeats' });
+    }
+  }
+  return out;
+}
+
+/** Take hold of the selection and move it — up and down for the time, across for
+ *  the day.
+ *
+ *  Picking a time by clicking lands you on the half hour, which is the right
+ *  first guess and the wrong final one often enough to be annoying: the way to
+ *  say "no, twenty past" was to click again somewhere else and hope. Dragging
+ *  snaps to a quarter of an hour, so the block is nudged rather than re-aimed.
+ *
+ *  Moved by writing straight to the element rather than through a re-render, for
+ *  the same reason the stretch handle is: rebuilding a hundred and seventy cells
+ *  per frame fights the pointer. Sideways movement is a transform rather than a
+ *  reparent into the neighbouring column — the same picture, without touching
+ *  the DOM's shape — and the real render at the end puts it where it belongs,
+ *  clipped and echoed properly.
+ */
+function dragSelection(block, at, weekStart, day) {
+  block.addEventListener('pointerdown', down => {
+    // The primary button only: right-click clears the selection, and the foot of
+    // the block belongs to the stretch handle, which stops the event itself.
+    if (down.button > 0) return;
+    down.preventDefault();
+    try { block.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+
+    const column = block.parentElement.getBoundingClientRect().width;
+    const fromX = down.clientX, fromY = down.clientY;
+    const startMinutes = at.getHours() * 60 + at.getMinutes();
+    const label = block.querySelector('.tm');
+    let moved = false;
+    let landing = at;
+
+    const move = ev => {
+      const dx = ev.clientX - fromX, dy = ev.clientY - fromY;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;   // a click, not a drag
+      moved = true;
+      block.classList.add('dragging');
+
+      // Never off the week on either axis: the grid shows seven days, and a
+      // start dragged past midnight belongs to the next column rather than to
+      // the bottom of this one.
+      const days = Math.min(6, Math.max(0, day + Math.round(dx / column))) - day;
+      const raw = startMinutes + (dy / ROW_H) * 60;
+      const snapped = Math.min(DAY_MS / 60000 - DRAG_SNAP,
+        Math.max(0, Math.round(raw / DRAG_SNAP) * DRAG_SNAP));
+
+      landing = dayStart(weekStart, day + days);
+      landing.setHours(Math.floor(snapped / 60), snapped % 60, 0, 0);
+
+      block.style.transform = days ? `translateX(${days * column}px)` : '';
+      block.style.top = (snapped / 60) * ROW_H + 'px';
+      if (label) {
+        const ends = new Date(landing.getTime() + view.duration * 60000);
+        label.textContent = `${fmtLocal(landing)}–${fmtLocal(ends)}`;
+      }
+    };
+
+    const up = () => {
+      block.removeEventListener('pointermove', move);
+      block.removeEventListener('pointerup', up);
+      block.removeEventListener('pointercancel', up);
+      block.classList.remove('dragging');
+      // A press that never moved is not a drag and must leave the selection
+      // exactly as it was — including its verdict, which a re-render would
+      // rebuild for no reason.
+      if (!moved) return;
+      view.pick = landing;
+      view.answer = null;
+      renderWindow();
+    };
+
+    block.addEventListener('pointermove', move);
+    block.addEventListener('pointerup', up);
+    block.addEventListener('pointercancel', up);
+  });
+}
+
+/** Drag the foot of the selection to change how long the hunt is.
+ *
+ *  Snapped to half hours on the way, because that is the granularity a booking
+ *  is made at — an hour and seven minutes is not a slot anybody can have. The
+ *  block is resized directly during the drag rather than through a re-render:
+ *  rebuilding a hundred and seventy cells per frame fights the pointer.
+ */
+function stretchHandle(block) {
+  const handle = el('div', 'stretch');
+  handle.title = 'Drag to change how long';
+  let preview = view.duration;
+
+  handle.addEventListener('pointerdown', down => {
+    // The primary button only. The handle sits on the selection, and a right
+    // click there is now how the selection is dropped — swallowing the press
+    // would start a resize nobody asked for and suppress the menu event that
+    // the block above is waiting for.
+    if (down.button > 0) return;
+    down.preventDefault();
+    down.stopPropagation();
+    // Capture keeps the drag alive when the pointer leaves the handle, which is
+    // most of a drag. It is not worth losing the drag over, though: a browser
+    // that refuses the capture should still resize, so the failure is allowed
+    // rather than left to abort the handler before its listeners are attached.
+    try { handle.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+    const fromY = down.clientY;
+    const fromDuration = view.duration;
+    const label = block.querySelector('.tm');
+    // Never below a whole step unless the tank itself is shorter than one, in
+    // which case the last of it is the only length on offer.
+    const floor = Math.min(SLOT, cap());
+
+    const move = ev => {
+      const minutes = fromDuration + ((ev.clientY - fromY) / ROW_H) * 60;
+      const next = Math.max(floor, Math.min(cap(), Math.round(minutes / SLOT) * SLOT));
+      if (next === preview) return;
+      preview = next;
+      block.style.height = Math.max(13, (next / 60) * ROW_H - 2) + 'px';
+      if (label) {
+        const end = new Date(view.pick.getTime() + next * 60000);
+        label.textContent = `${fmtLocal(view.pick)}–${fmtLocal(end)}`;
+      }
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      // One render at the end, which also redraws the echoes and the verdict
+      // against the length that was actually settled on.
+      if (preview !== view.duration) setDuration(preview); else renderWindow();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  return handle;
+}
+
+/** Everything the panel has to say, on the row above the one you act on.
+ *
+ *  Three things want to be said in that spot and never two at once, so one row
+ *  serves all of them in order of how much they are worth reading:
+ *
+ *  A reply to something just pressed wins outright, being the newer news — after
+ *  a booking lands, the verdict on the slot still selected would be about a slot
+ *  you now own: true, and not what anybody wants to read. Then the verdict on
+ *  whatever is selected. Then, with neither of those, how to select anything at
+ *  all — which is only worth saying while the grid is open to be clicked.
+ *
+ *  Those instructions had a row of their own under "Book a time" and were
+ *  drawn under exactly the same condition this branch is. Two strips of text
+ *  taking turns in different places is worse than one place that always holds
+ *  whatever there is to say.
+ *
+ *  Nothing at all when there is none of the three — a spawn panel with the week
+ *  folded away and nothing pressed — where an empty bar above the button would
+ *  be worse than no bar.
+ */
+function footMessage() {
+  if (view.answer) {
+    return el('div', 'foot-msg ' + (view.answer.ok ? 'ok' : 'no'),
+      `<i class="ti ${view.answer.ok ? 'ti-circle-check' : 'ti-alert-triangle'}" aria-hidden="true"></i>
+       <span>${esc(view.answer.message)}</span>`);
+  }
+  if (!view.pick) {
+    if (!view.calendarOpen) return null;
+    // Muted and without the verdict's icon: this is standing advice, not news
+    // about anything, and dressing it like an answer would have it read as one.
+    return el('div', 'foot-msg hint-msg', `<i class="ti ti-info-circle" aria-hidden="true"></i>
+      <span>${TOUCH
+        ? 'Tap a start time on the grid to book it, or tap one of your own bookings to cancel it.'
+        : 'Pick a start time on the grid to book it, or click one of your own bookings to cancel it. '
+          + 'Right-click a selection to clear it.'}</span>`);
+  }
+
+  const v = judge(view.pick);
+  const srv = serverParts(view.pick);
+  // `info` is not a refusal and must not be dressed as one: it answers "who has
+  // this?", which is the question a click on a running hunt actually asks.
+  const icon = v.type === 'ok' ? 'ti-calendar-check' : v.type === 'ask' ? 'ti-hand-stop'
+    : v.type === 'info' ? 'ti-info-circle' : 'ti-alert-triangle';
+  const cls = v.type === 'ok' ? 'verdict-ok' : v.type === 'ask' ? 'verdict-ask'
+    : v.type === 'info' ? 'verdict-info' : 'verdict-no';
+  // The server's own clock used to be echoed here whenever it disagreed with the
+  // reader's about the day. It is gone: the grid is drawn on the reader's clock,
+  // the times in this line are on the reader's clock, and a second reading of
+  // the same moment beside them was one more number to reconcile rather than an
+  // answer to anything. Where the server's weekday genuinely changes what gets
+  // booked, it is said in words below instead of left to be inferred from a
+  // timestamp.
+  //
+  // A weekly booking anchored on a day its own mask excludes is legal — the
+  // anchor gives the time of day and the mask gives the days — but it means the
+  // first slot is not the evening that was clicked, which nobody expects unless
+  // they are told.
+  const offMask = view.repeat === 'week' && view.days.size
+    && !view.days.has(DAY_NAMES.indexOf(srv.weekday))
+    ? `<span class="srv-note">· repeats on ${[...view.days].sort().map(d => DAY_NAMES[d]).join(', ')}, so the first slot is not this ${srv.weekday}</span>`
+    : '';
+
+  return el('div', 'foot-msg', `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
+    <span class="${cls}">${esc(v.text)}</span>${offMask}`);
+}
+
+/** The panel's action row: how long, and the thing that acts on it.
+ *
+ *  Anchored to the foot of the panel whether or not the week is open, rather
+ *  than drawn wherever the panel currently happens to end. Folding the week away
+ *  used to move the button from the bottom corner up into the strip at the top,
+ *  so the one control somebody presses over and over was in a different place
+ *  depending on something unrelated to it.
+ *
+ *  Its height never changes — the verdict that used to share it has moved to
+ *  footMessage above, which grows upward instead — so the button stays in one
+ *  place however much the panel has to say.
+ */
+function readout() {
+  const spawn = openSpawn();
+  const primary = spawn ? primaryAction(spawn) : null;
+
+  const out = el('div', 'readout');
+  const dur = el('div', 'foot-dur', `<span class="field-label">For</span>
+    <span class="tank" id="tank" role="slider" tabindex="0" aria-label="How long">
+      <span class="tank-zones"><span class="tank-spent"></span><span class="tank-hunt"></span></span>
+      <span class="tank-cap" hidden></span>
+      <span class="tank-edge"></span>
+      <span class="tank-in"></span>
+      <span class="tank-out"></span>
+    </span>`);
+  const actions = el('div', 'readout-actions');
+  // The tank is only worth offering while there is something it could be spent
+  // on. With no action available at all — somebody already holding the spawn and
+  // nothing selected — the row would be a control feeding nothing.
+  if (limits()) out.appendChild(dur);
+  out.appendChild(actions);
+
+  if (!view.pick) {
+    if (!primary && !limits()) return null;
+    if (primary) actions.appendChild(primary);
+    return out;
+  }
+  // The same button that offers Claim when nothing is picked; a selection is
+  // what turns it into Book, and clearing one turns it back.
+  if (primary) actions.appendChild(primary);
+
+  // Cancelling is offered on the slot itself: picking a block of your own is how
+  // you reach it, which is the same gesture as picking a time.
+  const mine = slots.find(b => b.mine && b.scheduleId != null && b.start.getTime() === view.pick.getTime());
+  if (mine) {
+    actions.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
+      () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
+  }
+  return out;
+}
+
+/** Putting one evening of the calendar right, for a moderator.
+ *
+ *  Deliberately about the day and never about the booking behind it. Cancelling
+ *  a booking is the owner's own control above and ends the whole arrangement;
+ *  these two end an evening — the Tuesday somebody cannot make, the slot two
+ *  people ended up agreeing between themselves — and leave a repeating booking
+ *  repeating.
+ *
+ *  Offered against a predicted block as readily as a written one. To the person
+ *  looking at the grid they are the same evening, and which of them has a row
+ *  in the database yet is not something a moderator should have to know about.
+ *
+ *  Hidden for a member, which is convenience rather than the control: both
+ *  endpoints re-resolve the tier per request, so a forged one is refused.
+ */
+/** Where the slot tools have got to, kept out of the DOM.
+ *
+ *  The foot is rebuilt from scratch on every render, and the board re-renders
+ *  every ten seconds whether anything happened or not — so anything held only
+ *  in an element is thrown away mid-use. `query` is the name being typed, which
+ *  otherwise vanished under the person's fingers on the next poll.
+ *
+ *  `pick` is the slot all of this is about, so opening the panel on one evening
+ *  and clicking another closes it rather than quietly re-aiming a Delete at
+ *  somebody who was never on screen when it was opened.
+ */
+let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
+
+function resetSlotPanel(pick) {
+  slotPanel = { open: false, mode: 'idle', pick, query: '', typing: false };
+}
+
+/** Putting one evening of the calendar right, for a moderator.
+ *
+ *  Deliberately about the day and never about the booking behind it. Cancelling
+ *  a booking is the owner's own control in the row below and ends the whole
+ *  arrangement; these two end an evening — the Tuesday somebody cannot make,
+ *  the slot two people ended up agreeing between themselves — and leave a
+ *  repeating booking repeating.
+ *
+ *  Folded away until asked for. It is the rarest thing on this panel and the
+ *  only one that acts on somebody else, so it earns a line rather than a block:
+ *  the strip names the evening it would act on, which is what stops it being a
+ *  box you have to open to find out what is inside.
+ *
+ *  Opened, it asks one question at a time. Both actions used to be on screen at
+ *  once alongside a name field nothing had asked for yet, which is a lot of
+ *  panel under a calendar on a phone — so the field appears only once giving
+ *  the claim away is what is being done.
+ *
+ *  Offered against a predicted block as readily as a written one. To the person
+ *  looking at the grid they are the same evening, and which of them has a row in
+ *  the database yet is not something a moderator should have to know about.
+ *
+ *  Hidden for a member, which is convenience rather than the control: both
+ *  endpoints re-resolve the tier per request, so a forged one is refused.
+ */
+function slotTools(spawn) {
+  if (TIER !== 'moderator' && TIER !== 'admin') return null;
+  const slot = spawn && view.pick
+    ? slots.find(b => b.start.getTime() === view.pick.getTime() && b.state !== 'claimed')
+    : null;
+  // Forgotten as soon as there is nothing selected — which is what a finished
+  // action leaves behind. Otherwise picking that same hour again, now somebody
+  // else's, would reopen the panel exactly where the last one left off, with a
+  // Confirm Delete already armed at a booking nobody has looked at yet.
+  if (!slot) { if (slotPanel.pick !== null) resetSlotPanel(null); return null; }
+
+  const startsAt = slot.startsAt;
+  if (slotPanel.pick !== startsAt) resetSlotPanel(startsAt);
+
+  const box = el('div', 'slot-tools' + (slotPanel.open ? ' open' : ''));
+  const day = slot.start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+
+  const strip = el('button', 'slot-strip',
+    `<i class="ti ti-shield-half" aria-hidden="true"></i>
+     <span class="slot-strip-label">Moderator</span>
+     <span class="slot-strip-who">${esc(whoHas(slot))} · ${esc(day)}</span>
+     <i class="ti ti-chevron-${slotPanel.open ? 'up' : 'down'}" aria-hidden="true"></i>`);
+  strip.type = 'button';
+  strip.setAttribute('aria-expanded', String(slotPanel.open));
+  strip.addEventListener('click', () => {
+    slotPanel.open = !slotPanel.open;
+    slotPanel.mode = 'idle';
+    renderWindow();
+  });
+  box.appendChild(strip);
+  if (!slotPanel.open) return box;
+
+  const body = el('div', 'slot-body');
+  const when = `${fmtLocal(slot.start)}–${fmtLocal(slot.end)}`;
+  body.appendChild(el('div', 'slot-ctx', `${esc(whoHas(slot))} · ${esc(day)}, ${esc(when)}`));
+
+  const go = (mode) => { slotPanel.mode = mode; renderWindow(); };
+
+  if (slotPanel.mode === 'idle') {
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Delete Claim', 'btn danger slot-act', () => go('confirm'), 'ti-trash'));
+    row.appendChild(button('Give Claim To', 'btn mod-btn slot-act', () => go('give'), 'ti-user-share'));
+    body.appendChild(row);
+  } else if (slotPanel.mode === 'confirm') {
+    // Said before the second press rather than after it: a repeating booking
+    // losing one evening and a booking ending outright look identical from
+    // here, and only one of them is what anybody means.
+    body.appendChild(el('div', 'slot-warn', slot.repeats
+      ? 'Their booking repeats — only this evening goes.'
+      : 'This booking is only on this evening.'));
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Confirm Delete', 'btn mod-btn armed slot-act', () =>
+      post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt })));
+    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
+    body.appendChild(row);
+  } else {
+    const picker = personField('Search a name, or paste a Discord ID', slotPanel);
+    body.appendChild(picker.field);
+    const row = el('div', 'slot-row');
+    row.appendChild(button('Give Claim', 'btn mod-btn slot-act', () => {
+      const person = picker.chosen();
+      if (!person) {
+        view.answer = { ok: false, message: 'Pick somebody first, or paste their Discord ID.' };
+        renderWindow();
+        return;
+      }
+      post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
+        { code: spawn.code, startsAt, toUserId: person.id });
+    }, 'ti-user-share'));
+    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
+    body.appendChild(row);
+    // After the row, so the field exists to be focused and the caret goes back
+    // where the poll took it from.
+    picker.restore();
+  }
+
+  box.appendChild(body);
+  return box;
+}
+
+/** Whose evening it is, for a line that has to name somebody in a few words.
+ *  The character is what the block is labelled with, so it leads; the account is
+ *  what a moderator would go and look for. */
+function whoHas(slot) {
+  const name = (slot.owner || '').trim();
+  const account = (slot.nickname || slot.account || '').trim();
+  if (!name) return account || 'Somebody';
+  return account && account.toLowerCase() !== name.toLowerCase() ? `${name} (${account})` : name;
+}
+
+/** The tools that act on somebody else's claim.
+ *
+ *  Drawn only for a moderator, but that is convenience and not the control:
+ *  every one of these endpoints re-resolves the tier server-side, so a member
+ *  who forges the request is refused anyway. What the hiding buys is that nobody
+ *  is offered a button they cannot press.
+ *
+ *  Nothing is offered against a spawn nobody holds — there is no claim to move,
+ *  hand over, or refund — so the whole block simply is not drawn.
+ */
+function modTools(body, spawn) {
+  const holder = spawn.holderId;
+  const queue = spawn.queue || [];   // omitted from the payload when empty
+  if (!holder) return;
+
+  const box = el('div', 'mod');
+  box.appendChild(el('div', 'mod-title', `<i class="ti ti-shield-half" aria-hidden="true"></i>Moderator`));
+
+  const row = el('div', 'mod-row');
+  const remove = button('Remove Claim', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
+  remove.title = `Take ${spawn.code} off whoever is holding it`;
+  row.appendChild(remove);
+  // The other half of putting a hunt right. Where taking somebody off is for a
+  // claim that should not stand, this is for one that lost time it should have
+  // had — a crash, a server issue, an argument that ate half the window.
+  //
+  // Stamina is not here any more: handing somebody minutes in the tank has
+  // nothing to do with the spawn open on screen, so it lives in the Moderator
+  // panel on the board, where any member can be picked rather than only whoever
+  // happens to be holding this one.
+  const extend = button('Extend Hunt - 30m', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/extend-holder`, { code: spawn.code, minutes: 30 }));
+  extend.title = 'Add 30 minutes to this hunt — costs them no stamina';
+  row.appendChild(extend);
+  box.appendChild(row);
+
+  // Handing over needs somebody to hand to, and the people already waiting for
+  // this spawn are the ones a moderator means nine times in ten. Typing a
+  // Discord id would be the alternative, and nobody knows their own.
+  if (queue.length) {
+    const give = el('div', 'mod-row');
+    give.appendChild(el('span', 'field-label', 'Hand to'));
+    queue.slice(0, 5).forEach(person => {
+      const b = button(person.name, 'btn mod-btn small',
+        () => post(`/dashboard/g/${GUILD_ID}/reassign`, { code: spawn.code, toUserId: person.id }));
+      b.title = `Give ${spawn.code} to ${person.name}`;
+      give.appendChild(b);
+    });
+    box.appendChild(give);
+  }
+  body.appendChild(box);
+}
+
+/** The moderator panel above the board: tools that act on the catalogue rather
+ *  than on any one claim.
+ *
+ *  Built once at startup and left in the document, folded shut. It is reference
+ *  rather than what anybody came here for, and an open form above the spawn list
+ *  would push the list itself off a phone screen.
+ *
+ *  Removed outright for a member, not merely hidden — there is nothing here they
+ *  could use, and leaving the markup in the page would invite the impression
+ *  that unhiding it would do something. It would not: `/spawns` re-resolves the
+ *  visitor's tier against the live guild on every request, so the control is
+ *  there and this is only tidiness.
+ */
+function setUpModPanel() {
+  const panel = document.getElementById('mod-panel');
+  if (TIER !== 'moderator' && TIER !== 'admin') { panel.remove(); return; }
+
+  const head = document.getElementById('mod-panel-head');
+  const body = document.getElementById('mod-panel-body');
+  panel.hidden = false;
+
+  // Two bands, each titled, rather than one column of controls with hairlines
+  // between them. The panel does two unrelated jobs — curating the server's
+  // codes, and topping up one person's tank — and a rule says "something ends
+  // here" without saying what begins. A heading and a ground of its own is what
+  // makes a section read as one.
+  const spawns = el('div', 'mod-band');
+  spawns.innerHTML = `
+    <div class="mod-section">
+      <span class="mod-section-title">Spawn codes</span>
+      <span class="mod-section-hint" id="ms-count"></span>
+    </div>
+    <div class="mod-form">
+      <div class="mod-field">
+        <label class="field-label" for="ms-code">Code</label>
+        <input id="ms-code" type="text" maxlength="16" placeholder="2104" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-name">Name</label>
+        <input id="ms-name" type="text" maxlength="60" placeholder="Moonstone Crater" autocomplete="off">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-region">City</label>
+        <input id="ms-region" type="text" maxlength="40" placeholder="Thalassara" autocomplete="off">
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ms-creature">Creature Name (Image)</label>
+        <input id="ms-creature" type="text" maxlength="64" placeholder="Moonstone Excavator" autocomplete="off">
+      </div>
+    </div>`;
+  body.appendChild(spawns);
+
+  const actions = el('div', 'mod-actions');
+  const add = button('Add spawn', 'btn mod-btn', () => submit(), 'ti-plus');
+  actions.appendChild(add);
+  actions.appendChild(el('span', 'mod-note',
+    'Creature is the wiki name of the monster and sets the picture on the card — leave it empty for none.'));
+  spawns.appendChild(actions);
+
+  // What this server has added, and the only way back out again. Redrawn from
+  // the catalogue on every open and after every write, so it never disagrees
+  // with the board below it.
+  const owned = el('div', 'mod-owned');
+  spawns.appendChild(owned);
+
+  // Handing somebody stamina. Here rather than on a spawn's card, where it used
+  // to sit: a tank belongs to a person and not to a respawn, and reaching it
+  // through whichever spawn they happened to be holding meant a moderator could
+  // only ever top up somebody who was mid-hunt.
+  const stamina = el('div', 'mod-band alt');
+  body.appendChild(stamina);
+
+  // One place for whatever the bot said back, whichever tool above said it, and
+  // always the last thing in the panel. Answers used to sit beside the button
+  // that caused them, which put the reply to adding a spawn in a different part
+  // of the panel from the reply to giving stamina — so where to look depended on
+  // what had just been pressed.
+  const answer = el('div', 'mod-answer');
+  body.appendChild(answer);
+
+  const field = id => document.getElementById(id);
+  const inputs = ['ms-code', 'ms-name', 'ms-region', 'ms-creature'].map(field);
+  // Enter submits from any field. A four-box form where the only way to send it
+  // is to reach for the mouse is a form people fill in wrong twice.
+  inputs.forEach(input => input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+  }));
+
+  function say(text, kind) {
+    answer.textContent = text;
+    answer.className = 'mod-answer' + (kind ? ' ' + kind : '');
+  }
+
+  /** The spawns this server added, each with the way to take it back out.
+   *
+   *  Only ever the custom ones. A seed code has no button because removing one
+   *  is refused server-side — it would come back on the next boot — and offering
+   *  a button that always fails is worse than offering none.
+   *
+   *  Two presses, not one. Removal takes the spawn's claims, bookings and forum
+   *  post with it, which is not something to hand to a stray click on a list of
+   *  small buttons; the second press is the confirmation, and moving away resets
+   *  it.
+   */
+  function drawOwned() {
+    owned.innerHTML = '';
+    const mine = catalogue
+      // Read the way a person reads a code — 101 before 1001, and 411a before
+      // 411b — matching how the board image orders them (RespawnCatalogue.sortKey).
+      ? [...catalogue.values()].filter(s => s.custom)
+          .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }))
+      : [];
+    // The count belongs to the section, not to the list: it is what the heading
+    // is about, and it is still true when the list is empty.
+    const counted = document.getElementById('ms-count');
+    if (counted) {
+      counted.textContent = mine.length
+        ? `${mine.length} added here` : 'none added here yet';
+    }
+    if (!mine.length) return;
+    const list = el('div', 'mod-list');
+    mine.forEach(spawn => {
+      const row = el('div', 'mod-list-row', `<span class="code-chip">${esc(spawn.code)}</span>
+        <span class="mod-list-name">${esc(spawn.name)}</span>
+        <span class="mod-list-region">${esc(spawn.region || '')}</span>`);
+      let armed = false;
+      const drop = button('Remove', 'btn mod-btn small danger-hover', () => {
+        if (!armed) {
+          armed = true;
+          drop.textContent = 'Sure?';
+          drop.classList.add('armed');
+          return;
+        }
+        remove(spawn.code);
+      }, 'ti-trash');
+      drop.title = `Remove ${spawn.code} from this server's catalogue`;
+      // Anywhere else, and the question is withdrawn. An armed button left
+      // sitting on the page is one somebody presses later meaning something else.
+      drop.addEventListener('blur', () => {
+        if (!armed) return;
+        armed = false;
+        drop.textContent = 'Remove';
+        drop.classList.remove('armed');
+      });
+      row.appendChild(drop);
+      list.appendChild(row);
+    });
+    owned.appendChild(list);
+  }
+
+  async function remove(code) {
+    say('Removing…');
+    const result = await send(`/dashboard/g/${GUILD_ID}/remove-spawn`, { code });
+    say(result.message, result.ok ? 'ok' : 'no');
+    if (result.ok) await reread();
+  }
+
+  /** One write, with the two failures that are not answers of their own. */
+  async function send(path, payload) {
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return await res.json().catch(() => ({ ok: false, message: 'That did not go through.' }));
+    } catch (e) {
+      return { ok: false, message: 'Could not reach the server.' };
+    }
+  }
+
+  /** The catalogue has changed, so everything drawn from it is stale: this list,
+   *  and the board underneath. `loadCatalogue` bypasses the browser cache, which
+   *  `refresh` on its own would not. */
+  async function reread() {
+    await loadCatalogue().catch(() => {});
+    drawOwned();
+    await refresh();
+  }
+
+  // ---- Stamina ------------------------------------------------------------
+  // The list of people lives at module scope and is read once the panel is
+  // opened rather than at page load — most visits never open it — see
+  // `loadPeople`.
+  let picked = null;
+
+  /** The amounts worth offering, and the whole of what may be given.
+   *
+   *  A moderator gives stamina to replace what somebody lost, so the figure is a
+   *  hunt's worth or a fraction of one rather than an arbitrary number of
+   *  minutes. That makes it a short known list, and a slider is the wrong
+   *  instrument for a short known list — it asks somebody to aim at a value they
+   *  could have named. These are pressed once, land exactly, work under a thumb,
+   *  and can be read back afterwards without interpreting where a handle sits.
+   */
+  const STAMINA_STEPS = [15, 30, 60, 120, 240];
+  let staminaMinutes = 30;
+
+  function drawStamina() {
+    stamina.innerHTML = `
+      <div class="mod-section">
+        <span class="mod-section-title">Stamina</span>
+        <span class="mod-section-hint">resets at server save</span>
+      </div>
+      <div class="mod-give">
+        <div class="mod-field mod-who">
+          <label class="field-label" for="ms-who">Who</label>
+          <input id="ms-who" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="Search a name, or paste a Discord ID">
+          <div class="mod-suggest" id="ms-suggest" hidden></div>
+        </div>
+        <div class="mod-field">
+          <span class="field-label">How much</span>
+          <div class="seg" id="ms-amount" role="group" aria-label="How much stamina">
+            ${STAMINA_STEPS.map(m =>
+              `<button type="button" data-minutes="${m}" aria-pressed="${m === staminaMinutes}">${fmtDur(m)}</button>`
+            ).join('')}
+          </div>
+        </div>
+      </div>
+      `;
+
+    const who = document.getElementById('ms-who');
+    const suggest = document.getElementById('ms-suggest');
+    const amount = document.getElementById('ms-amount');
+    amount.addEventListener('click', e => {
+      const hit = e.target.closest('button');
+      if (!hit) return;
+      staminaMinutes = Number(hit.dataset.minutes);
+      amount.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === hit)));
+    });
+
+    const give = button('Give stamina', 'btn mod-btn', () => grant(1), 'ti-battery-charging');
+    const take = button('Remove stamina', 'btn mod-btn small', () => grant(-1), 'ti-battery-off');
+    const row = el('div', 'mod-actions');
+    row.appendChild(give);
+    row.appendChild(take);
+    stamina.appendChild(row);
+
+    function choose(person) {
+      picked = person;
+      who.value = personLabel(person);
+      suggest.hidden = true;
+    }
+
+    // A pasted Discord id is a person too. Nobody knows their own snowflake, but
+    // a moderator copying one out of Discord does — and it is the only way to
+    // reach somebody who has never used the system here and so is in no list.
+    function typed() {
+      const text = who.value.trim();
+      if (/^\d{15,25}$/.test(text)) return { id: text, name: text, nickname: '' };
+      return picked && personLabel(picked) === text ? picked : null;
+    }
+
+    who.addEventListener('input', () => {
+      picked = null;
+      const text = who.value.trim().toLowerCase();
+      const matches = !text ? [] : (people || []).filter(p =>
+        p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
+      suggest.innerHTML = '';
+      matches.forEach(person => {
+        const hit = el('button', 'mod-suggest-row', esc(personLabel(person)));
+        hit.type = 'button';
+        // mousedown, not click: the input's blur fires first and would hide the
+        // list out from under the pointer before the click ever landed.
+        hit.addEventListener('mousedown', e => { e.preventDefault(); choose(person); });
+        suggest.appendChild(hit);
+      });
+      suggest.hidden = !matches.length;
+    });
+    who.addEventListener('blur', () => setTimeout(() => (suggest.hidden = true), 120));
+
+    async function grant(sign) {
+      const person = typed();
+      if (!person) { say('Pick somebody first, or paste their Discord ID.', 'no'); return; }
+      give.disabled = take.disabled = true;
+      say(sign > 0 ? 'Giving…' : 'Taking back…');
+      const result = await send(`/dashboard/g/${GUILD_ID}/grant-stamina`,
+        { userId: person.id, minutes: sign * staminaMinutes });
+      give.disabled = take.disabled = false;
+      say(result.message, result.ok ? 'ok' : 'no');
+      // Their tank may be the reader's own, and it feeds the length control on
+      // every spawn — so the board is re-read rather than left saying what it
+      // said before.
+      if (result.ok) await refresh();
+    }
+  }
+
+  async function submit() {
+    const payload = {
+      code: field('ms-code').value.trim(),
+      name: field('ms-name').value.trim(),
+      region: field('ms-region').value.trim(),
+      creature: field('ms-creature').value.trim()
+    };
+    // Checked here only to save a round trip on the obvious case; the server
+    // decides for real, and says so in its own words.
+    if (!payload.code || !payload.name) { say('A spawn needs a code and a name.', 'no'); return; }
+
+    add.disabled = true;
+    say('Adding…');
+    const result = await send(`/dashboard/g/${GUILD_ID}/spawns`, payload);
+    add.disabled = false;
+    say(result.message, result.ok ? 'ok' : 'no');
+
+    if (result.ok) {
+      // Cleared so the next one can be typed straight in — adding spawns is
+      // something done in a run of five, not once.
+      inputs.forEach(input => (input.value = ''));
+      field('ms-code').focus();
+      await reread();
+    }
+  }
+
+  head.addEventListener('click', () => {
+    const open = head.getAttribute('aria-expanded') === 'true';
+    head.setAttribute('aria-expanded', String(!open));
+    body.hidden = open;
+    // Drawn on the way open rather than kept up to date while shut: the list is
+    // only ever read here, and the catalogue may well have moved since last time.
+    if (!open) {
+      drawOwned();
+      drawStamina();
+      loadPeople();
+      field('ms-code').focus();
+    }
+  });
+}
+
+/** `icon` is a Tabler class, drawn before the label. Appended as a text node
+ *  rather than set through textContent, which would throw the icon away. */
+/** How somebody reads in a picker: the account, then what this server calls
+ *  them. The same order the bot names people in Discord. */
+function personLabel(person) {
+  const nick = (person.nickname || '').trim();
+  const name = (person.name || '').trim() || person.id;
+  return nick && nick.toLowerCase() !== name.toLowerCase() ? `${name} (@${nick})` : name;
+}
+
+async function loadPeople() {
+  if (people) return;
+  try {
+    const res = await fetch(`/dashboard/g/${GUILD_ID}/people`, { headers: { 'Accept': 'application/json' } });
+    people = res.ok ? (await res.json()).people : [];
+  } catch (e) {
+    // A picker that cannot be filled still takes a pasted id, so this is a
+    // smaller failure than it looks and not worth an error of its own.
+    people = [];
+  }
+}
+
+/** Somebody named by typing, for the calendar's "give this day to".
+ *
+ *  A search over everybody the system knows, and a pasted Discord id for
+ *  anybody it does not — the moderator panel's stamina field takes both for the
+ *  same reason, since somebody who has never claimed here is in no list but is
+ *  still a person a slot can be handed to.
+ *
+ *  Returns the field and a `chosen()` that answers null until it names somebody
+ *  real, so the caller never has to guess what a half-typed name meant.
+ */
+function personField(placeholder, memory) {
+  // Somewhere outside the DOM to keep what has been typed. The panel this sits
+  // in is rebuilt whole on every render, and the board renders every ten
+  // seconds on its own — so without this the name being typed disappeared under
+  // the fingers of whoever was typing it, roughly once per name.
+  const held = memory || { query: '', picked: null, typing: false };
+  const field = el('div', 'mod-field mod-who');
+  field.innerHTML = `<input type="text" autocomplete="off" spellcheck="false"
+      placeholder="${esc(placeholder)}"><div class="mod-suggest" hidden></div>`;
+  const input = field.querySelector('input');
+  const suggest = field.querySelector('.mod-suggest');
+  input.value = held.query || '';
+
+  function choose(person) {
+    held.picked = person;
+    held.query = personLabel(person);
+    input.value = held.query;
+    suggest.hidden = true;
+  }
+
+  input.addEventListener('focus', () => { held.typing = true; });
+  input.addEventListener('input', () => {
+    held.picked = null;
+    held.query = input.value;
+    const text = input.value.trim().toLowerCase();
+    const matches = !text ? [] : (people || []).filter(p =>
+      p.name.toLowerCase().includes(text) || p.nickname.toLowerCase().includes(text)).slice(0, 8);
+    suggest.innerHTML = '';
+    matches.forEach(person => {
+      const hit = el('button', 'mod-suggest-row', esc(personLabel(person)));
+      hit.type = 'button';
+      // mousedown, not click: the input's blur fires first and would hide the
+      // list out from under the pointer before the click ever landed.
+      hit.addEventListener('mousedown', e => { e.preventDefault(); choose(person); });
+      suggest.appendChild(hit);
+    });
+    suggest.hidden = !matches.length;
+  });
+  input.addEventListener('blur', () => setTimeout(() => (suggest.hidden = true), 120));
+  // Filled in the background: the field works without it, and waiting on a read
+  // before letting somebody type would make it feel broken.
+  loadPeople().then(() => {});
+
+  return {
+    field,
+    /** Put the cursor back where a re-render took it from. Called once the
+     *  field is in the document, since focusing a detached input does nothing. */
+    restore() {
+      if (!held.typing) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    },
+    chosen() {
+      const text = input.value.trim();
+      // A pasted Discord id is a person too. Nobody knows their own snowflake,
+      // but a moderator copying one out of Discord does — and it is the only way
+      // to reach somebody who has never used the system here.
+      if (/^\d{15,25}$/.test(text)) return { id: text, name: text, nickname: '' };
+      return held.picked && personLabel(held.picked) === text ? held.picked : null;
+    }
+  };
+}
+
+function button(label, className, onClick, icon) {
+  const b = document.createElement('button');
+  b.className = className;
+  if (icon) {
+    const glyph = document.createElement('i');
+    glyph.className = 'ti ' + icon;
+    glyph.setAttribute('aria-hidden', 'true');
+    b.appendChild(glyph);
+  }
+  b.appendChild(document.createTextNode(label));
+  b.disabled = view.busy;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function scrollToNow(smooth) {
+  if (!gridEl) return;
+  const now = new Date();
+  gridEl.style.scrollBehavior = smooth ? 'smooth' : 'auto';
+
+  // The headings sit at the top of the same scroller, stuck there, so the height
+  // they hold is height the hours are never scrolled into — the third is a third
+  // of what is left under them, not of the box.
+  const rows = gridEl.querySelector('.wk-rows');
+  const headH = rows ? rows.offsetTop : 0;
+  const visible = Math.max(0, gridEl.clientHeight - headH);
+  // A third down: enough of the morning above for context, most of the evening
+  // below, which is where hunts actually are.
+  gridEl.scrollTop = Math.max(0, Math.min(
+    (localMinutes(now) / 60) * ROW_H - visible / 3, gridEl.scrollHeight - gridEl.clientHeight));
+
+  // Sideways, where the week is wider than the screen: open on yesterday, so the
+  // four days in view are the one just gone, today, and the two anybody is
+  // actually planning into. Clamped, so a week with no "today" in it — one the
+  // arrows have been walked to — simply starts at Monday.
+  const col = gridEl.querySelector('.wk-col');
+  if (col && gridEl.scrollWidth > gridEl.clientWidth) {
+    const width = col.getBoundingClientRect().width;
+    const today = Math.round((new Date(now).setHours(0, 0, 0, 0) - weekStart().getTime()) / DAY_MS);
+    gridEl.scrollLeft = Math.max(0, Math.min(
+      (today - 1) * width, gridEl.scrollWidth - gridEl.clientWidth));
+  }
+}
+
+function wireWindow() {
+  const body = document.getElementById('win-body');
+
+  // In the foot rather than the body now, so it is looked up on the document.
+  // Painted here rather than while it was being built, because it measures its
+  // own zones to place the markers and cannot do that until it is in the page.
+  const tank = document.getElementById('tank');
+  if (tank) { wireTank(tank); paintTank(tank, view.duration || 0); }
+
+  body.querySelectorAll('[data-seg] button').forEach(btn => btn.addEventListener('click', () => {
+    const seg = btn.closest('[data-seg]').dataset.seg;
+    const v = btn.dataset.v;
+    if (seg === 'repeat') {
+      view.repeat = v;
+      // Coming back to a weekly booking, start from the day that is picked.
+      if (v === 'week' && view.days.size === 0 && view.pick) {
+        view.days.add(DAY_NAMES.indexOf(serverParts(view.pick).weekday));
+      }
+      view.answer = null;
+      renderWindow();
+    } else if (seg === 'days') {
+      const d = Number(v);
+      view.days.has(d) ? view.days.delete(d) : view.days.add(d);
+      renderWindow();
+    } else {
+      view.weekOffset = v === '0' ? 0 : view.weekOffset + Number(v);
+      view.pick = null;
+      showWeek();
+    }
+  }));
+
+  const jump = body.querySelector('#jump');
+  if (jump) jump.addEventListener('click', () => {
+    if (view.weekOffset !== 0) {
+      view.weekOffset = 0;
+      view.pick = null;
+      showWeek();
+    }
+    // The grid is on screen either way by now, so the scroll no longer waits on
+    // a read to know where to put itself.
+    scrollToNow(true);
+  });
+}
+
+// ---- Writes ---------------------------------------------------------------
+
+/** What the spawn will look like if this works, applied right now.
+ *
+ *  A claim takes a round trip — longer when the guild's respawns are run by
+ *  another bot and the write is relayed through Redis — and a button that sits
+ *  there doing nothing for half a second reads as broken however fast the
+ *  server actually is. So the change is drawn immediately and the server's
+ *  answer is treated as the correction.
+ *
+ *  Only what this visitor can work out for certain is guessed at. A claim on a
+ *  free spawn is theirs; a claim on a held one puts them in the queue. Anything
+ *  the server decides — how long they actually got once stamina and bookings
+ *  are taken into account, whether a booking clashed — is left alone and
+ *  arrives with the answer.
+ */
+function optimistically(change) {
+  const spawn = openSpawn();
+  if (!spawn) return null;
+  const before = { ...spawn };
+  change(spawn);
+  paintCard(spawn);
+  renderWindow();
+  return before;
+}
+
+/** Put back what was guessed, when the guess turns out to be wrong. */
+function revert(before) {
+  if (!before) return;
+  const spawn = openSpawn();
+  if (!spawn) return;
+  Object.assign(spawn, before);
+  paintCard(spawn);
+}
+
+async function post(path, payload, guess) {
+  view.busy = true;
+  const before = guess ? optimistically(guess) : null;
+  renderWindow();
+
+  let answer;
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    answer = await res.json().catch(() => ({ ok: false, message: 'That did not go through.' }));
+  } catch (e) {
+    answer = { ok: false, message: 'Could not reach the server.' };
+  }
+  view.busy = false;
+
+  // A refusal means the guess was wrong, so it goes back before the message
+  // explaining why — otherwise the page would be showing one thing and saying
+  // another.
+  if (!answer.ok) revert(before);
+  view.answer = answer;
+  if (answer.ok) view.pick = null;
+  // Whatever was held about this spawn's weeks was read before the write. Even
+  // a refusal is worth forgetting over: it usually means the week is not what
+  // we thought it was.
+  forgetWeeks();
+  renderWindow();
+
+  // Re-read either way, and after the message rather than before it: the answer
+  // is what the person asked for, and it should not wait on a poll. The read
+  // then corrects whatever the guess got approximately right.
+  await refresh();
+  renderWindow();
+}
+
+function doBook() {
+  if (!canBook()) return;
+  // The mask is in server-time weekdays, which is what the bot reads it as. A
+  // weekly booking with nothing ticked would mean "no days at all", so the day
+  // the slot lands on server-side is the floor.
+  const days = view.repeat === 'week'
+    ? (view.days.size ? [...view.days].reduce((mask, d) => mask | (1 << d), 0) : serverDayBit(view.pick))
+    : 0;
+  post(`/dashboard/g/${GUILD_ID}/book`, {
+    code: view.code,
+    startsAt: view.pick.toISOString(),
+    minutes: view.duration,
+    days
+  });
+}
+
+// All three go through the history entry rather than tearing the card down
+// themselves, so a phone's Back is the same action as the ✕ rather than a
+// fourth one that has to be kept in step with the other three.
+document.getElementById('win-close').addEventListener('click', dismissWindow);
+veil.addEventListener('click', dismissWindow);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') dismissWindow(); });
+
+/** The server menu. Present only when there is more than one server to switch
+ *  to — the markup for it is not drawn otherwise — so everything here is behind
+ *  that one check.
+ *
+ *  The whole menu is server-rendered and its items are ordinary links, so this
+ *  only has to open it, shut it, and shut it again on the two things every menu
+ *  must answer to: a press somewhere else, and Escape. */
+const switcher = document.getElementById('server-switch');
+if (switcher) {
+  const switchBtn = document.getElementById('server-switch-btn');
+  const showMenu = open => {
+    switcher.classList.toggle('open', open);
+    switchBtn.setAttribute('aria-expanded', String(open));
+  };
+  switchBtn.addEventListener('click', e => {
+    // Or the document listener below would shut it in the same breath.
+    e.stopPropagation();
+    showMenu(!switcher.classList.contains('open'));
+  });
+  document.addEventListener('click', () => showMenu(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') showMenu(false); });
+}
+
+// The tank places its markers and its two figures by measuring itself, so a
+// phone turned on its side has to be told to look again.
+addEventListener('resize', () => {
+  const tank = document.getElementById('tank');
+  if (tank) paintTank(tank, view.duration || 0);
+});
+
+document.getElementById('filter').addEventListener('input', e => {
+  filterText = e.target.value;
+  renderBoard();
+});
+
+setUpModPanel();
+refresh();
+// The board keeps up on its own. The open window is left alone while somebody is
+// mid-decision: rebuilding the grid under a half-made selection would throw it
+// away, and a week of bookings does not change under the reader the way a live
+// board does.
+setInterval(() => { if (!view.busy && !view.pick) refresh(); }, 10000);
+// The progress bars and "m left" move between polls, so redraw on a shorter beat
+// than the fetch — otherwise a hunt would visibly jump every ten seconds.
+setInterval(() => { if (board && !view.code) tick(); }, 1000);
+</script>
+</body>
+</html>

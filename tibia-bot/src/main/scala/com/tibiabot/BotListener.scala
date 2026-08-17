@@ -108,14 +108,30 @@ class BotListener extends ListenerAdapter with StrictLogging {
     if (interactions.RespawnModals.handles(event.getModalId)) {
       // Acknowledged here rather than inside the handler, for the same reason
       // as the buttons below: deferring as the handler's first statement still
-      // left the acknowledgement waiting for a free worker. Unconditional,
-      // because no respawn modal branch opens a further modal — every one of
-      // them can be deferred.
-      event.deferReply(true).queue()
+      // left the acknowledgement waiting for a free worker. Every branch can be
+      // deferred, since none of them opens a further modal — but *how* differs.
+      // The log's search rewrites the log panel it was opened from, which needs
+      // deferEdit; everything else answers with an ephemeral of its own.
+      if (interactions.RespawnModals.editsOriginal(event.getModalId)) event.deferEdit().queue()
+      else event.deferReply(true).queue()
       interactionExecutor.execute(() => {
         try interactions.RespawnModals.handle(event)
         catch {
           case ex: Throwable => logger.error(s"Unhandled exception on respawn modal '${event.getModalId}'", ex)
+        }
+      })
+    } else if (interactions.NotifyModals.handles(event.getModalId)) {
+      // Same treatment as the respawn forms, and for the same two reasons: these
+      // write to the database and call JDA before they have anything to say, and
+      // ModalHandler's deferEdit() would rewrite the message the form came from
+      // — here either a notifications embed the whole server reads or somebody's
+      // alert DM. Every branch answers ephemerally, so this can defer a reply
+      // unconditionally.
+      event.deferReply(true).queue()
+      interactionExecutor.execute(() => {
+        try interactions.NotifyModals.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on notification modal '${event.getModalId}'", ex)
         }
       })
     } else {
@@ -147,6 +163,19 @@ class BotListener extends ListenerAdapter with StrictLogging {
         try interactions.RespawnButtons.handle(event)
         catch {
           case ex: Throwable => logger.error(s"Unhandled exception on respawn button '${event.getComponentId}'", ex)
+        }
+      })
+    } else if (interactions.NotifyButtons.handles(event.getComponentId)) {
+      // The notification autoroles and the controls under the DMs they send.
+      // Acknowledged here for the same reason as the respawn buttons above,
+      // with the same exception: a press that opens a form cannot be deferred,
+      // since replyModal has to be the interaction's first response. Everything
+      // else rewrites the row it was pressed on, so it defers an edit.
+      if (!interactions.NotifyButtons.opensModal(event.getComponentId)) event.deferEdit().queue()
+      interactionExecutor.execute(() => {
+        try interactions.NotifyButtons.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on notification button '${event.getComponentId}'", ex)
         }
       })
     } else {

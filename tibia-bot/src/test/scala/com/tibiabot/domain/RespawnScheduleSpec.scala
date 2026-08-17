@@ -254,11 +254,12 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   private val window = (anchor.minusDays(1), anchor.plusDays(2))
 
   private def slot(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u2",
-                   scheduleId: Option[Long] = Some(9L), askedAt: Option[ZonedDateTime] = None) =
+                   scheduleId: Option[Long] = Some(9L), askedAt: Option[ZonedDateTime] = None,
+                   confirmedAt: Option[ZonedDateTime] = None) =
     RespawnClaim(7L, 1L, owner, owner, "", RespawnClaim.StatusReserved, 0, anchor,
       Some(start), Some(start.plusMinutes(durationMinutes.toLong)), durationMinutes,
       warned = false, RespawnClaim.KindScheduled, None, None, None, None,
-      scheduleId = scheduleId, askedAt = askedAt)
+      scheduleId = scheduleId, askedAt = askedAt, confirmedAt = confirmedAt)
 
   private def oneOff(start: ZonedDateTime, durationMinutes: Int = 120, owner: String = "u1") =
     RespawnSchedule(0L, 1L, owner, owner, "", start, RespawnSchedule.Daily, durationMinutes,
@@ -339,5 +340,115 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   test("a slot its owner has already been asked about is not asked about again") {
     RespawnSchedule.verdict(oneOff(anchor), Nil, List(slot(anchor, askedAt = Some(anchor)))) shouldBe
       ClashVerdict.AlreadyAsked
+  }
+
+  test("a slot its owner has confirmed is refused as confirmed, not as already asked") {
+    // Confirming early is how somebody says "don't ask me about this one", and it
+    // is a different answer from having used up the one question — so it gets its
+    // own verdict rather than falling into AlreadyAsked.
+    val settled = slot(anchor, confirmedAt = Some(anchor.minusMinutes(15)))
+    settled.requestable shouldBe false
+    RespawnSchedule.verdict(oneOff(anchor), Nil, List(settled)) shouldBe ClashVerdict.Confirmed
+  }
+
+  test("an unconfirmed slot nobody has asked about is still open to the question") {
+    slot(anchor).requestable shouldBe true
+  }
+
+  // --- days a rule has given up --------------------------------------------
+  // A rule speaks for every day; what became of one of them lives in its row.
+  // Without consulting those, a day handed to somebody else — or taken off the
+  // calendar by a moderator — left the old rule still defending it, and the
+  // next person to want that evening was refused on behalf of a booking that no
+  // longer existed.
+
+  // What a rule offers as its next evening, once one of its days has gone. The
+  // card listed tonight twice without this — once as the booking that had taken
+  // it, and once as the rule that used to hold it, at the very same hour.
+  test("the next slot skips a day the booking has given up") {
+    val daily = schedule()
+    daily.nextStartAtOrAfter(anchor, Set.empty) shouldBe Some(anchor)
+    daily.nextStartAtOrAfter(anchor, Set(anchor.toInstant)) shouldBe Some(anchor.plusDays(1))
+    daily.nextStartAtOrAfter(anchor, Set(anchor.toInstant, anchor.plusDays(1).toInstant)) shouldBe
+      Some(anchor.plusDays(2))
+  }
+
+  test("a day given up that is not the next one changes nothing") {
+    schedule().nextStartAtOrAfter(anchor, Set(anchor.plusDays(3).toInstant)) shouldBe Some(anchor)
+  }
+
+  test("a one-off that has given up its only evening has no next slot at all") {
+    val once = schedule(days = RespawnSchedule.OneOff)
+    once.nextStartAtOrAfter(anchor, Set(anchor.toInstant)) shouldBe None
+  }
+
+  test("giving up a day of a weekly booking moves it on a week, not a day") {
+    val tuesdays = onlyOn(DayOfWeek.TUESDAY)
+    val firstTuesday = tuesdays.nextStartAtOrAfter(anchor).getOrElse(fail("no Tuesday ahead"))
+    tuesdays.nextStartAtOrAfter(anchor, Set(firstTuesday.toInstant)) shouldBe
+      Some(firstTuesday.plusDays(7))
+  }
+
+  private val givenUpWindow = (anchor.minusDays(1), anchor.plusDays(6))
+
+  private def hasGivenUp(schedule: RespawnSchedule, candidate: RespawnSchedule,
+                         settled: ZonedDateTime*) =
+    RespawnSchedule.surrendered(schedule, candidate, settled.map(_.toInstant).toSet,
+      givenUpWindow._1, givenUpWindow._2)
+
+  test("a rule that has given up the one evening being asked for stands aside") {
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    hasGivenUp(standing, wanted) shouldBe false
+    hasGivenUp(standing, wanted, anchor.plusDays(1)) shouldBe true
+  }
+
+  test("giving up one evening does not give up the rest of the week") {
+    val standing = schedule()
+    // A daily booking wants every evening, so one settled day leaves six it
+    // still owns and the clash stands.
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.EveryDay)
+    hasGivenUp(standing, wanted, anchor.plusDays(1)) shouldBe false
+  }
+
+  test("a settled evening nobody was asking about changes nothing") {
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    // Thursday is settled; the evening being asked for is Friday.
+    hasGivenUp(standing, wanted, anchor) shouldBe false
+  }
+
+  test("a rule that contests nothing inside the window has surrendered nothing") {
+    // Different times of day, so the two never meet. Answering "yes, given up"
+    // here would read as permission drawn from an absence of evidence.
+    val standing = schedule()
+    val elsewhere = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusHours(6),
+      RespawnSchedule.Daily, 60, active = true, anchor, RespawnSchedule.EveryDay)
+    hasGivenUp(standing, elsewhere) shouldBe false
+  }
+
+  // --- confirming a booking that has started -------------------------------
+
+  test("a started booking is awaiting confirmation until its owner takes the claim") {
+    val started = slot(anchor).copy(status = RespawnClaim.StatusActive,
+      confirmBy = Some(anchor.plusMinutes(15)))
+    started.awaitingConfirmation shouldBe true
+    started.copy(confirmedAt = Some(anchor.plusMinutes(2))).awaitingConfirmation shouldBe false
+  }
+
+  test("a claim with no confirmation deadline is never awaiting one") {
+    // Every ad-hoc claim, and every hunt that was already running when
+    // confirmation shipped — making one is itself the act of turning up.
+    val adhoc = slot(anchor).copy(status = RespawnClaim.StatusActive, kind = RespawnClaim.KindAdHoc)
+    adhoc.awaitingConfirmation shouldBe false
+  }
+
+  test("a booking still waiting to start is not awaiting confirmation either") {
+    // The deadline only means anything once the hunt is live; a reserved slot has
+    // its whole reminder window to settle itself.
+    slot(anchor).copy(confirmBy = Some(anchor.plusMinutes(15))).awaitingConfirmation shouldBe false
   }
 }

@@ -47,7 +47,8 @@ Supporting packages:
 | `presentation/` | Pure embed/message builders (deaths, online list, boosted, galthen). |
 | `scheduler/` | Server-save schedule decisions (window, Rashid location, Drome countdown). |
 | `state/` | `StreamState` — the per-guild hunted/allied/world config shared by every stream. |
-| `tracking/` | Per-world stream state: death/level/online dedup, masslog detection, the online-list message cache, killer-level cache, and the dashboard's metrics/recent-event buffers. |
+| `tracking/` | Per-world stream state: death/level/online dedup, masslog detection, bounty login presence, the online-list message cache, killer-level cache, and the dashboard's metrics/recent-event buffers. |
+| `notifications/` | The two DM subscriptions behind the notification-channel autoroles — mass-log alerts at a threshold you pick, and login alerts for characters you're watching. |
 | `tibiadata/` | TibiaData v4 API client, its caching decorator, and `RetryPolicy`; response models in `tibiadata/response/`. |
 | `paywall/` | Patreon seat system — ties a (guild, world) pair's activity to a supporter's subscription. |
 | `web/` | The monitoring dashboard: Discord-OAuth-gated `/status`, log capture, Patreon admin routes. |

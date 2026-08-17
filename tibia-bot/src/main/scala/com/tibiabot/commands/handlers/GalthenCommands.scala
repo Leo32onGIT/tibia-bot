@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
+import com.tibiabot.presentation.Names
 
 /** Handles `/galthen`: per-user Galthen's Satchel 30-day cooldown tracker. */
 object GalthenCommands {
@@ -38,7 +39,7 @@ object GalthenCommands {
         val fullList = satchelTimeList.collect {
           case satchel =>
             val when = SatchelCooldown.expiresAtEpoch(satchel.when)
-            val displayTag = if (satchel.tag == "") s"<@${event.getUser.getId}>" else s"**`${satchel.tag}`**"
+            val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
             s"<:satchel:1030348072577945651> can be collected by $displayTag <t:$when:R>"
         }
 

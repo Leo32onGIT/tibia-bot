@@ -102,6 +102,7 @@ object Config {
  val satchelEmoji: String = discord.getString("satchel-emoji")
  val dreamScarEmoji: String = discord.getString("dreamscar-emoji")
  val masslogEmoji: String = discord.getString("masslog-emoji")
+ val bountyEmoji: String = discord.getString("bounty-emoji")
  val dromeEmoji: String = discord.getString("drome-emoji")
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
@@ -115,6 +116,45 @@ object Config {
     val sessionSecret: String = web.getString("session-secret")
     val statusDomain: String = web.getString("status-domain")
     val statusPort: Int = web.getInt("status-port")
+
+    /** Where a browser actually reaches this bot, as a scheme and authority
+     *  with no trailing slash — the origin the OAuth redirect URI is built on.
+     *
+     *  Derived from `status-domain` unless overridden, so production needs no
+     *  new setting and gets exactly the string it had before. The override
+     *  exists for local runs: there the bot is reached through a plain-HTTP
+     *  port forward on localhost, and an `https://` redirect URI is one Discord
+     *  will send a browser to and the browser cannot load. Discord allows
+     *  `http://` redirect URIs for localhost specifically, which is what makes
+     *  signing in locally possible at all. */
+    val baseUrl: String = {
+      if (configuredBaseUrl.nonEmpty) configuredBaseUrl else s"https://$statusDomain"
+    }
+
+    private def configuredBaseUrl: String = web.getString("base-url").trim.stripSuffix("/")
+
+    /** Where members are sent to use the dashboard, which is not always
+     *  somewhere this bot serves.
+     *
+     *  [[baseUrl]] answers "where is *this* bot reached", and on a bot that runs
+     *  no dashboard the honest answer is nowhere — it has no `status-domain`, so
+     *  that origin comes out as a bare `https://`. This one answers the
+     *  different question the respawn board asks: where does the person reading
+     *  this post go to use the dashboard. There is one dashboard serving every
+     *  guild whichever bot runs them, so its address has a default here instead
+     *  of being something each bot has to be told, and a bot that does serve its
+     *  own still links to itself. */
+    val dashboardOrigin: String =
+      com.tibiabot.web.Origin.of(configuredBaseUrl, statusDomain, web.getString("dashboard-domain"))
+
+    /** Whether session cookies may be marked `Secure`.
+     *
+     *  Tied to the origin rather than configured separately, so it cannot drift
+     *  from it: a `Secure` cookie is dropped outright over plain HTTP, which
+     *  would leave a local login succeeding at Discord and then landing on a
+     *  dashboard that sees no session and bounces straight back. Anything
+     *  served over HTTPS — which is every deployment — is unaffected. */
+    val secureCookies: Boolean = baseUrl.startsWith("https://")
   }
 
   /** Patreon paywall: how many (guild, world) seats each subscriber gets, and
@@ -148,6 +188,17 @@ object Config {
     val refreshToken: String = patreonApi.getString("refresh-token")
     val campaignId: String = patreonApi.getString("campaign-id")
     val syncInterval: FiniteDuration = patreonApi.getDuration("sync-interval").toScala
+    /** `/setup` kicks off its own sync before the subscription check, so
+     *  someone who subscribed minutes ago doesn't have to wait out
+     *  `sync-interval` — this is the shortest gap allowed between two syncs,
+     *  so a run of `/setup`s can't turn into a run of Patreon fetches. Shared
+     *  with the periodic sync: one that just ran counts, and `/setup` reuses
+     *  what it wrote. See BotApp.syncPatreonMembersForSetup. */
+    val setupSyncCooldown: FiniteDuration = patreonApi.getDuration("setup-sync-cooldown").toScala
+    /** How long `/setup` will wait on that sync before giving up on it and
+     *  answering from the previous snapshot. The sync itself is left running;
+     *  this only bounds how long the command blocks. */
+    val setupSyncTimeout: FiniteDuration = patreonApi.getDuration("setup-sync-timeout").toScala
     val enabled: Boolean = accessToken.nonEmpty
   }
 
@@ -211,19 +262,30 @@ object Config {
      *  and plan around tonight's slot; short enough that a cancelled schedule
      *  leaves few bookings to clear. */
     val scheduleLookAheadMinutes: Int = respawn.getInt("schedule-look-ahead-minutes")
-    /** How long the owner of a booked slot has to say whether they are hunting it
-     *  before it passes to whoever asked. Clamped to shortly after the slot's own
-     *  start, so it never waits past the hunt it is about. */
-    val bookingRequestResponseMinutes: Int = respawn.getInt("booking-request-response-minutes")
+    /** How far into a booked slot its owner may still say they are hunting it,
+     *  before it passes to whoever asked. The deadline is this much past the
+     *  slot's own start whenever the question was put, so somebody asked hours
+     *  ahead is judged on whether they turned up rather than on whether they
+     *  read a DM that afternoon. */
+    val bookingRequestGraceMinutes: Int = respawn.getInt("booking-request-grace-minutes")
     /** How long before a booked slot starts its owner is reminded. 0 turns the
      *  reminder off. Separate from the claim-end reminder members set for
      *  themselves: this one is about a hunt that hasn't begun. */
     val slotReminderMinutes: Int = respawn.getInt("slot-reminder-minutes")
+    /** How long after a booking starts on its own its owner has to confirm they
+     *  are there, before it is given up for them and the spawn moves on as it
+     *  would after any other claim ending. Capped at the slot's own end, so a
+     *  booking shorter than this is never outlived by its own deadline. */
+    val slotConfirmMinutes: Int = respawn.getInt("slot-confirm-minutes")
     /** Most standing bookings one member may hold in a guild. */
     val maxSchedulesPerUser: Int = respawn.getInt("max-schedules-per-user")
     /** Shown as the claim embed's image when a spawn has no `creature` set —
      *  most of the seed catalogue starts out that way. */
     val fallbackImage: String = respawn.getString("fallback-image")
+    /** Directory the member dashboard caches creature sprites into, so they are
+     *  served from our own domain rather than hotlinked from a wiki that
+     *  geoblocks some of the people looking at them. */
+    val spriteCacheDir: String = respawn.getString("sprite-cache-dir")
   }
 
   /** Auto-leave a guild with no worlds tracked for this many days, unless a

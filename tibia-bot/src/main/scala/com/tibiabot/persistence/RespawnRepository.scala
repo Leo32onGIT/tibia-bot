@@ -11,6 +11,27 @@ import java.time.ZonedDateTime
  *  would end a hunt in progress. It is counted rather than silently skipped, so
  *  whoever ran the repair knows there is something to come back to.
  */
+/** Somebody the guild's respawn system knows about, for a picker to offer.
+ *
+ *  Both names travel and neither is a mention: the account is what is unique and
+ *  searchable, the nickname is what people actually call them. Either may be
+ *  empty on a row written before it was recorded. */
+final case class KnownMember(userId: String, userName: String, nickname: String)
+
+/** One day a standing booking has given up.
+ *
+ *  A rule says "every day at eleven"; it cannot say what became of last
+ *  Thursday. Only the row for that day can, and there is exactly one per
+ *  `(schedule, start)` — the pair the database already treats as an
+ *  occurrence's identity.
+ *
+ *  A day is given up when its row has stopped standing: cancelled by its owner,
+ *  handed to whoever asked for it, missed, or taken off the calendar by a
+ *  moderator. Everywhere a rule speaks for a day — the card, the week, the
+ *  clash check, somebody's list of bookings — has to consult these first, or it
+ *  goes on naming an evening its owner no longer has. */
+final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime)
+
 final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
   def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
 }
@@ -33,6 +54,31 @@ trait RespawnRepository {
 
   /** Point the guild at a (re)created forum channel and board post. */
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit
+
+  /** Everybody this guild's respawn system has ever seen, newest first.
+   *
+   *  Exists because there is no member list to offer instead: the bot runs
+   *  without the privileged GUILD_MEMBERS intent, so Discord's own user picker
+   *  has no web counterpart here (see `DiscordGateway.memberAccess`). These are
+   *  the people who have actually claimed, queued or booked something, which is
+   *  the set a moderator ever needs to pick from — and the names come from the
+   *  rows themselves, so somebody who has since left is still nameable.
+   *
+   *  One entry per account, carrying the most recent name and nickname recorded
+   *  for them: people change both, and the newest is the one anybody would
+   *  search by. */
+  def knownMembers(guildId: String, limit: Int): List[KnownMember]
+
+  /** The fingerprint of the catalogue the pinned board post was last drawn from,
+   *  or None if it has never been recorded — which is every guild the first time
+   *  a build that keeps it runs, and reads as "redraw it".
+   *
+   *  Persisted rather than held in memory precisely because the question is
+   *  asked at boot: what is being remembered is the state of a message in
+   *  Discord, which outlives this process. */
+  def boardDigest(guildId: String): Option[String]
+
+  def setBoardDigest(guildId: String, digest: String): Unit
 
   // --- catalogue ----------------------------------------------------------
 
@@ -92,6 +138,23 @@ trait RespawnRepository {
   /** Every spawn currently held, for `/respawn list`. */
   def allActiveClaims(guildId: String): List[RespawnClaim]
 
+  /** Every queued claim in the guild, for callers that need the whole board at
+   *  once. The per-spawn [[queueFor]] is right for one spawn; asking it once per
+   *  spawn to draw a catalogue of a few hundred is not. */
+  def allQueuedClaims(guildId: String): List[RespawnClaim]
+
+  /** Every booked slot still ahead of `now`, across the guild. Bulk counterpart
+   *  to [[reservationsFor]], for the same reason. */
+  def allReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** When each spawn was last touched — the most recent claim on it, whether it
+   *  ended or is still running.
+   *
+   *  Drives how far a spawn has faded on the board, so it has to cover every
+   *  spawn ever claimed in one query rather than a history read per spawn.
+   *  Spawns never claimed at all are simply absent. */
+  def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)]
+
   /** Active or queued claims belonging to one user, for `/respawn release` and
    *  the per-user stamina display. */
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
@@ -124,14 +187,14 @@ trait RespawnRepository {
    *  free" read is not enough on its own, since two people pressing Claim at once
    *  both pass it. Whoever loses is told the spawn was taken rather than ending up
    *  with a second claim on the same hunt. */
-  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
                         durationMinutes: Int, kind: String): Option[RespawnClaim]
 
   /** Append to a spawn's queue, taking the next free position. Returns the
    *  stored row, or None if the queue is already at `queueLimit` or the user is
    *  already in it. */
-  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String,
+  def enqueueClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                    characterName: String, durationMinutes: Int, queueLimit: Int,
                    kind: String): Option[RespawnClaim]
 
@@ -183,12 +246,8 @@ trait RespawnRepository {
    *  `offset` pages backwards through it. Callers keep that bounded (see
    *  RespawnService.LogMaxPages) rather than letting somebody walk years of
    *  history one page at a time. */
-  def claimHistory(guildId: String, respawnId: Option[Long], limit: Int, offset: Int): List[RespawnClaim]
-
-  /** How many finished claims each spawn saw since `since`, for the Log panel's
-   *  summary line. One grouped query rather than counting rows in Scala, since
-   *  the window can cover far more claims than a page ever shows. */
-  def claimCountsSince(guildId: String, since: ZonedDateTime): List[(Long, Int)]
+  def claimHistory(guildId: String, respawnId: Option[Long], userId: Option[String],
+                   limit: Int, offset: Int): List[RespawnClaim]
 
   /** Close a claim that ran to its end. `outcome` records why, for the audit log
    *  (see RespawnClaim.Outcome); `ended_at` is stamped by the database. */
@@ -241,7 +300,7 @@ trait RespawnRepository {
 
   // --- schedules ----------------------------------------------------------
 
-  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String,
+  def addSchedule(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                   characterName: String, anchorAt: ZonedDateTime, periodMinutes: Int,
                   durationMinutes: Int,
                   daysOfWeek: Int = RespawnSchedule.EveryDay): RespawnSchedule
@@ -267,12 +326,72 @@ trait RespawnRepository {
    *  run on every sweep — the (schedule, start) pair is the identity of an
    *  occurrence. */
   def reserveOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
-                        userName: String, characterName: String, startsAt: ZonedDateTime,
+                        userName: String, nickname: String, characterName: String, startsAt: ZonedDateTime,
                         durationMinutes: Int): Option[RespawnClaim]
 
   /** Slots booked on a spawn that haven't started, soonest first — what the card
    *  shows and what an ad-hoc claim has to stop short of. */
   def reservationsFor(guildId: String, respawnId: Long, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Days a rule has given up — see [[ScheduleOccurrence]].
+   *
+   *  Distinct from [[reservationsFor]], which answers "what is booked": this
+   *  answers "which days are no longer anybody's to speak for", and the
+   *  difference is the whole point. A day handed to somebody else is missing
+   *  from the first and present here, and reading only the first is what let a
+   *  rule name an evening beside the booking that had replaced it.
+   *
+   *  Both bounds are optional because the callers want different shapes of the
+   *  same question: the week wants one spawn between two instants, and somebody
+   *  reading their bookings wants every spawn from now on. */
+  def settledOccurrences(guildId: String, from: ZonedDateTime,
+                         to: Option[ZonedDateTime] = None,
+                         respawnId: Option[Long] = None): List[ScheduleOccurrence]
+
+  /** Write off one day of a rule without touching the rule.
+   *
+   *  A cancelled occurrence row is how "not this day" is recorded — there is no
+   *  separate exception table, and there does not need to be one, because the
+   *  row is what both the calendar and the clash check already consult. Used for
+   *  a day that was never materialised: the moderator is taking a slot off the
+   *  calendar before the sweep would have written it.
+   *
+   *  False when the day already had a row, which makes it safe to call against
+   *  a calendar that may be a few seconds out of date. */
+  def skipOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
+                     userName: String, nickname: String, characterName: String,
+                     startsAt: ZonedDateTime, durationMinutes: Int, outcome: String): Boolean
+
+  /** Put a booked slot in somebody else's name, keeping its time and length.
+   *
+   *  Any pending question goes with it: the answer would be about a slot that is
+   *  no longer theirs to answer for. The schedule behind it is dropped for the
+   *  same reason — one day of a rule, handed on, stops being an occurrence of
+   *  that rule, exactly as it does when the owner gives it up to whoever asked.
+   *
+   *  None when the slot is no longer reserved. */
+  def reassignReservation(guildId: String, claimId: Long, toUserId: String,
+                          toUserName: String, toNickname: String): Option[RespawnClaim]
+
+  /** A booked or running claim starting at exactly this instant, whoever owns
+   *  it — how a moderator names one day on the calendar without knowing any
+   *  row id. */
+  def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
+
+  /** Run `body` holding the spawn's row lock, so two people deciding about the
+   *  same spawn at once take turns rather than both deciding on the same
+   *  picture.
+   *
+   *  The one thing that makes a read-then-write safe here. Booking checks for a
+   *  clash and then inserts, across separate statements, so without this two
+   *  bookings arriving together both found the evening free and both took it —
+   *  and nothing downstream would catch it, since the unique index on
+   *  `(schedule_id, starts_at)` sees two ids and the one on `respawn_id` only
+   *  covers a claim that is already running.
+   *
+   *  It has to be the database's lock rather than a mutex: dashboard writes are
+   *  relayed, so the two racers need not even be in the same process. */
+  def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A
 
   /** Booked slots whose start has arrived, across the guild. */
   def dueReservations(guildId: String, now: ZonedDateTime): List[RespawnClaim]
@@ -283,13 +402,29 @@ trait RespawnRepository {
 
   /** Turn a booked slot into the live claim it was always going to be. Returns
    *  None if it is no longer reserved, which is the guard against two sweeps
-   *  starting the same slot. */
+   *  starting the same slot.
+   *
+   *  `confirmBy` is the deadline its owner has to say they are actually there
+   *  (see [[unconfirmedClaims]]). Stamped even when the slot was confirmed
+   *  ahead of time, since it also records that this claim began as a booking. */
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
-                       endsAt: ZonedDateTime): Option[RespawnClaim]
+                       endsAt: ZonedDateTime, confirmBy: ZonedDateTime): Option[RespawnClaim]
+
+  /** Record that a slot's owner has said they are hunting it — Confirm on the
+   *  reminder while it is still reserved, or Take Claim once it has started.
+   *
+   *  Returns None if it is already confirmed, or in neither of those states,
+   *  which is what makes a second press a no-op rather than a restamp. */
+  def confirmClaim(guildId: String, claimId: Long, at: ZonedDateTime): Option[RespawnClaim]
+
+  /** Running claims that began as a booking, whose confirmation deadline has
+   *  gone by with nobody saying they were there. The caller gives these up on
+   *  the owner's behalf — see RespawnService's sweep. */
+  def unconfirmedClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
   /** Book a slot for somebody with no schedule of their own — used when a booked
    *  slot passes to whoever asked for it. */
-  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String,
+  def reserveFor(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                  startsAt: ZonedDateTime, durationMinutes: Int): RespawnClaim
 
   /** Ask the owner of a booked slot whether they are actually hunting it.

@@ -1,3 +1,5 @@
+import com.typesafe.sbt.packager.docker.Cmd
+
 name := "violent-bot-dedicated"
 version := "2.2"
 
@@ -24,6 +26,32 @@ Universal / javaOptions += "-Djava.awt.headless=true"
 // Also tag the built image `:latest` so docker-compose.yml can reference a
 // stable tag (otherwise only the version tag is created).
 dockerUpdateLatest := true
+
+// The sprite cache's directory has to exist in the image, owned by the user the
+// container actually runs as.
+//
+// sbt-native-packager runs the app as uid 1001 and leaves /opt/docker owned by
+// root with no group write, so the app cannot create a directory there at all.
+// Worse, a named volume mounted at a path the image does not have gets its
+// mountpoint created by Docker as root — which is what happened here: the
+// volume existed, the directory existed, and every write into it was denied.
+// Docker copies the image directory's ownership into an empty named volume, so
+// creating it here with the right owner fixes both the volume case and the
+// no-volume case.
+//
+// Keyed on the USER line native-packager emits. If that ever changes shape this
+// silently stops applying, which is why CreatureSpriteCache also checks the
+// directory is writable at startup and says so plainly rather than failing one
+// sprite at a time.
+dockerCommands := dockerCommands.value.flatMap {
+  case user @ Cmd("USER", args @ _*) if args.mkString(" ") == "1001:0" =>
+    Seq(
+      Cmd("RUN", "mkdir -p /opt/docker/cache/sprites && chown -R 1001:0 /opt/docker/cache " +
+        "&& chmod -R 775 /opt/docker/cache"),
+      user
+    )
+  case other => Seq(other)
+}
 
 val AkkaHttpVersion = "10.5.0"
 
