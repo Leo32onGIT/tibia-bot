@@ -1225,7 +1225,11 @@ const WEEK_TTL = 30000;
 /** Reads in the air, so a click, a prefetch and a poll landing on the same week
  *  make one request between them rather than three. */
 const weekInflight = new Map();
-const weekKey = (code, offset) => `${code}|${offset}`;
+/** Keyed on the window's first day rather than on the offset. The offsets slide
+ *  a day at midnight — offset 0 is yesterday-onward, whatever "yesterday" now
+ *  is — so a key of `code|0` would hand a reader the day before's bookings for
+ *  as long as the entry lived. */
+const weekKey = (code, offset) => `${code}|${weekStart(offset).getTime()}`;
 
 const view = {
   code: null,              // the spawn whose window is open, or null
@@ -1693,20 +1697,37 @@ async function refresh() {
 }
 
 // ---- The week -------------------------------------------------------------
+/** The first column's local midnight.
+ *
+ *  Yesterday, not the local Monday. A calendar week is the right shape for a
+ *  month view and the wrong one for booking a hunt: on a Saturday it spends
+ *  five of its seven columns on days that have already happened, so the part
+ *  anybody is actually planning into is squeezed into the last two. Anchoring
+ *  on yesterday keeps one day of context — a hunt that ran past midnight, and
+ *  the run of bookings the reader remembers — and gives the other six to what
+ *  is still bookable. The arrows still move a whole week at a time, so paging
+ *  forward from here tiles the days without repeating any.
+ */
 function weekStart(offset = view.weekOffset) {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offset * 7);   // local Monday
+  d.setDate(d.getDate() - 1 + offset * 7);   // yesterday, local
   return d;
 }
 const dayStart = (start, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; };
 const localMinutes = d => d.getHours() * 60 + d.getMinutes();
 
+/** The window on screen, as dates.
+ *
+ *  It used to read "This week" at offset 0, which was true while the columns
+ *  were a calendar week and is not now: the window starts yesterday and rolls.
+ *  The dates say what is actually on screen, and the button's own `on` state
+ *  is what marks it as the one you came in on.
+ */
 function weekLabel(start) {
   const end = new Date(start.getTime() + 6 * DAY_MS);
   const month = d => d.toLocaleDateString(undefined, { month: 'short' });
-  return view.weekOffset === 0 ? 'This week'
-    : `${start.getDate()} ${month(start)} – ${end.getDate()} ${month(end)}`;
+  return `${start.getDate()} ${month(start)} – ${end.getDate()} ${month(end)}`;
 }
 
 // ---- Verdict --------------------------------------------------------------
@@ -2488,7 +2509,8 @@ function calendar() {
   grid.appendChild(el('div', 'wk-headrow', '<div class="wk-corner"></div>' + [0,1,2,3,4,5,6].map(i => {
     const d = dayStart(start, i);
     const today = d.toDateString() === now.toDateString();
-    return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[i]}<span class="dnum">${d.getDate()}</span></div>`;
+    // Off the date, not off `i` — the first column is yesterday, not Monday.
+    return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[(d.getDay() + 6) % 7]}<span class="dnum">${d.getDate()}</span></div>`;
   }).join('')));
 
   const rows = el('div', 'wk-rows');
@@ -3589,8 +3611,9 @@ function scrollToNow(smooth) {
 
   // Sideways, where the week is wider than the screen: open on yesterday, so the
   // four days in view are the one just gone, today, and the two anybody is
-  // actually planning into. Clamped, so a week with no "today" in it — one the
-  // arrows have been walked to — simply starts at Monday.
+  // actually planning into. That is column 0 while the window is the current
+  // one; the arithmetic is kept because a window the arrows have been walked to
+  // has no "today" in it at all, and clamps to its own first day.
   const col = gridEl.querySelector('.wk-col');
   if (col && gridEl.scrollWidth > gridEl.clientWidth) {
     const width = col.getBoundingClientRect().width;
