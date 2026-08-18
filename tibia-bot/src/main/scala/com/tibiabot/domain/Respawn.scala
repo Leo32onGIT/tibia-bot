@@ -24,7 +24,20 @@ final case class Respawn(
   mapperLink: String,
   threadId: String,
   source: String,
-  addedBy: String
+  addedBy: String,
+  /** This spawn's own ceiling on how long a single claim may run, when it has
+   *  one. `None` — the usual case — means it follows the guild's
+   *  `RespawnSettings.maxDurationMinutes`, so retuning the server still moves
+   *  every spawn nobody has singled out.
+   *
+   *  It *replaces* the guild's number rather than capping it, so a spawn worth a
+   *  long session can be given one above the server's ceiling as well as below.
+   *  Read it through [[RespawnSettings.maxFor]] and never directly: the point of
+   *  that method is that no caller does this resolution by hand.
+   *
+   *  Defaulted so that the many places building one of these for a test — where
+   *  the ceiling is beside the point — need say nothing about it. */
+  maxDurationMinutes: Option[Int] = None
 ) {
   /** "415 — Cult Orcs" — the forum post title and the way a spawn is named
    *  everywhere it's displayed. */
@@ -591,7 +604,27 @@ final case class RespawnSettings(
   /** How long someone has to accept a handover offer before it's assumed they
    *  walked away and the spawn moves on to the next person. */
   handoverMinutes: Int
-)
+) {
+  /** The longest a single claim on `respawn` may run.
+   *
+   *  The one place the guild ceiling and a spawn's own override are reconciled.
+   *  Every check that used to read `maxDurationMinutes` straight off these
+   *  settings goes through here instead — claiming, extending, a moderator
+   *  setting somebody else's length, and booking a repeating slot — because ten
+   *  call sites each doing their own resolution is how a limit ends up
+   *  disagreeing with itself depending on which door you came in.
+   *
+   *  A spawn's own number wins outright, above the guild's as well as below.
+   *  "Maximum claim time for this spawn" reads as an absolute, and an admin who
+   *  types six hours on a raid spawn should not have it silently clamped to the
+   *  server's four.
+   *
+   *  Not applied to a member's *personal* default — see
+   *  `RespawnService.saveUserPrefs`. A preference with no spawn attached has no
+   *  spawn's ceiling to be measured against, so that one stays guild-level. */
+  def maxFor(respawn: Respawn): Int =
+    respawn.maxDurationMinutes.getOrElse(maxDurationMinutes)
+}
 
 /** One member's own preferences, overriding the guild defaults for their own
  *  claims. Set through the Config button on the spawns board.

@@ -98,6 +98,13 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"remove:$code"; result
     }
+    def setSpawnMax(guildId: String, actorId: String, code: String,
+                    minutes: Option[Int]): Future[ActionResult] = {
+      // "clear" rather than an empty string, so a test can tell an override being
+      // removed from one being set to nothing — which the endpoint refuses.
+      moderatorCalls = moderatorCalls :+ s"spawnmax:$code:${minutes.fold("clear")(_.toString)}"
+      result
+    }
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"extend:$code:$extraMinutes"; result
@@ -376,6 +383,7 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}"""),
       ("/dashboard/g/g1/spawns", """{"code":"999","name":"Somewhere"}"""),
       ("/dashboard/g/g1/remove-spawn", """{"code":"999"}"""),
+      ("/dashboard/g/g1/spawn-max", """{"code":"415","minutes":60}"""),
       ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}"""),
       ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
       ("/dashboard/g/g1/reassign-slot",
@@ -405,6 +413,8 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/remove-spawn", body("""{"code":"999"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":60}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/extend-holder", body("""{"code":"415","minutes":30}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/drop-slot",
@@ -415,8 +425,32 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
-      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "extend:415:30",
+      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "spawnmax:415:60", "extend:415:30",
       "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9")
+  }
+
+  test("an empty max claim clears the spawn's own ceiling rather than failing") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    // Both spellings of "no value", because a page that clears a field sends the
+    // empty string and one that drops it sends nothing at all.
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":""}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe List("spawnmax:415:clear", "spawnmax:415:clear")
+  }
+
+  // Reading "2h" as a clear would do the opposite of what was typed, so it is
+  // refused before the service sees it.
+  test("a max claim that is not a number never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2h"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }
+    Post("/dashboard/g/g1/spawn-max", body("""{"minutes":"60"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }
+    actions.moderatorCalls shouldBe empty
   }
 
   // A slot is named by the moment it starts on, and getting that wrong means

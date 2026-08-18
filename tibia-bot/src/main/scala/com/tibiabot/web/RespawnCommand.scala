@@ -63,6 +63,7 @@ object RespawnCommand {
   val GrantStamina = "grant-stamina"
   val AddSpawn = "add-spawn"
   val RemoveSpawn = "remove-spawn"
+  val SetSpawnMax = "set-spawn-max"
   val ExtendHolder = "extend-holder"
   val DropSlot = "drop-slot"
   val ReassignSlot = "reassign-slot"
@@ -72,7 +73,7 @@ object RespawnCommand {
    *  never heard of fails visibly instead of silently doing nothing. */
   val Actions: Set[String] =
     Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina,
-        AddSpawn, RemoveSpawn, ExtendHolder, DropSlot, ReassignSlot)
+        AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder, DropSlot, ReassignSlot)
 
   /** The actions that act on somebody else, and so need the moderator tier.
    *
@@ -80,7 +81,8 @@ object RespawnCommand {
    *  decided here and not carried on the wire. A command that could name its own
    *  requirement would be a command that could understate it. */
   private val ModeratorActions: Set[String] =
-    Set(ForceLeave, Reassign, GrantStamina, AddSpawn, RemoveSpawn, ExtendHolder, DropSlot, ReassignSlot)
+    Set(ForceLeave, Reassign, GrantStamina, AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder,
+        DropSlot, ReassignSlot)
 
   /** What somebody must be in the guild for this action to be performed as them.
    *

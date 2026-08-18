@@ -113,6 +113,15 @@ trait RespawnActionPort {
   def addSpawn(guildId: String, actorId: String, code: String, region: String,
                name: String, creature: String): Future[ActionResult]
 
+  /** Set or clear one spawn's own ceiling on claim length.
+   *
+   *  `minutes` empty clears the override, putting the spawn back on the guild's
+   *  number. Relayed like the other catalogue writes because the spawn's forum
+   *  post has to be redrawn afterwards, and only the bot that owns the forum can
+   *  touch it. */
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult]
+
   /** Take one day off the calendar, leaving the booking rule behind it alone.
    *
    *  The day is named by the instant it starts on, which is what the grid

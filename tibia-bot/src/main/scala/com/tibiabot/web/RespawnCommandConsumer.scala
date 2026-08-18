@@ -189,6 +189,13 @@ final class RespawnCommandConsumer(
       case RespawnCommand.RemoveSpawn =>
         command.param("code").fold(missing("spawn"))(local.removeSpawn(guildId, actor, _))
 
+      case RespawnCommand.SetSpawnMax =>
+        // No "minutes" means clear it, which is a real instruction here rather
+        // than a missing field — so only the spawn is required.
+        command.param("code").fold(missing("spawn")) { code =>
+          local.setSpawnMax(guildId, actor, code, command.param("minutes").flatMap(m => scala.util.Try(m.toInt).toOption))
+        }
+
       case RespawnCommand.DropSlot =>
         (command.param("code"), slotStart(command)) match {
           case (Some(code), Some(start)) => local.dropSlot(guildId, actor, code, start)

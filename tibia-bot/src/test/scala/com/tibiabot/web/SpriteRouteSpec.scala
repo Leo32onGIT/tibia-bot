@@ -70,6 +70,8 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def addSpawn(guildId: String, actorId: String, code: String, region: String,
                  name: String, creature: String): Future[ActionResult] = no
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = no
+    def setSpawnMax(guildId: String, actorId: String, code: String,
+                    minutes: Option[Int]): Future[ActionResult] = no
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = no
     def dropSlot(guildId: String, actorId: String, code: String,

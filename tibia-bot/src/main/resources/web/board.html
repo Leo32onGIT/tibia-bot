@@ -226,6 +226,18 @@
   .mod-field input[type="range"] { background: none; border: 0; padding: 0; }
   .mod-field input::placeholder { color: var(--muted); font-family: var(--sans); }
   .mod-field input:focus { outline: none; border-color: var(--purple); }
+  /* The one loose input in a spawn's Moderator block — narrow, because it holds
+     at most four digits, and mono so the number lines up with the durations
+     everywhere else on the card. Deliberately borrows the .mod-field look rather
+     than inventing a second field style. */
+  .mod-input {
+    width: 6.5rem; flex-shrink: 0;
+    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 6px 9px;
+    font-variant-numeric: tabular-nums;
+  }
+  .mod-input::placeholder { color: var(--muted); font-family: var(--sans); }
+  .mod-input:focus { outline: none; border-color: var(--purple); }
   .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
   .mod-note code { font-family: var(--mono); color: var(--text); }
   .mod-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1291,12 +1303,13 @@ function capAt(when) {
   const l = limits();
   if (!l) return 0;
   const resets = l.resetsAt ? new Date(l.resetsAt).getTime() : null;
+  const ceiling = spawnMax(openSpawn());
   if (when && resets && when.getTime() >= resets) {
     return l.budgetMinutes == null
-      ? l.maxDurationMinutes
-      : Math.max(0, Math.min(l.maxDurationMinutes, l.budgetMinutes));
+      ? ceiling
+      : Math.max(0, Math.min(ceiling, l.budgetMinutes));
   }
-  return l.claimableMinutes;
+  return claimableOn(openSpawn());
 }
 
 /** The ceiling for the hunt currently being arranged: the selected slot if
@@ -1304,6 +1317,36 @@ function capAt(when) {
  *  is measured against whichever the button is about to do. */
 const cap = () => capAt(view.pick);
 const openSpawn = () => (board && view.code ? board.spawns.find(s => s.code === view.code) : null);
+
+/** The longest a claim on one spawn may run.
+ *
+ *  `maxMinutes` arrives with the catalogue and is present only on a spawn a
+ *  moderator has singled out; everything else follows the server's figure. It
+ *  replaces that figure rather than capping it, so a spawn may be worth *more*
+ *  than the server's ceiling as well as less — the same rule the bot applies,
+ *  and the reason this is not a `Math.min`.
+ */
+const spawnMax = spawn => {
+  const l = limits();
+  if (!l) return 0;
+  return spawn && spawn.maxMinutes != null ? spawn.maxMinutes : l.maxDurationMinutes;
+};
+
+/** What this viewer could actually claim on one spawn right now: that spawn's
+ *  ceiling, or what is left in their tank if that is lower.
+ *
+ *  The same arithmetic the server does in `BoardLimits.claimableMinutes`, except
+ *  that the ceiling is the spawn's. `claimableMinutes` off the wire is the
+ *  board-wide answer and is still right for every spawn without an override —
+ *  which is nearly all of them — but it cannot speak for the ones with.
+ */
+const claimableOn = spawn => {
+  const l = limits();
+  if (!l) return 0;
+  const ceiling = spawnMax(spawn);
+  if (!l.budgetMinutes) return ceiling;
+  return Math.max(0, Math.min(ceiling, l.remainingMinutes || 0));
+};
 
 function hoursSince(iso) {
   if (!iso) return null;
@@ -1896,7 +1939,11 @@ function openWindow(code) {
   // Start at the guild's default, but never above what is actually claimable —
   // a default of 2h is meaningless if only 18m of stamina is left, and a floor
   // of half an hour would put the figure straight back above the ceiling.
-  view.duration = l ? Math.min(l.defaultDurationMinutes, l.claimableMinutes) : null;
+  //
+  // Through cap() rather than the board-wide `claimableMinutes`, so a spawn with
+  // a ceiling of its own opens at a length it will actually accept instead of
+  // opening too long and being corrected on the first render.
+  view.duration = l ? Math.min(l.defaultDurationMinutes, cap()) : null;
   veil.classList.add('open');
   windowEl.classList.add('open');
   lockPage();
@@ -2206,7 +2253,9 @@ function renderWindow() {
  *  anyway just invites a pointless round trip. */
 function canClaimNow(spawn) {
   const l = limits();
-  return !spawn.mine && !spawn.queued && !!l && l.claimableMinutes >= MIN_CLAIM;
+  // Per spawn, not board-wide: a tight ceiling on one spawn must not grey out
+  // the Claim button on every other, and a generous one must not be ignored.
+  return !spawn.mine && !spawn.queued && !!l && claimableOn(spawn) >= MIN_CLAIM;
 }
 
 /** The Discord emoji the Claim button wears there, worn here too. */
@@ -2340,7 +2389,7 @@ function nowStrip(spawn) {
   // Nothing about the ceiling here either. "up to 5h · stamina" was a third
   // telling of a thing the tank says by being the tank — the bar ends where the
   // ceiling is, and you can watch yourself arrive at it.
-  if (!canClaimNow(spawn) && l && l.claimableMinutes < MIN_CLAIM && !spawn.mine) {
+  if (!canClaimNow(spawn) && l && claimableOn(spawn) < MIN_CLAIM && !spawn.mine) {
     strip.appendChild(el('span', 'dur-cap', 'No stamina left today to start a hunt.'));
   }
 
@@ -3118,17 +3167,26 @@ function whoHas(slot) {
  *  who forges the request is refused anyway. What the hiding buys is that nobody
  *  is offered a button they cannot press.
  *
- *  Nothing is offered against a spawn nobody holds — there is no claim to move,
- *  hand over, or refund — so the whole block simply is not drawn.
+ *  The claim tools need a claim: against a spawn nobody holds there is nothing
+ *  to move, hand over or refund, so those rows are not drawn. The ceiling at the
+ *  bottom is not about a claim at all — it is what this spawn allows — so it is
+ *  offered either way, the same reasoning that keeps Log on the Discord panel
+ *  for an idle spawn.
  */
 function modTools(body, spawn) {
   const holder = spawn.holderId;
   const queue = spawn.queue || [];   // omitted from the payload when empty
-  if (!holder) return;
 
   const box = el('div', 'mod');
   box.appendChild(el('div', 'mod-title', `<i class="ti ti-shield-half" aria-hidden="true"></i>Moderator`));
 
+  if (holder) claimTools(box, spawn, queue);
+  box.appendChild(ceilingRow(spawn));
+  body.appendChild(box);
+}
+
+/** The rows that act on the claim currently on a spawn. */
+function claimTools(box, spawn, queue) {
   const row = el('div', 'mod-row');
   const remove = button('Remove Claim', 'btn mod-btn small',
     () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
@@ -3162,7 +3220,45 @@ function modTools(body, spawn) {
     });
     box.appendChild(give);
   }
-  body.appendChild(box);
+}
+
+/** How long anybody may hold this spawn.
+ *
+ *  A number and a Save, not a stepper: it is set once in a while and then left
+ *  alone for months, which is the opposite of the claim-length control on the
+ *  same screen — that one is dragged on every claim and is a stepper for exactly
+ *  that reason.
+ *
+ *  An empty box means "follow the server", which is why the placeholder says so
+ *  rather than showing a number that would look like the current value. Clearing
+ *  an override has to be as easy as setting one, and the endpoint reads an empty
+ *  `minutes` the same way.
+ */
+function ceilingRow(spawn) {
+  const row = el('div', 'mod-row');
+  row.appendChild(el('span', 'field-label', 'Max claim'));
+
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.inputMode = 'numeric';
+  field.className = 'mod-input';
+  field.value = spawn.maxMinutes != null ? String(spawn.maxMinutes) : '';
+  field.placeholder = `${limits() ? limits().maxDurationMinutes : ''} (server)`;
+  field.title = 'Minutes. Empty follows the server.';
+  field.setAttribute('aria-label', `Longest claim allowed on ${spawn.code}, in minutes`);
+  row.appendChild(field);
+
+  const save = button('Save', 'btn mod-btn small',
+    () => post(`/dashboard/g/${GUILD_ID}/spawn-max`, { code: spawn.code, minutes: field.value.trim() }));
+  save.title = `Set how long a claim on ${spawn.code} may run`;
+  row.appendChild(save);
+
+  // What is in force right now, said in words, because the box alone cannot
+  // distinguish an override that happens to match the server from one that is
+  // absent.
+  row.appendChild(el('span', 'mod-note',
+    spawn.maxMinutes != null ? `this spawn only` : 'following the server'));
+  return row;
 }
 
 /** The moderator panel above the board: tools that act on the catalogue rather

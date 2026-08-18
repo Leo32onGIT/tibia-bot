@@ -321,6 +321,43 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  change it per guild — it sits at `Config.Respawn.warnMinutes` for everybody.
    *  Members set their own in Config, which is the setting that was ever
    *  actually used. */
+  /** Give one spawn its own ceiling on claim length, or take it away.
+   *
+   *  `None` clears the override and puts the spawn back on the guild's number.
+   *  The value replaces that number rather than capping it, so a spawn worth a
+   *  long session can be set above the server's ceiling as well as below — see
+   *  [[com.tibiabot.domain.RespawnSettings.maxFor]].
+   *
+   *  Nothing already running is touched. A claim under way keeps the end time it
+   *  was granted and a repeating booking keeps firing at its stored length; the
+   *  new ceiling binds the next claim, the next extension and the next booking.
+   *  Shortening somebody mid-hunt because a moderator retuned a spawn would take
+   *  time off a hunt that was legitimate when it started, and the stamina for it
+   *  is already reserved.
+   */
+  def setSpawnMaxDuration(guild: Guild, respawn: Respawn,
+                          minutes: Option[Int]): Either[String, Respawn] =
+    settings(guild.getId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val guildId = guild.getId
+        minutes match {
+          case Some(value) if value < MinimumClaimMinutes =>
+            Left(s"A claim ceiling has to be at least " +
+              s"${RespawnEmbeds.humanDuration(MinimumClaimMinutes)}.")
+          case Some(value) if value > MaxSpawnCeilingMinutes =>
+            Left(s"A claim ceiling can be at most " +
+              s"${RespawnEmbeds.humanDuration(MaxSpawnCeilingMinutes)}.")
+          case _ =>
+            repository.setRespawnMaxDuration(guildId, respawn.id, minutes)
+            val updated = respawn.copy(maxDurationMinutes = minutes)
+            // The card carries the ceiling in its footer, so it is stale the
+            // moment this is written.
+            refreshThread(guild, updated, config)
+            Right(updated)
+        }
+    }
+
   def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
                      queueLimit: Option[Int], stamina: Option[Int],
                      handover: Option[Int]): Either[String, RespawnSettings] =
@@ -598,6 +635,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the claim is refused with an explanation instead. */
   val MinimumClaimMinutes: Int = 5
 
+  /** The longest ceiling a single spawn may be given.
+   *
+   *  A day, matching `RespawnSchedule.Daily`. Not because anything breaks above
+   *  it, but because a claim longer than a day cannot be booked as a repeating
+   *  slot (`addSchedule` refuses it), so a ceiling above this would be usable
+   *  from one door and not the other — and a moderator who typed 10000 into the
+   *  box meant something other than a week-long hold on a respawn. */
+  val MaxSpawnCeilingMinutes: Int = RespawnSchedule.Daily
+
 
   /** When the next booked slot on a spawn starts, if there is one. */
   def nextReservationStart(guildId: String, respawnId: Long,
@@ -626,8 +672,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // whatever the member set through Config.
             val minutes = requestedMinutes.getOrElse(
               repository.userPrefs(guild.getId, userId).defaultDurationOr(config.defaultDurationMinutes))
-            if (minutes <= 0 || minutes > config.maxDurationMinutes)
-              ClaimOutcome.BadDuration(minutes, config.maxDurationMinutes)
+            val ceiling = config.maxFor(respawn)
+            if (minutes <= 0 || minutes > ceiling)
+              ClaimOutcome.BadDuration(minutes, ceiling)
             else {
               val guildId = guild.getId
               val alreadyHeld = repository.openClaimsForUser(guildId, userId).find(_.respawnId == respawn.id)
@@ -826,8 +873,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def handingOverHolder(guildId: String, respawnId: Long): Option[RespawnClaim] =
     repository.activeClaim(guildId, respawnId).filter(_.eligibleForHandover)
 
-  /** Add time to the caller's active claim, within the guild's ceiling and
-   *  their remaining stamina. Returns the new end time on success. */
+  /** Add time to the caller's active claim, within the ceiling that applies to
+   *  the spawn it is on and their remaining stamina. Returns the new end time on
+   *  success. */
   def extend(guild: Guild, userId: String, extraMinutes: Int,
              now: ZonedDateTime = ZonedDateTime.now()): Either[ClaimOutcome, (Respawn, ZonedDateTime)] =
     settings(guild.getId) match {
@@ -839,12 +887,18 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         repository.openClaimsForUser(guildId, userId).find(c => c.isActive && c.limboUntil.isEmpty) match {
           case None => Left(ClaimOutcome.UnknownSpawn(""))
           case Some(claim) =>
+            // Read before the bound is checked rather than after, because the
+            // bound now depends on which spawn this is — see
+            // `RespawnSettings.maxFor`. A spawn that has gone from the catalogue
+            // under a live claim falls back to the guild's number, which is the
+            // same answer this gave before there were per-spawn ceilings.
+            val respawn = repository.findById(guildId, claim.respawnId)
             val newTotal = claim.durationMinutes + extraMinutes
-            if (extraMinutes <= 0 || newTotal > config.maxDurationMinutes)
-              Left(ClaimOutcome.BadDuration(newTotal, config.maxDurationMinutes))
+            val ceiling = respawn.fold(config.maxDurationMinutes)(config.maxFor)
+            if (extraMinutes <= 0 || newTotal > ceiling)
+              Left(ClaimOutcome.BadDuration(newTotal, ceiling))
             else {
               val boundary = resetBoundary(now)
-              val respawn = repository.findById(guildId, claim.respawnId)
               if (!repository.reserveStamina(guildId, userId, extraMinutes, config.staminaMinutes, boundary)) {
                 val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
                 Left(respawn
@@ -879,13 +933,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
         val guildId = guild.getId
-        if (newTotalMinutes < 5 || newTotalMinutes > config.maxDurationMinutes)
-          Left(s"A claim has to be between 5 minutes and " +
-            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+        val respawn = repository.findById(guildId, respawnId)
+        val ceiling = respawn.fold(config.maxDurationMinutes)(config.maxFor)
+        if (newTotalMinutes < MinimumClaimMinutes || newTotalMinutes > ceiling)
+          Left(s"A claim has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
+            s"${RespawnEmbeds.humanDuration(ceiling)}" +
+            s"${if (respawn.exists(_.maxDurationMinutes.isDefined)) " on this spawn." else " on this server."}")
         else repository.openClaimsForUser(guildId, userId).find(_.respawnId == respawnId) match {
           case None => Left("You aren't holding or waiting for that respawn.")
           case Some(claim) =>
-            val respawn = repository.findById(guildId, respawnId)
             if (!claim.isActive) {
               // Queued and offered claims have reserved nothing yet, so this is
               // just a stored number until they start.
@@ -1104,9 +1160,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
         val guildId = guild.getId
-        if (durationMinutes < MinimumClaimMinutes || durationMinutes > config.maxDurationMinutes)
+        val ceiling = config.maxFor(respawn)
+        if (durationMinutes < MinimumClaimMinutes || durationMinutes > ceiling)
           Left(s"A slot has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
-            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+            s"${RespawnEmbeds.humanDuration(ceiling)}" +
+            s"${if (respawn.maxDurationMinutes.isDefined) " on this spawn." else " on this server."}")
         else if (!firstStart.isAfter(now))
           Left("The first slot has to start in the future.")
         else if (durationMinutes >= RespawnSchedule.Daily)

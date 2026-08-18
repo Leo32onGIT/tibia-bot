@@ -419,7 +419,8 @@ object RespawnButtons extends StrictLogging {
                   // and the panel's own embed says whether anybody is on it.
                   val queueSize = service.status(guildId, respawn)._2.size
                   deferredRespond.embed(
-                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize),
+                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize,
+                      service.settings(guildId)),
                     Some(RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim)))
                 }
 
@@ -461,6 +462,14 @@ object RespawnButtons extends StrictLogging {
               case "holdercfg" =>
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
                 else event.replyModal(RespawnModals.holderDurationModal(guildId, respawn)).queue()
+
+              // Only reachable from the moderator panel, but checked here as
+              // well: a panel can sit open long after the role that opened it
+              // was taken away, and the id is guessable by anybody who has seen
+              // one.
+              case "spawnmax" =>
+                if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+                else event.replyModal(RespawnModals.spawnMaxModal(guildId, respawn)).queue()
 
               case "selfcfg" =>
                 event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()

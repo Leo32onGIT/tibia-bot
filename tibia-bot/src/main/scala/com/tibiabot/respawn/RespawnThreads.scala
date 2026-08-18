@@ -117,16 +117,23 @@ object RespawnThreads extends StrictLogging {
    *  when they have one, since the moderator actions target whoever holds the
    *  spawn — which may not be them.
    *
-   *  Never empty: Log is offered whatever state the spawn is in, so a moderator
-   *  opening this on a spawn nobody holds still has the one thing worth asking
-   *  about an idle spawn. */
+   *  Never empty: Log and Max Claim are offered whatever state the spawn is in,
+   *  so a moderator opening this on a spawn nobody holds still has the two
+   *  things worth doing about an idle spawn — reading its history and setting
+   *  how long anybody may hold it.
+   *
+   *  Five is Discord's limit for one action row, and with a holder and a claim
+   *  of the moderator's own this is now exactly five. There is no sixth slot: a
+   *  further spawn-level moderator action needs a second row or a menu. */
   def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): ActionRow = {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
       if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
       Some(Button.secondary(RespawnButtonId.logPage(LogScope.Spawn(respawnId), 0), "Log")
-        .withEmoji(Emoji.fromUnicode("📜")))
+        .withEmoji(Emoji.fromUnicode("📜"))),
+      Some(Button.secondary(RespawnButtonId.spawnMax(respawnId), "Max Claim")
+        .withEmoji(Emoji.fromUnicode("⏳")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -879,6 +886,8 @@ object RespawnButtonId {
 
   /** Moderator actions reached from a spawn's Config panel. */
   def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
+  /** This spawn's own ceiling on claim length, rather than the guild's. */
+  def spawnMax(respawnId: Long): String = s"${Prefix}spawnmax:$respawnId"
   def forceLeave(respawnId: Long): String = s"${Prefix}forceleave:$respawnId"
   /** The caller's own duration, offered alongside the moderator actions when they
    *  have a claim of their own on the spawn. */
@@ -907,6 +916,7 @@ object RespawnButtonId {
    *  the form itself, so it cannot be known when the modal is built. */
   val modalBoardSchedule: String = s"${ModalPrefix}boardschedule"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
+  def modalSpawnMax(respawnId: Long): String = s"${ModalPrefix}spawnmax:$respawnId"
 
   /** Every guild-wide setting, in one modal — exactly the five Discord allows. */
   val modalClaimRules: String = s"${ModalPrefix}claimrules"
@@ -972,7 +982,7 @@ object RespawnButtonId {
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
     Set("claim", "book", "mysettings", "claimrules", "selfcfg", "holdercfg", "schedule",
-        "booknew", "givestamina")
+        "booknew", "givestamina", "spawnmax")
 
   /** Whether this press has to answer with a modal, and so cannot be
    *  acknowledged up front — `replyModal` must be an interaction's first

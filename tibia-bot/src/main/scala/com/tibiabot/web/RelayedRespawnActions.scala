@@ -112,6 +112,14 @@ final class RelayedRespawnActions(
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.RemoveSpawn, Map("code" -> code))
 
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult] =
+    // An absent "minutes" is what clears the override, so this carries the field
+    // only when there is one — the same way an absent duration means "their
+    // default" on a relayed claim.
+    send(guildId, actorId, RespawnCommand.SetSpawnMax,
+      Map("code" -> code) ++ minutes.map(m => "minutes" -> m.toString))
+
   def dropSlot(guildId: String, actorId: String, code: String,
                startsAt: java.time.ZonedDateTime): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.DropSlot,

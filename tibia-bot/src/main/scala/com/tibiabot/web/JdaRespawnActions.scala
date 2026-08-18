@@ -260,6 +260,25 @@ final class JdaRespawnActions(
       }
     }
 
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, "That respawn isn't in the catalogue.")
+        case Some(respawn) => respawnService.setSpawnMaxDuration(guild, respawn, minutes) match {
+          case Left(reason) => ActionResult(ok = false, reason)
+          case Right(updated) => updated.maxDurationMinutes match {
+            case None =>
+              ActionResult(ok = true, s"${updated.displayName} follows the server's maximum again.")
+            case Some(value) =>
+              ActionResult(ok = true,
+                s"Claims on ${updated.displayName} can now run up to " +
+                  s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(value)}.")
+          }
+        }
+      }
+    }
+
   def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.resolve(guildId, code) match {

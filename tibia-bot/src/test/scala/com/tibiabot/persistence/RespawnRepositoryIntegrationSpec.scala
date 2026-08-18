@@ -92,6 +92,39 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.findByCode(g, "415") shouldBe None
   }
 
+  // A nullable numeric column is where "no override" and "zero minutes" get
+  // confused: JDBC's getInt answers 0 for SQL NULL, so a read that does not ask
+  // wasNull() turns every ordinary spawn into one nobody may claim.
+  test("catalogue: a spawn's own claim ceiling round-trips, including its absence") {
+    val (repo, g) = freshRepo()
+    val added = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+
+    // Nothing set yet: absent, not zero.
+    added.maxDurationMinutes shouldBe None
+    repo.findByCode(g, "415").flatMap(_.maxDurationMinutes) shouldBe None
+
+    repo.setRespawnMaxDuration(g, added.id, Some(90))
+    repo.findByCode(g, "415").flatMap(_.maxDurationMinutes) shouldBe Some(90)
+
+    // Above the server's own ceiling is allowed — the column stores what it was
+    // given and the reconciliation happens in RespawnSettings.maxFor.
+    repo.setRespawnMaxDuration(g, added.id, Some(600))
+    repo.findById(g, added.id).flatMap(_.maxDurationMinutes) shouldBe Some(600)
+
+    // Clearing has to be a real operation, not "leave it alone" — which is why
+    // this is its own statement rather than another COALESCE argument.
+    repo.setRespawnMaxDuration(g, added.id, None)
+    repo.findById(g, added.id).flatMap(_.maxDurationMinutes) shouldBe None
+
+    // And an edit of something else must not disturb it.
+    repo.setRespawnMaxDuration(g, added.id, Some(45))
+    repo.updateRespawn(g, added.id, name = Some("Cult Orc Cave"), creature = None,
+      world = None, mapperLink = None)
+    val edited = repo.findById(g, added.id)
+    edited.map(_.name) shouldBe Some("Cult Orc Cave")
+    edited.flatMap(_.maxDurationMinutes) shouldBe Some(45)
+  }
+
   test("codes are matched case-insensitively") {
     val (repo, g) = freshRepo()
     repo.addRespawn(g, "1415a", "Fury dungeon", "Fury", "Rathleton", "", "", Respawn.SourceSeed, "seed")

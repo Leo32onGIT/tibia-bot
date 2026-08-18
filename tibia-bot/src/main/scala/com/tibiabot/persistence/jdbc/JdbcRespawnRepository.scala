@@ -150,6 +150,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS creature_pinned BOOLEAN NOT NULL DEFAULT FALSE;")
+      // Nullable with no default on purpose: NULL is "follow the server", which
+      // is what almost every row is and what lets a guild retune its own ceiling
+      // and have every un-singled-out spawn move with it. A DEFAULT here would
+      // freeze today's server value onto every existing row.
+      statement.executeUpdate(
+        "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS max_duration INT;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS outcome VARCHAR(24);")
       statement.executeUpdate(
@@ -295,7 +301,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       mapperLink = Option(result.getString("mapper_link")).getOrElse(""),
       threadId = Option(result.getString("thread_id")).getOrElse(""),
       source = Option(result.getString("source")).getOrElse(Respawn.SourceCustom),
-      addedBy = Option(result.getString("added_by")).getOrElse("")
+      addedBy = Option(result.getString("added_by")).getOrElse(""),
+      // getInt yields 0 for SQL NULL, which would read as a ceiling of zero
+      // minutes rather than as "no override" — so the null is asked about
+      // explicitly rather than inferred from the value.
+      maxDurationMinutes = {
+        val value = result.getInt("max_duration")
+        if (result.wasNull()) None else Some(value)
+      }
     )
 
   private def readClaim(result: ResultSet): RespawnClaim =
@@ -559,6 +572,25 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate()
     } finally statement.close()
   }
+
+  /** Set or clear one spawn's own claim ceiling.
+   *
+   *  Its own statement rather than another COALESCE argument on `updateRespawn`,
+   *  because clearing is a real operation here: COALESCE cannot tell "leave this
+   *  alone" from "set it back to NULL", and both are things a moderator asks for.
+   */
+  def setRespawnMaxDuration(guildId: String, respawnId: Long, minutes: Option[Int]): Unit =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement("UPDATE respawns SET max_duration = ? WHERE id = ?;")
+      try {
+        minutes match {
+          case Some(value) => statement.setInt(1, value)
+          case None        => statement.setNull(1, java.sql.Types.INTEGER)
+        }
+        statement.setLong(2, respawnId)
+        statement.executeUpdate()
+      } finally statement.close()
+    }
 
   def removeRespawn(guildId: String, respawnId: Long): Unit = withGuildTransaction(guildId) { conn =>
     val claims = conn.prepareStatement("DELETE FROM respawn_claims WHERE respawn_id = ?;")

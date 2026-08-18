@@ -630,6 +630,34 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    // One spawn's own claim ceiling. A moderator tool like the two above, and
+    // gated the same way.
+    //
+    // An absent or empty "minutes" clears the override rather than failing: on
+    // this endpoint "no value" is the instruction to follow the server again,
+    // which is the same thing an empty box means in the Discord form.
+    path("g" / Segment / "spawn-max") { guildId =>
+      post {
+        withWrite(guildId, AccessTier.Moderator) { userId =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            fields.get("code").map(_.trim).filter(_.nonEmpty) match {
+              case None => badRequest("Which spawn?")
+              case Some(code) =>
+                val typed = fields.get("minutes").map(_.trim).getOrElse("")
+                if (typed.isEmpty) actionResult(guildId, actions.setSpawnMax(guildId, userId, code, None))
+                else scala.util.Try(typed.toInt).toOption match {
+                  case Some(minutes) =>
+                    actionResult(guildId, actions.setSpawnMax(guildId, userId, code, Some(minutes)))
+                  // Refused rather than read as a clear: taking "2h" to mean
+                  // "follow the server" would do the opposite of what was asked.
+                  case None => badRequest("That needs to be a whole number of minutes, or empty.")
+                }
+            }
+          }
+        }
+      }
+    } ~
     path("images" / Segment) { filename =>
       get {
         discordAuth.authenticatedUser { _ =>
@@ -1043,7 +1071,15 @@ object RespawnDashboardRoute {
         // picture ever disagreeing about which monster a spawn is. Empty for the
         // many catalogue rows whose creature is deliberately unset.
         "creature" -> JsString(spawn.creature)
-      ) ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue)))
+      )
+        ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue))
+        // This spawn's own claim ceiling, when it has been given one. Absent
+        // rather than equal to the server's, so the page can say *which* limit
+        // is binding — and so a guild retuning its own number does not need
+        // every catalogue row rewritten. In the catalogue rather than the board
+        // because it is configuration, not state: it changes when a moderator
+        // changes it, which is far rarer than the ten-second poll.
+        ++ spawn.maxDurationMinutes.map(m => "maxMinutes" -> (JsNumber(m): JsValue)))
     }.toVector))
 
   private def entryJson(entry: com.tibiabot.respawn.RespawnBoardEntry, viewerId: String): JsValue = {

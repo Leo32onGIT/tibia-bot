@@ -82,6 +82,11 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       lastRemove = Some(code); result
     }
     var lastRemove: Option[String] = None
+    def setSpawnMax(guildId: String, actorId: String, code: String,
+                    minutes: Option[Int]): Future[ActionResult] = {
+      lastSpawnMax = Some((code, minutes)); result
+    }
+    var lastSpawnMax: Option[(String, Option[Int])] = None
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = {
       lastExtend = Some((code, extraMinutes)); result

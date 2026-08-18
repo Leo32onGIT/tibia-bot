@@ -97,6 +97,10 @@ trait RespawnRepository {
                     world: Option[String], mapperLink: Option[String]): Unit
 
   /** Remove a catalogue entry and every claim attached to it. */
+  /** Set or clear one spawn's own ceiling on claim length. `None` clears it,
+   *  putting the spawn back on the guild's — see `RespawnSettings.maxFor`. */
+  def setRespawnMaxDuration(guildId: String, respawnId: Long, minutes: Option[Int]): Unit
+
   def removeRespawn(guildId: String, respawnId: Long): Unit
 
   /** Remember which forum post represents this spawn ("" to forget it). */

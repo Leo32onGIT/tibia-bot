@@ -58,6 +58,10 @@ final class RoutingRespawnActions(
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     port(guildId).removeSpawn(guildId, actorId, code)
 
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult] =
+    port(guildId).setSpawnMax(guildId, actorId, code, minutes)
+
   def dropSlot(guildId: String, actorId: String, code: String,
                startsAt: java.time.ZonedDateTime): Future[ActionResult] =
     port(guildId).dropSlot(guildId, actorId, code, startsAt)

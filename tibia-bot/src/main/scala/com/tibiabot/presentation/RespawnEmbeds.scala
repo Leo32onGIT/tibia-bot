@@ -465,7 +465,8 @@ object RespawnEmbeds {
   /** The moderator panel for one spawn: who holds it, and what can be done to
    *  them. Rendered instead of going straight to a duration form, because the
    *  actions here affect somebody else's hunt. */
-  def spawnModeratorPanel(respawn: Respawn, holder: Option[RespawnClaim], queueSize: Int): MessageEmbed = {
+  def spawnModeratorPanel(respawn: Respawn, holder: Option[RespawnClaim], queueSize: Int,
+                          settings: Option[RespawnSettings] = None): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     holder match {
       case Some(claim) =>
@@ -476,6 +477,17 @@ object RespawnEmbeds {
         embed.setFooter("Force leave hands it to whoever is next, and refunds their unused stamina.")
       case None =>
         embed.setDescription("Nobody is on this respawn right now.")
+    }
+    // Shown because Max Claim is one of the buttons under this, and a control
+    // whose current value is not on screen is a control you have to press to
+    // read. Says which of the two numbers is in force, since "2h" alone does not
+    // tell a moderator whether this spawn has been singled out or is simply
+    // following the server.
+    settings.foreach { config =>
+      val effective = humanDuration(config.maxFor(respawn))
+      embed.addField("Max claim",
+        if (respawn.maxDurationMinutes.isDefined) s"$effective · this spawn"
+        else s"$effective · server default", true)
     }
     embed.build()
   }
