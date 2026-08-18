@@ -712,11 +712,23 @@ object BotApp extends App with StrictLogging {
       // roughly daily instead of every 30 seconds.
       private var ticks = 0L
       private val ticksPerDay = math.max(1L, (24 * 60 * 60 * 1000L) / math.max(1L, sweepMillis))
+      // And so the stray-post reconciler runs roughly hourly. Far more often
+      // than the board refresh, because what it is recovering from is a restart
+      // dropping RespawnSleep's pending closes — leaving a guild's free spawns
+      // sitting open on the forum's front page for the rest of the day would
+      // defeat the point of closing them at all.
+      private val ticksPerHour = math.max(1L, (60 * 60 * 1000L) / math.max(1L, sweepMillis))
 
       def run(): Unit = {
         if (!startUpComplete) return
         ticks += 1
         val refreshBoards = ticks % ticksPerDay == 0
+        val reconcilePosts = ticks % ticksPerHour == 0
+        // Entries for guilds nothing drains — a press that reached a bot which
+        // does not own that guild's forum, or one whose settings have since
+        // gone. Cheap, and process-wide rather than per guild, so it sits above
+        // the loop.
+        respawn.RespawnSleep.evictStale()
         // Only guilds with a configured world are worth sweeping. The bot sits
         // in plenty of guilds that never ran /setup and so have no
         // `_<guildId>` database at all — asking those for their settings opens
@@ -735,6 +747,17 @@ object BotApp extends App with StrictLogging {
               .filter(respawnOwnership.ownsRespawns(guild, _))
               .foreach { config =>
                 respawnService.sweep(guild)
+                // After the sweep, so a spawn that has just come free has
+                // already had its own post closed and there is nothing here to
+                // race. Both of these are no-ops on a quiet guild: the first
+                // returns immediately with nothing due, and the second only
+                // looks at posts JDA already has cached as open.
+                respawnService.closeIdleThreads(guild, config)
+                if (reconcilePosts) {
+                  val closed = respawnService.reconcileThreads(guild, config)
+                  if (closed > 0)
+                    logger.info(s"Put $closed idle respawn post(s) back to sleep in guild '${guild.getId}'")
+                }
                 if (refreshBoards) respawn.RespawnThreads.refreshBoard(guild, config)
               }
           } catch {

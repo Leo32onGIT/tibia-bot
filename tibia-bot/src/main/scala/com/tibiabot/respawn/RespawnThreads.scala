@@ -686,6 +686,41 @@ object RespawnThreads extends StrictLogging {
     }
   }
 
+  /** Put a spawn's post back to sleep on its own, without touching its card or
+   *  its tag. Returns whether an archive was actually sent.
+   *
+   *  This is the debounced close — see [[RespawnSleep]] — so unlike [[settle]]
+   *  it is waited on rather than handed over: it runs on the respawn sweep,
+   *  where blocking is the established style and where the result is what says
+   *  whether the post really did go to sleep. Nothing is redrawn, because
+   *  nothing changed; the post is the same one the last press left behind, and
+   *  the only thing wrong with it is that it is awake.
+   *
+   *  An already-archived post is not an error and costs no request — a post can
+   *  reach its due time having been closed in the meantime by the spawn going
+   *  free, or by Discord's own auto-archive. */
+  def closeThread(thread: ThreadChannel): Boolean =
+    if (thread.isArchived) false
+    else Try {
+      thread.getManager.setArchived(true).complete()
+      true
+    }.recover { case error =>
+      logger.warn(s"Could not put respawn thread '${thread.getId}' back to sleep " +
+        s"in guild '${thread.getGuild.getId}'", error)
+      false
+    }.getOrElse(false)
+
+  /** The same, for a post known only by id.
+   *
+   *  Cache-only on purpose, where [[resolveThread]] would page the forum's
+   *  archived posts to find one that is missing. Every post this is asked about
+   *  is one somebody was clicking on moments ago, so an open one is certainly
+   *  cached — and a miss means it is already archived or has been deleted,
+   *  which is the outcome this wanted either way. Paging 500 archived posts to
+   *  confirm that would be the whole cost of the feature. */
+  def closeThread(guild: Guild, threadId: String): Boolean =
+    Option(guild.getThreadChannelById(threadId)).exists(closeThread)
+
   /** The status tag a spawn should be showing right now. Deliberately binary —
    *  a spawn is either taken or available, and whether anyone happens to be
    *  waiting behind it isn't a state of the spawn. */

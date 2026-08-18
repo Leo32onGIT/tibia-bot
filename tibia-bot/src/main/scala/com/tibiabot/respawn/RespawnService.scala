@@ -10,6 +10,7 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.{ForumChannel, ThreadChannel}
 
 import java.time.ZonedDateTime
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
@@ -2040,6 +2041,80 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           sleep = active.isEmpty)
       }
       opened.map(_.thread)
+    }
+  }
+
+  // --- putting posts back to sleep ------------------------------------------
+
+  /** Archive the posts somebody has been clicking on that have since gone quiet.
+   *  Returns how many were closed.
+   *
+   *  The other half of [[RespawnSleep]]: presses are written down on JDA's event
+   *  thread, and this — on the sweep, where blocking is fine — is what acts on
+   *  them once they are due. A post is only closed if the spawn it belongs to
+   *  still has nobody on it, which is re-read here rather than trusted from
+   *  whenever the press happened: five minutes is long enough for somebody to
+   *  have claimed it, and closing a held spawn's post would take the Leave
+   *  button away from its holder.
+   */
+  def closeIdleThreads(guild: Guild, config: RespawnSettings,
+                       now: java.time.Instant = java.time.Instant.now()): Int = {
+    val guildId = guild.getId
+    val ready = RespawnSleep.due(guildId, now)
+    if (ready.isEmpty) 0
+    else RespawnThreads.findForum(guild, config).fold(0) { _ =>
+      // One catalogue read for the batch, keyed by thread so a due entry that
+      // belongs to no spawn — the board post, or a thread in some other forum
+      // that `RespawnSleep.touched` could not rule out without this lookup — is
+      // simply dropped.
+      val byThread = repository.listRespawns(guildId)
+        .filter(_.threadId.nonEmpty).map(respawn => respawn.threadId -> respawn).toMap
+      ready.count { entry =>
+        entry.threadId != config.boardThread &&
+          byThread.get(entry.threadId).exists { respawn =>
+            repository.activeClaim(guildId, respawn.id).isEmpty &&
+              RespawnThreads.closeThread(guild, entry.threadId)
+          }
+      }
+    }
+  }
+
+  /** Close any post that is awake with nobody on the spawn, whatever left it
+   *  that way. Returns how many were closed.
+   *
+   *  The backstop under [[RespawnSleep]], which is in memory: a restart forgets
+   *  every pending close, and a post left open by a press just before one would
+   *  otherwise stay open until somebody claimed and left that spawn. It also
+   *  catches the posts already stuck open from before any of this existed.
+   *
+   *  `getThreadChannels` is cache-only and by definition lists the forum's
+   *  *un*-archived posts, which is exactly the candidate set — so the scan
+   *  itself costs nothing and only the spawns it turns up cost a query. Posts
+   *  the debounce is already about to handle are skipped, so this never closes
+   *  one out from under somebody mid-visit.
+   *
+   *  `limit` caps the archives per pass. The lookups ahead of it are lazy, so a
+   *  forum full of held spawns costs its queries and stops at no requests rather
+   *  than spending the cap on posts that turn out to be fine.
+   */
+  def reconcileThreads(guild: Guild, config: RespawnSettings, limit: Int = 10): Int = {
+    val guildId = guild.getId
+    RespawnThreads.findForum(guild, config).fold(0) { forum =>
+      val open = forum.getThreadChannels.asScala.iterator
+        .filterNot(_.isArchived)
+        .filterNot(thread => thread.getId == config.boardThread)
+        .filterNot(thread => RespawnSleep.isPending(thread.getId))
+        .toList
+      if (open.isEmpty) 0
+      else {
+        val byThread = repository.listRespawns(guildId)
+          .filter(_.threadId.nonEmpty).map(respawn => respawn.threadId -> respawn).toMap
+        open.iterator
+          .flatMap(thread => byThread.get(thread.getId).map(thread -> _))
+          .filter { case (_, respawn) => repository.activeClaim(guildId, respawn.id).isEmpty }
+          .take(limit)
+          .count { case (thread, _) => RespawnThreads.closeThread(thread) }
+      }
     }
   }
 

@@ -258,6 +258,12 @@ object Config {
     /** How often the expiry/promotion sweep runs. Also the worst-case lateness
      *  of a claim ending. */
     val sweepInterval: FiniteDuration = respawn.getDuration("sweep-interval").toScala
+    /** How long a free spawn's post has to go untouched before it is archived
+     *  again. Interacting with an archived post re-opens it, so this is what
+     *  stops a burst of clicks costing an archive apiece — see
+     *  [[com.tibiabot.respawn.RespawnSleep]]. The worst-case lateness on top is
+     *  one [[sweepInterval]], since the sweep is what drains it. */
+    val closeDelay: FiniteDuration = respawn.getDuration("close-delay").toScala
     /** How far ahead recurring slots are booked. Long enough that people can see
      *  and plan around tonight's slot; short enough that a cancelled schedule
      *  leaves few bookings to clear. */
