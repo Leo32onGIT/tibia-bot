@@ -19,7 +19,8 @@ class AccessCacheSpec extends AnyWordSpec with Matchers {
     def advance(seconds: Long): Unit = at = at.plusSeconds(seconds)
   }
 
-  private val access = List(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica")))
+  private val access = AccessReport.of(
+    List(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica"))))
 
   "the cache" should {
 
@@ -59,8 +60,19 @@ class AccessCacheSpec extends AnyWordSpec with Matchers {
     // would otherwise cost.
     "remember an empty answer as an answer" in {
       val cache = new AccessCache(Duration.ofSeconds(45))
-      cache.put("u1", Nil)
-      cache.get("u1") shouldBe Some(Nil)
+      cache.put("u1", AccessReport.Empty)
+      cache.get("u1") shouldBe Some(AccessReport.Empty)
+    }
+
+    // Caching only the granted half would hand the next reader a list that
+    // looks complete and is not — which is the whole confusion the report was
+    // introduced to remove, reappearing one layer down.
+    "remember that a pass could not reach a server" in {
+      val cache = new AccessCache(Duration.ofSeconds(45))
+      val partial = AccessReport(access.granted, List(UnreachableGuild("g2", "Elsewhere")))
+      cache.put("u1", partial)
+      cache.get("u1").map(_.unreachable) shouldBe Some(List(UnreachableGuild("g2", "Elsewhere")))
+      cache.get("u1").map(_.complete) shouldBe Some(false)
     }
 
     "stay bounded when a lot of visitors arrive at once" in {

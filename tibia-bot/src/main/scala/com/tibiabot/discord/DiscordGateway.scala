@@ -18,6 +18,40 @@ final case class MemberAccess(
   visibleChannelIds: Set[String]
 )
 
+/** What a membership lookup produced, with a refusal told apart from a failure
+ *  to ask.
+ *
+ *  [[MemberAccess]] as an `Option` could not say which had happened, and the
+ *  dashboard needs to: "not a member here" is an answer that should quietly
+ *  remove a guild from somebody's picker, where "Discord would not tell us" is
+ *  a fault that should be reported rather than presented as an absence. Reading
+ *  the second as the first is what let a rate-limited lookup silently shrink a
+ *  visitor's server list — and a list shrunk to one is a list with nothing to
+ *  choose from, which sent them into a board they never picked.
+ */
+sealed trait MemberLookup {
+  /** The access, where there is any. `None` for both a refusal and a failure —
+   *  for the callers that genuinely cannot act on the difference. */
+  def toOption: Option[MemberAccess] = this match {
+    case MemberLookup.Allowed(access) => Some(access)
+    case _                            => None
+  }
+}
+
+object MemberLookup {
+  /** Discord answered, and this is who they are. */
+  final case class Allowed(access: MemberAccess) extends MemberLookup
+
+  /** Discord answered, and they are not a member of that guild. A settled
+   *  answer: nothing is going to change by asking again. */
+  case object Denied extends MemberLookup
+
+  /** Nobody answered. Rate limited, timed out, refused, or the bot cannot see
+   *  the guild at all — all of which are worth retrying and none of which say
+   *  anything about the visitor. */
+  final case class Unreachable(reason: String) extends MemberLookup
+}
+
 /**
  * Read-side seam over the JDA instance: the single place the rest of the bot
  * goes through for guild/user lookups, identity and presence. Mirrors JDA's
@@ -39,6 +73,19 @@ trait DiscordGateway {
    *  GUILD_MEMBERS intent, so there is no member cache to read instead. Callers
    *  are expected to ask about a handful of guilds, not all of them. */
   def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess]
+
+  /** The same lookup, saying whether a `None` was a refusal or a failure.
+   *
+   *  Defaulted rather than abstract so that the many gateways which cannot tell
+   *  the two apart — the fakes, and anything standing in for JDA — need say
+   *  nothing. The default reads every absence as a settled refusal, which is
+   *  exactly what the whole of this interface meant before the distinction
+   *  existed; only [[JdaDiscordGateway]] is in a position to do better, and it
+   *  overrides this. */
+  def memberLookup(guildId: String, userId: String, channelIds: List[String]): MemberLookup =
+    memberAccess(guildId, userId, channelIds)
+      .fold[MemberLookup](MemberLookup.Denied)(MemberLookup.Allowed)
+
   /** The bot account's own user id. */
   def selfUserId: String
   /** The bot account's own username. */

@@ -178,22 +178,58 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
 
   /** A dead end the visitor can act on rather than a bare status line: every
    *  way a login can fail short of a server fault (they cancelled, the attempt
-   *  went stale, Discord refused) ends here, styled to match the dashboard, with
-   *  the one useful next step. `message` is ours, never echoed from the query
-   *  string — an attacker-supplied `error` would otherwise be HTML injection. */
+   *  went stale, Discord refused) ends here, with the one useful next step.
+   *  `message` is ours, never echoed from the query string — an attacker-supplied
+   *  `error` would otherwise be HTML injection.
+   *
+   *  Self-contained rather than served through the dashboard's shell, because
+   *  this class is mounted by more than one area and cannot assume the respawn
+   *  page's stylesheet is there. The card is therefore a deliberate copy of it
+   *  — same palette, same mono heading, same blurple sign-in control — so a
+   *  login that failed does not look like it belongs to a different product than
+   *  the page the visitor was heading for. Change one and change the other. */
   private def loginProblem(status: StatusCode, message: String): StandardRoute =
     complete(status, HttpEntity(ContentTypes.`text/html(UTF-8)`,
       s"""<!doctype html>
          |<html lang="en"><head><meta charset="utf-8">
          |<meta name="viewport" content="width=device-width, initial-scale=1">
-         |<title>Sign in</title></head>
-         |<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-         |             background:#0b0d12;color:#d7dce3;font-size:14px;
-         |             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
-         |  <div style="background:#12151c;border:1px solid #1f2430;border-radius:10px;padding:28px 32px;
-         |              max-width:26rem;text-align:center">
-         |    <p style="margin:0 0 18px">$message</p>
-         |    <a href="$loginPath" style="color:#5b8cff;text-decoration:none;font-weight:600">Sign in with Discord</a>
+         |<title>Violent Bot - Sign in</title>
+         |<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
+         |<style>
+         |  * { box-sizing: border-box; }
+         |  body {
+         |    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         |    padding: 24px; background: #0b0d12; color: #d7dce3; font-size: 14px;
+         |    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         |    background-image:
+         |      linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px),
+         |      linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+         |    background-size: 46px 46px;
+         |  }
+         |  .card {
+         |    background: #12151c; border: 1px solid #1f2430; border-radius: 10px;
+         |    padding: 30px 32px; width: 100%; max-width: 27rem; text-align: center;
+         |  }
+         |  .face { width: 46px; height: 46px; border-radius: 12px; margin-bottom: 20px; }
+         |  h1 {
+         |    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         |    font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: #e8ebf0; margin: 0 0 10px;
+         |  }
+         |  p { color: #7c8698; font-size: 13.5px; line-height: 1.65; margin: 0; }
+         |  a.btn {
+         |    display: flex; align-items: center; justify-content: center; gap: 9px;
+         |    margin-top: 20px; padding: 10px 18px; border-radius: 7px;
+         |    background: #5865f2; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none;
+         |  }
+         |  a.btn:hover { background: #6b77f5; }
+         |  a.btn:focus-visible { outline: 2px solid #5b8cff; outline-offset: 2px; }
+         |</style></head>
+         |<body>
+         |  <div class="card">
+         |    <img class="face" src="/dashboard/images/avatar.png" alt="">
+         |    <h1>That didn't go through</h1>
+         |    <p>$message</p>
+         |    <a class="btn" href="$loginPath">Continue with Discord</a>
          |  </div>
          |</body></html>""".stripMargin))
 

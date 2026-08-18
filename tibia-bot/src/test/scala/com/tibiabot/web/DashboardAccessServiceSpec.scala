@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import com.tibiabot.discord.{DiscordGateway, MemberAccess}
+import com.tibiabot.discord.{DiscordGateway, MemberAccess, MemberLookup}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -42,10 +42,22 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     def guilds: List[Guild] = botGuilds.map { case (id, name) => guildStub(id, name, iconUrl) }
     def guildById(id: String): Guild = botGuilds.find(_._1 == id).map { case (i, n) => guildStub(i, n, iconUrl) }.orNull
     def retrieveUser(id: String): User = null
+    /** Guilds whose lookup fails outright rather than answering. A Discord rate
+     *  limit, in other words — which is not a statement about the visitor and
+     *  must not read as one. */
+    var unreachable: Set[String] = Set.empty
+
     def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
       lookups = lookups :+ guildId
       members.get((guildId, userId))
     }
+
+    override def memberLookup(guildId: String, userId: String,
+                              channelIds: List[String]): MemberLookup =
+      if (unreachable.contains(guildId)) {
+        lookups = lookups :+ guildId
+        MemberLookup.Unreachable("rate limited")
+      } else super.memberLookup(guildId, userId, channelIds)
     def selfUserId: String = "self"
     def selfUserName: String = "ViolentBot"
     def selfUserAvatarUrl: String = "https://example.com/avatar.png"
@@ -245,11 +257,54 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
           "g2" -> List(WorldChannel("Antica", AnticaCategory)))
       )
       svc.entryFor("u1", Set("g1", "g2")) match {
-        case DashboardEntry.Choose(options) => options.map(_.guildName) shouldBe List("Allies", "Violent")
+        case DashboardEntry.Choose(options, _) => options.map(_.guildName) shouldBe List("Allies", "Violent")
         case other => fail(s"expected a picker, got $other")
       }
     }
+
+    // The reported bug, end to end. A Discord lookup that fails for one of two
+    // servers used to leave a list of one, which was read as "nothing to ask"
+    // and became a redirect into the other server's board — arriving somewhere
+    // they never chose, with the switcher hidden because that list was also of
+    // length one.
+    "show the picker when a server's lookup failed, rather than jumping into the other" in {
+      val (gateway, svc) = twoGuilds
+      gateway.unreachable = Set("g2")
+      svc.entryFor("u1", Set("g1", "g2")) match {
+        case DashboardEntry.Choose(options, missing) =>
+          options.map(_.guildId) shouldBe List("g1")
+          missing.map(_.guildName) shouldBe List("Allies")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    // A refusal is still a refusal. Somebody genuinely removed from a server
+    // should see it quietly disappear, not be told the dashboard is broken.
+    "still go straight through when the second server simply is not theirs" in {
+      val (_, svc) = twoGuilds
+      svc.entryFor("u1", Set("g1")) shouldBe
+        DashboardEntry.Straight(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica")))
+    }
+
+    "send somebody whose every server failed to the try-again page, not the empty one" in {
+      val (gateway, svc) = twoGuilds
+      gateway.unreachable = Set("g1", "g2")
+      svc.entryFor("u1", Set("g1", "g2")) match {
+        case DashboardEntry.Unreachable(guilds) => guilds.map(_.guildId) should contain theSameElementsAs List("g1", "g2")
+        case other => fail(s"expected the try-again page, got $other")
+      }
+    }
   }
+
+  /** Two guilds the visitor can use, both resolvable — so a test can break
+   *  exactly one of them and say what that should look like. */
+  private def twoGuilds = service(
+    botGuilds = List("g1" -> "Violent", "g2" -> "Allies"),
+    members = Map(("g1", "u1") -> member(), ("g2", "u1") -> member()),
+    configured = Set("g1", "g2"),
+    worlds = Map(
+      "g1" -> List(WorldChannel("Antica", AnticaCategory)),
+      "g2" -> List(WorldChannel("Antica", AnticaCategory))))
 
   /** Two guilds, one of which starts out unresolvable — the shape of a guild
    *  another bot runs that has not answered yet. */

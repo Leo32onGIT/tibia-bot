@@ -3,8 +3,11 @@ package com.tibiabot.discord
 import net.dv8tion.jda.api.{JDA, Permission}
 import net.dv8tion.jda.api.entities.{Activity, Guild, User}
 
+import net.dv8tion.jda.api.exceptions.ErrorResponseException
+import net.dv8tion.jda.api.requests.ErrorResponse
+
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
 /** JDA-backed [[DiscordGateway]]. */
@@ -21,27 +24,53 @@ final class JdaDiscordGateway(jda: JDA) extends DiscordGateway with com.typesafe
   def guilds: List[Guild] = jda.getGuilds.asScala.toList
   def retrieveUser(id: String): User = jda.retrieveUserById(id).complete()
 
-  def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
+  def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] =
+    memberLookup(guildId, userId, channelIds).toOption
+
+  /** The lookup, with a refusal told apart from a failure to ask.
+   *
+   *  Both used to come back as `None`. JDA throws `ErrorResponseException` for
+   *  a member who is not in the guild — a settled answer — and throws for a
+   *  rate limit, a gateway error or a timeout as well, which are not answers at
+   *  all. Reading the second as the first dropped guilds out of a visitor's
+   *  picker at random; see [[MemberLookup]].
+   *
+   *  The one error code that means "there is no such member" is the whole of
+   *  the distinction. Anything else is taken as unreachable, deliberately: an
+   *  unrecognised failure is far more likely to be transient than to be a
+   *  quiet, permanent no, and being wrong that way costs a retry rather than a
+   *  guild.
+   */
+  override def memberLookup(guildId: String, userId: String,
+                            channelIds: List[String]): MemberLookup = {
     val guild = guildById(guildId)
-    if (guild == null) None
-    else
-      // A member who isn't in the guild makes this throw rather than return
-      // null, and that is an ordinary answer here ("no access"), not a fault —
-      // so it is caught rather than propagated to the request.
-      Try(guild.retrieveMemberById(userId).complete()).toOption.flatMap(Option(_)).map { member =>
-        MemberAccess(
-          hasManageServer = member.hasPermission(Permission.MANAGE_SERVER),
-          roleIds = member.getRoles.asScala.map(_.getId).toSet,
-          visibleChannelIds = channelIds.filter { channelId =>
-            try Option(guild.getGuildChannelById(channelId))
-              .exists(channel => member.hasPermission(channel, Permission.VIEW_CHANNEL))
-            // A channel that has since been deleted, or one JDA cannot resolve,
-            // simply is not visible — it must not fail the whole lookup and
-            // lock somebody out of a guild they can otherwise use.
-            catch { case NonFatal(_) => false }
-          }.toSet
-        )
-      }
+    // Not a statement about the visitor: this process simply is not in that
+    // guild, and somebody else's bot may well be able to answer. Saying "no"
+    // here would settle a question this bot cannot even ask.
+    if (guild == null) MemberLookup.Unreachable(s"this bot is not in guild '$guildId'")
+    else Try(guild.retrieveMemberById(userId).complete()) match {
+      case Success(null)   => MemberLookup.Denied
+      case Success(member) => MemberLookup.Allowed(MemberAccess(
+        hasManageServer = member.hasPermission(Permission.MANAGE_SERVER),
+        roleIds = member.getRoles.asScala.map(_.getId).toSet,
+        visibleChannelIds = channelIds.filter { channelId =>
+          try Option(guild.getGuildChannelById(channelId))
+            .exists(channel => member.hasPermission(channel, Permission.VIEW_CHANNEL))
+          // A channel that has since been deleted, or one JDA cannot resolve,
+          // simply is not visible — it must not fail the whole lookup and
+          // lock somebody out of a guild they can otherwise use.
+          catch { case NonFatal(_) => false }
+        }.toSet
+      ))
+      case Failure(e: ErrorResponseException) if e.getErrorResponse == ErrorResponse.UNKNOWN_MEMBER =>
+        MemberLookup.Denied
+      case Failure(e) =>
+        // Said out loud, unlike before. This is the path that makes a server
+        // disappear from somebody's dashboard, and it used to leave no trace at
+        // all to explain why.
+        logger.warn(s"Could not resolve member '$userId' in guild '$guildId': ${e.getMessage}")
+        MemberLookup.Unreachable(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
+    }
   }
   def selfUserId: String = jda.getSelfUser.getId
   def selfUserName: String = jda.getSelfUser.getName

@@ -131,6 +131,17 @@
   }
   .sw-item:hover { background: rgba(255,255,255,0.05); }
   .sw-item.on { background: rgba(91,140,255,0.13); }
+  /* A server that did not answer. Listed so it is visibly missing rather than
+     silently absent, and dimmed and unclickable because we do not know it is
+     theirs to open — offering it as a link would be offering a 403. */
+  .sw-item.off { opacity: 0.55; cursor: default; }
+  .sw-item.off:hover { background: none; }
+  .sw-item.off .tier { background: rgba(224,169,62,0.15); color: var(--warn); }
+  /* The reliable way back to the full list, whatever the menu above it managed
+     to resolve. Set off by a rule so it reads as a different kind of row. */
+  .sw-item.sw-all { border-top: 1px solid var(--panel-border); margin-top: 4px; padding-top: 9px; }
+  .sw-item.sw-all .sw-name { color: var(--muted); }
+  .sw-item.sw-all:hover .sw-name { color: var(--text-strong); }
   /* The server's own face. Sized to the row rather than to the brand mark above
      — this is a list to pick from, not a masthead — and squared off with the
      same radius the bot's own avatar wears.

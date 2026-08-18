@@ -26,7 +26,12 @@ import java.util.concurrent.ConcurrentHashMap
 final class AccessCache(ttl: Duration, maxEntries: Int = AccessCache.MaxEntries,
                         now: () => Instant = () => Instant.now()) {
 
-  private final case class Entry(value: List[GuildAccess], expiresAt: Instant)
+  /** The whole [[AccessReport]], not just the guilds it granted. A pass that
+   *  failed to reach a server has to keep saying so for as long as it is
+   *  remembered - caching only the successes would turn an incomplete answer
+   *  into one indistinguishable from a complete one, which is precisely the
+   *  confusion the report exists to remove. */
+  private final case class Entry(value: AccessReport, expiresAt: Instant)
 
   private val entries = new ConcurrentHashMap[String, Entry]()
 
@@ -37,14 +42,14 @@ final class AccessCache(ttl: Duration, maxEntries: Int = AccessCache.MaxEntries,
    *  one. Nothing else invalidates this: what it holds is permissions, and no
    *  claim or booking changes those.
    */
-  def get(key: String): Option[List[GuildAccess]] =
+  def get(key: String): Option[AccessReport] =
     Option(entries.get(key)) match {
       case Some(entry) if entry.expiresAt.isAfter(now()) => Some(entry.value)
       case Some(_) => entries.remove(key); None
       case None    => None
     }
 
-  def put(key: String, access: List[GuildAccess]): Unit = {
+  def put(key: String, access: AccessReport): Unit = {
     if (entries.size >= maxEntries) sweep()
     entries.put(key, Entry(access, now().plus(ttl)))
     ()

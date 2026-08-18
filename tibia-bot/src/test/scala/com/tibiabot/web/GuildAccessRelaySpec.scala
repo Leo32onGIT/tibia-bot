@@ -103,7 +103,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       // The consumer sweeps on its own beat in production; here it is stepped.
       Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
 
-      Await.result(answer, 5.seconds) shouldBe List(access)
+      Await.result(answer, 5.seconds).granted shouldBe List(access)
     }
 
     "never ask about a guild it is in itself" in {
@@ -114,7 +114,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       // asking would invite a second, possibly different answer for a guild
       // this bot has already resolved for itself.
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => true)
-      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe Nil
+      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds).granted shouldBe Nil
       redis.store.keys.count(_.startsWith("tibia:access-q:")) shouldBe 0
     }
 
@@ -123,7 +123,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false)
       // No roster names g9, so it is never asked about and costs no timeout.
       val started = System.nanoTime()
-      Await.result(asking.accessFor("u1", Set("g9")), 2.seconds) shouldBe Nil
+      Await.result(asking.accessFor("u1", Set("g9")), 2.seconds) shouldBe AccessReport.Empty
       (System.nanoTime() - started).nanos should be < 1.second
     }
 
@@ -134,7 +134,33 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       // Roster says bot-2 runs g1, but nothing is sweeping to answer.
       val asking = new RemoteGuildAccess(redis, scheduler,
         isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
-      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe Nil
+      val report = Await.result(asking.accessFor("u1", Set("g1")), 3.seconds)
+      report.granted shouldBe Nil
+      // Short, and saying so. Silently short is what made a two-server visitor
+      // land on a one-server dashboard with no sign anything was missing — the
+      // roster's copy of the name is what lets the page name it.
+      report.unreachable shouldBe List(UnreachableGuild("g1", "Gone Quiet"))
+      report.complete shouldBe false
+    }
+
+    // The standing memory covers a missed beat, so a guild that answered a
+    // moment ago is not reported as missing — that is the difference between
+    // "the fleet is busy" and "this server has gone".
+    "not report a server as missing while it still has a remembered answer" in {
+      val redis = new FakeRedis
+      Await.result(redis.setEx(GuildRoster.key("bot-2"),
+        GuildRoster("bot-2", List(RosterGuild("g1", "Their Server", None))).toJson, 1.minute), 2.seconds)
+      val consumer = new AccessQueryConsumer(redis, resolve = (_, _) => Some(access), canSee = _ == "g1")
+      val asking = new RemoteGuildAccess(redis, scheduler,
+        isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
+
+      val first = asking.accessFor("u1", Set("g1"))
+      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(first, 3.seconds).granted shouldBe List(access)
+
+      val second = Await.result(asking.accessFor("u1", Set("g1")), 3.seconds)
+      second.granted shouldBe List(access)
+      second.unreachable shouldBe empty
     }
 
     "answer 'they may not' for somebody with no access there" in {
@@ -145,7 +171,10 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false)
       val answer = asking.accessFor("stranger", Set("g1"))
       Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
-      Await.result(answer, 5.seconds) shouldBe Nil
+      // Empty *and* complete: a refusal is an answer, so the guild is absent
+      // rather than missing, and the page says nothing about it. Only silence
+      // is worth reporting.
+      Await.result(answer, 5.seconds) shouldBe AccessReport.Empty
     }
 
     "answer rather than stay silent when resolving throws" in {
@@ -158,7 +187,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val answer = asking.accessFor("u1", Set("g1"))
       Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
       // The asker gets a definite no instead of waiting out its timeout.
-      Await.result(answer, 2.seconds) shouldBe Nil
+      Await.result(answer, 2.seconds).granted shouldBe Nil
       redis.store.keys.exists(_.startsWith("tibia:access-a:")) shouldBe true
     }
 
@@ -192,12 +221,12 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
 
       val first = asking.accessFor("u1", Set("g1"))
       Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
-      Await.result(first, 3.seconds) shouldBe List(access)
+      Await.result(first, 3.seconds).granted shouldBe List(access)
 
       // Now nothing sweeps — a deploy, a busy beat, a page load that landed
       // between two of them. The visitor's standing there has not changed, so
       // dropping the server from their picker would be the wrong answer.
-      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe List(access)
+      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds).granted shouldBe List(access)
     }
 
     "believe a 'they may not' over anything it remembers" in {
@@ -212,16 +241,16 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
 
       val first = asking.accessFor("u1", Set("g1"))
       Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
-      Await.result(first, 3.seconds) shouldBe List(access)
+      Await.result(first, 3.seconds).granted shouldBe List(access)
 
       allowed = false
       val second = asking.accessFor("u1", Set("g1"))
       Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
-      Await.result(second, 3.seconds) shouldBe Nil
+      Await.result(second, 3.seconds).granted shouldBe Nil
 
       // And the refusal sticks: losing access must not be undone by the next
       // beat the other bot happens to miss.
-      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds) shouldBe Nil
+      Await.result(asking.accessFor("u1", Set("g1")), 3.seconds).granted shouldBe Nil
     }
 
     "not stand on an old answer when the question grants a moderator action" in {
@@ -234,12 +263,12 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
 
       val first = asking.accessFor("u1", Set("g1"))
       Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
-      Await.result(first, 3.seconds) shouldBe List(access)
+      Await.result(first, 3.seconds).granted shouldBe List(access)
 
       // A bot that cannot say now whether somebody is still a moderator is a
       // no, however recently it said yes — this is the check that moves
       // somebody else off a spawn.
-      Await.result(asking.accessFor("u1", Set("g1"), remembering = false), 3.seconds) shouldBe Nil
+      Await.result(asking.accessFor("u1", Set("g1"), remembering = false), 3.seconds).granted shouldBe Nil
     }
 
     "leave alone a question about a guild it cannot see" in {

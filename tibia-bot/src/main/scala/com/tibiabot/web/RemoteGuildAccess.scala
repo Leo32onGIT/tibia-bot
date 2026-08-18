@@ -8,6 +8,8 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
+import RemoteGuildAccess.{Answered, Asked, Unanswered}
+
 /** The guilds a visitor can use that *this* bot is not in.
  *
  *  Reads the rosters every bot publishes to find which guilds are run
@@ -25,8 +27,12 @@ import scala.util.control.NonFatal
  *  poll pays nothing.
  *
  *  A quiet or absent bot costs the timeout once and then contributes no guilds.
- *  That is the right failure: a picker one server short is a smaller wrong than
- *  a dashboard that will not load.
+ *  That is still the right failure - a picker one server short is a smaller
+ *  wrong than a dashboard that will not load - but the short picker has to say
+ *  so, which is why this reports the guilds it could not get an answer about
+ *  rather than merely leaving them out. A list silently one short is
+ *  indistinguishable from a complete one, and at two servers down to one it
+ *  stopped being a picker at all.
  */
 final class RemoteGuildAccess(
   cache: RedisCache,
@@ -49,17 +55,41 @@ final class RemoteGuildAccess(
    *  [[DashboardAccessService.accessIn]].
    */
   def accessFor(userId: String, userGuildIds: Set[String],
-                remembering: Boolean = true): Future[List[GuildAccess]] =
-    if (userGuildIds.isEmpty) Future.successful(Nil)
+                remembering: Boolean = true): Future[AccessReport] =
+    if (userGuildIds.isEmpty) Future.successful(AccessReport.Empty)
     else foreignGuilds(userGuildIds).flatMap {
-      case Nil => Future.successful(Nil)
+      case Nil => Future.successful(AccessReport.Empty)
       case candidates =>
-        Future.traverse(candidates)(guildId => ask(guildId, userId, remembering)).map(_.flatten)
+        Future.traverse(candidates) { case (guildId, guildName) =>
+          ask(guildId, userId, remembering).map {
+            case Answered(access) => AccessReport(access.toList, Nil)
+            case Unanswered       => AccessReport(Nil, List(UnreachableGuild(guildId, guildName)))
+          }
+        }.map(_.foldLeft(AccessReport.Empty)(_ ++ _))
     }.recover {
       case NonFatal(e) =>
+        // Redis itself, rather than any one bot. Which guilds were involved is
+        // not known at this point - the roster read is what failed - so this
+        // reports nothing rather than inventing names, and the caller's own
+        // backstop covers the case where it matters.
         logger.warn(s"Could not resolve dashboard access held by other bots: ${e.getMessage}")
-        Nil
+        AccessReport.Empty
     }
+
+  /** The foreign guilds this visitor is in, as far as the last roster read
+   *  knows, named. For the caller's backstop: when the whole wait is abandoned
+   *  from outside, these are the guilds that were being waited on, and saying
+   *  so beats reporting a complete answer that is missing all of them.
+   *
+   *  Answered from the roster cache alone and never by reading Redis, because
+   *  the one caller is already on a thread that has just given up waiting. An
+   *  empty roster cache yields nothing, which is the same silence as before. */
+  def pendingFor(userGuildIds: Set[String]): List[UnreachableGuild] = {
+    val (_, known) = rosterCache
+    known.collect { case (id, name) if userGuildIds.contains(id) && !isLocal(id) =>
+      UnreachableGuild(id, name)
+    }
+  }
 
   /** Who runs what, as last read. Rosters are republished every thirty seconds
    *  and change only when a bot joins or leaves a guild, so re-reading them per
@@ -67,28 +97,34 @@ final class RemoteGuildAccess(
    *  `KEYS`, which walks the whole keyspace and stalls the server while it
    *  does. Read on a page load it ran against every online-list snapshot and
    *  character cache the bot holds. */
-  @volatile private var rosterCache: (Long, List[String]) = (0L, Nil)
+  @volatile private var rosterCache: (Long, List[(String, String)]) = (0L, Nil)
 
-  private def rosterGuilds(): Future[List[String]] = {
+  /** Id and name both, now that a guild which fails to answer has to be named
+   *  on screen. The roster already carried the name for the picker's benefit;
+   *  it was being thrown away here and re-derived from the answer, which is
+   *  exactly the thing that does not arrive when this goes wrong. */
+  private def rosterGuilds(): Future[List[(String, String)]] = {
     val (readAt, known) = rosterCache
     if (System.nanoTime() - readAt < RemoteGuildAccess.RosterMaxAge.toNanos) Future.successful(known)
     else cache.keysMatching(GuildRoster.pattern).flatMap { keys =>
       Future.traverse(keys)(cache.get).map { values =>
-        val ids = values.flatten.flatMap(GuildRoster.fromJson).flatMap(_.guilds.map(_.id)).distinct
-        rosterCache = (System.nanoTime(), ids)
-        ids
+        val named = values.flatten.flatMap(GuildRoster.fromJson)
+          .flatMap(_.guilds.map(g => g.id -> g.name))
+          .distinctBy(_._1)
+        rosterCache = (System.nanoTime(), named)
+        named
       }
     }
   }
 
-  /** Guild ids somebody else runs that this visitor is in. */
-  private def foreignGuilds(userGuildIds: Set[String]): Future[List[String]] =
-    rosterGuilds().map(_.filter(userGuildIds.contains)
-      // A guild this process is in needs no asking — it resolved it itself, and
+  /** Guilds somebody else runs that this visitor is in, named. */
+  private def foreignGuilds(userGuildIds: Set[String]): Future[List[(String, String)]] =
+    rosterGuilds().map(_.filter { case (id, _) => userGuildIds.contains(id) }
+      // A guild this process is in needs no asking - it resolved it itself, and
       // asking would invite a second, possibly different answer for it.
-      .filterNot(isLocal))
+      .filterNot { case (id, _) => isLocal(id) })
 
-  private def ask(guildId: String, userId: String, remembering: Boolean): Future[Option[GuildAccess]] = {
+  private def ask(guildId: String, userId: String, remembering: Boolean): Future[Asked] = {
     val id = newId()
     val query = AccessQuery(id, guildId, userId)
     // The request outlives the wait, so an answering bot that gets to it a
@@ -97,16 +133,21 @@ final class RemoteGuildAccess(
       .flatMap(_ => await(id, deadline = System.nanoTime() + timeout.toNanos))
       .map {
         // Two answers and a silence. Both answers are authoritative and replace
-        // whatever was remembered — including the "no", which must forget, or
+        // whatever was remembered - including the "no", which must forget, or
         // somebody who lost access would keep it for the length of the memory.
-        case Some(answer) => remember(userId, guildId, answer.access); answer.access
-        case None if remembering => lastGood(userId, guildId)
-        case None => None
+        case Some(answer) => remember(userId, guildId, answer.access); Answered(answer.access)
+        // Silence, softened by the standing memory where there is one: a guild
+        // that answered a moment ago counts as answered, which is the whole
+        // point of keeping it. Only a silence with nothing behind it is
+        // reported as unanswered.
+        case None if remembering => lastGood(userId, guildId).fold[Asked](Unanswered)(a => Answered(Some(a)))
+        case None => Unanswered
       }
       .recover {
         case NonFatal(e) =>
           logger.warn(s"Could not ask about dashboard access in guild '$guildId': ${e.getMessage}")
-          if (remembering) lastGood(userId, guildId) else None
+          if (remembering) lastGood(userId, guildId).fold[Asked](Unanswered)(a => Answered(Some(a)))
+          else Unanswered
       }
   }
 
@@ -174,6 +215,22 @@ final class RemoteGuildAccess(
 }
 
 object RemoteGuildAccess {
+  /** What asking one bot produced. [[Answered]] carries a decision the owning
+   *  bot actually made, including its "no"; [[Unanswered]] means nobody said
+   *  anything and the guild's standing is simply unknown.
+   *
+   *  Both used to be `Option[GuildAccess]`, so a bot that was merely quiet
+   *  looked identical to one that had refused - which is how a guild silently
+   *  fell out of somebody's picker.
+   *
+   *  Out here rather than inside the class for the same reason
+   *  [[UserGuildCache.Entry]] is: an inner case class carries a reference back
+   *  to its enclosing instance that cannot be checked at run time, which the
+   *  compiler warns about. */
+  private[web] sealed trait Asked
+  private[web] final case class Answered(access: Option[GuildAccess]) extends Asked
+  private[web] case object Unanswered extends Asked
+
   /** Shorter than a relayed write's, and deliberately: a write is somebody
    *  waiting on a button they pressed, where this is a page that must render.
    *

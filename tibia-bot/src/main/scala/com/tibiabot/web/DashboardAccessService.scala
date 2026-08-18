@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import com.tibiabot.discord.DiscordGateway
+import com.tibiabot.discord.{DiscordGateway, MemberLookup}
 
 /** The parts of a tracked world this needs: its name, and the category whose
  *  visibility stands in for belonging to that world's team.
@@ -72,12 +72,23 @@ final class DashboardAccessService(
    *  was about to fail anyway that pays for a fresh lookup.
    */
   def rememberedAccessFor(userId: String, userGuildIds: Set[String],
-                          mustInclude: Option[String] = None): List[GuildAccess] = {
+                          mustInclude: Option[String] = None): List[GuildAccess] =
+    rememberedReportFor(userId, userGuildIds, mustInclude).granted
+
+  /** As [[rememberedAccessFor]], keeping what the pass failed to resolve.
+   *
+   *  The memory holds the whole report rather than the granted half, so a page
+   *  drawn from it can still say that a server is missing. Remembering only the
+   *  successes would have the cache quietly launder an incomplete answer into
+   *  one that looked complete, which is the original bug wearing a hat.
+   */
+  def rememberedReportFor(userId: String, userGuildIds: Set[String],
+                          mustInclude: Option[String] = None): AccessReport = {
     val key = s"$userId:${userGuildIds.toList.sorted.mkString(",")}"
-    def usable(granted: List[GuildAccess]) =
-      mustInclude.forall(guildId => granted.exists(_.guildId == guildId))
+    def usable(report: AccessReport) =
+      mustInclude.forall(guildId => report.granted.exists(_.guildId == guildId))
     cache.get(key).filter(usable).getOrElse {
-      val fresh = accessFor(userId, userGuildIds)
+      val fresh = accessReportFor(userId, userGuildIds)
       cache.put(key, fresh)
       fresh
     }
@@ -106,6 +117,17 @@ final class DashboardAccessService(
    *  by scanning everything each time it does.
    */
   def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
+    accessReportFor(userId, userGuildIds).granted
+
+  /** The same resolution, keeping hold of what it could not resolve.
+   *
+   *  Both halves can fail independently and for unrelated reasons - a Discord
+   *  rate limit here, a bot that did not answer over there - and neither
+   *  failure says anything about the visitor. Reporting them is what lets the
+   *  landing page tell "you have one server" apart from "one of your servers
+   *  did not answer": the same list, and completely different pages.
+   */
+  def accessReportFor(userId: String, userGuildIds: Set[String]): AccessReport =
     localAccessFor(userId, userGuildIds) ++ remoteAccessFor(userId, userGuildIds)
 
   /** Guilds another bot runs, resolved by asking it.
@@ -123,15 +145,20 @@ final class DashboardAccessService(
    *  do is show a picker one server short.
    */
   private def remoteAccessFor(userId: String, userGuildIds: Set[String],
-                             remembering: Boolean = true): List[GuildAccess] =
-    remote.fold(List.empty[GuildAccess]) { resolver =>
+                             remembering: Boolean = true): AccessReport =
+    remote.fold(AccessReport.Empty) { resolver =>
       try scala.concurrent.Await.result(
         resolver.accessFor(userId, userGuildIds, remembering),
         scala.concurrent.duration.Duration.fromNanos(remoteWait.toNanos))
       catch {
         case scala.util.control.NonFatal(e) =>
+          // The backstop firing, rather than the per-guild wait inside. Nothing
+          // out here knows how far the resolver had got, so every foreign guild
+          // this visitor is in is reported as unanswered - which is true of at
+          // least one of them, and is the safe way to be wrong: it shows the
+          // picker and names a server, rather than silently dropping the lot.
           logger.warn(s"Gave up waiting on other bots for dashboard access: ${e.getMessage}")
-          Nil
+          AccessReport(Nil, resolver.pendingFor(userGuildIds))
       }
     }
 
@@ -153,53 +180,65 @@ final class DashboardAccessService(
    *  timed out.
    */
   def localAccessIn(userId: String, guildId: String): Option[GuildAccess] =
-    localAccessFor(userId, Set(guildId)).headOption
+    localAccessFor(userId, Set(guildId)).granted.headOption
 
-  private def localAccessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] = {
+  private def localAccessFor(userId: String, userGuildIds: Set[String]): AccessReport = {
     val candidates = discordGateway.guilds.filter(g => userGuildIds.contains(g.getId))
-    candidates.flatMap { guild =>
+    candidates.foldLeft(AccessReport.Empty) { (report, guild) =>
       val guildId = guild.getId
       // Checked before the REST call, because it is a cheap local read and a
       // guild that never set the respawn system up can be dismissed without
       // asking Discord anything.
-      if (!respawnConfigured(guildId)) None
+      if (!respawnConfigured(guildId)) report
       else {
         // A world with no category recorded can't be used to prove anything, so
         // it is dropped rather than treated as visible to everyone.
         val worlds = worldsOf(guildId).filter(_.categoryId.nonEmpty)
-        if (worlds.isEmpty) None
+        if (worlds.isEmpty) report
         // The icon is read here because this is the only place holding the JDA
         // guild; it is null for a guild that never set one, which Option turns
         // into an absence the page can fall back from.
-        else resolveGuild(userId, guild.getId, guild.getName, Option(guild.getIconUrl), worlds)
+        else report ++ resolveGuild(userId, guildId, guild.getName, Option(guild.getIconUrl), worlds)
       }
     }
   }
 
+  /** One guild: granted, refused, or unanswered.
+   *
+   *  A refusal - not a member, or a member who cannot see any tracked world's
+   *  category - is an empty report, exactly as it always was. A lookup that
+   *  never got an answer is reported as unreachable instead of vanishing, which
+   *  is the whole point of [[com.tibiabot.discord.MemberLookup]].
+   */
   private def resolveGuild(userId: String, guildId: String, guildName: String,
                            iconUrl: Option[String],
-                           worlds: List[WorldChannel]): Option[GuildAccess] =
-    discordGateway.memberAccess(guildId, userId, worlds.map(_.categoryId)).flatMap { member =>
-      val visibleWorlds = worlds.filter(w => member.visibleChannelIds.contains(w.categoryId)).map(_.name)
-      if (!DashboardAccess.eligible(respawnConfigured = true, visibleWorlds)) None
-      else {
-        val moderatorRole = moderatorRoleOf(guildId)
-        // An unset role id must not match anything — a guild with no moderator
-        // role would otherwise promote everyone who happens to hold no roles.
-        val hasRole = moderatorRole.nonEmpty && moderatorRole != "0" &&
-          member.roleIds.contains(moderatorRole)
-        Some(GuildAccess(
-          guildId, guildName,
-          AccessTier.of(member.hasManageServer, hasRole),
-          visibleWorlds,
-          iconUrl
-        ))
-      }
+                           worlds: List[WorldChannel]): AccessReport =
+    discordGateway.memberLookup(guildId, userId, worlds.map(_.categoryId)) match {
+      case MemberLookup.Denied => AccessReport.Empty
+      case MemberLookup.Unreachable(reason) =>
+        logger.warn(s"Could not resolve dashboard access in guild '$guildId': $reason")
+        AccessReport(Nil, List(UnreachableGuild(guildId, guildName)))
+      case MemberLookup.Allowed(member) =>
+        val visibleWorlds = worlds.filter(w => member.visibleChannelIds.contains(w.categoryId)).map(_.name)
+        if (!DashboardAccess.eligible(respawnConfigured = true, visibleWorlds)) AccessReport.Empty
+        else {
+          val moderatorRole = moderatorRoleOf(guildId)
+          // An unset role id must not match anything - a guild with no moderator
+          // role would otherwise promote everyone who happens to hold no roles.
+          val hasRole = moderatorRole.nonEmpty && moderatorRole != "0" &&
+            member.roleIds.contains(moderatorRole)
+          AccessReport.of(List(GuildAccess(
+            guildId, guildName,
+            AccessTier.of(member.hasManageServer, hasRole),
+            visibleWorlds,
+            iconUrl
+          )))
+        }
     }
 
   /** Where to send this visitor when they arrive. */
   def entryFor(userId: String, userGuildIds: Set[String]): DashboardEntry =
-    entryOf(accessFor(userId, userGuildIds))
+    entryOf(accessReportFor(userId, userGuildIds))
 
   /** The same decision over guilds already resolved.
    *
@@ -207,8 +246,8 @@ final class DashboardAccessService(
    *  and the list itself, which is what tells the board's header whether there
    *  is anywhere to switch to — and resolving access twice costs a Discord REST
    *  call per candidate guild. */
-  def entryOf(accesses: List[GuildAccess]): DashboardEntry =
-    DashboardAccess.entryFor(accesses, demoGuildId)
+  def entryOf(report: AccessReport): DashboardEntry =
+    DashboardAccess.entryFor(report, demoGuildId)
 
   /** Whether a request may act on `guildId` at `required` or better.
    *
@@ -234,6 +273,6 @@ final class DashboardAccessService(
    */
   def accessIn(userId: String, userGuildIds: Set[String], guildId: String): List[GuildAccess] =
     if (!userGuildIds.contains(guildId)) Nil
-    else if (discordGateway.guildById(guildId) != null) localAccessFor(userId, Set(guildId))
-    else remoteAccessFor(userId, Set(guildId), remembering = false)
+    else if (discordGateway.guildById(guildId) != null) localAccessFor(userId, Set(guildId)).granted
+    else remoteAccessFor(userId, Set(guildId), remembering = false).granted
 }
