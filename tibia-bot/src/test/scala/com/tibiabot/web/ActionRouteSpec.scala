@@ -441,12 +441,30 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     actions.moderatorCalls shouldBe List("spawnmax:415:clear", "spawnmax:415:clear")
   }
 
-  // Reading "2h" as a clear would do the opposite of what was typed, so it is
-  // refused before the service sees it.
-  test("a max claim that is not a number never reaches the service") {
+  // The endpoint reads what was typed through ClaimDuration, so the dashboard and
+  // the Discord form agree about what "2h" is. Its own table is in
+  // ClaimDurationSpec; this only pins down that the route goes through it.
+  test("a max claim is read the way it was typed") {
     val actions = new RecordingActions
     val r = routes(actions, member = moderator, moderatorRole = ModRole)
     Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2h"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"1h30"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    // A bare 2 is two hours, not two minutes — nobody caps a spawn at two
+    // minutes, and the suffix is there for whoever means the short one.
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe
+      List("spawnmax:415:120", "spawnmax:415:90", "spawnmax:415:120")
+  }
+
+  // Refused rather than guessed at: reading "2 days" as two of anything is how a
+  // ceiling ends up somewhere nobody chose.
+  test("a max claim that cannot be read never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2 days"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }
     Post("/dashboard/g/g1/spawn-max", body("""{"minutes":"60"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }

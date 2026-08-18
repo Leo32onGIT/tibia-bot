@@ -216,6 +216,9 @@
   /* One field per column while there is room, stacking on a narrow screen. The
      code is the short one and gets the narrow track. */
   .mod-form { display: grid; grid-template-columns: 110px 1fr 1fr 1fr; gap: 10px; align-items: end; }
+  /* Two fields rather than four, and the number is the short one — the same
+     reasoning as the code column above, mirrored. */
+  .mod-form.limits { grid-template-columns: 1fr 130px; }
   .mod-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .mod-field input {
     background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
@@ -226,18 +229,6 @@
   .mod-field input[type="range"] { background: none; border: 0; padding: 0; }
   .mod-field input::placeholder { color: var(--muted); font-family: var(--sans); }
   .mod-field input:focus { outline: none; border-color: var(--purple); }
-  /* The one loose input in a spawn's Moderator block — narrow, because it holds
-     at most four digits, and mono so the number lines up with the durations
-     everywhere else on the card. Deliberately borrows the .mod-field look rather
-     than inventing a second field style. */
-  .mod-input {
-    width: 6.5rem; flex-shrink: 0;
-    background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px;
-    color: var(--text); font-family: var(--mono); font-size: 12px; padding: 6px 9px;
-    font-variant-numeric: tabular-nums;
-  }
-  .mod-input::placeholder { color: var(--muted); font-family: var(--sans); }
-  .mod-input:focus { outline: none; border-color: var(--purple); }
   .mod-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
   .mod-note code { font-family: var(--mono); color: var(--text); }
   .mod-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -262,7 +253,14 @@
   .mod-list-name { color: var(--spawn-name); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mod-list-region { color: var(--muted); font-size: 11px; margin-left: auto; padding-left: 8px;
                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The ceiling in force, pushed right like a region is — it is what the row is
+     about, and the purple says it was set here rather than inherited. */
+  .mod-list-max {
+    color: var(--purple); font-family: var(--mono); font-size: 11.5px;
+    margin-left: auto; padding-left: 8px; flex-shrink: 0;
+  }
   .mod-list-row .btn { flex-shrink: 0; }
+  .mod-list-row .code-chip { flex-shrink: 0; }
   /* Purple until it is pointed at, red once it is armed: removal takes the
      spawn's claims and bookings with it, so the second press should not look
      like the first. */
@@ -302,6 +300,9 @@
   }
   @media (max-width: 720px) {
     .mod-form { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 720px) {
+    .mod-form.limits { grid-template-columns: 1fr; }
   }
   @media (max-width: 460px) {
     .mod-form { grid-template-columns: 1fr; }
@@ -627,6 +628,13 @@
   .btn.small { font-size: 11px; padding: 4px 10px; }
   .btn.mod-btn { background: transparent; color: var(--purple); border-color: rgba(167,139,250,0.4); }
   .btn.mod-btn:hover:not([disabled]) { background: rgba(167,139,250,0.12); }
+  /* After the variants, not with `.btn[disabled]` above: that rule ties with
+     `.btn.mod-btn` and `.btn.ghost` on specificity and loses on order, so a
+     disabled button kept its colour and read as pressable. */
+  .btn.mod-btn[disabled], .btn.ghost[disabled], .btn.danger[disabled] {
+    background: transparent; color: var(--muted); border-color: var(--panel-border);
+    cursor: not-allowed;
+  }
   /* Claiming is green here because it is green in Discord — Button.success on
      the same action, wearing the same emoji. Somebody who has used the one
      should recognise the other without reading it. */
@@ -657,13 +665,6 @@
      window. Its children carry their own top borders, so it adds none. */
   .win-foot { position: relative; flex-shrink: 0; }
 
-  /* Moderator tools, walled off from the member ones. Acting on somebody else's
-     claim is a different kind of act from taking a free spawn, and a strip that
-     mixed them would make it easy to do the first while meaning the second. */
-  .mod { border-top: 1px dashed var(--panel-border); padding: 12px 20px 18px; display: flex; flex-direction: column; gap: 9px; }
-  .mod-title { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--purple); display: flex; align-items: center; gap: 6px; }
-  .mod-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-
   /* The same tools one evening at a time, under the calendar. Dashed top border
      and the purple label of the block above, so a moderator reads them as the
      same kind of act rather than as part of the booking controls they sit
@@ -673,6 +674,10 @@
      the only one that acts on somebody else. What is left when it is closed is
      one line naming the evening it would act on, which is what keeps it from
      being a box somebody has to open to find out what is in it. */
+  /* The spawn's own moderator block folds the same way and shares these rules
+     outright, rather than a second set that looks the same until one of them is
+     edited. Both are the same act — reaching past a member to change something
+     that is not yours — so they read as one control in two places. */
   .slot-tools { border-top: 1px dashed var(--panel-border); }
   .slot-strip {
     display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 20px;
@@ -688,21 +693,28 @@
     margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 10px;
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .slot-body { padding: 0 20px 12px; display: flex; flex-direction: column; gap: 9px; }
-  .slot-ctx { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
-  .slot-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.45; }
-  .slot-row { display: flex; gap: 8px; }
-  /* Both actions share the row equally and each is a thumb's worth tall, so the
-     pair works the same under a finger as under a pointer. Cancel keeps its own
-     width — it is the way out, not half the decision. */
-  .btn.slot-act { flex: 1; justify-content: center; min-height: 38px; }
-  .btn.slot-cancel { flex: 0 0 auto; min-height: 38px; }
+  .slot-body { padding: 0 20px 12px; }
+
+  /* One row, in every state the panel has. Nothing stretches: the buttons used
+     to share the row equally, which made a word like "+30m" as wide as the
+     panel and looked like a mistake. They are their own width now and the gap
+     below does the separating. */
+  .mod-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .mod-row .btn { flex-shrink: 0; }
+  /* Pushes the ceiling to the right, into the space the verbs leave. Anchored
+     there so it does not move as the verbs come and go with the selection. */
+  .mod-gap { flex: 1; min-width: 12px; }
+  /* Inline rather than on a line of its own — it is a caveat to the button
+     beside it, not an announcement. */
+  .mod-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.4; min-width: 0; }
+  /* The person picker takes what the verbs were using. */
+  .mod-grow { flex: 1 1 12rem; min-width: 0; }
+
   @media (max-width: 420px) {
     .slot-strip, .slot-body { padding-left: 14px; padding-right: 14px; }
-    /* Stacked rather than squeezed: two full-width targets beat two that are
-       each too narrow to read the label of. */
-    .slot-row { flex-direction: column; }
-    .btn.slot-cancel { flex: 1 1 auto; }
+    /* The ceiling drops onto its own line rather than being squeezed beside
+       three buttons; the gap collapses so it lands at the left with them. */
+    .mod-gap { flex-basis: 100%; min-width: 0; }
   }
 
   /* ---- Week grid ---------------------------------------------------------- */
@@ -1270,7 +1282,8 @@ const view = {
   // reference, and a section that stayed open would take the grid's height on
   // every spawn after the one somebody wanted it on.
   upNextOpen: false
-};
+}
+;
 
 let gridEl = null;
 let scrolledOnce = false;
@@ -1934,6 +1947,8 @@ function openWindow(code) {
   // offer no way to change how long it runs for.
   view.calendarOpen = true;
   view.upNextOpen = false;
+  // Shut on every spawn.
+  slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
   scrolledOnce = false;
   const l = limits();
   // Start at the guild's default, but never above what is actually claimable —
@@ -2217,7 +2232,6 @@ function renderWindow() {
   const upNext = upNextSection(spawn);
   if (upNext) body.appendChild(upNext);
   body.appendChild(calendarSection());
-  if (TIER === 'moderator' || TIER === 'admin') modTools(body, spawn);
 
   // The foot of the panel: whatever it has to say, then how long and the button
   // that acts on it. Outside the part that scrolls, so all of it sits in the same
@@ -2234,7 +2248,7 @@ function renderWindow() {
   if (message) foot.appendChild(message);
   // Between the two: a moderator repairing an evening is answering the message
   // above it, and the action row below stays where it always is.
-  const tools = slotTools(openSpawn());
+  const tools = moderatorTools(openSpawn());
   if (tools) foot.appendChild(tools);
   const action = readout();
   if (action) foot.appendChild(action);
@@ -3041,113 +3055,152 @@ function readout() {
  */
 let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
 
-function resetSlotPanel(pick) {
-  slotPanel = { open: false, mode: 'idle', pick, query: '', typing: false };
-}
-
-/** Putting one evening of the calendar right, for a moderator.
+/** Everything a moderator can do here, in one panel in the foot.
  *
- *  Deliberately about the day and never about the booking behind it. Cancelling
- *  a booking is the owner's own control in the row below and ends the whole
- *  arrangement; these two end an evening — the Tuesday somebody cannot make,
- *  the slot two people ended up agreeing between themselves — and leave a
- *  repeating booking repeating.
+ *  ==What it acts on==
+ *  Whatever is selected in the grid, and nothing else. Select the live claim and
+ *  it offers the claim's actions; select a booking and it offers that booking's;
+ *  select nothing and all that is left is the spawn's own ceiling.
  *
- *  Folded away until asked for. It is the rarest thing on this panel and the
- *  only one that acts on somebody else, so it earns a line rather than a block:
- *  the strip names the evening it would act on, which is what stops it being a
- *  box you have to open to find out what is inside.
+ *  That is the whole reason this is one function. It used to be two panels —
+ *  one keyed on "is this spawn claimed", one on "which evening did you click" —
+ *  which stacked two strips both labelled Moderator and left the claim buttons
+ *  standing on any busy spawn next to buttons for a booking three days away.
+ *  With one target there is nothing to disambiguate.
  *
- *  Opened, it asks one question at a time. Both actions used to be on screen at
- *  once alongside a name field nothing had asked for yet, which is a lot of
- *  panel under a calendar on a phone — so the field appears only once giving
- *  the claim away is what is being done.
+ *  The live claim was excluded from selection until now (`state !== 'claimed'`),
+ *  which is precisely what forced the claim tools to key off the spawn instead.
  *
- *  Offered against a predicted block as readily as a written one. To the person
- *  looking at the grid they are the same evening, and which of them has a row in
- *  the database yet is not something a moderator should have to know about.
+ *  ==Shape==
+ *  One row in every state it has. Verbs at their own width on the left, the
+ *  ceiling anchored right in the space that was going spare; confirming and
+ *  handing over reuse the row rather than adding one.
  *
- *  Hidden for a member, which is convenience rather than the control: both
- *  endpoints re-resolve the tier per request, so a forged one is refused.
+ *  Folded shut, and what is left when it is shut names its target — so it is not
+ *  a box you have to open to find out what is in it.
+ *
+ *  Hidden for a member, which is convenience rather than the control: every
+ *  endpoint re-resolves the tier per request, so a forged one is refused.
  */
-function slotTools(spawn) {
+function moderatorTools(spawn) {
   if (TIER !== 'moderator' && TIER !== 'admin') return null;
+
+  // Any block, including the live claim. The old filter dropped `claimed` here.
   const slot = spawn && view.pick
-    ? slots.find(b => b.start.getTime() === view.pick.getTime() && b.state !== 'claimed')
+    ? slots.find(b => b.start.getTime() === view.pick.getTime())
     : null;
-  // Forgotten as soon as there is nothing selected — which is what a finished
-  // action leaves behind. Otherwise picking that same hour again, now somebody
-  // else's, would reopen the panel exactly where the last one left off, with a
-  // Confirm Delete already armed at a booking nobody has looked at yet.
-  if (!slot) { if (slotPanel.pick !== null) resetSlotPanel(null); return null; }
 
-  const startsAt = slot.startsAt;
-  if (slotPanel.pick !== startsAt) resetSlotPanel(startsAt);
+  // No block selected is nothing to act on, so there is no panel. It briefly
+  // drew one regardless, because the spawn's claim ceiling lived in it and was
+  // worth reaching without a selection; that moved to the board's own Moderator
+  // panel, and what was left here was a strip with an empty row under it.
+  if (!slot) {
+    if (slotPanel.pick !== null) {
+      slotPanel = { open: slotPanel.open, mode: 'idle', pick: null, query: '', typing: false };
+    }
+    return null;
+  }
 
+  // Keyed on the instant rather than on `startsAt`, so a selection is identified
+  // the same way whether or not the thing selected has a row of its own yet.
+  const pickKey = slot.start.getTime();
+  // The mode is forgotten as soon as the selection moves — otherwise clicking
+  // another block would find a Confirm Delete already armed at somebody who was
+  // never on screen when it was armed. Whether the panel is *open* is left
+  // alone, since a moderator working through several evenings should not have to
+  // reopen it for each, and the strip always names what it is aimed at.
+  if (slotPanel.pick !== pickKey) {
+    slotPanel = { open: slotPanel.open, mode: 'idle', pick: pickKey, query: '', typing: false };
+  }
+
+  const onClaim = slot.state === 'claimed';
   const box = el('div', 'slot-tools' + (slotPanel.open ? ' open' : ''));
-  const day = slot.start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 
   const strip = el('button', 'slot-strip',
     `<i class="ti ti-shield-half" aria-hidden="true"></i>
      <span class="slot-strip-label">Moderator</span>
-     <span class="slot-strip-who">${esc(whoHas(slot))} · ${esc(day)}</span>
+     <span class="slot-strip-who">${esc(targetSummary(slot))}</span>
      <i class="ti ti-chevron-${slotPanel.open ? 'up' : 'down'}" aria-hidden="true"></i>`);
   strip.type = 'button';
   strip.setAttribute('aria-expanded', String(slotPanel.open));
-  strip.addEventListener('click', () => {
-    slotPanel.open = !slotPanel.open;
-    slotPanel.mode = 'idle';
-    renderWindow();
-  });
+  strip.addEventListener('click', () => { slotPanel.open = !slotPanel.open; renderWindow(); });
   box.appendChild(strip);
   if (!slotPanel.open) return box;
 
   const body = el('div', 'slot-body');
-  const when = `${fmtLocal(slot.start)}–${fmtLocal(slot.end)}`;
-  body.appendChild(el('div', 'slot-ctx', `${esc(whoHas(slot))} · ${esc(day)}, ${esc(when)}`));
+  const row = el('div', 'mod-row');
+  body.appendChild(row);
+  box.appendChild(body);
 
   const go = (mode) => { slotPanel.mode = mode; renderWindow(); };
 
-  if (slotPanel.mode === 'idle') {
-    const row = el('div', 'slot-row');
-    row.appendChild(button('Delete Claim', 'btn danger slot-act', () => go('confirm'), 'ti-trash'));
-    row.appendChild(button('Give Claim To', 'btn mod-btn slot-act', () => go('give'), 'ti-user-share'));
-    body.appendChild(row);
-  } else if (slotPanel.mode === 'confirm') {
+  // --- confirming, and handing over: the row becomes the one thing being done
+  if (slotPanel.mode === 'confirm') {
+    row.appendChild(button('Confirm delete', 'btn mod-btn armed', () =>
+      post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt: slot.startsAt })));
+    row.appendChild(button('Cancel', 'btn ghost', () => go('idle')));
     // Said before the second press rather than after it: a repeating booking
-    // losing one evening and a booking ending outright look identical from
-    // here, and only one of them is what anybody means.
-    body.appendChild(el('div', 'slot-warn', slot.repeats
+    // losing one evening and a booking ending outright look identical from here,
+    // and only one of them is what anybody means. Inline, so it costs no row.
+    row.appendChild(el('span', 'mod-warn', slot.repeats
       ? 'Their booking repeats — only this evening goes.'
       : 'This booking is only on this evening.'));
-    const row = el('div', 'slot-row');
-    row.appendChild(button('Confirm Delete', 'btn mod-btn armed slot-act', () =>
-      post(`/dashboard/g/${GUILD_ID}/drop-slot`, { code: spawn.code, startsAt })));
-    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
-    body.appendChild(row);
-  } else {
+    return box;
+  }
+
+  if (slotPanel.mode === 'give') {
     const picker = personField('Search a name, or paste a Discord ID', slotPanel);
-    body.appendChild(picker.field);
-    const row = el('div', 'slot-row');
-    row.appendChild(button('Give Claim', 'btn mod-btn slot-act', () => {
+    picker.field.classList.add('mod-grow');
+    row.appendChild(picker.field);
+    row.appendChild(button('Give', 'btn mod-btn', () => {
       const person = picker.chosen();
       if (!person) {
         view.answer = { ok: false, message: 'Pick somebody first, or paste their Discord ID.' };
         renderWindow();
         return;
       }
-      post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
-        { code: spawn.code, startsAt, toUserId: person.id });
-    }, 'ti-user-share'));
-    row.appendChild(button('Cancel', 'btn ghost slot-cancel', () => go('idle')));
-    body.appendChild(row);
+      // Which endpoint depends on what is selected, not on which button was
+      // pressed: moving the hunt somebody is on now and moving one booked
+      // evening are different things wearing the same word.
+      if (onClaim) post(`/dashboard/g/${GUILD_ID}/reassign`, { code: spawn.code, toUserId: person.id });
+      else post(`/dashboard/g/${GUILD_ID}/reassign-slot`,
+        { code: spawn.code, startsAt: slot.startsAt, toUserId: person.id });
+    }));
+    row.appendChild(button('Cancel', 'btn ghost', () => go('idle')));
     // After the row, so the field exists to be focused and the caret goes back
     // where the poll took it from.
     picker.restore();
+    return box;
   }
 
-  box.appendChild(body);
+  // --- at rest: the verbs for whatever is selected, then the ceiling
+  if (onClaim) {
+    const remove = button('Remove claim', 'btn danger', () =>
+      post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
+    remove.title = `Take ${spawn.code} off whoever is holding it`;
+    row.appendChild(remove);
+    row.appendChild(button('Give to…', 'btn mod-btn', () => go('give')));
+    // For a hunt that lost time it should have had — a crash, a server issue.
+    // Costs the holder no stamina, which is why it is a moderator's to give.
+    const extend = button('+30m', 'btn mod-btn', () =>
+      post(`/dashboard/g/${GUILD_ID}/extend-holder`, { code: spawn.code, minutes: 30 }));
+    extend.title = 'Add 30 minutes to this hunt — costs them no stamina';
+    row.appendChild(extend);
+  } else {
+    row.appendChild(button('Delete booking', 'btn danger', () => go('confirm')));
+    row.appendChild(button('Give to…', 'btn mod-btn', () => go('give')));
+  }
+
   return box;
+}
+
+/** What the shut strip names — which is always the selection, since without one
+ *  there is no panel. Said on the strip so it is not a box you have to open to
+ *  find out whose evening it is aimed at. */
+function targetSummary(slot) {
+  const day = slot.start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  const when = slot.state === 'claimed' ? 'now' : day;
+  return `${whoHas(slot)} · ${when}, ${fmtLocal(slot.start)}–${fmtLocal(slot.end)}`;
 }
 
 /** Whose evening it is, for a line that has to name somebody in a few words.
@@ -3158,107 +3211,6 @@ function whoHas(slot) {
   const account = (slot.nickname || slot.account || '').trim();
   if (!name) return account || 'Somebody';
   return account && account.toLowerCase() !== name.toLowerCase() ? `${name} (${account})` : name;
-}
-
-/** The tools that act on somebody else's claim.
- *
- *  Drawn only for a moderator, but that is convenience and not the control:
- *  every one of these endpoints re-resolves the tier server-side, so a member
- *  who forges the request is refused anyway. What the hiding buys is that nobody
- *  is offered a button they cannot press.
- *
- *  The claim tools need a claim: against a spawn nobody holds there is nothing
- *  to move, hand over or refund, so those rows are not drawn. The ceiling at the
- *  bottom is not about a claim at all — it is what this spawn allows — so it is
- *  offered either way, the same reasoning that keeps Log on the Discord panel
- *  for an idle spawn.
- */
-function modTools(body, spawn) {
-  const holder = spawn.holderId;
-  const queue = spawn.queue || [];   // omitted from the payload when empty
-
-  const box = el('div', 'mod');
-  box.appendChild(el('div', 'mod-title', `<i class="ti ti-shield-half" aria-hidden="true"></i>Moderator`));
-
-  if (holder) claimTools(box, spawn, queue);
-  box.appendChild(ceilingRow(spawn));
-  body.appendChild(box);
-}
-
-/** The rows that act on the claim currently on a spawn. */
-function claimTools(box, spawn, queue) {
-  const row = el('div', 'mod-row');
-  const remove = button('Remove Claim', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/force-leave`, { code: spawn.code }));
-  remove.title = `Take ${spawn.code} off whoever is holding it`;
-  row.appendChild(remove);
-  // The other half of putting a hunt right. Where taking somebody off is for a
-  // claim that should not stand, this is for one that lost time it should have
-  // had — a crash, a server issue, an argument that ate half the window.
-  //
-  // Stamina is not here any more: handing somebody minutes in the tank has
-  // nothing to do with the spawn open on screen, so it lives in the Moderator
-  // panel on the board, where any member can be picked rather than only whoever
-  // happens to be holding this one.
-  const extend = button('Extend Hunt - 30m', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/extend-holder`, { code: spawn.code, minutes: 30 }));
-  extend.title = 'Add 30 minutes to this hunt — costs them no stamina';
-  row.appendChild(extend);
-  box.appendChild(row);
-
-  // Handing over needs somebody to hand to, and the people already waiting for
-  // this spawn are the ones a moderator means nine times in ten. Typing a
-  // Discord id would be the alternative, and nobody knows their own.
-  if (queue.length) {
-    const give = el('div', 'mod-row');
-    give.appendChild(el('span', 'field-label', 'Hand to'));
-    queue.slice(0, 5).forEach(person => {
-      const b = button(person.name, 'btn mod-btn small',
-        () => post(`/dashboard/g/${GUILD_ID}/reassign`, { code: spawn.code, toUserId: person.id }));
-      b.title = `Give ${spawn.code} to ${person.name}`;
-      give.appendChild(b);
-    });
-    box.appendChild(give);
-  }
-}
-
-/** How long anybody may hold this spawn.
- *
- *  A number and a Save, not a stepper: it is set once in a while and then left
- *  alone for months, which is the opposite of the claim-length control on the
- *  same screen — that one is dragged on every claim and is a stepper for exactly
- *  that reason.
- *
- *  An empty box means "follow the server", which is why the placeholder says so
- *  rather than showing a number that would look like the current value. Clearing
- *  an override has to be as easy as setting one, and the endpoint reads an empty
- *  `minutes` the same way.
- */
-function ceilingRow(spawn) {
-  const row = el('div', 'mod-row');
-  row.appendChild(el('span', 'field-label', 'Max claim'));
-
-  const field = document.createElement('input');
-  field.type = 'text';
-  field.inputMode = 'numeric';
-  field.className = 'mod-input';
-  field.value = spawn.maxMinutes != null ? String(spawn.maxMinutes) : '';
-  field.placeholder = `${limits() ? limits().maxDurationMinutes : ''} (server)`;
-  field.title = 'Minutes. Empty follows the server.';
-  field.setAttribute('aria-label', `Longest claim allowed on ${spawn.code}, in minutes`);
-  row.appendChild(field);
-
-  const save = button('Save', 'btn mod-btn small',
-    () => post(`/dashboard/g/${GUILD_ID}/spawn-max`, { code: spawn.code, minutes: field.value.trim() }));
-  save.title = `Set how long a claim on ${spawn.code} may run`;
-  row.appendChild(save);
-
-  // What is in force right now, said in words, because the box alone cannot
-  // distinguish an override that happens to match the server from one that is
-  // absent.
-  row.appendChild(el('span', 'mod-note',
-    spawn.maxMinutes != null ? `this spawn only` : 'following the server'));
-  return row;
 }
 
 /** The moderator panel above the board: tools that act on the catalogue rather
@@ -3316,8 +3268,6 @@ function setUpModPanel() {
   const actions = el('div', 'mod-actions');
   const add = button('Add spawn', 'btn mod-btn', () => submit(), 'ti-plus');
   actions.appendChild(add);
-  actions.appendChild(el('span', 'mod-note',
-    'Creature is the wiki name of the monster and sets the picture on the card — leave it empty for none.'));
   spawns.appendChild(actions);
 
   // What this server has added, and the only way back out again. Redrawn from
@@ -3326,11 +3276,18 @@ function setUpModPanel() {
   const owned = el('div', 'mod-owned');
   spawns.appendChild(owned);
 
+  // How long a claim on one spawn may run. Here rather than on the spawn's own
+  // card for the same reason stamina is: it is configuration rather than
+  // something done to a hunt in progress, and from a card there was no way to
+  // see which spawns had been singled out without opening all of them.
+  const limitsBand = el('div', 'mod-band alt');
+  body.appendChild(limitsBand);
+
   // Handing somebody stamina. Here rather than on a spawn's card, where it used
   // to sit: a tank belongs to a person and not to a respawn, and reaching it
   // through whichever spawn they happened to be holding meant a moderator could
   // only ever top up somebody who was mid-hunt.
-  const stamina = el('div', 'mod-band alt');
+  const stamina = el('div', 'mod-band');
   body.appendChild(stamina);
 
   // One place for whatever the bot said back, whichever tool above said it, and
@@ -3438,7 +3395,145 @@ function setUpModPanel() {
   async function reread() {
     await loadCatalogue().catch(() => {});
     drawOwned();
+    drawLimits();
     await refresh();
+  }
+
+  // ---- Claim limits -------------------------------------------------------
+  // Which spawn the box below is about. Held outside the field because the band
+  // is redrawn after every write, and because what was typed and what was
+  // *chosen* are different things — see `limitSpawn`.
+  let limitPick = null;
+
+  limitsBand.innerHTML = `
+    <div class="mod-section">
+      <span class="mod-section-title">Claim limits</span>
+      <span class="mod-section-hint" id="ml-default"></span>
+    </div>
+    <div class="mod-form limits">
+      <div class="mod-field mod-who">
+        <label class="field-label" for="ml-spawn">Spawn</label>
+        <input id="ml-spawn" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Search a code or a name">
+        <div class="mod-suggest" id="ml-suggest" hidden></div>
+      </div>
+      <div class="mod-field">
+        <label class="field-label" for="ml-max">Max claim</label>
+        <input id="ml-max" type="text" autocomplete="off" placeholder="2h">
+      </div>
+    </div>`;
+
+  const mlSpawn = document.getElementById('ml-spawn');
+  const mlSuggest = document.getElementById('ml-suggest');
+  const mlMax = document.getElementById('ml-max');
+
+  const limitActions = el('div', 'mod-actions');
+  const setLimit = button('Set limit', 'btn mod-btn', () => applyLimit(), 'ti-hourglass');
+  limitActions.appendChild(setLimit);
+  limitsBand.appendChild(limitActions);
+
+  // What has been singled out, and the way back off it — the same shape as the
+  // custom-code list above, because it answers the same kind of question.
+  const limited = el('div', 'mod-owned');
+  limitsBand.appendChild(limited);
+
+  [mlSpawn, mlMax].forEach(input => input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); applyLimit(); }
+  }));
+
+  // A code or a name, because a moderator remembers one or the other. Same list
+  // and same behaviour as the stamina band's Who — including mousedown rather
+  // than click, since the input's blur would otherwise hide the row out from
+  // under the pointer.
+  mlSpawn.addEventListener('input', () => {
+    limitPick = null;
+    const text = mlSpawn.value.trim().toLowerCase();
+    const hits = !text || !catalogue ? [] : [...catalogue.values()].filter(sp =>
+      sp.code.toLowerCase().includes(text) || sp.name.toLowerCase().includes(text)).slice(0, 8);
+    mlSuggest.innerHTML = '';
+    hits.forEach(sp => {
+      const row = el('button', 'mod-suggest-row', `${esc(sp.code)} — ${esc(sp.name)}`);
+      row.type = 'button';
+      row.addEventListener('mousedown', e => {
+        e.preventDefault();
+        limitPick = sp;
+        mlSpawn.value = `${sp.code} — ${sp.name}`;
+        mlSuggest.hidden = true;
+        // Pre-filled with what that spawn is on now, so the box says where it is
+        // starting from rather than making somebody look it up in the list below.
+        mlMax.value = sp.maxMinutes != null ? String(sp.maxMinutes) : '';
+        mlMax.focus();
+      });
+      mlSuggest.appendChild(row);
+    });
+    mlSuggest.hidden = !hits.length;
+  });
+  mlSpawn.addEventListener('blur', () => setTimeout(() => (mlSuggest.hidden = true), 120));
+
+  /** The spawn the box is about: the one chosen from the list, or whatever a
+   *  typed code matches exactly. Typing `415` and pressing Enter should work
+   *  without going through the suggestions. */
+  function limitSpawn() {
+    if (limitPick) return limitPick;
+    const text = mlSpawn.value.trim().toLowerCase();
+    if (!text || !catalogue) return null;
+    return [...catalogue.values()].find(sp =>
+      sp.code.toLowerCase() === text || `${sp.code} — ${sp.name}`.toLowerCase() === text) || null;
+  }
+
+  /** Every spawn with a ceiling of its own, in the order the board reads them. */
+  function drawLimits() {
+    const l = board && board.limits;
+    document.getElementById('ml-default').textContent =
+      l ? `server default ${fmtDur(l.maxDurationMinutes)}` : '';
+
+    limited.innerHTML = '';
+    const rows = !catalogue ? [] : [...catalogue.values()]
+      .filter(sp => sp.maxMinutes != null)
+      // Sorted the way the list above is, and the board image: 101 before 1001.
+      .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
+    if (!rows.length) return;
+    const list = el('div', 'mod-list');
+    rows.forEach(sp => {
+      const row = el('div', 'mod-list-row');
+      row.appendChild(el('span', 'code-chip', esc(sp.code)));
+      row.appendChild(el('span', 'mod-list-name', esc(sp.name)));
+      row.appendChild(el('span', 'mod-list-max', fmtDur(sp.maxMinutes)));
+      const clear = button('Clear', 'btn mod-btn small', () => sendLimit(sp.code, ''));
+      clear.title = `Put ${sp.code} back on the server's maximum`;
+      row.appendChild(clear);
+      list.appendChild(row);
+    });
+    limited.appendChild(list);
+  }
+
+  function applyLimit() {
+    const spawn = limitSpawn();
+    if (!spawn) { say('Pick a spawn first.', 'no'); mlSpawn.focus(); return; }
+    sendLimit(spawn.code, mlMax.value);
+  }
+
+  /** One way out for both the form and the Clear buttons, so the reply and the
+   *  redraw happen the same way whichever pressed.
+   *
+   *  Through the panel's own `send` rather than the window's `post`: that one
+   *  drives `view.busy` and re-renders the spawn window, which is not what is on
+   *  screen here.
+   *
+   *  The text goes to the server as typed — `ClaimDuration` there is the only
+   *  thing that decides what `2h` means, so the page cannot disagree with it. */
+  async function sendLimit(code, minutes) {
+    setLimit.disabled = true;
+    say('Saving…');
+    const result = await send(`/dashboard/g/${GUILD_ID}/spawn-max`, { code, minutes });
+    setLimit.disabled = false;
+    say(result.message, result.ok ? 'ok' : 'no');
+    if (result.ok) {
+      limitPick = null;
+      mlSpawn.value = '';
+      mlMax.value = '';
+      await reread();
+    }
   }
 
   // ---- Stamina ------------------------------------------------------------
@@ -3583,6 +3678,7 @@ function setUpModPanel() {
     // only ever read here, and the catalogue may well have moved since last time.
     if (!open) {
       drawOwned();
+      drawLimits();
       drawStamina();
       loadPeople();
       field('ms-code').focus();

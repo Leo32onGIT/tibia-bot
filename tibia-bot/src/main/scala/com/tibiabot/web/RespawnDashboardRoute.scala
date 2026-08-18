@@ -644,14 +644,13 @@ final class RespawnDashboardRoute(
             fields.get("code").map(_.trim).filter(_.nonEmpty) match {
               case None => badRequest("Which spawn?")
               case Some(code) =>
-                val typed = fields.get("minutes").map(_.trim).getOrElse("")
-                if (typed.isEmpty) actionResult(guildId, actions.setSpawnMax(guildId, userId, code, None))
-                else scala.util.Try(typed.toInt).toOption match {
-                  case Some(minutes) =>
-                    actionResult(guildId, actions.setSpawnMax(guildId, userId, code, Some(minutes)))
-                  // Refused rather than read as a clear: taking "2h" to mean
-                  // "follow the server" would do the opposite of what was asked.
-                  case None => badRequest("That needs to be a whole number of minutes, or empty.")
+                // Read the same way the Discord form reads it — see ClaimDuration,
+                // which is the only thing on either side that knows what "2h"
+                // means. An empty box is a clear rather than a refusal.
+                com.tibiabot.domain.ClaimDuration.parse(fields.getOrElse("minutes", "")) match {
+                  case Right(minutes) =>
+                    actionResult(guildId, actions.setSpawnMax(guildId, userId, code, minutes))
+                  case Left(problem) => badRequest(problem)
                 }
             }
           }
