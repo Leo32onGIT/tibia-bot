@@ -2253,7 +2253,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               Left("That one is being hunted now. Use Remove Claim on the board to end a running hunt.")
             case Some(slot) =>
               repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotRemoved)
-              Right(Names.user(slot.nickname, slot.userName))
+              Right(Names.plain(slot.nickname, slot.userName))
             case None =>
               predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
                 case None => Left("Nothing is booked at that time.")
@@ -2261,7 +2261,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
                     schedule.userName, schedule.nickname, schedule.characterName, startsAt,
                     schedule.durationMinutes, RespawnClaim.Outcome.SlotRemoved)
-                  Right(Names.user(schedule.nickname, schedule.userName))
+                  Right(Names.plain(schedule.nickname, schedule.userName))
               }
           }
         }
@@ -2296,7 +2296,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             case Some(slot) if slot.isActive =>
               Left("That one is being hunted now. Use Hand To on the board to move a running claim.")
             case Some(slot) if slot.userId == toUserId =>
-              Left(s"That slot is already ${Names.user(slot.nickname, slot.userName)}'s.")
+              Left(s"That slot is already ${Names.plain(slot.nickname, slot.userName)}'s.")
             case Some(slot) =>
               // An occurrence of a rule is settled and replaced, so the rule
               // stops speaking for the day; a booking that belongs to nobody's
@@ -2306,7 +2306,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotMoved)
                 repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
                   startsAt, slot.durationMinutes)
-                Right(Names.user(slot.nickname, slot.userName))
+                Right(Names.plain(slot.nickname, slot.userName))
               } else
                 repository.reassignReservation(guildId, slot.id, toUserId, toUserName, toNickname)
                   .map(_ => Names.user(slot.nickname, slot.userName))
@@ -2315,14 +2315,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
                 case None => Left("Nothing is booked at that time.")
                 case Some(schedule) if schedule.userId == toUserId =>
-                  Left(s"That slot is already ${Names.user(schedule.nickname, schedule.userName)}'s.")
+                  Left(s"That slot is already ${Names.plain(schedule.nickname, schedule.userName)}'s.")
                 case Some(schedule) =>
                   repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
                     schedule.userName, schedule.nickname, schedule.characterName, startsAt,
                     schedule.durationMinutes, RespawnClaim.Outcome.SlotMoved)
                   repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
                     startsAt, schedule.durationMinutes)
-                  Right(Names.user(schedule.nickname, schedule.userName))
+                  Right(Names.plain(schedule.nickname, schedule.userName))
               }
           }
         }
@@ -2431,7 +2431,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // holder nothing; shrinking it hands back minutes they will never use.
         if (delta < 0) repository.refundStamina(guildId, slot.userId, -delta, resetBoundary(now))
         repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
-        Right(SlotEdit(Names.user(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
+        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
           live = true, cutInto = nextUpOn(guildId, respawn.id, start, newEnd, now)))
       }
     }
@@ -2447,7 +2447,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // Nothing to settle with stamina: a booking reserves none until it
         // starts, so its length is a stored number until then.
         repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
-        Right(SlotEdit(Names.user(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
+        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
           live = false, cutInto = None))
     }
   }
@@ -2467,7 +2467,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               schedule.durationMinutes, RespawnClaim.Outcome.SlotResized)
             repository.reserveFor(guildId, respawn.id, schedule.userId, schedule.userName,
               schedule.nickname, startsAt, minutes)
-            Right(SlotEdit(Names.user(schedule.nickname, schedule.userName), schedule.userId,
+            Right(SlotEdit(Names.plain(schedule.nickname, schedule.userName), schedule.userId,
               minutes, newEnd, live = false, cutInto = None))
         }
     }
@@ -2488,7 +2488,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                        until: ZonedDateTime, now: ZonedDateTime): Option[String] = {
     val booked = repository.reservationsFor(guildId, respawnId, after)
       .filter(_.startsAt.exists(_.isBefore(until)))
-      .map(slot => Names.user(slot.nickname, slot.userName))
+      .map(slot => Names.plain(slot.nickname, slot.userName))
     if (booked.nonEmpty) booked.headOption
     else {
       // A day already settled is in nobody's way, which is what stops an evening
@@ -2498,7 +2498,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       repository.schedulesForRespawn(guildId, respawnId).iterator.flatMap { schedule =>
         schedule.occurrencesBetween(after.plusMinutes(1), until)
           .filterNot(start => settled.getOrElse(schedule.id, Set.empty).contains(start.toInstant))
-          .map(_ => Names.user(schedule.nickname, schedule.userName))
+          .map(_ => Names.plain(schedule.nickname, schedule.userName))
       }.toList.headOption
     }
   }

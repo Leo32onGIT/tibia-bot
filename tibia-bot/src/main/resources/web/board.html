@@ -693,7 +693,11 @@
     margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 10px;
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .slot-body { padding: 0 20px 12px; }
+  /* The strip above is tinted while the panel is open, so the row needs a gap
+     of its own or the buttons sit directly on that tint and read as part of the
+     strip rather than as what is under it. The strip's own 9px was doing the
+     whole job and was never enough. */
+  .slot-body { padding: 10px 20px 12px; }
 
   /* One row, in every state the panel has. Nothing stretches: the buttons used
      to share the row equally, which made a word like "+30m" as wide as the
@@ -1292,6 +1296,12 @@ const view = {
   code: null,              // the spawn whose window is open, or null
   weekOffset: 0,
   duration: null,
+  // The length the reader themselves chose, which is not always the one on
+  // screen: selecting somebody's booking shows that booking's length, and their
+  // own comes back the moment they pick an empty slot again. Without this the
+  // borrowed length stuck, and clicking a half-hour booking quietly rewrote
+  // what the next hunt they arranged would run for.
+  chosen: null,
   repeat: 'once',
   days: new Set(),
   pick: null,
@@ -1657,6 +1667,7 @@ async function loadBoard() {
   };
   if (view.duration == null && limits()) {
     view.duration = Math.max(SLOT, Math.min(limits().defaultDurationMinutes, cap()));
+    view.chosen = view.duration;
   }
 }
 
@@ -1981,6 +1992,7 @@ function openWindow(code) {
   // a ceiling of its own opens at a length it will actually accept instead of
   // opening too long and being corrected on the first render.
   view.duration = l ? Math.min(l.defaultDurationMinutes, cap()) : null;
+  view.chosen = view.duration;
   veil.classList.add('open');
   windowEl.classList.add('open');
   lockPage();
@@ -2040,10 +2052,31 @@ function snapDuration(minutes) {
   return Math.max(Math.min(s, cap()), Math.min(cap(), Math.round(minutes / s) * s));
 }
 
+/** A length the reader picked: the slider, or the foot of their own selection.
+ *  Remembered as theirs, so anything borrowed later gives way back to it. */
 function setDuration(minutes) {
+  view.duration = snapDuration(minutes);
+  view.chosen = view.duration;
+  view.answer = null;
+  renderWindow();
+}
+
+/** A length taken off whatever is selected, for as long as it is selected.
+ *
+ *  Clicking a booking draws the selection over exactly that booking rather than
+ *  the reader's own length hanging off its start — two windows where they
+ *  clicked on one. It is emphatically not a choice, though, so it leaves
+ *  [[view.chosen]] alone and `ownDuration` puts it back on the next empty slot.
+ */
+function borrowDuration(minutes) {
   view.duration = snapDuration(minutes);
   view.answer = null;
   renderWindow();
+}
+
+/** Back to the reader's own length, after a look at somebody else's block. */
+function ownDuration() {
+  if (view.chosen != null) view.duration = snapDuration(view.chosen);
 }
 
 /** Keep the chosen length inside what the hunt being arranged can actually run
@@ -2220,6 +2253,8 @@ function clearPick() {
   // The verdict on screen is about the slot being given up, as is any refusal
   // still sitting above it, so neither outlives it.
   view.answer = null;
+  // Nor does a length borrowed off whatever was selected.
+  ownDuration();
   renderWindow();
 }
 
@@ -2646,6 +2681,9 @@ function calendar() {
         if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
         view.pick = picked;
         view.answer = null;
+        // A fresh slot is the reader's own again, whatever length the block they
+        // were looking at happened to run for.
+        ownDuration();
         // A weekly booking defaults to the day it was picked on, read in server
         // time — which is not always the column it was clicked in.
         if (view.repeat === 'week' && view.days.size === 0) {
@@ -2686,7 +2724,10 @@ function calendar() {
         e.stopPropagation();
         view.pick = b.start;
         view.answer = null;
-        renderWindow();
+        // Borrowed, not chosen: the selection takes the block's own window
+        // while the block is what is selected, and hands it back on the next
+        // empty slot.
+        borrowDuration(slotMinutes(b));
       });
       // Only while Edit claim is armed, and only on the piece carrying the end:
       // the half above a midnight split is not where the window finishes.

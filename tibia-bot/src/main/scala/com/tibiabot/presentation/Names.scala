@@ -47,6 +47,23 @@ object Names {
    *  loudly. Rows written before nicknames were kept have none, so most of the
    *  history reads exactly as it did.
    */
+  /** The same pair of names, for a surface with no markdown in it.
+   *
+   *  [[user(nickname:String,username:String)*]] writes Discord's own formatting
+   *  — bold, a code span, an `@` — which is right in an embed and is literal
+   *  punctuation everywhere else. The web dashboard renders its answers as
+   *  plain text, so a name built for Discord arrives there wearing asterisks
+   *  and backticks, which reads as the bot having malfunctioned.
+   *
+   *  Same two names in the same order, and the same fallback when a nickname
+   *  is absent or only repeats the account.
+   */
+  def plain(nickname: String, username: String): String = {
+    val nick = nickname.trim
+    if (nick.isEmpty || nick.equalsIgnoreCase(username.trim)) username.trim
+    else s"${username.trim} ($nick)"
+  }
+
   def user(nickname: String, username: String): String = {
     val nick = nickname.replace("`", "").replace("*", "").trim
     if (nick.isEmpty || nick.equalsIgnoreCase(username.trim)) user(username)

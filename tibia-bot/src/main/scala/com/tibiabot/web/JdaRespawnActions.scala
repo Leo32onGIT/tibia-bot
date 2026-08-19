@@ -305,7 +305,7 @@ final class JdaRespawnActions(
             case Right(owner) =>
               logger.info(s"Dashboard: '$actorId' took $owner's ${respawn.code} slot at " +
                 s"${startsAt.toInstant} off the calendar in guild '$guildId'")
-              ActionResult(ok = true, s"$owner's slot on ${respawn.displayName} has been removed.")
+              ActionResult(ok = true, s"The booking for ${respawn.displayName} has been removed.")
           }
       }
     }
@@ -340,16 +340,23 @@ final class JdaRespawnActions(
               logger.info(s"Dashboard: '$actorId' set ${edit.owner}'s ${respawn.code} " +
                 s"${if (edit.live) "hunt" else "slot"} at ${startsAt.toInstant} to ${edit.minutes}m " +
                 s"in guild '$guildId'")
-              // Whose evening it now reaches into is said on the way past
-              // rather than left to be discovered: the write has happened, and
-              // this is the one moment somebody is looking at the answer.
+              // That it now reaches into the next booking is said on the way
+              // past rather than left to be discovered: the write has happened,
+              // and this is the one moment somebody is looking at the answer.
+              //
+              // Whose booking is not. The panel answers about the slot that was
+              // selected, and the grid beside the message already says whose
+              // every block on it is.
               val overrun = edit.cutInto
-                .map(who => s" It now runs into ${who}'s slot, which will be cut short.")
+                .map(_ => " It now runs into the next booking, which will be cut short.")
                 .getOrElse("")
-              val what = if (edit.live) s"${edit.owner}'s hunt on ${respawn.displayName}"
-                         else s"${edit.owner}'s slot on ${respawn.displayName}"
+              // Which of the two it was, because the panel acts on both and
+              // "the booking" and "the claim" are the words the grid and the
+              // card already use for them.
+              val what = if (edit.live) "claim" else "booking"
               ActionResult(ok = true,
-                s"$what now runs for ${com.tibiabot.presentation.RespawnEmbeds.humanDuration(edit.minutes)}.$overrun")
+                s"The $what for ${respawn.displayName} now runs for " +
+                  s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(edit.minutes)}.$overrun")
           }
       }
     }
