@@ -631,6 +631,38 @@ object BotApp extends App with StrictLogging {
     }
     worldTransferRepository.record(guildId, name, formerWorlds, detectedAt)
   }
+
+  /** Move any announced-transfer record filed under a former name of `charName`
+   *  onto `charName`, in cache and db.
+   *
+   *  A rename does not undo an announcement, but the record is keyed by whatever
+   *  the character was called when it was written. Matching on former names is
+   *  what stops the transfer being posted again; moving the record is what keeps
+   *  that from depending on Tibia still listing the old name — the retention
+   *  window here is a year, longer than anything the character sheet promises —
+   *  and keeps the table from carrying rows keyed to names nobody answers to.
+   *
+   *  The list is re-derived inside the lock rather than from the caller's read,
+   *  for the same reason the activity list is: a discord's records are shared by
+   *  every world it tracks and those streams poll concurrently. */
+  def rekeyWorldTransfer(guildId: String, charName: String, formerNames: List[String]): Unit = {
+    var stale: List[String] = Nil
+    var moved: Option[WorldTransfer] = None
+    streamState.modifyWorldTransfersData { m =>
+      val live = m.getOrElse(guildId, List())
+      stale = presentation.WorldTransfers.staleKeys(live, charName, formerNames)
+      val updated = presentation.WorldTransfers.applyRename(live, charName, formerNames)
+      moved = updated.find(_.name.equalsIgnoreCase(charName))
+      m + (guildId -> updated)
+    }
+    // Written under the new key before the old ones are dropped: a crash between
+    // the two leaves the transfer suppressed twice over, where the other order
+    // would leave it suppressed by nothing and announce it again.
+    if (stale.nonEmpty) {
+      moved.foreach(t => worldTransferRepository.record(guildId, charName, t.formerWorlds, t.detectedAt))
+      stale.foreach(name => worldTransferRepository.remove(guildId, name))
+    }
+  }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
     streamState.modifyHuntedPlayersData(f)
   def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =

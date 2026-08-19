@@ -36,6 +36,34 @@ class WorldTransferRepositoryIntegrationSpec extends AnyFunSuite with Matchers w
     repo.getTransfers(guildId).map(_.name) should not contain "transferchar"
   }
 
+  test("world_transfers rename: the record moves onto the new name and the old key goes") {
+    val provider = pgOrCancel()
+    ensureGuildDatabase(provider, guildId)
+    val repo = new JdbcWorldTransferRepository(provider)
+
+    repo.getTransfers(guildId) // creates the table on first use
+    repo.removeExpired(guildId, t.plusYears(10)) // clean slate
+
+    repo.record(guildId, "Rodzeraah", List("Unebra"), t)
+    // What BotApp.rekeyWorldTransfer does: write under the new key, then drop the old.
+    repo.record(guildId, "Chris Rpbombita", List("Unebra"), t)
+    repo.remove(guildId, "Rodzeraah")
+
+    val rows = repo.getTransfers(guildId)
+    rows.map(_.name) should contain("chris rpbombita")
+    rows.map(_.name) should not contain "rodzeraah"
+    rows.find(_.name == "chris rpbombita").map(_.formerWorlds) shouldBe Some(List("Unebra"))
+
+    // Capitalisation from the API must not leave the old key behind, and removing a
+    // key that was never there is a no-op rather than a failure.
+    repo.record(guildId, "Rodzeraah", List("Unebra"), t)
+    repo.remove(guildId, "RODZERAAH")
+    repo.remove(guildId, "Nobodyatall")
+    repo.getTransfers(guildId).map(_.name) should not contain "rodzeraah"
+
+    repo.removeExpired(guildId, t.plusDays(2))
+  }
+
   private def ensureGuildDatabase(provider: JdbcConnectionProvider, guildId: String): Unit = {
     val conn = provider.admin()
     try {

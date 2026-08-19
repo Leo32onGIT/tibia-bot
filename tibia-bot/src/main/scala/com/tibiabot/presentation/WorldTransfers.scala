@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.Config
-import com.tibiabot.domain.Killers
+import com.tibiabot.domain.{Killers, WorldTransfer}
 
 /** Deciding when a tracked character's former-world entry is an incoming transfer
  *  worth announcing.
@@ -43,6 +43,64 @@ object WorldTransfers {
     if (arrivedFrom.isEmpty || posted.contains(arrivedFrom.map(_.toLowerCase).toSet)) None
     else Some(arrivedFrom)
   }
+
+  /** The record this character's arrival was announced under, matched on the name
+   *  they carry now or on any name they have carried before.
+   *
+   *  A rename does not undo an announcement, but the record is keyed by whatever
+   *  the character was called when it was written. Looking only under the live
+   *  name reads a renamed character as a stranger and posts their months-old
+   *  transfer a second time, which is what a name change used to do here. Former
+   *  names come off the character sheet fresh on every poll, so this holds across
+   *  a restart with nothing extra stored.
+   *
+   *  A record under the live name wins over one under a former name — that is the
+   *  character as they are now — and among former names the most recently detected
+   *  wins, so a character renamed twice before this matching existed is judged by
+   *  their latest transfer rather than by whichever row happens to come first. */
+  def postedFor(records: List[WorldTransfer], charName: String, formerNames: List[String]): Option[WorldTransfer] = {
+    val stale = staleKeys(records, charName, formerNames).map(_.toLowerCase).toSet
+    records
+      .find(_.name.equalsIgnoreCase(charName))
+      .orElse(mostRecent(records.filter(r => stale.contains(r.name.trim.toLowerCase))))
+  }
+
+  /** The keys this character's arrival is filed under that are no longer their
+   *  name — what a rename leaves behind, and what has to be deleted once the
+   *  record has been moved.
+   *
+   *  A former name equal to the current one is dropped: the sheet does list a name
+   *  a character has taken back, and treating that as stale would move a record
+   *  onto itself. */
+  def staleKeys(records: List[WorldTransfer], charName: String, formerNames: List[String]): List[String] = {
+    val live = charName.trim.toLowerCase
+    val previous = formerNames.map(_.trim.toLowerCase).filter(n => n.nonEmpty && n != live).toSet
+    records.map(_.name).filter(n => previous.contains(n.trim.toLowerCase)).distinct
+  }
+
+  /** The list with every record filed under a former name of `charName` collapsed
+   *  onto `charName`.
+   *
+   *  The worlds and the detection time are carried across untouched: it is the
+   *  same arrival either way, and re-stamping it would push the retention prune
+   *  out past the point where the former-world field it exists to suppress has
+   *  cleared on its own. */
+  def applyRename(records: List[WorldTransfer], charName: String, formerNames: List[String]): List[WorldTransfer] = {
+    val stale = staleKeys(records, charName, formerNames).map(_.toLowerCase).toSet
+    if (stale.isEmpty) records
+    else {
+      val isStale = (r: WorldTransfer) => stale.contains(r.name.trim.toLowerCase)
+      val winner = records
+        .find(_.name.equalsIgnoreCase(charName))
+        .orElse(mostRecent(records.filter(isStale)))
+        .map(_.copy(name = charName.toLowerCase))
+      winner.toList ::: records.filterNot(r => isStale(r) || r.name.equalsIgnoreCase(charName))
+    }
+  }
+
+  /** Latest by detection time, without needing an Ordering for ZonedDateTime. */
+  private def mostRecent(records: List[WorldTransfer]): Option[WorldTransfer] =
+    records.reduceOption((a, b) => if (b.detectedAt.isAfter(a.detectedAt)) b else a)
 
   /** The level at or above which a character in no tracked guild and on no
    *  tracked list is still worth announcing the arrival of.

@@ -303,10 +303,23 @@ class TibiaBot(
               val notableStranger =
                 showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
               if (trackedHere || notableStranger) {
-                val postedTransfer = BotApp.worldTransfersData.getOrElse(guildId, List())
-                  .find(_.name.equalsIgnoreCase(charName)).map(_.formerWorlds)
+                // Matched on former names as well as the live one: the record is
+                // keyed by whatever the character was called when it was written, so
+                // looking only under the name they carry now reads a renamed
+                // character as a stranger and posts their months-old transfer over
+                // again under the new name.
+                val postedTransfer = presentation.WorldTransfers.postedFor(
+                  BotApp.worldTransfersData.getOrElse(guildId, List()), charName, formerNamesList)
+                // A record still filed under a dropped name is moved onto the live
+                // one. This is the only place that happens, and it has to be here
+                // rather than in the rename branch below: that branch only fires for
+                // characters with an activity row — members of a tracked guild — and
+                // an untracked arrival over the level bar has none.
+                if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
+                  BotApp.rekeyWorldTransfer(guildId, charName, formerNamesList)
+                }
                 presentation.WorldTransfers.unreported(
-                  char.character.character.world, world, formerWorldsList, postedTransfer
+                  char.character.character.world, world, formerWorldsList, postedTransfer.map(_.formerWorlds)
                 ).foreach { arrivedFrom =>
                   if (activityTextChannel != null) {
                     if (activityTextChannel.canTalk() || (!Config.prod)) {

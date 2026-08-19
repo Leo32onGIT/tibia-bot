@@ -69,6 +69,16 @@ final class JdbcWorldTransferRepository(connectionProvider: ConnectionProvider) 
       statement.close()
     }
 
+  def remove(guildId: String, name: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      val statement = conn.prepareStatement("DELETE FROM world_transfers WHERE name = ?;")
+      // Lowercased to match how `record` writes the key.
+      statement.setString(1, name.toLowerCase)
+      statement.executeUpdate()
+
+      statement.close()
+    }
+
   def removeExpired(guildId: String, before: ZonedDateTime): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
       val statement = conn.prepareStatement("DELETE FROM world_transfers WHERE detected < ?;")
