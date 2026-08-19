@@ -55,12 +55,11 @@ final class AccessCache(staleAfter: Duration,
                         maxEntries: Int = AccessCache.MaxEntries,
                         now: () => Instant = () => Instant.now()) {
 
-  /** The whole [[AccessReport]], not just the guilds it granted. A pass that
-   *  failed to reach a server has to keep saying so for as long as it is
-   *  remembered - caching only the successes would turn an incomplete answer
-   *  into one indistinguishable from a complete one, which is precisely the
-   *  confusion the report exists to remove. */
-  private final case class Entry(value: AccessReport, staleAt: Instant, expiresAt: Instant)
+  // From the companion rather than from here: a case class nested in a class
+  // carries a reference to its enclosing instance, which the compiler cannot
+  // check when matching on it, and warns about every time this cache reads an
+  // entry back out.
+  import AccessCache.Entry
 
   private val entries = new ConcurrentHashMap[String, Entry]()
 
@@ -119,6 +118,13 @@ final class AccessCache(staleAfter: Duration,
 }
 
 object AccessCache {
+  /** The whole [[AccessReport]], not just the guilds it granted. A pass that
+   *  failed to reach a server has to keep saying so for as long as it is
+   *  remembered - caching only the successes would turn an incomplete answer
+   *  into one indistinguishable from a complete one, which is precisely the
+   *  confusion the report exists to remove. */
+  private final case class Entry(value: AccessReport, staleAt: Instant, expiresAt: Instant)
+
   /** A remembered answer, and whether whoever takes it should refresh it. */
   final case class Cached(report: AccessReport, stale: Boolean)
 

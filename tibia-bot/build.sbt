@@ -5,6 +5,15 @@ version := "2.2"
 
 scalaVersion := "2.13.18"
 
+// Turn scalac's "1 deprecation, re-run with -deprecation" summary lines into
+// the actual offending code. A warning reduced to a count is one nobody acts
+// on; these two flags cost nothing and make any new warning readable where it
+// happened. The build is warning-free as of this commit.
+//
+// Deliberately not -Xlint: it finds another hundred things in code that already
+// works, which is a separate piece of work from keeping the build quiet.
+scalacOptions ++= Seq("-deprecation", "-feature")
+
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
 // Pins the packaged image's entrypoint/launcher script to the bot itself.
