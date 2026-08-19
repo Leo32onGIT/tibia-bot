@@ -312,8 +312,43 @@ object BotApp extends App with StrictLogging {
     if (Config.redisEnabled)
       Some(new web.RemoteGuildAccess(
         persistence.RedisCacheProvider.cache, actorSystem.scheduler,
-        isLocal = guildId => discordGateway.guildById(guildId) != null)(ex))
+        isLocal = guildId => discordGateway.guildById(guildId) != null,
+        selfBotId = discordGateway.selfUserId)(ex))
     else None
+  // Where an access answer that has fallen due is resolved again, behind
+  // whoever was handed the old one — see AccessCache's "two horizons".
+  //
+  // Small on purpose. Every refresh is a chain of blocking Discord REST calls,
+  // and Discord's budget is bot-wide and shared with the world scanning that is
+  // this bot's actual job; four threads is the ceiling on how much of it the
+  // dashboard can take at any instant. In the steady state it is nowhere near
+  // busy — a few hundred visitors, each refreshed once every few minutes, is a
+  // couple of lookups a second — so what this width really bounds is the cold
+  // start, when every visitor's entry is missing at once and the temptation is
+  // to resolve all of them together.
+  private val accessRefreshPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "access-refresh")
+      thread.setDaemon(true)
+      thread
+    }))
+  // Where a visitor's individual guilds are looked up, when they are in more
+  // than one this bot tracks. Its own pool because every other dashboard pool
+  // *waits* on it: reads, refreshes, another bot's questions and the write
+  // relay's permission check all resolve access, and fanning out onto the pool
+  // the caller already occupies is a deadlock rather than a slowdown.
+  //
+  // Wider than the pools that wait on it, since one resolution can want several
+  // of these at once and they are all parked on a Discord round trip. Nothing
+  // here governs how hard Discord is pushed — JDA's own rate limiter does that,
+  // and queues past it — so this is about not making a visitor wait for a
+  // thread, rather than about the budget.
+  private val dashboardLookupPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
+      val thread = new Thread(r, "dashboard-lookup")
+      thread.setDaemon(true)
+      thread
+    }))
   private val dashboardAccessService = new web.DashboardAccessService(
     discordGateway,
     respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
@@ -325,7 +360,9 @@ object BotApp extends App with StrictLogging {
     // and ours. It is still reachable, and it is where somebody with no
     // community of their own lands.
     demoGuildId = Config.Patreon.supportGuildId,
-    remote = remoteGuildAccess
+    remote = remoteGuildAccess,
+    refreshOn = accessRefreshPool,
+    lookupOn = dashboardLookupPool
   )
   // Fetched on this host, which can reach the wiki even where the people
   // looking at the dashboard cannot, and served back from our own domain.
@@ -342,6 +379,25 @@ object BotApp extends App with StrictLogging {
   private val respawnActionPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
       val thread = new Thread(r, "respawn-action")
+      thread.setDaemon(true)
+      thread
+    }))
+  // Reads get their own, separate from the writes above.
+  //
+  // They shared one pool of four, and the sharing was the problem rather than
+  // the size: resolving access waits on the other bots in the fleet (see
+  // RemoteGuildAccess), so a few visitors loading the dashboard while another
+  // bot was slow could occupy every thread and leave nothing to perform a
+  // claim with. That coupling is also what forced the wait itself to be kept
+  // unrealistically short, which is what made the picker drop servers.
+  //
+  // Larger than the write pool because these threads are almost never running:
+  // they are parked on a Discord REST call or on an answer coming back over
+  // Redis. Bounded all the same, so a burst queues instead of spawning threads
+  // without limit.
+  private val dashboardReadPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
+      val thread = new Thread(r, "dashboard-read")
       thread.setDaemon(true)
       thread
     }))
@@ -375,10 +431,44 @@ object BotApp extends App with StrictLogging {
   // asks about a guild this bot is in. Resolved locally on purpose — going back
   // out over Redis here would have two bots asking each other the same question
   // until both timed out.
+  //
+  // On its own pool, and not on `ex`, which is what it used to run on. Every
+  // question answered here ends in a *blocking* JDA member lookup, and the
+  // sweep starts one per pending question at once — so a burst of questions
+  // put an unbounded number of blocking calls onto the default dispatcher.
+  // That dispatcher is eight-odd threads and also runs the HTTP server, the
+  // world poll streams and every scheduled job in this file: enough
+  // simultaneous questions and the bot stops answering requests at all, on the
+  // strength of somebody else's dashboard being opened.
+  //
+  // A fixed pool is the bound as well as the isolation — the fan-out can no
+  // longer exceed its width, and the work that does not fit queues instead of
+  // taking a thread from something else. Four is generous against a deadline
+  // of `RemoteGuildAccess.DefaultTimeout` and a lookup worth a few hundred
+  // milliseconds; deliberately not shared with the action pool, since the
+  // point of splitting reads off writes was that a slow answer must not be
+  // able to hold up a claim.
+  private val accessAnswerPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "access-answer")
+      thread.setDaemon(true)
+      thread
+    }))
   private val accessQueryConsumer = new web.AccessQueryConsumer(
     persistence.RedisCacheProvider.cache,
     resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId),
-    canSee = guildId => discordGateway.guildById(guildId) != null)(ex)
+    canSee = guildId => discordGateway.guildById(guildId) != null,
+    selfBotId = discordGateway.selfUserId)(accessAnswerPool)
+
+  /** Whether this bot is listening for access questions on its own channel, and
+   *  so whether its roster may tell the others to send them there.
+   *
+   *  Written once the subscription has actually been accepted, and read by
+   *  `publishGuildRoster` on every beat. It must not be a statement about what
+   *  this build is capable of: a bot advertising a channel it never subscribed
+   *  to would have every other bot publishing into silence and waiting out a
+   *  deadline to discover it, which is worse than the sweep this replaces. */
+  @volatile private var answeringOnChannel = false
 
   /** Republished well inside its own TTL, so a missed beat or two never drops
    *  this bot's guilds out of anybody's picker. */
@@ -400,7 +490,7 @@ object BotApp extends App with StrictLogging {
         .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
       persistence.RedisCacheProvider.cache.setEx(
         web.GuildRoster.key(discordGateway.selfUserId),
-        web.GuildRoster(discordGateway.selfUserId, guilds).toJson,
+        web.GuildRoster(discordGateway.selfUserId, guilds, pubSub = answeringOnChannel).toJson,
         guildRosterTtl
       ).recover { case e: Throwable => logger.warn(s"Failed to publish guild roster: ${e.getMessage}") }(ex)
     } catch {
@@ -408,9 +498,40 @@ object BotApp extends App with StrictLogging {
     }
 
   if (Config.Respawn.enabled && Config.redisEnabled) {
+    // Both halves of the channel transport, set up before the first roster goes
+    // out so nothing advertises a channel it is not yet on.
+    accessQueryConsumer.listen().foreach { listening =>
+      answeringOnChannel = listening
+      if (listening) logger.info("Dashboard access relay answering questions on its own channel")
+      else logger.warn("Dashboard access relay could not open its question channel; " +
+        "other bots will fall back to leaving questions as keys")
+    }(ex)
+    remoteGuildAccess.foreach(_.listen().foreach { listening =>
+      if (!listening) logger.warn("Dashboard access relay could not open its answer channel; " +
+        "questions to other bots will fall back to waiting on a key")
+    }(ex))
+    // Still swept, and more slowly, but only for as long as there is anybody
+    // left to sweep for: the only questions written as keys now come from a bot
+    // that has not yet been restarted onto this build, and the rosters say
+    // whether any such bot is still running. Once none is, this costs one
+    // cached read of that answer per beat and no `KEYS` at all — so the last of
+    // the keyspace walks goes away on its own, on the deploy that finishes the
+    // fleet, rather than waiting for somebody to come back and delete it.
+    //
+    // Nothing is lost if the answer is late or unavailable: not knowing reads
+    // as "somebody might still be old", and the sweep runs.
     actorSystem.scheduler.scheduleWithFixedDelay(
       web.AccessQueryConsumer.SweepEvery, web.AccessQueryConsumer.SweepEvery
-    )(() => { accessQueryConsumer.sweep(); () })(ex)
+    )(() => {
+      remoteGuildAccess match {
+        case Some(fleet) => fleet.fleetAllOnChannels.foreach {
+          case true  => ()
+          case false => accessQueryConsumer.sweep(); ()
+        }(ex)
+        case None => accessQueryConsumer.sweep(); ()
+      }
+      ()
+    })(ex)
     // Published straight away as well as on the beat, so a bot restarting does
     // not drop out of everybody else's server picker for half a minute.
     actorSystem.scheduler.scheduleWithFixedDelay(
@@ -436,7 +557,9 @@ object BotApp extends App with StrictLogging {
       },
       peopleOf = guildId => respawnService.knownMembers(guildId),
       actions = respawnActions,
-      boardChanged = boardSnapshots.invalidate)(respawnActionPool)
+      // The route's own pool is the one its *reads* run on; every write it
+      // makes goes through `respawnActions`, which carries the action pool.
+      boardChanged = boardSnapshots.invalidate)(dashboardReadPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.

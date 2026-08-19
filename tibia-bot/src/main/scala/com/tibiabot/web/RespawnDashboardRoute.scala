@@ -319,7 +319,17 @@ final class RespawnDashboardRoute(
           val theirs = guildIdsOf(userId)
           // Resolved once and used twice: where to send them, and — if that is
           // straight to a board — whether its header has anywhere to switch to.
-          read(accessService.accessReportFor(userId, theirs)) { report =>
+          //
+          // From the short memory, like every other read here. This route
+          // alone resolved live, so the most-visited page on the dashboard
+          // paid a Discord REST call per candidate guild and a fresh wait on
+          // the other bots every single time it was opened — and, resolving
+          // outside the cache, never left an answer behind for the routes that
+          // do read it. Landing is a read: it decides where to send somebody,
+          // and the board it sends them to re-resolves before showing them
+          // anything, so nothing is granted on the strength of what is
+          // remembered here.
+          read(accessService.rememberedReportFor(userId, theirs)) { report =>
             accessService.entryOf(report) match {
               case DashboardEntry.Nowhere               => html(signedInEmpty(theirs))
               case DashboardEntry.Unreachable(guilds)   => html(unreachable(guilds))
@@ -755,7 +765,7 @@ object RespawnDashboardRoute {
        // "Check again" is a plain reload, and it is the action that actually
        // helps here: somebody in this state is nearly always waiting on a
        // moderator to let them into a channel, and the answer behind this page
-       // is cached for up to AccessCache.DefaultTtl.
+       // is cached for up to AccessCache.DefaultStaleAfter.
        s"""<div class="empty auth">
           |  <div class="shake" aria-hidden="true">
           |    <img class="face" src="/dashboard/images/avatar.png" alt="">

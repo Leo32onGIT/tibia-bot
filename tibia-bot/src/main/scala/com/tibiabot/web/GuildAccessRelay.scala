@@ -27,11 +27,19 @@ import spray.json._
  *  Redis — and it is the safer half of the pair anyway: a write performs
  *  something, where this only ever describes what somebody may already do.
  */
-final case class AccessQuery(id: String, guildId: String, userId: String) {
+final case class AccessQuery(id: String, guildId: String, userId: String,
+                            /** Where to send the answer: the asking bot's id,
+                             *  which names its reply channel. Empty from a bot
+                             *  old enough to be waiting on a reply *key*
+                             *  instead — see [[AccessQuery.replyKey]] — which
+                             *  is how the two generations tell each other
+                             *  apart during a rolling deploy. */
+                            replyTo: String = "") {
   def toJson: String = JsObject(
     "id" -> JsString(id),
     "guildId" -> JsString(guildId),
-    "userId" -> JsString(userId)
+    "userId" -> JsString(userId),
+    "replyTo" -> JsString(replyTo)
   ).compactPrint
 }
 
@@ -42,16 +50,25 @@ final case class AccessQuery(id: String, guildId: String, userId: String) {
  *  runs that guild was listening. The first excludes the guild from the picker
  *  for good; the second is worth retrying, and the caching reflects that.
  */
-final case class AccessAnswer(access: Option[GuildAccess]) {
+final case class AccessAnswer(access: Option[GuildAccess],
+                             /** Which question this answers. Carried in the
+                              *  body because a reply *channel* is shared by
+                              *  every question one bot has out at once, where a
+                              *  reply key named exactly one. Empty on the key
+                              *  path, where the key is the identifier. */
+                             id: String = "") {
+  private def withId(fields: Map[String, JsValue]): JsObject =
+    JsObject(if (id.isEmpty) fields else fields + ("id" -> JsString(id)))
+
   def toJson: String = access match {
-    case None => JsObject("access" -> JsNull).compactPrint
-    case Some(a) => JsObject("access" -> JsObject(
+    case None => withId(Map("access" -> JsNull)).compactPrint
+    case Some(a) => withId(Map("access" -> JsObject(
       "guildId" -> JsString(a.guildId),
       "guildName" -> JsString(a.guildName),
       "tier" -> JsString(a.tier.name),
       "worlds" -> JsArray(a.worlds.map(JsString(_)).toVector),
       "iconUrl" -> a.iconUrl.map(JsString(_)).getOrElse(JsNull)
-    )).compactPrint
+    ))).compactPrint
   }
 }
 
@@ -68,14 +85,15 @@ object AccessQuery {
         id <- str("id")
         guildId <- str("guildId")
         userId <- str("userId")
-      } yield AccessQuery(id, guildId, userId)
+      } yield AccessQuery(id, guildId, userId, str("replyTo").getOrElse(""))
     }.toOption.flatten
 
   def answerFromJson(raw: String): Option[AccessAnswer] =
     scala.util.Try {
       val fields = raw.parseJson.asJsObject.fields
+      val answerId = fields.get("id").collect { case JsString(v) => v }.getOrElse("")
       fields.get("access") match {
-        case Some(JsNull) | None => Some(AccessAnswer(None))
+        case Some(JsNull) | None => Some(AccessAnswer(None, answerId))
         case Some(obj: JsObject) =>
           val f = obj.fields
           def str(key: String) = f.get(key).collect { case JsString(v) => v }
@@ -88,7 +106,7 @@ object AccessQuery {
             f.get("worlds").collect { case JsArray(v) => v.collect { case JsString(w) => w }.toList }
               .getOrElse(Nil),
             str("iconUrl")
-          )))
+          )), answerId)
         case _ => None
       }
     }.toOption.flatten
@@ -105,6 +123,23 @@ object AccessQuery {
   }
 
   def replyKey(id: String): String = s"tibia:access-a:$id"
+
+  /** Where a bot listens for questions about the guilds it runs.
+   *
+   *  Addressed to one bot rather than broadcast, which is the whole saving: the
+   *  asker already knows who runs the guild — the roster told it — so there is
+   *  nothing to search for and nothing for uninvolved bots to wake up over. The
+   *  key-based path had every bot in the fleet running `KEYS` four times a
+   *  second across the entire Redis keyspace to find questions that were
+   *  usually not theirs.
+   */
+  def questionChannel(botId: String): String = s"tibia:access-ask:$botId"
+
+  /** Where a bot listens for the answers to its own questions. One channel per
+   *  asker rather than one per question, so a subscription is set up once at
+   *  startup instead of being taken out and torn down around every lookup —
+   *  which is why an answer has to carry its [[AccessAnswer.id]]. */
+  def replyChannel(botId: String): String = s"tibia:access-reply:$botId"
 }
 
 /** The guilds a bot runs the respawns for, published so the others know who to
@@ -119,9 +154,24 @@ object AccessQuery {
  *  serves whichever of them happens to be showing the dashboard, and a fleet
  *  with no secondaries simply reads one roster it can already account for.
  */
-final case class GuildRoster(botId: String, guilds: List[RosterGuild]) {
+final case class GuildRoster(botId: String, guilds: List[RosterGuild],
+                            /** Whether this bot is actually listening for
+                             *  questions on its [[AccessQuery.questionChannel]]
+                             *  — set only once the subscription succeeded, so
+                             *  it says what is true rather than what this
+                             *  version is capable of.
+                             *
+                             *  This is what lets the two relays coexist while a
+                             *  fleet is part-way through a deploy: an asker
+                             *  publishes only to a bot that has said it is
+                             *  listening, and falls back to the old key for one
+                             *  that has not. Once nothing in the fleet
+                             *  advertises `false`, no key is ever written and
+                             *  the sweep that reads them can go. */
+                            pubSub: Boolean = false) {
   def toJson: String = JsObject(
     "botId" -> JsString(botId),
+    "pubSub" -> JsBoolean(pubSub),
     "guilds" -> JsArray(guilds.map(g => JsObject(
       "id" -> JsString(g.id),
       "name" -> JsString(g.name),
@@ -138,6 +188,7 @@ object GuildRoster {
       val fields = raw.parseJson.asJsObject.fields
       for {
         botId <- fields.get("botId").collect { case JsString(v) => v }.filter(_.nonEmpty)
+        pubSub = fields.get("pubSub").collect { case JsBoolean(v) => v }.getOrElse(false)
       } yield GuildRoster(botId,
         fields.get("guilds").collect { case JsArray(v) => v }.getOrElse(Vector.empty).flatMap {
           case obj: JsObject =>
@@ -146,7 +197,7 @@ object GuildRoster {
             str("id").filter(_.nonEmpty).map(id =>
               RosterGuild(id, str("name").getOrElse(""), str("iconUrl").filter(_.nonEmpty)))
           case _ => None
-        }.toList)
+        }.toList, pubSub)
     }.toOption.flatten
 
   def key(botId: String): String = s"tibia:respawn-roster:$botId"

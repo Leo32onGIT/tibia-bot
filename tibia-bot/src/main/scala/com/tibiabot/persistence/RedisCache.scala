@@ -43,6 +43,40 @@ trait RedisCache {
    *  secondary-status entries), so a plain KEYS is fine; not meant for
    *  scanning the whole cache. */
   def keysMatching(pattern: String): Future[List[String]]
+
+  /** Fan `message` out to whoever is listening on `channel` at this instant,
+   *  answering how many that was.
+   *
+   *  Nothing is stored: a message published to nobody is simply gone. That
+   *  suits a question with a deadline — see [[com.tibiabot.web.AccessQuery]] —
+   *  far better than a key does, because an answer that arrives after the asker
+   *  has given up was worthless anyway, and it costs no `KEYS` sweep to notice.
+   *
+   *  The count is worth having rather than discarding. A publish that reached
+   *  nobody is a definite "the bot that runs this guild is not listening", known
+   *  in one round trip, where waiting out the timeout to learn the same thing
+   *  costs the visitor the whole deadline.
+   *
+   *  Defaults to reaching nobody, so an implementation without pub/sub degrades
+   *  to the key-based path rather than silently dropping questions. */
+  def publish(channel: String, message: String): Future[Long] = Future.successful(0L)
+
+  /** Hand every message published to `channel` to `onMessage`, for as long as
+   *  this process lives.
+   *
+   *  Delivery is best effort and unordered with respect to everything else:
+   *  a subscriber that is briefly disconnected misses whatever was published
+   *  meanwhile, which for a question with a deadline is the same outcome as
+   *  being too slow to answer it.
+   *
+   *  Fails the returned Future when the subscription could not be set up, which
+   *  the caller must treat as "cannot answer this way" rather than ignore —
+   *  a bot that believes it is listening and is not would have every other bot
+   *  waiting out a deadline on it.
+   *
+   *  Defaults to never delivering anything. */
+  def subscribe(channel: String)(onMessage: String => Unit): Future[Unit] = Future.unit
+
   def close(): Unit
 }
 
@@ -57,5 +91,10 @@ object NoopRedisCache extends RedisCache {
     Future.successful(false)
   def delete(key: String): Future[Unit] = Future.unit
   def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
+  /** Never reaches anybody, and never hears anything: with no Redis there is no
+   *  fleet to talk to. Inherited from the trait, and spelled out here because
+   *  the relay reads a zero here as "nobody is listening", which is true. */
+  override def publish(channel: String, message: String): Future[Long] = Future.successful(0L)
+  override def subscribe(channel: String)(onMessage: String => Unit): Future[Unit] = Future.unit
   def close(): Unit = ()
 }

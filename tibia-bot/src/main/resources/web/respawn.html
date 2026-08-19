@@ -65,6 +65,12 @@
     margin-top: 14px; padding: 9px 12px; border-radius: 7px;
     background: rgba(224, 169, 62, 0.09); border: 1px solid rgba(224, 169, 62, 0.25);
     color: var(--warn); opacity: 1;
+    /* Out from under the 62ch prose cap above. That measure is there to keep a
+       paragraph readable, but this is a banner rather than prose: capped, it
+       stopped half way across the panel on a desktop while filling the width on
+       a phone, so the one element on the page that is meant to be noticed was
+       also the one that looked unfinished. */
+    max-width: none;
   }
   p.hint.warn i { flex-shrink: 0; font-size: 14px; margin-top: 1px; }
   p.hint.warn strong { color: var(--warn); }

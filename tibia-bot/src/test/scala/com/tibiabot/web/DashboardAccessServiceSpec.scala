@@ -33,8 +33,15 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     var members: Map[(String, String), MemberAccess]
   ) extends DiscordGateway {
     /** Which channel-visibility questions were actually asked, so a test can
-     *  show the REST call was skipped rather than merely ignored. */
+     *  show the REST call was skipped rather than merely ignored.
+     *
+     *  Appended under a lock because a visitor's guilds are now resolved at the
+     *  same time as each other, so this is written from several threads at
+     *  once. For the same reason the *order* here means nothing beyond one
+     *  guild: assert on what was asked, not on the sequence. */
     var lookups: List[String] = Nil
+    private def noteLookup(guildId: String): Unit =
+      synchronized { lookups = lookups :+ guildId }
 
     /** Set to give every stub guild an icon, for the one test that cares. */
     var iconUrl: String = null
@@ -48,14 +55,14 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     var unreachable: Set[String] = Set.empty
 
     def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
-      lookups = lookups :+ guildId
+      noteLookup(guildId)
       members.get((guildId, userId))
     }
 
     override def memberLookup(guildId: String, userId: String,
                               channelIds: List[String]): MemberLookup =
       if (unreachable.contains(guildId)) {
-        lookups = lookups :+ guildId
+        noteLookup(guildId)
         MemberLookup.Unreachable("rate limited")
       } else super.memberLookup(guildId, userId, channelIds)
     def selfUserId: String = "self"
@@ -87,6 +94,100 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       worldsOf = guildId => worlds.getOrElse(guildId, Nil),
       moderatorRoleOf = guildId => moderatorRoles.getOrElse(guildId, "0")
     ))
+  }
+
+  /** A gateway whose every lookup takes real time, so serial and concurrent
+   *  resolution can be told apart by the clock. */
+  private class SlowGateway(botGuilds: List[(String, String)], perLookup: Long)
+      extends FakeGateway(botGuilds, botGuilds.map { case (id, _) => (id, "u1") -> member() }.toMap) {
+    override def memberAccess(guildId: String, userId: String,
+                              channelIds: List[String]): Option[MemberAccess] = {
+      Thread.sleep(perLookup)
+      super.memberAccess(guildId, userId, channelIds)
+    }
+  }
+
+  private def slowService(guilds: List[(String, String)], perLookup: Long,
+                          on: scala.concurrent.ExecutionContext) = {
+    val gateway = new SlowGateway(guilds, perLookup)
+    (gateway, new DashboardAccessService(
+      gateway,
+      respawnConfigured = _ => true,
+      worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+      moderatorRoleOf = _ => "0",
+      lookupOn = on))
+  }
+
+  "localAccessFor" should {
+
+    // Each guild is a blocking round trip to Discord and no guild's answer
+    // bears on any other's, so somebody in three of them should wait for the
+    // slowest rather than for the sum. This is what decides how many visitors
+    // one small refresh pool can keep up with.
+    "ask about a visitor's guilds at the same time, not one after another" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        val (gateway, svc) = slowService(
+          List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"), perLookup = 200, on = pool)
+        val started = System.nanoTime()
+        val granted = svc.accessFor("u1", Set("g1", "g2", "g3"))
+        val took = (System.nanoTime() - started) / 1000000L
+
+        granted.map(_.guildId).sorted shouldBe List("g1", "g2", "g3")
+        gateway.lookups should contain theSameElementsAs List("g1", "g2", "g3")
+        // Serially this is 600ms and cannot be less; concurrently it is one
+        // lookup plus overhead. Halfway between is a wide enough gate to be
+        // stable on a loaded machine and still fail if the fan-out is lost.
+        took should be < 450L
+      } finally pool.shutdown()
+    }
+
+    // Order used to come from folding over the guilds in turn, and several
+    // things downstream read the first element — so it has to survive the
+    // change from a fold to a fan-out.
+    "keep the visitor's guilds in the order the gateway lists them" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        // Slowest first, so anything ordering by completion would invert it.
+        val (_, svc) = slowService(List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"),
+                                   perLookup = 50, on = pool)
+        svc.accessFor("u1", Set("g1", "g2", "g3")).map(_.guildId) shouldBe List("g1", "g2", "g3")
+      } finally pool.shutdown()
+    }
+
+    // Much the commonest case, and it should cost nothing extra: handing a
+    // single lookup to another pool and waiting for it back is a thread hop
+    // that buys nothing. Proved with a pool that refuses everything — if the
+    // one-guild path touched it, this could not resolve at all.
+    "resolve a single guild without going near the lookup pool" in {
+      val refusing = new scala.concurrent.ExecutionContext {
+        def execute(runnable: Runnable): Unit = throw new java.util.concurrent.RejectedExecutionException("nope")
+        def reportFailure(cause: Throwable): Unit = ()
+      }
+      val (_, svc) = slowService(List("g1" -> "One"), perLookup = 0, on = refusing)
+      svc.accessFor("u1", Set("g1")).map(_.guildId) shouldBe List("g1")
+    }
+
+    // A wedged Discord call has no timeout of its own, so before the backstop
+    // it held the request until akka gave up. Reported as unreachable rather
+    // than as a visitor with fewer servers than they have.
+    "report guilds as unanswered rather than hanging on a lookup that never returns" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        val gateway = new SlowGateway(List("g1" -> "One", "g2" -> "Two"), perLookup = 5000)
+        val svc = new DashboardAccessService(
+          gateway, respawnConfigured = _ => true,
+          worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+          moderatorRoleOf = _ => "0",
+          lookupOn = pool, lookupWait = java.time.Duration.ofMillis(300))
+        val report = svc.accessReportFor("u1", Set("g1", "g2"))
+        report.granted shouldBe Nil
+        report.unreachable.map(_.guildId) should contain theSameElementsAs List("g1", "g2")
+      } finally pool.shutdown()
+    }
   }
 
   "accessIn" should {
@@ -326,8 +427,10 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
       svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
       // One pass over the candidates, not two — this is what keeps the ten
-      // second board poll from costing a Discord call each time.
-      gateway.lookups shouldBe List("g1", "g2")
+      // second board poll from costing a Discord call each time. The two are
+      // asked concurrently, so which arrives first is not a fact about the
+      // code: what matters is that each was asked exactly once.
+      gateway.lookups should contain theSameElementsAs List("g1", "g2")
     }
 
     // The bug this exists for: one page load that lost its race with the bot

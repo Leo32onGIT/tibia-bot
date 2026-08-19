@@ -61,6 +61,42 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
       case NonFatal(e) => logger.warn(s"redis KEYS failed for pattern '$pattern': ${e.getMessage}"); Nil
     }
 
+  /** Pub/sub needs a connection of its own: once a Redis connection is
+   *  subscribed it will not carry ordinary commands, so sharing the multiplexed
+   *  one above would take every GET and SETEX in the process down with the
+   *  first subscription. Opened lazily, so a deployment that never subscribes
+   *  never pays for it. */
+  private lazy val pubSub: io.lettuce.core.pubsub.StatefulRedisPubSubConnection[String, String] =
+    client.connectPubSub()
+
+  override def publish(channel: String, message: String): Future[Long] =
+    commands.publish(channel, message).asScala.map(_.longValue()).recover {
+      case NonFatal(e) =>
+        // Zero is the honest answer here as well as the safe one: we do not
+        // know that anybody received this, and the caller treats "nobody" as a
+        // reason to stop waiting rather than as an error.
+        logger.warn(s"redis PUBLISH failed for '$channel': ${e.getMessage}"); 0L
+    }
+
+  override def subscribe(channel: String)(onMessage: String => Unit): Future[Unit] = {
+    pubSub.addListener(new io.lettuce.core.pubsub.RedisPubSubAdapter[String, String] {
+      override def message(onChannel: String, body: String): Unit =
+        // One connection carries every subscription this process makes, so a
+        // listener hears all of them and has to pick out its own.
+        if (onChannel == channel)
+          // A listener that throws would be swallowed by Lettuce and take the
+          // rest of the delivery with it, so nothing is allowed out of here.
+          try onMessage(body) catch {
+            case NonFatal(e) => logger.warn(s"Dropped a message on '$channel': ${e.getMessage}")
+          }
+    })
+    // Deliberately not recovered to a success: a caller that believes it is
+    // listening and is not would have the whole fleet waiting out deadlines on
+    // it. Lettuce re-subscribes its channels itself after a reconnect, so this
+    // is set up once and stays up.
+    pubSub.async().subscribe(channel).asScala.map(_ => ())
+  }
+
   def close(): Unit = {
     connection.close()
     client.shutdown()
