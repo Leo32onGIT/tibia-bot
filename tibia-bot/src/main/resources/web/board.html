@@ -716,9 +716,11 @@
   .mod-length {
     color: var(--purple); font-family: var(--mono); font-size: 11px; white-space: nowrap;
   }
-  /* How to move it, said once beside the buttons. Muted, because somebody who
-     has already grabbed the block has no more use for it. */
-  .mod-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; min-width: 0; }
+  /* How to move it, leading the row. Muted, because somebody who has already
+     grabbed the block has no more use for it — and the first to give up width
+     when the row runs short, since the length and the verbs beside it are what
+     anybody is actually reaching for. */
+  .mod-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; min-width: 0; flex-shrink: 1; }
   /* The person picker takes what the verbs were using. */
   .mod-grow { flex: 1 1 12rem; min-width: 0; }
 
@@ -3226,6 +3228,12 @@ function moderatorTools(spawn) {
 
   // --- re-timing: the row becomes the length under the pointer
   if (slotPanel.mode === 'length') {
+    // What to do leads, and what it produces — the length, then the two verbs —
+    // is anchored at the far end, so the row is read in the order the gesture
+    // happens in rather than ending on the instruction for it.
+    row.appendChild(el('span', 'mod-hint',
+      `Drag the foot of the ${onClaim ? 'claim' : 'booking'} to extend or reduce its duration.`));
+    row.appendChild(el('div', 'mod-gap'));
     const readout = el('span', 'mod-length', esc(lengthReadout(slot.start, slotPanel.length)));
     readout.id = 'mod-length';
     row.appendChild(readout);
@@ -3241,9 +3249,6 @@ function moderatorTools(spawn) {
     }
     row.appendChild(save);
     row.appendChild(button('Cancel', 'btn ghost', () => go('idle')));
-    row.appendChild(el('span', 'mod-hint', onClaim
-      ? 'Drag the foot of the hunt on the grid. It cannot end before now.'
-      : 'Drag the foot of the block on the grid.'));
     return box;
   }
 
