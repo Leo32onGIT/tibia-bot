@@ -141,6 +141,20 @@ trait RespawnActionPort {
   def reassignSlot(guildId: String, actorId: String, code: String,
                    startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult]
 
+  /** Change how long one window on the calendar runs.
+   *
+   *  Named by the instant it starts on for the same reason [[dropSlot]] is: the
+   *  grid draws days a rule has not written down yet, and those have no id to
+   *  send. The window it names may equally be the hunt in progress, which is
+   *  what lets one button on the panel serve whatever is selected.
+   *
+   *  A moderator override throughout — no stamina is charged for a longer
+   *  window and the guild's maximum claim length does not apply. See
+   *  `RespawnService.editSlot` for what it will still refuse.
+   */
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult]
+
   /** Take a spawn the guild added back out of its catalogue.
    *
    *  Only ever one it added itself — a code from the bundled list is refused,

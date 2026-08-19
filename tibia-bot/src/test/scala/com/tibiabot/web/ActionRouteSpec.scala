@@ -117,6 +117,10 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
                      startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"move:$code:${startsAt.toInstant}:$toUserId"; result
     }
+    def editSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"edit:$code:${startsAt.toInstant}:$minutes"; result
+    }
   }
 
   private def auth = new DiscordAuth(
@@ -387,7 +391,9 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}"""),
       ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
       ("/dashboard/g/g1/reassign-slot",
-        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":120}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path: ")(status shouldBe StatusCodes.Forbidden)
@@ -423,10 +429,14 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Post("/dashboard/g/g1/reassign-slot",
       body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/edit-slot",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":120}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
       "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "spawnmax:415:60", "extend:415:30",
-      "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9")
+      "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9",
+      "edit:415:2026-08-13T11:00:00Z:120")
   }
 
   test("an empty max claim clears the spawn's own ceiling rather than failing") {
@@ -482,7 +492,15 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"tuesday evening"}"""),
       ("/dashboard/g/g1/drop-slot", """{"startsAt":"2026-08-13T11:00:00Z"}"""),
       ("/dashboard/g/g1/reassign-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
-      ("/dashboard/g/g1/reassign-slot", """{"code":"415","toUserId":"u9"}""")
+      ("/dashboard/g/g1/reassign-slot", """{"code":"415","toUserId":"u9"}"""),
+      // A length is as load-bearing as the day: an edit that lost it would
+      // otherwise be a slot silently set to nothing.
+      ("/dashboard/g/g1/edit-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":0}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":"soon"}"""),
+      ("/dashboard/g/g1/edit-slot", """{"code":"415","minutes":120}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path $payload: ")(status shouldBe StatusCodes.BadRequest)

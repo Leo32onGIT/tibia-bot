@@ -707,6 +707,14 @@
   /* Inline rather than on a line of its own — it is a caveat to the button
      beside it, not an announcement. */
   .mod-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.4; min-width: 0; }
+  /* The length being dragged, in the same mono the strip names its target in:
+     it is a reading off the grid, not a sentence. */
+  .mod-length {
+    color: var(--purple); font-family: var(--mono); font-size: 11px; white-space: nowrap;
+  }
+  /* How to move it, said once beside the buttons. Muted, because somebody who
+     has already grabbed the block has no more use for it. */
+  .mod-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; min-width: 0; }
   /* The person picker takes what the verbs were using. */
   .mod-grow { flex: 1 1 12rem; min-width: 0; }
 
@@ -834,6 +842,14 @@
   .stretch::after {
     content: ''; position: absolute; left: 50%; bottom: 4px; width: 18px; height: 2px;
     transform: translateX(-50%); border-radius: 1px; background: var(--purple); opacity: 0.85;
+  }
+  /* The block a moderator is re-timing. Lifted over its neighbours and given
+     the dashed purple every other moderator control wears, so the length under
+     the pointer reads as a proposal rather than as the booking itself — which
+     it is not until Save. */
+  .wk-block.b-editing {
+    z-index: 5; border-style: dashed; border-color: var(--purple);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45); touch-action: none;
   }
   /* A block clipped by local midnight keeps a flat edge, so it reads as
      continuing rather than as a booking that really stops there. */
@@ -1023,6 +1039,12 @@ const DRAG_SNAP = 15;
 // eighteen minutes is still eighteen minutes of hunting and rounding it away
 // would refuse somebody a hunt to keep the numbers tidy.
 const MIN_CLAIM = 5;
+// The longest a moderator may drag a window out to — RespawnService's
+// MaxModeratorSlotMinutes. The guild's own maximum deliberately does not apply
+// to a moderator's ruler (see the panel's Edit claim), so this is the only
+// ceiling the drag has, and it is a guard against a number that could not be a
+// hunt rather than a rule about what anybody may ask for.
+const MOD_MAX = 12 * 60;
 // How many rows "Up next" shows before it owns up to the rest. Matches
 // RespawnDashboardRoute.UpNextRows and RespawnEmbeds.RowsPerField, so the panel
 // and the Discord card are the same list rather than two answers to one
@@ -2636,11 +2658,16 @@ function calendar() {
 
     // Blocks, clipped to this local day. A window crossing local midnight is
     // drawn as two clipped pieces rather than dropped or overflowing.
-    slots.filter(b => b.start.getTime() < colEnd && colStart < b.end.getTime()).forEach(b => {
-      const from = Math.max(b.start.getTime(), colStart), to = Math.min(b.end.getTime(), colEnd);
+    // `ends` rather than `b.end` throughout, so a block being re-timed is drawn
+    // — and clipped, and titled — at the length under the pointer rather than at
+    // the one still in the database.
+    slots.filter(b => b.start.getTime() < colEnd && colStart < shownEnd(b).getTime()).forEach(b => {
+      const ends = shownEnd(b);
+      const from = Math.max(b.start.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
+        + (resizing(b) ? ' b-editing' : '')
         + (b.start.getTime() < colStart ? ' clip-top' : '')
-        + (b.end.getTime() > colEnd ? ' clip-bottom' : ''));
+        + (ends.getTime() > colEnd ? ' clip-bottom' : ''));
       // The third line only goes on a block with room for a whole one. A block is
       // as tall as its hunt is long, and half a line of clipped text under the
       // time would read as a rendering fault rather than as information.
@@ -2649,11 +2676,11 @@ function calendar() {
       block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
       block.style.height = height + 'px';
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
-        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(b.end)}</span>`
+        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
         + (account && height >= 40 ? `<span class="acct">${esc(account)}</span>` : '');
       // The tooltip carries it whatever the block's height, so a half-hour
       // booking is not the one block you cannot find out who owns.
-      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(b.end)} your time`
+      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(ends)} your time`
         + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '');
       block.addEventListener('click', e => {
         e.stopPropagation();
@@ -2661,6 +2688,9 @@ function calendar() {
         view.answer = null;
         renderWindow();
       });
+      // Only while Edit claim is armed, and only on the piece carrying the end:
+      // the half above a midnight split is not where the window finishes.
+      if (resizing(b) && ends.getTime() <= colEnd) block.appendChild(lengthHandle(block, b));
       col.appendChild(block);
     });
 
@@ -3052,8 +3082,13 @@ function readout() {
  *  `pick` is the slot all of this is about, so opening the panel on one evening
  *  and clicking another closes it rather than quietly re-aiming a Delete at
  *  somebody who was never on screen when it was opened.
+ *
+ *  `length` is the number Edit claim is dragging, in minutes, and null when it
+ *  is not being dragged. It has to live out here for the same reason `query`
+ *  does — the grid is rebuilt from scratch every poll, so a length held only in
+ *  the block's own height would be thrown away every ten seconds, mid-drag.
  */
-let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
+let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false, length: null };
 
 /** Everything a moderator can do here, in one panel in the foot.
  *
@@ -3096,7 +3131,7 @@ function moderatorTools(spawn) {
   // panel, and what was left here was a strip with an empty row under it.
   if (!slot) {
     if (slotPanel.pick !== null) {
-      slotPanel = { open: slotPanel.open, mode: 'idle', pick: null, query: '', typing: false };
+      slotPanel = { open: slotPanel.open, mode: 'idle', pick: null, query: '', typing: false, length: null };
     }
     return null;
   }
@@ -3110,7 +3145,7 @@ function moderatorTools(spawn) {
   // alone, since a moderator working through several evenings should not have to
   // reopen it for each, and the strip always names what it is aimed at.
   if (slotPanel.pick !== pickKey) {
-    slotPanel = { open: slotPanel.open, mode: 'idle', pick: pickKey, query: '', typing: false };
+    slotPanel = { open: slotPanel.open, mode: 'idle', pick: pickKey, query: '', typing: false, length: null };
   }
 
   const onClaim = slot.state === 'claimed';
@@ -3145,6 +3180,29 @@ function moderatorTools(spawn) {
     row.appendChild(el('span', 'mod-warn', slot.repeats
       ? 'Their booking repeats — only this evening goes.'
       : 'This booking is only on this evening.'));
+    return box;
+  }
+
+  // --- re-timing: the row becomes the length under the pointer
+  if (slotPanel.mode === 'length') {
+    const readout = el('span', 'mod-length', esc(lengthReadout(slot.start, slotPanel.length)));
+    readout.id = 'mod-length';
+    row.appendChild(readout);
+    const save = button('Save', 'btn mod-btn', () =>
+      post(`/dashboard/g/${GUILD_ID}/edit-slot`,
+        { code: spawn.code, startsAt: slot.startsAt, minutes: slotPanel.length }));
+    // Nothing to save until the block has actually moved. Pressing it on an
+    // untouched block would write the length it already has, which looks like
+    // the button doing nothing — and is indistinguishable from it failing.
+    if (slotPanel.length === slotMinutes(slot)) {
+      save.disabled = true;
+      save.title = 'Drag the foot of the block first';
+    }
+    row.appendChild(save);
+    row.appendChild(button('Cancel', 'btn ghost', () => go('idle')));
+    row.appendChild(el('span', 'mod-hint', onClaim
+      ? 'Drag the foot of the hunt on the grid. It cannot end before now.'
+      : 'Drag the foot of the block on the grid.'));
     return box;
   }
 
@@ -3186,12 +3244,132 @@ function moderatorTools(spawn) {
       post(`/dashboard/g/${GUILD_ID}/extend-holder`, { code: spawn.code, minutes: 30 }));
     extend.title = 'Add 30 minutes to this hunt — costs them no stamina';
     row.appendChild(extend);
+    row.appendChild(editClaimButton(slot, go));
   } else {
     row.appendChild(button('Delete booking', 'btn danger', () => go('confirm')));
     row.appendChild(button('Give to…', 'btn mod-btn', () => go('give')));
+    row.appendChild(editClaimButton(slot, go));
   }
 
   return box;
+}
+
+/** Edit claim: hands the block on the grid a foot to drag, and the row a
+ *  readout of what is being dragged.
+ *
+ *  A mode rather than a drag that is always live, because the alternative is a
+ *  handle sitting on every block a moderator selects — and a stray pointer on
+ *  the way to Delete would then be quietly re-timing somebody's evening. Two
+ *  presses to change a length is the right price for never changing one by
+ *  accident.
+ *
+ *  The length starts where the block already is, so opening the mode changes
+ *  nothing and Save has nothing to write until the block has moved.
+ */
+function editClaimButton(slot, go) {
+  const edit = button('Edit claim', 'btn mod-btn', () => {
+    slotPanel.length = slotMinutes(slot);
+    go('length');
+  });
+  edit.title = slot.state === 'claimed'
+    ? 'Change how long this hunt runs — costs them no stamina'
+    : 'Change how long this booking runs';
+  return edit;
+}
+
+/** How long a block runs now, in whole minutes. Off its two instants rather
+ *  than off a duration field, because a predicted day has no row to carry one
+ *  and the grid has already worked both ends out to draw it. */
+const slotMinutes = slot => Math.round((slot.end.getTime() - slot.start.getTime()) / 60000);
+
+/** The window a length would make, as the row says it: the clock at both ends,
+ *  then the length itself. Both, because a moderator dragging a foot is
+ *  answering "until when" and "for how long" at the same time and which of the
+ *  two they are thinking in varies. */
+const lengthReadout = (start, minutes) =>
+  `${fmtLocal(start)}–${fmtLocal(new Date(start.getTime() + minutes * 60000))} · ${fmtDur(minutes)}`;
+
+/** Whether the panel is re-timing this block right now.
+ *
+ *  Folding the panel away counts as not: the Save the drag is feeding goes with
+ *  it, and a handle still on the grid under a shut strip would be a length
+ *  nobody could commit. */
+const resizing = slot =>
+  slotPanel.open && slotPanel.mode === 'length' && slotPanel.length != null &&
+  slotPanel.pick === slot.start.getTime();
+
+/** Where a block ends on screen — the length being dragged while it is being
+ *  dragged, and the booking's own end the rest of the time. Everything that
+ *  draws a block goes through this, so a window dragged past local midnight is
+ *  clipped into the next column exactly as a booked one is. */
+const shownEnd = slot => resizing(slot) ? new Date(slot.start.getTime() + slotPanel.length * 60000) : slot.end;
+
+/** The shortest a block may be dragged to.
+ *
+ *  A hunt in progress cannot be dragged above the now line: those minutes are
+ *  spent whatever anybody now says, and the server refuses it. Dragging one
+ *  down to exactly now ends it at the next sweep, which is as near to stopping
+ *  it as this tool goes — Remove claim is what ends a hunt outright, with the
+ *  queue behind it served properly. */
+function lengthFloor(slot) {
+  if (slot.state !== 'claimed') return SLOT;
+  const elapsed = (Date.now() - slot.start.getTime()) / 60000;
+  return Math.max(SLOT, Math.ceil(elapsed / SLOT) * SLOT);
+}
+
+/** Drag the foot of a booked or hunted block to re-time it.
+ *
+ *  A near twin of [[stretchHandle]], and deliberately not the same function:
+ *  that one owns `view.duration`, which is the length of a booking nobody has
+ *  made yet, and this one owns a proposal about a block that already exists.
+ *  Folding them together would mean a handle that has to ask which of the two
+ *  it is on before every frame.
+ *
+ *  Snapped to half hours, resized directly rather than through a re-render, and
+ *  settled with one render at the end — all three for the reasons the other one
+ *  gives. The row's readout follows the pointer too, since it is the number
+ *  Save will actually write.
+ */
+function lengthHandle(block, slot) {
+  const handle = el('div', 'stretch');
+  handle.title = 'Drag to change how long this runs';
+  const floor = lengthFloor(slot);
+  let preview = slotPanel.length;
+
+  handle.addEventListener('pointerdown', down => {
+    if (down.button > 0) return;
+    down.preventDefault();
+    // The block underneath answers a click by selecting itself, which is where
+    // it already is — but a press that reached it would also cancel the drag.
+    down.stopPropagation();
+    try { handle.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+    const fromY = down.clientY;
+    const fromLength = slotPanel.length;
+    const label = block.querySelector('.tm');
+    const readout = document.getElementById('mod-length');
+
+    const move = ev => {
+      const minutes = fromLength + ((ev.clientY - fromY) / ROW_H) * 60;
+      const next = Math.max(floor, Math.min(MOD_MAX, Math.round(minutes / SLOT) * SLOT));
+      if (next === preview) return;
+      preview = next;
+      block.style.height = Math.max(13, (next / 60) * ROW_H - 2) + 'px';
+      if (label) label.textContent = `${fmtLocal(slot.start)}–${fmtLocal(new Date(slot.start.getTime() + next * 60000))}`;
+      if (readout) readout.textContent = lengthReadout(slot.start, next);
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      if (preview === slotPanel.length) return;
+      slotPanel.length = preview;
+      renderWindow();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  return handle;
 }
 
 /** What the shut strip names — which is always the selection, since without one

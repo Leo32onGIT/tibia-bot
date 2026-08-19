@@ -328,6 +328,32 @@ final class JdaRespawnActions(
       }
     }
 
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, s"No spawn matches '$code'.")
+        case Some(respawn) =>
+          respawnService.editSlot(guild, respawn, startsAt, minutes) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(edit) =>
+              logger.info(s"Dashboard: '$actorId' set ${edit.owner}'s ${respawn.code} " +
+                s"${if (edit.live) "hunt" else "slot"} at ${startsAt.toInstant} to ${edit.minutes}m " +
+                s"in guild '$guildId'")
+              // Whose evening it now reaches into is said on the way past
+              // rather than left to be discovered: the write has happened, and
+              // this is the one moment somebody is looking at the answer.
+              val overrun = edit.cutInto
+                .map(who => s" It now runs into ${who}'s slot, which will be cut short.")
+                .getOrElse("")
+              val what = if (edit.live) s"${edit.owner}'s hunt on ${respawn.displayName}"
+                         else s"${edit.owner}'s slot on ${respawn.displayName}"
+              ActionResult(ok = true,
+                s"$what now runs for ${com.tibiabot.presentation.RespawnEmbeds.humanDuration(edit.minutes)}.$overrun")
+          }
+      }
+    }
+
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.settings(guildId) match {

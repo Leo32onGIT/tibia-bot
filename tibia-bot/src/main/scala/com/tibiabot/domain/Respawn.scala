@@ -266,6 +266,12 @@ object RespawnClaim {
     /** A moderator put this day in somebody else's name. Recorded against the
      *  day the previous owner lost, not against the one they were given. */
     val SlotMoved: String = "slot-moved"
+    /** A moderator changed how long this day runs. Recorded only where the day
+     *  had to be rewritten to change it — an occurrence a rule had not written
+     *  down yet is settled and replaced at the new length, exactly as
+     *  [[SlotMoved]] settles one that changes hands. A booking that already had
+     *  a row is edited in place and leaves no trail here. */
+    val SlotResized: String = "slot-resized"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -288,6 +294,7 @@ object RespawnClaim {
       case Unconfirmed => "never confirmed, given up"
       case SlotRemoved => "taken off the calendar by a moderator"
       case SlotMoved   => "moved to somebody else by a moderator"
+      case SlotResized => "lengthened or shortened by a moderator"
       case other       => other
     }
   }

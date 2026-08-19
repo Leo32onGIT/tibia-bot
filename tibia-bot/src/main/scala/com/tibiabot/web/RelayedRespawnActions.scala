@@ -130,6 +130,11 @@ final class RelayedRespawnActions(
     send(guildId, actorId, RespawnCommand.ReassignSlot,
       Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "toUserId" -> toUserId))
 
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.EditSlot,
+      Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "minutes" -> minutes.toString))
+
   /** Reads never relay — every bot shares the guild's database, so this
    *  implementation is only ever used for writes and these are unreachable. */
   def bookings(guildId: String, userId: String): List[BookingView] = Nil

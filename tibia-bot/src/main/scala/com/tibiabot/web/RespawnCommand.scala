@@ -67,13 +67,14 @@ object RespawnCommand {
   val ExtendHolder = "extend-holder"
   val DropSlot = "drop-slot"
   val ReassignSlot = "reassign-slot"
+  val EditSlot = "edit-slot"
 
   /** Every action a relayed command may name. An unrecognised one is answered
    *  rather than executed, so a newer build asking for something this one has
    *  never heard of fails visibly instead of silently doing nothing. */
   val Actions: Set[String] =
     Set(Claim, Release, Extend, Book, CancelBooking, ForceLeave, Reassign, GrantStamina,
-        AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder, DropSlot, ReassignSlot)
+        AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder, DropSlot, ReassignSlot, EditSlot)
 
   /** The actions that act on somebody else, and so need the moderator tier.
    *
@@ -82,7 +83,7 @@ object RespawnCommand {
    *  requirement would be a command that could understate it. */
   private val ModeratorActions: Set[String] =
     Set(ForceLeave, Reassign, GrantStamina, AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder,
-        DropSlot, ReassignSlot)
+        DropSlot, ReassignSlot, EditSlot)
 
   /** What somebody must be in the guild for this action to be performed as them.
    *

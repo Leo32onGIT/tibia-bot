@@ -557,6 +557,22 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    path("g" / Segment / "edit-slot") { guildId =>
+      post {
+        withWrite(guildId, AccessTier.Moderator) { userId =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt),
+             fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption).filter(_ > 0)) match {
+              case (Some(code), Some(start), Some(minutes)) =>
+                actionResult(guildId, actions.editSlot(guildId, userId, code, start, minutes))
+              case _ => badRequest("Changing a slot's length needs a spawn, which day, and how long.")
+            }
+          }
+        }
+      }
+    } ~
     // Who a moderator may hand stamina to. Behind the moderator gate rather than
     // merely unadvertised: it is a list of everybody who has used the system
     // here, which is not something an ordinary member should be able to

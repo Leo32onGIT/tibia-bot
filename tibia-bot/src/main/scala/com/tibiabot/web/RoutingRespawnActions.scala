@@ -70,6 +70,10 @@ final class RoutingRespawnActions(
                    startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] =
     port(guildId).reassignSlot(guildId, actorId, code, startsAt, toUserId)
 
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+    port(guildId).editSlot(guildId, actorId, code, startsAt, minutes)
+
   def bookings(guildId: String, userId: String): List[BookingView] = local.bookings(guildId, userId)
   def calendar(guildId: String, code: String,
                from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] =

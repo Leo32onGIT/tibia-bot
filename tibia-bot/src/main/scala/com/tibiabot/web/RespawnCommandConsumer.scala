@@ -208,6 +208,12 @@ final class RespawnCommandConsumer(
           case _ => missing("spawn, day and somebody to give it to")
         }
 
+      case RespawnCommand.EditSlot =>
+        (command.param("code"), slotStart(command), command.intParam("minutes").filter(_ > 0)) match {
+          case (Some(code), Some(start), Some(minutes)) => local.editSlot(guildId, actor, code, start, minutes)
+          case _ => missing("spawn, day and length")
+        }
+
       // Unreachable via fromJson, which refuses unknown actions — kept so a
       // future action added to the set without a branch here fails loudly
       // rather than silently doing nothing.

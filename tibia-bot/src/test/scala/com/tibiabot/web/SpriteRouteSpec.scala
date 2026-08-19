@@ -78,6 +78,8 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
                  startsAt: java.time.ZonedDateTime): Future[ActionResult] = no
     def reassignSlot(guildId: String, actorId: String, code: String,
                      startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = no
+    def editSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = no
   }
 
   /** Enough gateway to construct the access service; no test here reaches it. */
