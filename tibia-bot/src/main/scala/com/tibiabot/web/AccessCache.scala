@@ -43,7 +43,7 @@ import java.util.concurrent.ConcurrentHashMap
  *  ever.
  */
 final class AccessCache(staleAfter: Duration,
-                        /** How long past [[staleAfter]] an answer may still be
+                        /** How long past `staleAfter` an answer may still be
                          *  served while a refresh is tried. Bounds how long a
                          *  *failing* refresh can keep an old answer alive; past
                          *  it, a reader waits for a live one. */
@@ -83,11 +83,11 @@ final class AccessCache(staleAfter: Duration,
 
   /** Remember a pass, for as long as it deserves to be believed.
    *
-   *  A complete answer gets both horizons: refreshable after [[staleAfter]],
-   *  unusable after [[hardTtl]].
+   *  A complete answer gets both horizons: refreshable after `staleAfter`,
+   *  unusable after `hardTtl`.
    *
    *  An incomplete one gets neither, and is simply dropped after
-   *  [[partialTtl]]. It is not really an answer — it is a report that something
+   *  `partialTtl`. It is not really an answer — it is a report that something
    *  was too slow once — so there is nothing here worth serving stale, and
    *  "reload in a moment to try again" has to mean a real retry rather than
    *  being handed the same failure back. Kept for the full window it turned a

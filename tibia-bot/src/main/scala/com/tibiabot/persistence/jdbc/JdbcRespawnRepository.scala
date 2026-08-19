@@ -10,7 +10,7 @@ import scala.collection.mutable.ListBuffer
 /** JDBC implementation of RespawnRepository against a guild's own database.
  *
  *  The schema is checked on a guild's first use in this process, and not again
- *  — see [[ensureSchema]]. `SchemaInitializer.initGuild` only creates tables
+ *  — see `ensureSchema`. `SchemaInitializer.initGuild` only creates tables
  *  when it creates the database, so guilds that existed before this feature
  *  would otherwise never get them; this is the same create-on-read approach
  *  `JdbcGalthenRepository` uses for `satchel`, just not repeated per query.

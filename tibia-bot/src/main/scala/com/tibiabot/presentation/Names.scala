@@ -35,7 +35,7 @@ object Names {
    *  people actually call each other and is often nothing like the account name;
    *  the account name is the one that is unique and searchable, and the only one
    *  that means anything to a moderator reading a log. Neither is a mention —
-   *  see [[user]].
+   *  see [[user(name:String)*]].
    *
    *  The account leads because it is the half that is always there. A nickname
    *  is optional and changes at whim, so putting it first would mean the same

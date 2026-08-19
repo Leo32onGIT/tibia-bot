@@ -13,11 +13,12 @@ import scala.concurrent.Future
  *  lifecycle (see `respawn.RespawnOwnership`). Putting that check behind this
  *  interface means a route cannot forget it.
  *
- *  [[Unavailable]] is that refusal, and it is deliberately distinct from a
- *  permission failure: the visitor did nothing wrong and retrying will not
- *  help, so the page says so rather than implying they lack access. It is also
- *  the seam a Redis relay to the owning bot slots into later, at which point
- *  the case stops being reachable for guilds another bot owns.
+ *  [[RespawnActionPort.Unavailable]] is that refusal, and it is deliberately
+ *  distinct from a permission failure: the visitor did nothing wrong and
+ *  retrying will not help, so the page says so rather than implying they lack
+ *  access. It is also the seam a Redis relay to the owning bot slots into
+ *  later, at which point the case stops being reachable for guilds another bot
+ *  owns.
  */
 trait RespawnActionPort {
 

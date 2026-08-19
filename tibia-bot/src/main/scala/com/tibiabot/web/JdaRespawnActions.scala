@@ -10,7 +10,7 @@ import scala.util.control.NonFatal
 
 /** [[RespawnActionPort]] against the real service.
  *
- *  Everything here funnels through [[withActableGuild]], which is the one place
+ *  Everything here funnels through `withActableGuild`, which is the one place
  *  the two preconditions a write has beyond permission are checked: this bot has
  *  to be *in* the guild to resolve it at all, and it has to be the identity that
  *  runs that guild's respawns. Several bot identities can share a guild and only
@@ -54,7 +54,7 @@ final class JdaRespawnActions(
     }(blocking)
 
   /** Whether this bot is the one that runs `guildId`'s respawns — the same
-   *  question [[withActableGuild]] asks, exposed so the router and the command
+   *  question `withActableGuild` asks, exposed so the router and the command
    *  consumer decide it exactly the same way rather than each reimplementing it. */
   def ownsGuild(guildId: String): Boolean =
     Option(discordGateway.guildById(guildId)).exists { guild =>

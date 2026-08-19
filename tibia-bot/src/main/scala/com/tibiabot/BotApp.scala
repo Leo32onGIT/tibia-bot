@@ -1359,7 +1359,7 @@ object BotApp extends App with StrictLogging {
    *   - Every failure is swallowed and logged. A Patreon outage must never be
    *     the reason `/setup` errors, and it can't cost anyone access either: a
    *     failed fetch leaves the last good snapshot in place (see
-   *     [[syncPatreonMembers]]).
+   *     `syncPatreonMembers`).
    *
    *  Names are deliberately not resolved on this path (`resolveNames = false`)
    *  — that's a blocking Discord lookup per linked patron, easily the slowest

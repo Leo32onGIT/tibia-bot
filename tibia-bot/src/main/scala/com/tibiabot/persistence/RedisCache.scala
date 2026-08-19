@@ -28,9 +28,10 @@ trait RedisCache {
    *
    *  For a key that is a piece of work rather than a cached value: once it has
    *  been done, leaving it to expire means everything sweeping for work finds
-   *  it again and does it again. [[AccessQueryConsumer]] is the case in point —
-   *  an answered question left lying around was re-resolved on every beat until
-   *  it expired, at the cost of a Discord REST call each time.
+   *  it again and does it again. [[com.tibiabot.web.AccessQueryConsumer]] is
+   *  the case in point — an answered question left lying around was
+   *  re-resolved on every beat until it expired, at the cost of a Discord
+   *  REST call each time.
    *
    *  Missing keys are not an error: deleting one twice, or one that was never
    *  there, succeeds quietly. */
