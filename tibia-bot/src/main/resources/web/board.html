@@ -33,6 +33,23 @@
 
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* How big the spawn window draws itself, as a multiple. Every type size and
+       every hour row inside the window is a multiple of this rather than a flat
+       pixel count, so on a display with pixels to spare the panel grows into
+       them instead of sitting at laptop size in the middle of the screen with
+       nine-pixel type. One here is the size the window has always been; the
+       steps that raise it are on .window, so that everything outside the window
+       — the board, which is already the size it wants to be — stays at one and
+       is untouched by any of this.
+
+       The hour row is here rather than in the grid because the script needs it
+       too: every block on the week is placed by multiplying an hour count by it.
+       Kept as a bare number and a bare length, with no var() of their own, so
+       that reading them back through getComputedStyle gives something
+       parseFloat understands rather than an unevaluated calc(). */
+    --ui-scale: 1;
+    --row-base: 28px;
   }
   * { box-sizing: border-box; }
   /* `hidden` means hidden, whatever else an element is styled as.
@@ -401,9 +418,34 @@
      from taking one — they are the same thought, so they are one window. */
   .veil { position: fixed; inset: 0; background: rgba(4,5,8,0.72); backdrop-filter: blur(2px); z-index: 40; display: none; }
   .veil.open { display: block; }
+  /* The ceilings were picked on a laptop and had no upper branch: past a
+     1150x830 viewport the min() stopped following the screen entirely, so on a
+     4K panel the window took under a third of the width and rather more than a
+     third of the height and left the rest of the display empty. Raised, and the
+     two raised together on purpose: the enlarged hour rows below are 35px, so a
+     day of them is 840px, and a height that did not grow with the type would
+     have spent the whole of this change putting fewer hours on the screen than
+     were there before. The ceiling is set to clear that day plus the strips
+     above and below it — near enough that the evening is in view on opening
+     rather than scrolled to, which is what the window is opened for.
+
+     Both stay min() against the viewport, so nothing here reaches a screen
+     that has not got the room: a laptop is bounded by its own height exactly
+     as it was, and only a display with the pixels going spare ever sees the
+     new ceilings at all.
+
+     The height is a ceiling and not a height, which is the whole difference
+     between this and a panel with a field of nothing under its calendar. A day
+     is 24 rows and no more; once the window was allowed to be 1180px tall, any
+     screen whose rows were still the unenlarged 28px had a grid some 700px tall
+     sitting in 930px of space, and the remainder was simply empty. So the panel
+     is as tall as what is in it and stops growing here — which also means it
+     needs no separate ceiling per --ui-scale step, since taller rows make a
+     taller grid and the window follows on its own. */
   .window {
     position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(1120px, calc(100vw - 28px)); height: min(792px, calc(100vh - 40px));
+    width: min(1600px, calc(100vw - 28px));
+    height: auto; max-height: min(1180px, calc(100vh - 40px));
     background: var(--panel); border: 1px solid #2a3142; border-radius: 14px;
     box-shadow: 0 30px 90px rgba(0,0,0,0.6);
     display: none; overflow: hidden;
@@ -413,6 +455,37 @@
     overscroll-behavior: contain;
   }
   .window.open { display: flex; flex-direction: column; }
+
+  /* ---- Growing the window's type -----------------------------------------
+     A bigger box on its own would have given more week at the same nine pixels,
+     which is the half of this that actually reads as unusable: the window is
+     pixel-sized throughout, so on a dense display its type is physically half
+     the size the same panel has on a laptop.
+
+     Keyed on width alone, and generously, because width is the honest signal
+     here. A 4K display run at 100% is 3840 CSS pixels and everything on it is
+     tiny; the same display run at 200% is 1920 and everything on it is already
+     the right size, and it correctly gets nothing from this. Two steps rather
+     than a continuous function so there are only three appearances to have
+     looked at, and a height floor on both so a short, wide screen is never
+     given rows too tall for a day to fit in what it has.
+
+     The two multiples are eighths, and deliberately: an hour row is 28px, so
+     these are the sizes that come out whole — 31.5 and 35 — where a friendlier
+     looking 1.3 gives 36.4 and lands every one of the day's twenty-four hour
+     rules on a different fraction of a pixel. That costs twice: the rules
+     render at visibly uneven weights, and the script's idea of the height
+     drifts from the browser's by a fraction a row all the way down the day.
+     A quarter is also as far as this should go — a third would push the day
+     past the height even the raised window has, and the week would be back to
+     being scrolled.
+
+     On .window rather than on :root: the board behind is already the size it
+     wants to be, and inherits the 1 declared up there. Classes the two share —
+     the buttons, the segmented controls — therefore draw at their old size out
+     on the board and at the raised one in here, with no rule of their own. */
+  @media (min-width: 2000px) and (min-height: 800px) { .window { --ui-scale: 1.125; } }
+  @media (min-width: 2800px) and (min-height: 800px) { .window { --ui-scale: 1.25; } }
 
   /* The creature, filling the window rather than tucked in a corner. Kept far
      enough back that everything on top of it stays readable — the scrim does
@@ -440,42 +513,53 @@
      first — where a spawn is, is the least of what this row says — and the name
      ellipsises only once that is gone. */
   .win-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px 13px; border-bottom: 1px solid var(--panel-border); flex-wrap: nowrap; }
-  .win-head .code-chip { font-size: 15px; padding: 4px 11px; border-radius: 7px; flex-shrink: 0; }
+  .win-head .code-chip { font-size: calc(15px * var(--ui-scale)); padding: 4px 11px; border-radius: 7px; flex-shrink: 0; }
   .win-title {
-    font-size: 17px; color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em;
+    font-size: calc(17px * var(--ui-scale)); color: var(--text-strong); font-weight: 600; letter-spacing: -0.01em;
     flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* A shrink factor far above the title's, so this is what disappears first. */
   .win-region {
-    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); color: var(--muted);
     flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .win-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: calc(22px * var(--ui-scale)); cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
   .win-close:hover { color: var(--text-strong); }
   /* A column, so the week inside it can be handed whatever height is left over
      rather than guessing at it. `min-height: 0` on each link of that chain is
      what lets a flex child be *shorter* than its contents — without it every
      one of them sizes to the full grid and the panel grows past the window,
-     which is the scrolling this is meant to do away with. */
-  .win-body { flex: 1; min-height: 0; display: flex; flex-direction: column;
+     which is the scrolling this is meant to do away with.
+
+     The basis is `auto` and not the 0 that a bare `flex: 1` means, on this and
+     on the two links under it. With a window that is only as tall as its
+     contents, a basis of 0 says the contents are nothing: the chain has no
+     height to be given a share of, so every one of them collapses and the panel
+     shuts to the height of its own header. Told to start at what is in them,
+     they still take the leftover height whenever there is some — a full window
+     distributes exactly as it did — and they now also state a height when the
+     window is asking them what it should be. */
+  .win-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
               overflow-y: auto; overscroll-behavior: contain;
               scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
-  .cal-section.open, .cal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .cal-section, .cal { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
   .win-body::-webkit-scrollbar { width: 10px; }
   .win-body::-webkit-scrollbar-track { background: transparent; }
   .win-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
 
   .strip {
     display: flex; align-items: center; gap: 11px; padding: 10px 20px; flex-wrap: wrap;
-    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+    border-bottom: 1px solid var(--panel-border); font-size: calc(12px * var(--ui-scale)); color: var(--muted);
   }
-  .strip i { font-size: 14px; }
+  .strip i { font-size: calc(14px * var(--ui-scale)); }
   .now-strip { background: rgba(255,255,255,0.02); }
-  .fold { cursor: pointer; user-select: none; }
-  .fold:hover { background: rgba(255,255,255,0.03); }
-  .fold-title { color: var(--text-strong); font-weight: 600; font-size: 12.5px; }
+  /* `.fold` itself has gone with the calendar's fold — it was the only thing
+     wearing it, and a heading that does not answer a press has no business
+     carrying a pointer and a hover. The two parts below outlived it: the title
+     is the voice every section heading speaks in, folding or not, and the
+     chevron is still turned by Up next and by the moderator panel. */
+  .fold-title { color: var(--text-strong); font-weight: 600; font-size: calc(12.5px * var(--ui-scale)); }
   .fold-chevron { transition: transform 0.15s ease; margin-left: auto; }
-  .fold.open .fold-chevron { transform: rotate(180deg); }
 
   /* ---- Up next -----------------------------------------------------------
      What is actually coming to this spawn, which "+2 queued" never said. The
@@ -489,26 +573,26 @@
      data. */
   .up-head {
     display: flex; align-items: center; gap: 9px; padding: 9px 20px;
-    border-bottom: 1px solid var(--panel-border); font-size: 12px; color: var(--muted);
+    border-bottom: 1px solid var(--panel-border); font-size: calc(12px * var(--ui-scale)); color: var(--muted);
     cursor: pointer; user-select: none;
   }
   .up-head:hover { background: rgba(255,255,255,0.03); }
   .up-head .fold-chevron { transform: rotate(180deg); }
   .up-head.open .fold-chevron { transform: rotate(0deg); }
   .up-peek {
-    font-family: var(--mono); font-size: 11px; min-width: 0;
+    font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .up-peek b { color: var(--text); font-weight: 600; }
   .up-count {
-    font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 9px;
+    font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); padding: 1px 6px; border-radius: 9px;
     background: rgba(255,255,255,0.05); color: var(--muted); flex-shrink: 0; margin-left: auto;
   }
   .up-list {
     border-bottom: 1px solid var(--panel-border); padding: 6px 20px 9px;
-    max-height: 190px; overflow-y: auto; overscroll-behavior: contain;
+    max-height: calc(190px * var(--ui-scale)); overflow-y: auto; overscroll-behavior: contain;
     scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
-    font-family: var(--mono); font-size: 11.5px;
+    font-family: var(--mono); font-size: calc(11.5px * var(--ui-scale));
   }
   /* Fixed tracks throughout, and a width on the trailing one: a column that only
      some rows fill is a column that moves. */
@@ -519,7 +603,7 @@
     gap: 8px; align-items: center; padding: 5px 0; line-height: 1.4;
   }
   .up-when { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; }
-  .up-when small { display: block; font-size: 9px; color: var(--muted); }
+  .up-when small { display: block; font-size: calc(9px * var(--ui-scale)); color: var(--muted); }
   /* The rail is drawn off each row's own box, joining pip to pip, and stops at
      the first and last so it does not dangle past either end of the list. */
   .up-rail { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
@@ -535,35 +619,35 @@
   .up-mine .up-pip { background: var(--st-free); }
   .up-body { min-width: 0; }
   .up-who { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-  .up-sub { color: var(--muted); font-size: 10px; }
+  .up-sub { color: var(--muted); font-size: calc(10px * var(--ui-scale)); }
   /* A booking's countdown is definite and coloured; a queue place's is a
      projection off hunts that may not run their length, so it stays muted. */
   .up-sub .up-rel { color: var(--accent); }
   .up-queued .up-sub .up-rel { color: var(--muted); }
   .up-tag {
-    font-family: var(--sans); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.09em;
+    font-family: var(--sans); font-size: calc(8.5px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.09em;
     padding: 1px 5px; border-radius: 3px; justify-self: end;
   }
   .up-tag.queue { color: var(--st-claimed); background: rgba(210,51,105,0.16); }
   .up-tag.asked { color: var(--st-asked); background: rgba(224,169,62,0.16); }
   .up-tag.you { color: var(--st-free); background: rgba(46,204,113,0.16); }
-  .up-more { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding-top: 6px; }
+  .up-more { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--muted); padding-top: 6px; }
   .field { display: flex; align-items: center; gap: 7px; }
-  .field-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+  .field-label { font-family: var(--mono); font-size: calc(9px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
   .live-bar { flex: 1; min-width: 80px; max-width: 220px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
   .live-bar span { display: block; height: 100%; background: var(--st-claimed); transition: width 1s linear; }
 
   .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; }
   .seg button {
     background: transparent; border: none; border-left: 1px solid var(--panel-border);
-    color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer;
+    color: var(--muted); font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); padding: 4px 9px; cursor: pointer;
     font-variant-numeric: tabular-nums;
   }
   .seg button:first-child { border-left: none; }
   .seg button:hover { background: rgba(255,255,255,0.04); color: var(--text); }
   .seg button.on { background: rgba(91,140,255,0.18); color: #cfdcff; }
 
-  .dur-cap { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .dur-cap { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); color: var(--muted); }
 
   /* ---- How long: the day's tank ------------------------------------------
      Not a nought-to-ceiling slider but the stamina itself — grey for what today
@@ -575,7 +659,7 @@
      touch and once as a number, and neither of them was the thing you were
      about to change. */
   .tank {
-    display: block; position: relative; width: 240px; height: 34px; border-radius: 8px;
+    display: block; position: relative; width: calc(240px * var(--ui-scale)); height: calc(34px * var(--ui-scale)); border-radius: 8px;
     border: 1px solid var(--panel-border); background: rgba(255,255,255,0.02);
     overflow: hidden; touch-action: none; user-select: none; cursor: ew-resize;
   }
@@ -600,11 +684,11 @@
     position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
     white-space: nowrap; pointer-events: none; font-family: var(--mono); font-variant-numeric: tabular-nums;
   }
-  .tank-in { font-size: 12.5px; font-weight: 600; color: #06122e; }
+  .tank-in { font-size: calc(12.5px * var(--ui-scale)); font-weight: 600; color: #06122e; }
   /* A short hunt is narrower than the word for it, so the figure steps outside
      the block and takes the page's own text colour to stay readable. */
   .tank-in.outside { color: var(--text-strong); }
-  .tank-out { font-size: 10.5px; color: var(--muted); }
+  .tank-out { font-size: calc(10.5px * var(--ui-scale)); color: var(--muted); }
   /* The blue has reached it and is now behind it, so it wears the blue's type
      colour rather than moving out of the way. */
   .tank-out.on-hunt { color: #06122e; font-weight: 600; }
@@ -620,20 +704,20 @@
 
   .btn {
     background: var(--accent); border: 1px solid var(--accent); border-radius: 6px;
-    color: var(--bg); font-size: 12.5px; font-weight: 600; padding: 6px 15px; cursor: pointer;
+    color: var(--bg); font-size: calc(12.5px * var(--ui-scale)); font-weight: 600; padding: 6px 15px; cursor: pointer;
     /* Inline-flex so a button that carries an icon spaces it from its label
        without every such button having to say so itself. A button with only a
        label is laid out exactly as it was. */
     display: inline-flex; align-items: center; gap: 6px;
   }
-  .btn > i { font-size: 14px; line-height: 1; }
+  .btn > i { font-size: calc(14px * var(--ui-scale)); line-height: 1; }
   .btn:hover:not([disabled]) { filter: brightness(1.08); }
   .btn[disabled] { background: transparent; color: var(--muted); border-color: var(--panel-border); cursor: not-allowed; }
   .btn.ghost { background: transparent; color: var(--text); border-color: var(--panel-border); }
   .btn.ghost:hover:not([disabled]) { border-color: var(--accent); }
   .btn.danger { background: transparent; color: var(--st-claimed); border-color: rgba(210,51,105,0.5); }
   .btn.danger:hover:not([disabled]) { background: rgba(210,51,105,0.12); }
-  .btn.small { font-size: 11px; padding: 4px 10px; }
+  .btn.small { font-size: calc(11px * var(--ui-scale)); padding: 4px 10px; }
   .btn.mod-btn { background: transparent; color: var(--purple); border-color: rgba(167,139,250,0.4); }
   .btn.mod-btn:hover:not([disabled]) { background: rgba(167,139,250,0.12); }
   /* After the variants, not with `.btn[disabled]` above: that rule ties with
@@ -659,15 +743,15 @@
      one grows upward instead. */
   .foot-msg {
     padding: 9px 20px; border-top: 1px solid var(--panel-border);
-    display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.45;
+    display: flex; align-items: flex-start; gap: 8px; font-size: calc(12.5px * var(--ui-scale)); line-height: 1.45;
   }
-  .foot-msg > i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .foot-msg > i { font-size: calc(15px * var(--ui-scale)); flex-shrink: 0; margin-top: 1px; }
   .foot-msg.ok { color: var(--st-free); }
   .foot-msg.no { color: var(--st-asked); }
   /* Standing advice rather than news, so it is quieter than either — it is what
      the row holds when there is nothing to report. */
-  .foot-msg.hint-msg { color: var(--muted); font-size: 11.5px; }
-  .foot-msg.hint-msg > i { font-size: 14px; opacity: 0.75; }
+  .foot-msg.hint-msg { color: var(--muted); font-size: calc(11.5px * var(--ui-scale)); }
+  .foot-msg.hint-msg > i { font-size: calc(14px * var(--ui-scale)); opacity: 0.75; }
   /* Sized by its content and never scrolled away, so neither the button nor a
      reply can be left off the bottom of a panel whose body is taller than the
      window. Its children carry their own top borders, so it adds none. */
@@ -693,12 +777,12 @@
   }
   .slot-strip:hover { background: rgba(167,139,250,0.06); }
   .slot-tools.open .slot-strip { background: rgba(167,139,250,0.08); }
-  .slot-strip-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; }
+  .slot-strip-label { font-family: var(--mono); font-size: calc(9px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; }
   /* Pushed to the end and allowed to shrink first: on a narrow screen the label
      and the chevron are what must survive, and a long name truncates rather
      than pushing the chevron off the strip. */
   .slot-strip-who {
-    margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 10px;
+    margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: calc(10px * var(--ui-scale));
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* The strip above is tinted while the panel is open, so the row needs a gap
@@ -718,17 +802,17 @@
   .mod-gap { flex: 1; min-width: 12px; }
   /* Inline rather than on a line of its own — it is a caveat to the button
      beside it, not an announcement. */
-  .mod-warn { color: var(--st-claimed); font-size: 11.5px; line-height: 1.4; min-width: 0; }
+  .mod-warn { color: var(--st-claimed); font-size: calc(11.5px * var(--ui-scale)); line-height: 1.4; min-width: 0; }
   /* The length being dragged, in the same mono the strip names its target in:
      it is a reading off the grid, not a sentence. */
   .mod-length {
-    color: var(--purple); font-family: var(--mono); font-size: 11px; white-space: nowrap;
+    color: var(--purple); font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); white-space: nowrap;
   }
   /* How to move it, leading the row. Muted, because somebody who has already
      grabbed the block has no more use for it — and the first to give up width
      when the row runs short, since the length and the verbs beside it are what
      anybody is actually reaching for. */
-  .mod-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; min-width: 0; flex-shrink: 1; }
+  .mod-hint { color: var(--muted); font-size: calc(11.5px * var(--ui-scale)); line-height: 1.4; min-width: 0; flex-shrink: 1; }
   /* The person picker takes what the verbs were using. */
   .mod-grow { flex: 1 1 12rem; min-width: 0; }
 
@@ -741,7 +825,7 @@
 
   /* ---- Week grid ---------------------------------------------------------- */
   .cal-legend { display: flex; gap: 14px; padding: 9px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
-  .cal-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .cal-legend span { display: flex; align-items: center; gap: 6px; font-size: calc(11px * var(--ui-scale)); color: var(--muted); }
   .swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; border: 1.5px solid; }
   .sw-claimed { border-color: var(--st-claimed); background: rgba(210,51,105,0.3); }
   .sw-booked { border-color: var(--st-booked); background: transparent; border-style: dashed; }
@@ -756,9 +840,9 @@
      movement would sit still while its own columns went past underneath. */
   .wk-headrow, .wk-rows { display: grid; grid-template-columns: var(--gutter, 56px) repeat(7, 1fr); }
   .wk-headrow { position: sticky; top: 0; z-index: 7; background: var(--panel); }
-  .wk-head { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
+  .wk-head { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
   .wk-head.today { color: var(--accent); }
-  .wk-head .dnum { display: block; font-size: 13px; color: var(--text-strong); margin-top: 2px; letter-spacing: 0; }
+  .wk-head .dnum { display: block; font-size: calc(13px * var(--ui-scale)); color: var(--text-strong); margin-top: 2px; letter-spacing: 0; }
   /* The corner the two sticky axes meet in, above both of them. */
   .wk-corner { position: sticky; left: 0; z-index: 8; background: var(--panel); border-bottom: 1px solid var(--panel-border); }
   /* Sized off the viewport rather than fixed, so on a laptop screen the grid
@@ -768,7 +852,7 @@
      strips above and below have had theirs, rather than the viewport arithmetic
      this used to do — which had to be re-guessed whenever anything around it
      changed height, and was wrong on a phone. */
-  .wk-body { position: relative; flex: 1; min-height: 120px; overflow: auto; overscroll-behavior: contain;
+  .wk-body { position: relative; flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain;
              margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
   .wk-body::-webkit-scrollbar { width: 10px; }
   .wk-body::-webkit-scrollbar-track { background: transparent; }
@@ -794,27 +878,27 @@
      Everything absolutely placed on the week — the now line, the selection —
      belongs to the lower one, so its coordinates stay measured from midnight and
      owe nothing to how tall the headings happen to be. */
-  .wk-grid { position: relative; --gutter: 56px; }
+  .wk-grid { position: relative; --gutter: calc(56px * var(--ui-scale)); }
   .wk-rows { position: relative; }
   /* Relative only so the now flag can hang off it; it earns a background and a
      layer of its own on a phone, where it is stuck to the left edge and has the
      rest of the week passing behind it. */
   .wk-hours { border-right: 1px solid var(--panel-border); position: relative; z-index: 5; }
   .wk-hour {
-    height: 28px; font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+    height: calc(var(--row-base) * var(--ui-scale)); font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--muted);
     text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
   }
   /* The server-time echo, so a Berlin-anchored rule can be read off a local axis
      without doing the arithmetic in your head. */
-  .wk-hour .srv { display: block; font-size: 8px; opacity: 0.5; margin-top: -3px; }
+  .wk-hour .srv { display: block; font-size: calc(8px * var(--ui-scale)); opacity: 0.5; margin-top: -3px; }
   .wk-col { border-left: 1px solid var(--panel-border); position: relative; }
-  .wk-cell { height: 28px; border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
+  .wk-cell { height: calc(var(--row-base) * var(--ui-scale)); border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
   .wk-cell:hover { background: rgba(91,140,255,0.07); }
   .wk-cell.past { cursor: not-allowed; background: rgba(0,0,0,0.3); }
   .wk-cell.past:hover { background: rgba(0,0,0,0.3); }
   .wk-block {
     position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; overflow: hidden;
-    font-family: var(--mono); font-size: 9.5px; line-height: 1.25; cursor: pointer; border: 1px solid;
+    font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); line-height: 1.25; cursor: pointer; border: 1px solid;
   }
   .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
@@ -825,7 +909,7 @@
      what the block is, and it is the line that may be cut when the name is
      longer than the column. */
   .wk-block .acct {
-    display: block; opacity: 0.6; font-size: 8.5px; margin-top: 1px;
+    display: block; opacity: 0.6; font-size: calc(8.5px * var(--ui-scale)); margin-top: 1px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* State decides the colour; whose it is decides how loud. Two hues would have
@@ -871,14 +955,14 @@
   .clip-bottom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: dashed; }
 
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
-  .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: 8px; color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
+  .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
   .now-line { position: absolute; left: var(--gutter, 56px); right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
   /* Carried by the hour gutter rather than by the grid, so that on a phone — where
      the gutter is stuck to the left edge and the days slide past it — the time
      stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
   .now-flag {
     position: absolute; left: 2px; transform: translateY(-50%); z-index: 6; pointer-events: none;
-    font-family: var(--mono); font-size: 8.5px; font-weight: 600; color: var(--bg);
+    font-family: var(--mono); font-size: calc(8.5px * var(--ui-scale)); font-weight: 600; color: var(--bg);
     background: var(--bad); border-radius: 3px; padding: 1px 4px; font-variant-numeric: tabular-nums;
   }
 
@@ -887,15 +971,15 @@
      verdict that shared this row has moved to .foot-msg above. What is left is
      two objects whose height never changes, which is what keeps the button in
      one place however much the panel has to say. */
-  .readout { padding: 10px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+  .readout { padding: 10px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-size: calc(12.5px * var(--ui-scale)); }
   .foot-dur { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
   .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
-  .readout i { font-size: 15px; }
+  .readout i { font-size: calc(15px * var(--ui-scale)); }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
   /* Neither a yes nor a no: somebody clicked a hunt in progress and is being
      told whose it is. */
   .verdict-info { color: var(--muted); }
-  .srv-note { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+  .srv-note { font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); color: var(--warn); }
 
   @media (max-width: 900px) { .wk-grid { --gutter: 44px; } }
   @media (max-width: 620px) {
@@ -910,7 +994,13 @@
        actually showing it and the whole thing scrolls by exactly the height of
        the address bar. dvh is the height there really is. The vh line stays
        ahead of it for anything too old to know the unit. */
-    .window { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
+    /* `max-height: none` puts back what the desktop ceiling would otherwise
+       take: a phone wants the whole screen, and a ceiling of 100dvh minus the
+       desktop's 40px of margin would hold the panel forty pixels short of the
+       bottom with a strip of board showing under it. The height below is a
+       height again here, not a ceiling — this is the one case where filling
+       the screen is the point rather than fitting the contents. */
+    .window { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
     .wk-body { margin: 0 10px; }
     /* Nothing outside the week scrolls: it is the part that is too big for a
        phone, and everything else earns its place by being small enough. */
@@ -959,7 +1049,13 @@
     .cc-repeat .field-label { display: none; }
     .cc-week .btn span { display: none; }
     .cc-week .btn { padding: 5px 8px; }
-    .cc-days { flex: 1 1 100%; justify-content: center; }
+    /* Last here, whatever the source order. The mask sits beside Once/Weekly on
+       a wide panel, which is the pair it belongs to — but it takes a whole row
+       of a phone, and a full-width item in the middle of the source would break
+       the line there and leave the week nav stranded on a third row. `order`
+       puts it back at the end without the desktop having to give up the
+       adjacency it was moved for. */
+    .cc-days { flex: 1 1 100%; justify-content: center; order: 1; }
     .cc-days .seg { flex: 1; max-width: 320px; }
     .cc-days .seg button { flex: 1; padding: 7px 0; font-size: 12px; }
 
@@ -1036,7 +1132,44 @@ const PLACEHOLDER = '/dashboard/images/avatar.png';
 // it is not a custom emoji, in which case Claim goes without a face.
 const CLAIM_EMOJI = '<!--CLAIM_EMOJI-->';
 
-const SLOT = 30, ROW_H = 28, DAY_MS = 86400000;
+const SLOT = 30, DAY_MS = 86400000;
+
+/* How tall an hour is on the week, and the two smallest things drawn on it: the
+   least a block may be however short its hunt, and the height one needs before
+   a third line of text fits inside it.
+ *
+ *  These are `let` and not `const` because the window now draws itself larger on
+ *  a display with room for it — see --ui-scale — and every block on the grid is
+ *  placed by multiplying an hour count by the first of them. A stylesheet that
+ *  grew the rows while the script went on believing they were 28px would put
+ *  every booking at the wrong height on the right day, which is a worse fault
+ *  than the small type this exists to fix. So the scale is read back out of the
+ *  CSS rather than restated here, and the ten places that use ROW_H keep reading
+ *  the same name and did not have to change.
+ */
+let ROW_H = 28, MIN_BLOCK_H = 13, ACCT_MIN_H = 40;
+
+/** The window's scale as the stylesheet currently computes it, or 1 if anything
+ *  about that reading is not a number — a grid drawn slightly small is a far
+ *  better failure than one drawn at NaN pixels. Both properties it reads are
+ *  bare literals for this reason: a custom property holding a calc() comes back
+ *  from getComputedStyle unevaluated, and parseFloat would make nothing of it.
+ *
+ *  Returns whether the scale moved, so a resize that crosses a step can redraw
+ *  the week and one that does not can leave it alone. */
+function refreshScale() {
+  const num = (el, name, fallback) => {
+    const v = parseFloat(getComputedStyle(el).getPropertyValue(name));
+    return v > 0 ? v : fallback;
+  };
+  const scale = num(windowEl, '--ui-scale', 1);
+  const base = num(document.documentElement, '--row-base', 28);
+  const was = ROW_H;
+  ROW_H = base * scale;
+  MIN_BLOCK_H = 13 * scale;
+  ACCT_MIN_H = 40 * scale;
+  return ROW_H !== was;
+}
 // What dragging a selection about snaps to. Finer than SLOT, which is the step a
 // hunt's *length* moves in: a quarter of an hour is a start time somebody means,
 // and being made to choose between 20:00 and 20:30 for the sake of one number
@@ -1311,9 +1444,6 @@ const view = {
   pick: null,
   answer: null,
   busy: false,
-  // Set for real by openWindow, which opens the week — this only covers the
-  // moment before any spawn has been opened at all.
-  calendarOpen: false,
   // Shut on every open. Deliberately not remembered between spawns: it is
   // reference, and a section that stayed open would take the grid's height on
   // every spawn after the one somebody wanted it on.
@@ -1809,11 +1939,10 @@ function showWeek() {
  *  Somebody paging through a month presses the same arrow several times over,
  *  so the week after the one being looked at is nearly always the next one
  *  wanted. Two reads per week visited buys arrows that answer with no wait at
- *  all — and only while the grid is actually open, since a window opened to
- *  claim something now never looks at another week.
+ *  all.
  */
 function prefetchNeighbours() {
-  if (!view.code || !view.calendarOpen) return;
+  if (!view.code) return;
   const code = view.code;
   [view.weekOffset - 1, view.weekOffset + 1].forEach(offset => {
     const held = weekCache.get(weekKey(code, offset));
@@ -2046,11 +2175,6 @@ function openWindow(code) {
   view.answer = null;
   view.repeat = 'once';
   view.days = new Set();
-  // Open on the week rather than on a fold that has to be found and pressed.
-  // It is also where the length of a hunt is set, the strip above having no
-  // control of its own, so a spawn opened straight to a claim would otherwise
-  // offer no way to change how long it runs for.
-  view.calendarOpen = true;
   view.upNextOpen = false;
   // Shut on every spawn.
   slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
@@ -2067,6 +2191,10 @@ function openWindow(code) {
   view.chosen = view.duration;
   veil.classList.add('open');
   windowEl.classList.add('open');
+  // Before the week is drawn, not after: the grid about to be built needs to
+  // know how tall an hour is, and a browser zoom or a window dragged to another
+  // monitor between one spawn and the next changes the answer.
+  refreshScale();
   lockPage();
   // Read even while the week is folded away, because the header says how much is
   // in it and a header that lied until you opened it would be worse than no
@@ -2621,19 +2749,19 @@ function upNextSection(spawn) {
   return wrap;
 }
 
-/** The week, folded away until it is wanted.
+/** The week, and a heading saying what is in it.
  *
- *  Most visits to a spawn are about right now — take it, or see who has it —
- *  and a week of grid above the fold makes that ordinary case read as the
- *  complicated one. So the header states what the week holds and opens it on
- *  request, which is also where the first scroll-to-now happens: scrolling
- *  something nobody has looked at yet is wasted work.
+ *  This was a fold once, shut by default, on the reasoning that most visits to a
+ *  spawn are about right now — take it, or see who has it — and that a week of
+ *  grid would make that ordinary case read as the complicated one. It opened by
+ *  default long before this, which was the first half of admitting the reasoning
+ *  was wrong: booking is most of what the window is for, and the one press
+ *  bought nothing but a chance to be looking at the wrong thing. The control has
+ *  now gone after the default. What is left is a heading, which is all the row
+ *  was ever really doing — naming the section and saying what the week holds.
  */
 function calendarSection() {
-  // `open` is what lets the week claim the height left over in the panel — see
-  // the flex chain in the stylesheet. Folded away it must not, or the fold
-  // header would be pushed about by space it is not using.
-  const wrap = el('div', 'cal-section' + (view.calendarOpen ? ' open' : ''));
+  const wrap = el('div', 'cal-section');
   const booked = slots.filter(b => b.state !== 'claimed').length;
   // A week we have not read yet, or could not, says so. "Nothing booked" is a
   // claim about the week, and it is not one to make on no information.
@@ -2642,32 +2770,16 @@ function calendarSection() {
     : booked === 0 ? 'nothing booked this week'
     : `${booked} booked this week`;
 
-  const head = el('div', 'strip fold' + (view.calendarOpen ? ' open' : ''), `
+  wrap.appendChild(el('div', 'strip', `
     <i class="ti ti-calendar-month" aria-hidden="true"></i>
     <span class="fold-title">Book a time</span>
-    <span class="muted">${summary}</span>
-    <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
-  head.setAttribute('role', 'button');
-  head.setAttribute('aria-expanded', String(view.calendarOpen));
-  head.addEventListener('click', () => {
-    view.calendarOpen = !view.calendarOpen;
-    // Nothing to book while it is shut, and the grid it was picked on is about
-    // to be thrown away — holding onto the element would have the next render
-    // restore a scroll position from a node that is no longer in the page,
-    // which is what stopped `scrolledOnce` from ever taking effect on reopening.
-    if (!view.calendarOpen) { view.pick = null; gridEl = null; }
-    scrolledOnce = false;
-    // Opening it is also when the weeks either side become worth having, and
-    // when a week held from an earlier visit is worth checking.
-    if (view.calendarOpen) showWeek(); else renderWindow();
-  });
-  wrap.appendChild(head);
+    <span class="muted">${summary}</span>`));
   // The standing instructions used to sit here, under this heading. They have
   // moved into the message row at the foot — see footMessage — because they and
   // the verdict on a selection are the same row's job at different moments, and
   // giving them a row of their own meant the panel carried two strips of text
   // where one would do.
-  if (view.calendarOpen) wrap.appendChild(calendar());
+  wrap.appendChild(calendar());
   return wrap;
 }
 
@@ -2689,6 +2801,10 @@ function calendar() {
         <button data-v="week" class="${view.repeat === 'week' ? 'on' : ''}">Weekly</button>
       </span>
     </span>
+    ${view.repeat === 'week'
+      ? `<span class="cc-row cc-days"><span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
+          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span></span>`
+      : ''}
     <span class="cc-row cc-week">
       <span class="seg" data-seg="week">
         <button data-v="-1" aria-label="Previous week">&lsaquo;</button>
@@ -2696,11 +2812,7 @@ function calendar() {
         <button data-v="1" aria-label="Next week">&rsaquo;</button>
       </span>
       <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> <span>Now</span></button>
-    </span>
-    ${view.repeat === 'week'
-      ? `<span class="cc-row cc-days"><span class="seg" data-seg="days">${DAY_NAMES.map((d, i) =>
-          `<button data-v="${i}" class="${view.days.has(i) ? 'on' : ''}" title="${d} (server time)">${d[0]}</button>`).join('')}</span></span>`
-      : ''}`));
+    </span>`));
 
   wrap.appendChild(el('div', 'cal-legend', `
     <span><i class="swatch sw-claimed"></i>Being hunted</span>
@@ -2788,13 +2900,13 @@ function calendar() {
       // The third line only goes on a block with room for a whole one. A block is
       // as tall as its hunt is long, and half a line of clipped text under the
       // time would read as a rendering fault rather than as information.
-      const height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2);
+      const height = Math.max(MIN_BLOCK_H, ((to - from) / 3600000) * ROW_H - 2);
       const account = accountLine(b);
       block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
       block.style.height = height + 'px';
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
         <span class="tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
-        + (account && height >= 40 ? `<span class="acct">${esc(account)}</span>` : '');
+        + (account && height >= ACCT_MIN_H ? `<span class="acct">${esc(account)}</span>` : '');
       // The tooltip carries it whatever the block's height, so a half-hour
       // booking is not the one block you cannot find out who owns.
       block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(ends)} your time`
@@ -2832,7 +2944,7 @@ function calendar() {
           + (p.at.getTime() < colStart ? ' clip-top' : '')
           + (pEnd.getTime() > colEnd ? ' clip-bottom' : ''));
         sel.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
-        sel.style.height = Math.max(13, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+        sel.style.height = Math.max(MIN_BLOCK_H, ((to - from) / 3600000) * ROW_H - 2) + 'px';
         sel.innerHTML = `<span class="who">${p.label}</span>
           <span class="tm">${fmtLocal(p.at)}–${fmtLocal(pEnd)}</span>`;
         // Taking a selection back. Every piece of it answers, echoes included:
@@ -3055,7 +3167,7 @@ function stretchHandle(block) {
       const next = Math.max(floor, Math.min(cap(), Math.round(minutes / SLOT) * SLOT));
       if (next === preview) return;
       preview = next;
-      block.style.height = Math.max(13, (next / 60) * ROW_H - 2) + 'px';
+      block.style.height = Math.max(MIN_BLOCK_H, (next / 60) * ROW_H - 2) + 'px';
       if (label) {
         const end = new Date(view.pick.getTime() + next * 60000);
         label.textContent = `${fmtLocal(view.pick)}–${fmtLocal(end)}`;
@@ -3103,7 +3215,6 @@ function footMessage() {
        <span>${esc(view.answer.message)}</span>`);
   }
   if (!view.pick) {
-    if (!view.calendarOpen) return null;
     // Muted and without the verdict's icon: this is standing advice, not news
     // about anything, and dressing it like an answer would have it read as one.
     return el('div', 'foot-msg hint-msg', `<i class="ti ti-info-circle" aria-hidden="true"></i>
@@ -3492,7 +3603,7 @@ function lengthHandle(block, slot) {
       const next = Math.max(floor, Math.min(MOD_MAX, Math.round(minutes / SLOT) * SLOT));
       if (next === preview) return;
       preview = next;
-      block.style.height = Math.max(13, (next / 60) * ROW_H - 2) + 'px';
+      block.style.height = Math.max(MIN_BLOCK_H, (next / 60) * ROW_H - 2) + 'px';
       if (label) label.textContent = `${fmtLocal(slot.start)}–${fmtLocal(new Date(slot.start.getTime() + next * 60000))}`;
       if (readout) readout.textContent = lengthReadout(slot.start, next);
     };
@@ -4308,6 +4419,11 @@ if (switcher) {
 // The tank places its markers and its two figures by measuring itself, so a
 // phone turned on its side has to be told to look again.
 addEventListener('resize', () => {
+  // A resize that crosses one of the --ui-scale steps changes how tall an hour
+  // is, and every block already on the grid was placed against the old height.
+  // Only then, though: redrawing the week on every frame of a drag across the
+  // desktop would throw away a half-made selection for nothing.
+  if (refreshScale() && view.code) renderWindow();
   const tank = document.getElementById('tank');
   if (tank) paintTank(tank, view.duration || 0);
   // The watermark's shift is a fraction of what it paints, and what it paints
@@ -4323,6 +4439,7 @@ document.getElementById('filter').addEventListener('input', e => {
 });
 
 setUpModPanel();
+refreshScale();
 refresh();
 // The board keeps up on its own. The open window is left alone while somebody is
 // mid-decision: rebuilding the grid under a half-made selection would throw it
