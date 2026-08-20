@@ -83,14 +83,17 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
   private def service(
     botGuilds: List[(String, String)] = List("g1" -> "Violent"),
     members: Map[(String, String), MemberAccess] = Map(("g1", "u1") -> member()),
-    configured: Set[String] = Set("g1"),
+    /** Guilds with a respawn forum that is actually there — a settings row
+     *  naming a channel that still resolves on Discord. A guild outside this
+     *  set has one or the other missing, which the service treats alike. */
+    withForum: Set[String] = Set("g1"),
     worlds: Map[String, List[WorldChannel]] = Map("g1" -> List(WorldChannel("Antica", AnticaCategory))),
     moderatorRoles: Map[String, String] = Map.empty
   ) = {
     val gateway = new FakeGateway(botGuilds, members)
     (gateway, new DashboardAccessService(
       gateway,
-      respawnConfigured = configured.contains,
+      respawnForumExists = guild => withForum.contains(guild.getId),
       worldsOf = guildId => worlds.getOrElse(guildId, Nil),
       moderatorRoleOf = guildId => moderatorRoles.getOrElse(guildId, "0")
     ))
@@ -112,7 +115,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     val gateway = new SlowGateway(guilds, perLookup)
     (gateway, new DashboardAccessService(
       gateway,
-      respawnConfigured = _ => true,
+      respawnForumExists = _ => true,
       worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
       moderatorRoleOf = _ => "0",
       lookupOn = on))
@@ -179,7 +182,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       try {
         val gateway = new SlowGateway(List("g1" -> "One", "g2" -> "Two"), perLookup = 5000)
         val svc = new DashboardAccessService(
-          gateway, respawnConfigured = _ => true,
+          gateway, respawnForumExists = _ => true,
           worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
           moderatorRoleOf = _ => "0",
           lookupOn = pool, lookupWait = java.time.Duration.ofMillis(300))
@@ -200,7 +203,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       val gateway = new FakeGateway(List("g1" -> "Violent"), Map(("g1", "u1") -> member()))
       val svc = new DashboardAccessService(
         gateway,
-        respawnConfigured = Set("g1").contains,
+        respawnForumExists = guild => guild.getId == "g1",
         worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
         moderatorRoleOf = _ => "0",
         remote = Some(new RemoteGuildAccess(
@@ -264,14 +267,25 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     }
 
     "refuse a guild that never set the respawn system up" in {
-      val (_, svc) = service(configured = Set.empty)
+      val (_, svc) = service(withForum = Set.empty)
       svc.accessFor("u1", Set("g1")) shouldBe empty
     }
 
     // Cheap local read first, so an unconfigured guild costs no REST call.
     "not ask Discord about a guild it can rule out locally" in {
-      val (gateway, svc) = service(configured = Set.empty)
+      val (gateway, svc) = service(withForum = Set.empty)
       svc.accessFor("u1", Set("g1"))
+      gateway.lookups shouldBe empty
+    }
+
+    // The settings row is written before the forum is built, and survives the
+    // forum being deleted afterwards — so "has a row" was never the same
+    // question as "has a forum", and answering the first offered people a
+    // server whose dashboard had nothing behind it.
+    "refuse a guild whose respawn forum is gone" in {
+      val (gateway, svc) = service(withForum = Set.empty)
+      svc.accessFor("u1", Set("g1")) shouldBe empty
+      // Ruled out on a local channel lookup, before any REST call.
       gateway.lookups shouldBe empty
     }
 
@@ -338,7 +352,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
   "entryFor" should {
 
     "send a visitor with no usable guild to the empty state" in {
-      val (_, svc) = service(configured = Set.empty)
+      val (_, svc) = service(withForum = Set.empty)
       svc.entryFor("u1", Set("g1")) shouldBe DashboardEntry.Nowhere
     }
 
@@ -352,7 +366,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       val (_, svc) = service(
         botGuilds = List("g1" -> "Violent", "g2" -> "Allies"),
         members = Map(("g1", "u1") -> member(), ("g2", "u1") -> member()),
-        configured = Set("g1", "g2"),
+        withForum = Set("g1", "g2"),
         worlds = Map(
           "g1" -> List(WorldChannel("Antica", AnticaCategory)),
           "g2" -> List(WorldChannel("Antica", AnticaCategory)))
@@ -402,7 +416,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
   private def twoGuilds = service(
     botGuilds = List("g1" -> "Violent", "g2" -> "Allies"),
     members = Map(("g1", "u1") -> member(), ("g2", "u1") -> member()),
-    configured = Set("g1", "g2"),
+    withForum = Set("g1", "g2"),
     worlds = Map(
       "g1" -> List(WorldChannel("Antica", AnticaCategory)),
       "g2" -> List(WorldChannel("Antica", AnticaCategory))))
@@ -415,7 +429,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       Map(("g1", "u1") -> member()))
     (gateway, new DashboardAccessService(
       gateway,
-      respawnConfigured = Set("g1", "g2").contains,
+      respawnForumExists = guild => Set("g1", "g2").contains(guild.getId),
       worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
       moderatorRoleOf = _ => "0"))
   }

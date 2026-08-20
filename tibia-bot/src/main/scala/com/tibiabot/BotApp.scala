@@ -351,7 +351,13 @@ object BotApp extends App with StrictLogging {
     }))
   private val dashboardAccessService = new web.DashboardAccessService(
     discordGateway,
-    respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
+    // Both halves of "is there a respawn dashboard here": the guild's settings
+    // row, and the forum that row names still existing on Discord. A settings
+    // row alone used to be enough, which offered the picker every guild whose
+    // setup wrote its row and then failed to build the forum — and every guild
+    // whose forum was deleted afterwards.
+    respawnForumExists = guild => respawnService.settings(guild.getId)
+      .flatMap(respawn.RespawnThreads.findForum(guild, _)).isDefined,
     worldsOf = guildId => worldConfigRepository.listWorlds(guildId)
       .map(w => web.WorldChannel(w.name, w.category)),
     moderatorRoleOf = moderatorRoleId,

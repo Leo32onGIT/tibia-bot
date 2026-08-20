@@ -147,7 +147,7 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     a.userGuilds.put("user-1", theirGuilds)
     val access = new DashboardAccessService(
       new FakeGateway(member),
-      respawnConfigured = _ => true,
+      respawnForumExists = _ => true,
       worldsOf = _ => List(WorldChannel("Antica", CategoryId)),
       moderatorRoleOf = _ => moderatorRole)
     val cache = new CreatureSpriteCache(Files.createTempDirectory("action-route"), _ => Future.successful(None))(sameThread)

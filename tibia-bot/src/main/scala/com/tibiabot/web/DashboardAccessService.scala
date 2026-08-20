@@ -19,13 +19,30 @@ final case class WorldChannel(name: String, categoryId: String)
  *  can be exercised without a database or a Discord connection; the decisions
  *  themselves live in [[DashboardAccess]], which has no dependencies at all.
  *
- *  `respawnConfigured` and `worldsOf` are per-guild reads against that guild's
+ *  `respawnForumExists` and `worldsOf` are per-guild reads against that guild's
  *  own database; `moderatorRoleOf` is the guild's configured "Violent Bot
  *  Moderator" role id, or "0" when it has none.
  */
 final class DashboardAccessService(
   discordGateway: DiscordGateway,
-  respawnConfigured: String => Boolean,
+  /** Whether this guild has a respawn forum that is actually there: the
+   *  settings row says which channel it is, *and* that channel still resolves
+   *  on Discord.
+   *
+   *  Both halves are needed and the second is the one that was missing. The row
+   *  is written with a placeholder channel id before the forum is created (see
+   *  `ChannelService.createSpawnsForum`), so a setup that fell over on a
+   *  missing permission leaves a guild that reads as configured and has no
+   *  forum — and a forum deleted by hand afterwards leaves exactly the same
+   *  state. Either way the picker offered a server whose dashboard has nothing
+   *  behind it.
+   *
+   *  Takes the guild rather than its id so the caller can answer it with
+   *  `RespawnThreads.findForum`, which is how the rest of the bot asks the same
+   *  question. Two places deciding "is there a forum here" separately is the
+   *  kind of drift that only shows up as a server appearing where it should
+   *  not. */
+  respawnForumExists: net.dv8tion.jda.api.entities.Guild => Boolean,
   worldsOf: String => List[WorldChannel],
   moderatorRoleOf: String => String,
   /** The bot's own support Discord, which is kept out of the guild picker —
@@ -320,11 +337,12 @@ final class DashboardAccessService(
 
   /** Every guild this bot is in that is worth asking Discord about, with what
    *  has to be asked. Cheap local reads only — a guild that never set the
-   *  respawn system up, or has no world with a category recorded, is dismissed
-   *  here rather than costing a REST call to dismiss. */
+   *  respawn system up, whose respawn forum is gone, or that has no world with
+   *  a category recorded, is dismissed here rather than costing a REST call to
+   *  dismiss. */
   private def worthAsking(userGuildIds: Set[String]): List[(net.dv8tion.jda.api.entities.Guild, List[WorldChannel])] =
     discordGateway.guilds.filter(g => userGuildIds.contains(g.getId)).flatMap { guild =>
-      if (!respawnConfigured(guild.getId)) None
+      if (!respawnForumExists(guild)) None
       else {
         // A world with no category recorded can't be used to prove anything, so
         // it is dropped rather than treated as visible to everyone.
