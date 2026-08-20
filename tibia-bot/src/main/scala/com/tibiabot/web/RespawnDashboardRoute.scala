@@ -1082,7 +1082,7 @@ object RespawnDashboardRoute {
    *  cache itself, so this stays a pure renderer that a test can read back
    *  without a filesystem. */
   private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry],
-                                 nudgeOf: String => Option[Double]): JsObject =
+                                 nudgeOf: String => Option[SpriteNudge]): JsObject =
     JsObject("spawns" -> JsArray(entries.map { entry =>
       val spawn = entry.respawn
       JsObject(Map[String, JsValue](
@@ -1104,11 +1104,10 @@ object RespawnDashboardRoute {
       )
         ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue))
         // How far the page should shift that sprite, where its creature is not
-        // drawn in the middle of its own canvas. Absent for the many that are,
-        // and rounded to four places because the page multiplies it by a box a
-        // hundred pixels tall — anything finer is a fraction of a pixel.
-        ++ nudgeOf(spawn.creature).map(nudge =>
-          "nudge" -> (JsNumber(BigDecimal(nudge).setScale(4, BigDecimal.RoundingMode.HALF_UP)): JsValue))
+        // drawn in the middle of its own canvas. Each axis is absent when it
+        // wants nothing, which for the sideways one is nearly always — so the
+        // ordinary row carries one number, and a centred sprite carries none.
+        ++ nudgeOf(spawn.creature).toList.flatMap(nudgeFields)
         // This spawn's own claim ceiling, when it has been given one. Absent
         // rather than equal to the server's, so the page can say *which* limit
         // is binding — and so a guild retuning its own number does not need
@@ -1117,6 +1116,18 @@ object RespawnDashboardRoute {
         // changes it, which is far rarer than the ten-second poll.
         ++ spawn.maxDurationMinutes.map(m => "maxMinutes" -> (JsNumber(m): JsValue)))
     }.toVector))
+
+  /** The two halves of a nudge, each dropped when it is zero.
+   *
+   *  Rounded to four places because the page multiplies these by a box a
+   *  hundred pixels across — anything finer is a fraction of a pixel, and every
+   *  digit is paid for once per spawn in a payload a board holds for two
+   *  minutes. */
+  private def nudgeFields(nudge: SpriteNudge): Seq[(String, JsValue)] =
+    Seq("nudgeX" -> nudge.x, "nudgeY" -> nudge.y).collect {
+      case (name, value) if value != 0.0 =>
+        name -> (JsNumber(BigDecimal(value).setScale(4, BigDecimal.RoundingMode.HALF_UP)): JsValue)
+    }
 
   private def entryJson(entry: com.tibiabot.respawn.RespawnBoardEntry, viewerId: String): JsValue = {
     val spawn = entry.respawn

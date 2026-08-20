@@ -1416,8 +1416,8 @@ function esc(s) {
  *  a Misguided Bully. `object-fit: contain` centres the *canvas*, which centres
  *  the air along with it and leaves the creature sitting low, with its feet cut
  *  off by the bottom of the card. The server measures where the ink actually is
- *  (see SpriteInk) and sends `nudge` as a fraction of canvas height; this turns
- *  that into the pixels this particular element is painting at.
+ *  (see SpriteInk) and sends each axis as a fraction of that side of the canvas;
+ *  this turns those into the pixels this element is painting at.
  *
  *  In painted pixels rather than a CSS percentage because the two surfaces
  *  showing a sprite paint it at wildly different sizes — a little over natural
@@ -1425,22 +1425,23 @@ function esc(s) {
  *  resolves against the element box, which is the same as the painted art on
  *  one of them and not the other.
  *
- *  Reads the figure off the element so that anything redrawing it later — the
+ *  Reads the figures off the element so that anything redrawing it later — the
  *  resize handler, most of all — needs nothing but the element itself.
  */
 function nudgeArt(img) {
-  const nudge = Number(img.dataset.nudge || 0);
+  const x = Number(img.dataset.nudgeX || 0), y = Number(img.dataset.nudgeY || 0);
   // The avatar stand-in is not a creature and has no canvas to be off centre
   // in, so a card that fell back to it drops whatever shift it was carrying.
-  if (!nudge || img.classList.contains('placeholder')) { img.style.transform = ''; return; }
+  if ((!x && !y) || img.classList.contains('placeholder')) { img.style.transform = ''; return; }
   const box = img.getBoundingClientRect();
   const w = img.naturalWidth, h = img.naturalHeight;
   if (!w || !h || !box.width || !box.height) return;
   // What `object-fit: contain` actually paints inside the box, which is what
-  // the fraction is a fraction of. Not the box: the box is square and the art
+  // the fractions are fractions of. Not the box: the box is square and the art
   // frequently is not.
-  const painted = Math.min(box.width / w, box.height / h) * h;
-  img.style.transform = `translateY(${(nudge * painted).toFixed(1)}px)`;
+  const scale = Math.min(box.width / w, box.height / h);
+  img.style.transform =
+    `translate(${(x * w * scale).toFixed(1)}px, ${(y * h * scale).toFixed(1)}px)`;
 }
 
 // ---- The board ------------------------------------------------------------
@@ -1458,7 +1459,8 @@ function cardFor(spawn) {
   // Applied on load rather than now, because the shift is a fraction of the art
   // and there is no art to take a fraction of until the browser has it. Lazy
   // loading means that is when the card is scrolled to, not when it is built.
-  if (spawn.nudge) img.dataset.nudge = spawn.nudge;
+  if (spawn.nudgeX) img.dataset.nudgeX = spawn.nudgeX;
+  if (spawn.nudgeY) img.dataset.nudgeY = spawn.nudgeY;
   img.addEventListener('load', () => nudgeArt(img));
   // A sprite the cache has not fetched yet 404s; the fetch has just been started
   // by that very request, so a later poll will have it.
@@ -2324,7 +2326,8 @@ function renderWindow() {
     // belongs to the creature being replaced, and leaving it on would move the
     // next one by the last one's number for as long as the load takes.
     watermark.style.transform = '';
-    watermark.dataset.nudge = spawn.nudge || '';
+    watermark.dataset.nudgeX = spawn.nudgeX || '';
+    watermark.dataset.nudgeY = spawn.nudgeY || '';
     watermark.onload = () => nudgeArt(watermark);
     watermark.onerror = () => { watermark.src = PLACEHOLDER; watermark.className = 'watermark placeholder'; };
   }

@@ -56,11 +56,12 @@ class SpriteInkSpec extends AnyWordSpec with Matchers {
 
     "find the creature in a canvas it does not fill" in {
       val box = SpriteInk.boxOf(gif(64, 24, 64))
-      box shouldBe Some(InkBox(canvasHeight = 64, top = 24, bottom = 64))
+      box shouldBe Some(InkBox(canvasWidth = 64, canvasHeight = 64,
+        left = 0, top = 24, right = 64, bottom = 64))
     }
 
     "report a tightly cropped sprite as filling its canvas" in {
-      SpriteInk.boxOf(gif(32, 0, 32)) shouldBe Some(InkBox(32, 0, 32))
+      SpriteInk.boxOf(gif(32, 0, 32)) shouldBe Some(InkBox(32, 32, 0, 0, 32, 32))
     }
 
     // Not a sprite anybody can use, and measuring it would divide by an ink box
@@ -84,35 +85,60 @@ class SpriteInkSpec extends AnyWordSpec with Matchers {
     "place a frame by its own offset rather than at the top of the canvas" in {
       val frame = gif(16, 0, 16)
       SpriteInk.boxOf(placedOnTallerCanvas(frame, canvas = 64, top = 48)) shouldBe
-        Some(InkBox(canvasHeight = 64, top = 48, bottom = 64))
+        Some(InkBox(canvasWidth = 16, canvasHeight = 64,
+          left = 0, top = 48, right = 16, bottom = 64))
     }
   }
 
-  "nudge" should {
+  "nudgeY" should {
 
     "move a creature drawn low in its canvas upwards" in {
       // Ink from 24 to 64 has its centre at 44, twelve rows below the canvas's
       // own centre of 32 — so up by twelve sixty-fourths.
-      InkBox(64, 24, 64).nudge shouldBe (-12.0 / 64)
+      InkBox(64, 64, 0, 24, 64, 64).nudgeY shouldBe (-12.0 / 64)
     }
 
     "move a creature drawn high in its canvas downwards" in {
-      InkBox(64, 0, 40).nudge shouldBe (12.0 / 64)
+      InkBox(64, 64, 0, 0, 64, 40).nudgeY shouldBe (12.0 / 64)
     }
 
     "leave a creature that already fills its canvas alone" in {
-      InkBox(64, 0, 64).nudge shouldBe 0.0
+      InkBox(64, 64, 0, 0, 64, 64).nudgeY shouldBe 0.0
     }
 
     "leave a creature that is merely small but centred alone" in {
-      InkBox(64, 16, 48).nudge shouldBe 0.0
+      InkBox(64, 64, 16, 16, 48, 48).nudgeY shouldBe 0.0
+    }
+  }
+
+  "nudgeX" should {
+
+    // The Mitmah Seer's shape: drawn into the right of its canvas, and cut off
+    // by it. Rare — of thirty real sprites it is the only one this far out —
+    // but the one the correction exists for.
+    "move a creature drawn to the right of its canvas leftwards" in {
+      InkBox(64, 64, 23, 27, 64, 64).nudgeX shouldBe (-11.5 / 64)
+    }
+
+    "move a creature drawn to the left of its canvas rightwards" in {
+      InkBox(64, 64, 0, 0, 41, 64).nudgeX shouldBe (11.5 / 64)
+    }
+
+    "leave a creature centred across its canvas alone" in {
+      InkBox(64, 64, 16, 32, 48, 64).nudgeX shouldBe 0.0
     }
   }
 
   "nudgeOf" should {
 
     "answer with the shift a sprite drawn low in its canvas needs" in {
-      SpriteInk.nudgeOf(gif(64, 24, 64)) shouldBe Some(-12.0 / 64)
+      SpriteInk.nudgeOf(gif(64, 24, 64)) shouldBe Some(SpriteNudge(0.0, -12.0 / 64))
+    }
+
+    // Each axis is deadbanded on its own, so the ordinary sprite — centred
+    // sideways, sitting low — carries one number rather than two.
+    "leave an axis that wants nothing at zero rather than dropping the other" in {
+      SpriteInk.nudgeOf(gif(64, 24, 64)).map(_.x) shouldBe Some(0.0)
     }
 
     // Under two pixels on a card. Absent rather than zero, so the common case

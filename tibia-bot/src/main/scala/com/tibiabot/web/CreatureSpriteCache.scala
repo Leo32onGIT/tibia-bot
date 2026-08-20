@@ -43,14 +43,13 @@ final class CreatureSpriteCache(
    *  gained the file. */
   private val known404 = ConcurrentHashMap.newKeySet[String]()
 
-  /** What each cached sprite measured, by file name. Zero means measured and
-   *  not worth shifting, which is most of them — [[SpriteInk.Deadband]] makes
-   *  that unambiguous, since a real nudge is never that small.
+  /** What each cached sprite measured, by file name. [[SpriteNudge.None]] means
+   *  measured and not worth shifting, which is true of a good half of them.
    *
    *  Held rather than recomputed because the answer belongs to the file and the
    *  files never change: a sprite is fetched once and served from disk forever
    *  after, so this is measured once and read for the life of the process. */
-  private val nudges = new ConcurrentHashMap[String, java.lang.Double]()
+  private val nudges = new ConcurrentHashMap[String, SpriteNudge]()
 
   /** Measurements under way, so a board asking about the same unmeasured sprite
    *  twenty times decodes it once. */
@@ -95,10 +94,10 @@ final class CreatureSpriteCache(
    *  that shows it centred. The catalogue is only cached for two minutes, so
    *  "after that" means within two minutes.
    */
-  def nudgeFor(wikiName: String): Option[Double] =
+  def nudgeFor(wikiName: String): Option[SpriteNudge] =
     CreatureSprites.safeFileName(wikiName).flatMap { safeName =>
       Option(nudges.get(safeName)) match {
-        case Some(known) => Some(known.doubleValue).filter(_ != 0.0)
+        case Some(known) => Some(known).filterNot(_.isZero)
         case None        => measureLater(safeName); None
       }
     }
@@ -185,7 +184,7 @@ final class CreatureSpriteCache(
     }
 
   private def measure(safeName: String, bytes: Array[Byte]): Unit =
-    nudges.put(safeName, java.lang.Double.valueOf(SpriteInk.nudgeOf(bytes).getOrElse(0.0)))
+    nudges.put(safeName, SpriteInk.nudgeOf(bytes).getOrElse(SpriteNudge.None))
 
   /** Measure everything already on disk, in the background, at startup.
    *
@@ -200,10 +199,15 @@ final class CreatureSpriteCache(
       val listing = Files.list(directory)
       try
         listing.iterator().asScala
-          .filter(Files.isRegularFile(_))
+          // Sprites only. A cache directory can hold other things — an
+          // interrupted write, an old probe file — and measuring those puts
+          // junk in the memo and junk in the count below. Every name that can
+          // ever be looked up came from `CreatureSprites.safeFileName`, so this
+          // is exactly the set worth measuring.
+          .filter(file => file.getFileName.toString.endsWith(".gif") && Files.isRegularFile(file))
           .foreach(file => measure(file.getFileName.toString, Files.readAllBytes(file)))
       finally listing.close()
-      val shifted = nudges.values().asScala.count(_.doubleValue != 0.0)
+      val shifted = nudges.values().asScala.count(!_.isZero)
       if (nudges.size > 0)
         logger.info(s"Measured ${nudges.size} cached creature sprites; $shifted sit off centre in their canvas")
     }.failed.foreach(e => logger.warn(s"Could not measure the cached sprites: ${describe(e)}"))

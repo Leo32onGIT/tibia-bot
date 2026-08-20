@@ -158,7 +158,7 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
       RespawnDashboardRoute.catalogueJson(entries.toList, _ => None)
 
     /** The same, for a creature whose art the cache has measured as off centre. */
-    def catalogueNudging(nudge: Double, entries: com.tibiabot.respawn.RespawnBoardEntry*) =
+    def catalogueNudging(nudge: SpriteNudge, entries: com.tibiabot.respawn.RespawnBoardEntry*) =
       RespawnDashboardRoute.catalogueJson(entries.toList, _ => Some(nudge))
 
     def firstEntry(o: JsObject) =
@@ -194,15 +194,28 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
     // A creature drawn in the lower half of its own canvas: object-fit centres
     // the canvas, so the page is told how far to move the picture instead.
     "carry the sprite's nudge when its creature is off centre in its canvas" in {
-      firstEntry(catalogueNudging(-0.1563, RespawnBoardEntry(spawn("Misguided_Bully"), None, Nil, Nil, None)))
-        .fields("nudge") shouldBe JsNumber(BigDecimal("-0.1563"))
+      val fields = firstEntry(catalogueNudging(SpriteNudge(0.0, -0.1563),
+        RespawnBoardEntry(spawn("Misguided_Bully"), None, Nil, Nil, None))).fields
+      fields("nudgeY") shouldBe JsNumber(BigDecimal("-0.1563"))
+      // The sideways half is nearly always nothing, and nothing is not sent.
+      fields.contains("nudgeX") shouldBe false
+    }
+
+    // The Mitmah Seer, drawn into the corner of its canvas rather than the
+    // middle of it — the one shape that moves on both axes.
+    "carry both axes for a creature off centre in both" in {
+      val fields = firstEntry(catalogueNudging(SpriteNudge(-0.1797, -0.2109),
+        RespawnBoardEntry(spawn("Mitmah_Seer"), None, Nil, Nil, None))).fields
+      fields("nudgeX") shouldBe JsNumber(BigDecimal("-0.1797"))
+      fields("nudgeY") shouldBe JsNumber(BigDecimal("-0.2109"))
     }
 
     // Which is most of them, and the reason absence rather than zero: a number
     // in every row to say "leave this one alone" is a payload nobody needs.
     "omit the nudge for a sprite that wants no shifting" in {
-      firstEntry(catalogue(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None)))
-        .fields.contains("nudge") shouldBe false
+      val fields = firstEntry(catalogue(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None))).fields
+      fields.contains("nudgeX") shouldBe false
+      fields.contains("nudgeY") shouldBe false
     }
 
     "keep the catalogue in the order the board is in" in {
