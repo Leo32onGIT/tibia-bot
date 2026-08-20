@@ -5,6 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import java.nio.file.{Files, Path, StandardCopyOption}
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 /** Creature sprites, fetched once from the wiki and served from our own domain
@@ -42,6 +43,19 @@ final class CreatureSpriteCache(
    *  gained the file. */
   private val known404 = ConcurrentHashMap.newKeySet[String]()
 
+  /** What each cached sprite measured, by file name. Zero means measured and
+   *  not worth shifting, which is most of them — [[SpriteInk.Deadband]] makes
+   *  that unambiguous, since a real nudge is never that small.
+   *
+   *  Held rather than recomputed because the answer belongs to the file and the
+   *  files never change: a sprite is fetched once and served from disk forever
+   *  after, so this is measured once and read for the life of the process. */
+  private val nudges = new ConcurrentHashMap[String, java.lang.Double]()
+
+  /** Measurements under way, so a board asking about the same unmeasured sprite
+   *  twenty times decodes it once. */
+  private val measuring = ConcurrentHashMap.newKeySet[String]()
+
   /** Whether the cache can actually be written to, checked once at startup.
    *
    *  Worth doing eagerly because the failure it catches is a deployment
@@ -66,8 +80,28 @@ final class CreatureSpriteCache(
     }
 
   checkWritable()
+  measureCached()
 
   private def fileFor(safeName: String): Path = directory.resolve(safeName)
+
+  /** How far this creature's art should be shifted for the creature to sit in
+   *  the middle of it — see [[SpriteInk]]. None for a sprite that wants no
+   *  shifting, and for one nobody has measured yet.
+   *
+   *  Never blocks and never decodes on the caller's thread, exactly as [[get]]
+   *  never fetches on it. A sprite this has not seen yet answers None and is
+   *  measured behind the request, so the first board drawn after a brand-new
+   *  creature arrives shows it where `object-fit` puts it and every board after
+   *  that shows it centred. The catalogue is only cached for two minutes, so
+   *  "after that" means within two minutes.
+   */
+  def nudgeFor(wikiName: String): Option[Double] =
+    CreatureSprites.safeFileName(wikiName).flatMap { safeName =>
+      Option(nudges.get(safeName)) match {
+        case Some(known) => Some(known.doubleValue).filter(_ != 0.0)
+        case None        => measureLater(safeName); None
+      }
+    }
 
   /** The bytes if we already hold them. A miss starts a background fetch and
    *  returns None immediately — the caller shows the placeholder. */
@@ -118,6 +152,9 @@ final class CreatureSpriteCache(
       Files.write(temp, bytes)
       Files.move(temp, fileFor(safeName), StandardCopyOption.REPLACE_EXISTING)
       logger.info(s"Cached creature sprite '$safeName' (${bytes.length} bytes)")
+      // Measured here, with the bytes already in hand, because this is the only
+      // moment a sprite that was not on disk becomes one that is.
+      measure(safeName, bytes)
     } catch {
       case NonFatal(e) => logger.warn(s"Could not cache sprite '$safeName': ${describe(e)}")
     }
@@ -133,6 +170,43 @@ final class CreatureSpriteCache(
     val detail = Option(e.getMessage).filter(_.nonEmpty).getOrElse("no detail")
     s"${e.getClass.getSimpleName}: $detail"
   }
+
+  /** Measure `safeName` off the caller's thread, once. */
+  private def measureLater(safeName: String): Unit =
+    if (Files.isReadable(fileFor(safeName)) && measuring.add(safeName)) {
+      Future(measure(safeName, Files.readAllBytes(fileFor(safeName))))
+        .recover {
+          // Left unmeasured rather than remembered as needing nothing, so a
+          // transient read failure is retried on the next board instead of
+          // settling in as "this sprite is fine".
+          case NonFatal(e) => logger.warn(s"Could not measure sprite '$safeName': ${describe(e)}")
+        }
+        .onComplete(_ => measuring.remove(safeName))
+    }
+
+  private def measure(safeName: String, bytes: Array[Byte]): Unit =
+    nudges.put(safeName, java.lang.Double.valueOf(SpriteInk.nudgeOf(bytes).getOrElse(0.0)))
+
+  /** Measure everything already on disk, in the background, at startup.
+   *
+   *  Without this the first visitor after a restart is the one who measures the
+   *  catalogue — not slowly, since nothing waits on it, but a board at a time.
+   *  Doing it up front means the answers are there before anybody asks, and it
+   *  costs one pass over a few hundred small files on a thread nobody is
+   *  waiting for.
+   */
+  private def measureCached(): Unit =
+    if (Files.isDirectory(directory)) Future {
+      val listing = Files.list(directory)
+      try
+        listing.iterator().asScala
+          .filter(Files.isRegularFile(_))
+          .foreach(file => measure(file.getFileName.toString, Files.readAllBytes(file)))
+      finally listing.close()
+      val shifted = nudges.values().asScala.count(_.doubleValue != 0.0)
+      if (nudges.size > 0)
+        logger.info(s"Measured ${nudges.size} cached creature sprites; $shifted sit off centre in their canvas")
+    }.failed.foreach(e => logger.warn(s"Could not measure the cached sprites: ${describe(e)}"))
 
   private[web] def isCached(wikiName: String): Boolean =
     CreatureSprites.safeFileName(wikiName).exists(name => Files.isReadable(fileFor(name)))

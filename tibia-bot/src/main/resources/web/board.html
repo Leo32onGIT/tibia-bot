@@ -1409,6 +1409,40 @@ function esc(s) {
   return node.innerHTML;
 }
 
+/** Shift a sprite so the creature sits where its canvas pretends it does.
+ *
+ *  Tibia sprites are drawn standing on the bottom of their cell and the cell is
+ *  often bigger than the creature, so a 64x64 file can be half empty air above
+ *  a Misguided Bully. `object-fit: contain` centres the *canvas*, which centres
+ *  the air along with it and leaves the creature sitting low, with its feet cut
+ *  off by the bottom of the card. The server measures where the ink actually is
+ *  (see SpriteInk) and sends `nudge` as a fraction of canvas height; this turns
+ *  that into the pixels this particular element is painting at.
+ *
+ *  In painted pixels rather than a CSS percentage because the two surfaces
+ *  showing a sprite paint it at wildly different sizes — a little over natural
+ *  size on a card, a dozen times it in the window's watermark — and a percentage
+ *  resolves against the element box, which is the same as the painted art on
+ *  one of them and not the other.
+ *
+ *  Reads the figure off the element so that anything redrawing it later — the
+ *  resize handler, most of all — needs nothing but the element itself.
+ */
+function nudgeArt(img) {
+  const nudge = Number(img.dataset.nudge || 0);
+  // The avatar stand-in is not a creature and has no canvas to be off centre
+  // in, so a card that fell back to it drops whatever shift it was carrying.
+  if (!nudge || img.classList.contains('placeholder')) { img.style.transform = ''; return; }
+  const box = img.getBoundingClientRect();
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (!w || !h || !box.width || !box.height) return;
+  // What `object-fit: contain` actually paints inside the box, which is what
+  // the fraction is a fraction of. Not the box: the box is square and the art
+  // frequently is not.
+  const painted = Math.min(box.width / w, box.height / h) * h;
+  img.style.transform = `translateY(${(nudge * painted).toFixed(1)}px)`;
+}
+
 // ---- The board ------------------------------------------------------------
 /** One card, built once. Everything that can change later is written by
  *  paintCard, so this runs once per spawn rather than once per second. */
@@ -1421,6 +1455,11 @@ function cardFor(spawn) {
   img.src = spawn.sprite || PLACEHOLDER;
   img.alt = '';
   img.loading = 'lazy';
+  // Applied on load rather than now, because the shift is a fraction of the art
+  // and there is no art to take a fraction of until the browser has it. Lazy
+  // loading means that is when the card is scrolled to, not when it is built.
+  if (spawn.nudge) img.dataset.nudge = spawn.nudge;
+  img.addEventListener('load', () => nudgeArt(img));
   // A sprite the cache has not fetched yet 404s; the fetch has just been started
   // by that very request, so a later poll will have it.
   img.addEventListener('error', () => {
@@ -2281,6 +2320,12 @@ function renderWindow() {
   if (watermark.getAttribute('src') !== wanted) {
     watermark.src = wanted;
     watermark.className = 'watermark' + (spawn.sprite ? '' : ' placeholder');
+    // Cleared as the source changes, not when the new one arrives: the shift
+    // belongs to the creature being replaced, and leaving it on would move the
+    // next one by the last one's number for as long as the load takes.
+    watermark.style.transform = '';
+    watermark.dataset.nudge = spawn.nudge || '';
+    watermark.onload = () => nudgeArt(watermark);
     watermark.onerror = () => { watermark.src = PLACEHOLDER; watermark.className = 'watermark placeholder'; };
   }
 
@@ -4238,6 +4283,11 @@ if (switcher) {
 addEventListener('resize', () => {
   const tank = document.getElementById('tank');
   if (tank) paintTank(tank, view.duration || 0);
+  // The watermark's shift is a fraction of what it paints, and what it paints
+  // is the window — which a phone turned on its side has just changed. The
+  // cards do not need this: their box is 84px whatever the viewport does.
+  const watermark = document.getElementById('watermark');
+  if (watermark) nudgeArt(watermark);
 });
 
 document.getElementById('filter').addEventListener('input', e => {

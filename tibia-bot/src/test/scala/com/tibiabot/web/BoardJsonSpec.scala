@@ -155,7 +155,11 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
   "catalogueJson" should {
 
     def catalogue(entries: com.tibiabot.respawn.RespawnBoardEntry*) =
-      RespawnDashboardRoute.catalogueJson(entries.toList)
+      RespawnDashboardRoute.catalogueJson(entries.toList, _ => None)
+
+    /** The same, for a creature whose art the cache has measured as off centre. */
+    def catalogueNudging(nudge: Double, entries: com.tibiabot.respawn.RespawnBoardEntry*) =
+      RespawnDashboardRoute.catalogueJson(entries.toList, _ => Some(nudge))
 
     def firstEntry(o: JsObject) =
       o.fields("spawns").asInstanceOf[JsArray].elements.head.asJsObject
@@ -185,6 +189,20 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
     "omit the sprite rather than emit an unsafe name" in {
       firstEntry(catalogue(RespawnBoardEntry(spawn("../../etc/passwd"), None, Nil, Nil, None)))
         .fields.contains("sprite") shouldBe false
+    }
+
+    // A creature drawn in the lower half of its own canvas: object-fit centres
+    // the canvas, so the page is told how far to move the picture instead.
+    "carry the sprite's nudge when its creature is off centre in its canvas" in {
+      firstEntry(catalogueNudging(-0.1563, RespawnBoardEntry(spawn("Misguided_Bully"), None, Nil, Nil, None)))
+        .fields("nudge") shouldBe JsNumber(BigDecimal("-0.1563"))
+    }
+
+    // Which is most of them, and the reason absence rather than zero: a number
+    // in every row to say "leave this one alone" is a payload nobody needs.
+    "omit the nudge for a sprite that wants no shifting" in {
+      firstEntry(catalogue(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None)))
+        .fields.contains("nudge") shouldBe false
     }
 
     "keep the catalogue in the order the board is in" in {

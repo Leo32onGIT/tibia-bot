@@ -370,7 +370,7 @@ final class RespawnDashboardRoute(
       get {
         withAccess(guildId) { _ =>
           read(boardOf(guildId)) { entries =>
-            cachedJson(RespawnDashboardRoute.catalogueJson(entries),
+            cachedJson(RespawnDashboardRoute.catalogueJson(entries, spriteCache.nudgeFor),
               RespawnDashboardRoute.CatalogueMaxAge)
           }
         }
@@ -1077,7 +1077,12 @@ object RespawnDashboardRoute {
         "nickname" -> JsString(person.nickname)): JsValue
     }.toVector))
 
-  private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry]): JsObject =
+  /** `nudgeOf` says how far a creature's art should be shifted for the creature
+   *  to sit in the middle of it — see [[SpriteInk]]. A function rather than the
+   *  cache itself, so this stays a pure renderer that a test can read back
+   *  without a filesystem. */
+  private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry],
+                                 nudgeOf: String => Option[Double]): JsObject =
     JsObject("spawns" -> JsArray(entries.map { entry =>
       val spawn = entry.respawn
       JsObject(Map[String, JsValue](
@@ -1098,6 +1103,12 @@ object RespawnDashboardRoute {
         "creature" -> JsString(spawn.creature)
       )
         ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue))
+        // How far the page should shift that sprite, where its creature is not
+        // drawn in the middle of its own canvas. Absent for the many that are,
+        // and rounded to four places because the page multiplies it by a box a
+        // hundred pixels tall — anything finer is a fraction of a pixel.
+        ++ nudgeOf(spawn.creature).map(nudge =>
+          "nudge" -> (JsNumber(BigDecimal(nudge).setScale(4, BigDecimal.RoundingMode.HALF_UP)): JsValue))
         // This spawn's own claim ceiling, when it has been given one. Absent
         // rather than equal to the server's, so the page can say *which* limit
         // is binding — and so a guild retuning its own number does not need
