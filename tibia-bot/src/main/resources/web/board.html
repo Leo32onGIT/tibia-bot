@@ -1797,6 +1797,33 @@ function weekStart(offset = view.weekOffset) {
 const dayStart = (start, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; };
 const localMinutes = d => d.getHours() * 60 + d.getMinutes();
 
+/** The earliest start a selection may be dragged to: the first snap boundary
+ *  still ahead.
+ *
+ *  A floor rather than a refusal, the same way [[lengthFloor]] is one. A
+ *  booking whose start has passed is one the server will not take, and finding
+ *  that out by dropping the block and reading a sentence about it is a slower
+ *  way of being told what the grid could simply not let you do.
+ *
+ *  Strictly ahead of now, never level with it: `judge` refuses a start on this
+ *  instant, and a slot that is exactly now has passed by the time the request
+ *  lands anyway. */
+function startFloor() {
+  const step = DRAG_SNAP * 60000;
+  return new Date(Math.ceil((Date.now() + 1) / step) * step);
+}
+
+/** Which of the seven columns an instant belongs to.
+ *
+ *  Clamped to the grid, and worked out by walking the columns rather than
+ *  dividing by DAY_MS — the day a clock change falls on is not twenty-four
+ *  hours long, and a column arrived at by arithmetic would be the wrong one
+ *  for the rest of that week. */
+function columnOf(start, at) {
+  for (let i = 6; i > 0; i--) if (at.getTime() >= dayStart(start, i).getTime()) return i;
+  return 0;
+}
+
 /** The window on screen, as dates.
  *
  *  It used to read "This week" at offset 0, which was true while the columns
@@ -2836,6 +2863,10 @@ function previews(start) {
  *  say "no, twenty past" was to click again somewhere else and hope. Dragging
  *  snaps to a quarter of an hour, so the block is nudged rather than re-aimed.
  *
+ *  It cannot be dragged out of the bookable part of the grid: the past is a
+ *  floor the block stops against, not a place it may be dropped and then be
+ *  told about.
+ *
  *  Moved by writing straight to the element rather than through a re-render, for
  *  the same reason the stretch handle is: rebuilding a hundred and seventy cells
  *  per frame fights the pointer. Sideways movement is a transform rather than a
@@ -2874,9 +2905,21 @@ function dragSelection(block, at, weekStart, day) {
 
       landing = dayStart(weekStart, day + days);
       landing.setHours(Math.floor(snapped / 60), snapped % 60, 0, 0);
+      // The past is not somewhere a booking can be dragged to, so the block
+      // stops at the first slot still ahead rather than following the pointer
+      // into one the server would refuse. Both axes at once, since they are the
+      // same mistake: dragging down through the now line and dragging back onto
+      // yesterday's column both land before this instant, and the block sits on
+      // the earliest real answer either way instead of somewhere it cannot go.
+      const floor = startFloor();
+      if (landing.getTime() < floor.getTime()) landing = new Date(floor);
+      // Read back off the landing rather than off the pointer, because the
+      // clamp may have moved it to another column — a block held over yesterday
+      // is drawn on today, where it would actually be dropped.
+      const landed = columnOf(weekStart, landing) - day;
 
-      block.style.transform = days ? `translateX(${days * column}px)` : '';
-      block.style.top = (snapped / 60) * ROW_H + 'px';
+      block.style.transform = landed ? `translateX(${landed * column}px)` : '';
+      block.style.top = (localMinutes(landing) / 60) * ROW_H + 'px';
       if (label) {
         const ends = new Date(landing.getTime() + view.duration * 60000);
         label.textContent = `${fmtLocal(landing)}–${fmtLocal(ends)}`;
