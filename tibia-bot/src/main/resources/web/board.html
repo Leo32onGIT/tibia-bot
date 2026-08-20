@@ -329,8 +329,32 @@
      flipping one reads as wrong art rather than as a design choice — and it
      would disagree with the same creature shown the right way round in the
      Discord thread's thumbnail. */
+  /* 128px: exactly twice these files' own size, every creature sprite being a
+     64x64 canvas. The doubling is the point — an integer scale stays integer
+     however dense the display is (2x here becomes 4x on a retina screen, 6x on
+     a 4K one), so every source pixel lands on a whole number of device pixels
+     and the art stays hard-edged. The 84px box this used to be was 1.3125x,
+     which is a whole number of pixels on no display ever made.
+
+     Bigger than the card on purpose. A card is 61px tall, so a creature filling
+     its canvas shows about half of itself and the rest is clipped: the card is a
+     window onto the art rather than a frame around it, which at seventeen per
+     cent opacity reads as a deliberate backdrop rather than a small creature
+     adrift in a large box. What the ink nudge buys at this size is that the half
+     you see is the middle of the creature rather than whatever the canvas
+     happened to leave low.
+
+     If a 32x32 canvas ever turns up, object-fit would draw it at 4x in here.
+     None of the 232 sprites in the catalogue is one. */
+  /* Centred by `top/bottom: 0` against a fixed height rather than by an offset
+     from the bottom, because the card is not one height: it grows eleven pixels
+     when a claim adds its progress bar, and anything anchored to the bottom
+     edge slides down with it. `margin: auto` splits the difference on whatever
+     height the card happens to be, and leaves `transform` free for the ink
+     nudge, which needs it. */
   .sprite {
-    position: absolute; right: -10px; bottom: -12px; width: 84px; height: 84px;
+    position: absolute; right: -6px; top: 0; bottom: 0; margin: auto;
+    width: 128px; height: 128px;
     opacity: 0.17; pointer-events: none;
     image-rendering: pixelated; object-fit: contain;
     filter: grayscale(var(--drain, 0));
@@ -4288,7 +4312,7 @@ addEventListener('resize', () => {
   if (tank) paintTank(tank, view.duration || 0);
   // The watermark's shift is a fraction of what it paints, and what it paints
   // is the window — which a phone turned on its side has just changed. The
-  // cards do not need this: their box is 84px whatever the viewport does.
+  // cards do not need this: their box is 128px whatever the viewport does.
   const watermark = document.getElementById('watermark');
   if (watermark) nudgeArt(watermark);
 });
