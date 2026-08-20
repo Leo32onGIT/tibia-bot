@@ -50,6 +50,12 @@
       linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
     background-size: 46px 46px;
   }
+  /* Chrome on Android reads a downward drag at the top of the document as a
+     reload, and here that is pure loss: the board refetches itself every ten
+     seconds regardless, so the gesture gains the reader nothing and costs them
+     whatever window, selection or week they had open. `contain` keeps the
+     rubber band at the end of the scroll and leaves the gesture with the page. */
+  html, body { overscroll-behavior-y: contain; }
   /* A page that cannot move cannot drag the window about with it. The spawn
      window is `position: fixed`, and on a phone a fixed element is only really
      fixed while the document behind it is still: rubber-banding at either end of
