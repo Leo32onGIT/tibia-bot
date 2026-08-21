@@ -76,7 +76,7 @@ object RespawnThreads extends StrictLogging {
       // making the member pick the right word for their own state was needless.
       List(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Bookings").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
@@ -87,7 +87,7 @@ object RespawnThreads extends StrictLogging {
       // nobody is on.
       List(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(claimEmoji),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Bookings").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️"))
       )
 
@@ -208,11 +208,14 @@ object RespawnThreads extends StrictLogging {
       if (mine <= 0) Nil
       else List(Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
         if (mine == 1) "Cancel Booking" else s"Cancel All $mine Bookings"))
+    // The two ways to make a booking first, then the one way to undo one. Cancel
+    // last also keeps the destructive button away from the one somebody reaches
+    // for most, rather than between the pair that belong together.
     val buttons =
-      Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
+      Button.success(RespawnButtonId.bookAnother(respawnId), "Book")
         .withEmoji(Emoji.fromUnicode(BookEmoji)) ::
-        (cancel :+ Button.link(spawnDashboardLink(guildId, code), "Dashboard")
-          .withEmoji(Emoji.fromUnicode(DashboardEmoji)))
+        Button.link(spawnDashboardLink(guildId, code), "Dashboard")
+          .withEmoji(Emoji.fromUnicode(DashboardEmoji)) :: cancel
     ActionRow.of(buttons.asJava)
   }
 

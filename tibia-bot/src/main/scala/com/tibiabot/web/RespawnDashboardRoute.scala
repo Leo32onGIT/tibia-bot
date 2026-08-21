@@ -1033,7 +1033,7 @@ object RespawnDashboardRoute {
   private def instant(when: java.time.ZonedDateTime): JsValue = JsString(when.toInstant.toString)
 
   /** How many rows of "up next" a spawn sends. Matches
-   *  `RespawnEmbeds.RowsPerField`, because the panel and the Discord card are
+   *  `RespawnEmbeds.RowsPerList`, because the panel and the Discord card are
    *  meant to be the same list — a page that showed twelve where the card showed
    *  ten would read as two different answers to one question. The count of
    *  everything is sent alongside, so the page can own up to what it is not

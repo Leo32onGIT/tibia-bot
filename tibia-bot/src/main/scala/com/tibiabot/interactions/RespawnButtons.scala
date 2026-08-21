@@ -452,7 +452,8 @@ object RespawnButtons extends StrictLogging {
                 deferredRespond.embed(
                   RespawnEmbeds.bookingPanel(respawn, mine, user.getId, reservations,
                     service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
-                    service.daysGivenUp(guildId, now, respawnId = Some(respawn.id)), upcoming),
+                    service.daysGivenUp(guildId, now, respawnId = Some(respawn.id)), upcoming,
+                    Config.yesEmoji, Config.noEmoji),
                   Some(RespawnThreads.spawnBookingButtons(guildId, respawn.id, respawn.code, mine.size)))
 
               case "booknew" =>

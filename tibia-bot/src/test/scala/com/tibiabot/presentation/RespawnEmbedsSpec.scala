@@ -35,6 +35,19 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   private val mappings = Map.empty[String, String]
   private val fallback = "https://example.invalid/fallback.gif"
   private val indent = "▹"
+  /** The Book panel has no fields any more — every part of it is a paragraph of
+   *  the description, and both lists carry a bold title of their own. */
+  private val AllBookings = "**All Bookings**"
+  private val YourBookings = "**Your Bookings**"
+
+  /** The lines under `heading`, up to the blank line that ends its block.
+   *
+   *  By line rather than by paragraph, since a title need not begin one. */
+  private def section(embed: net.dv8tion.jda.api.entities.MessageEmbed, heading: String): String =
+    embed.getDescription.linesIterator.toList.dropWhile(_ != heading) match {
+      case Nil => fail(s"no '$heading' line in:\n${embed.getDescription}")
+      case _ :: rest => rest.takeWhile(_.nonEmpty).mkString("\n")
+    }
   private def image(respawn: Respawn) = RespawnEmbeds.imageFor(respawn, mappings, fallback)
 
   private def fields(embed: net.dv8tion.jda.api.entities.MessageEmbed): Map[String, String] =
@@ -383,9 +396,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs))
 
     embed.getTitle shouldBe "415 — Cult Orcs"
-    embed.getDescription should include("Free right now")
+    embed.getDescription should include("**Free** right now")
     embed.getDescription should include("every day")
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     // Yours is marked rather than filtered out, so the order still reads as the
     // evening it is.
     booked should include("▸")
@@ -407,11 +420,11 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getTitle shouldBe "415 — Cult Orcs"
     embed.getDescription should include("nothing booked here")
     // Everyone else's bookings are still listed, and none is marked as theirs.
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     booked should include("hunter99")
     booked should include("hunter77")
     booked should not include "▸"
-    // Every line still starts with something, so the times share a left edge.
+    // Every line starts with a marker, so the times share a left edge.
     booked.linesIterator.foreach(_ should startWith(indent))
   }
 
@@ -419,18 +432,51 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
     embed.getDescription should include("hunter55")
-    embed.getDescription should include("Your booking is every day")
-    // The spawn's state and the reader's own bookings are separate facts, so
-    // they sit on separate lines.
-    embed.getDescription.linesIterator.next() should endWith(".")
-    embed.getDescription.linesIterator.size should be >= 2
+    // Marked like a row: one booking is still a list of one.
+    section(embed, YourBookings) shouldBe
+      s"▸ Your booking is **every day** at <t:${now.plusHours(2).toInstant.getEpochSecond}:t> for **2h**."
+    // The state leads behind its glyph, one line, with the reader's own titled
+    // underneath it.
+    embed.getDescription should startWith("🔴 Being hunted by ")
+    embed.getDescription should include("\n**Your Bookings**\n")
+    // Nothing quoted anywhere: both lists are titled instead. By line, not by
+    // substring — every timestamp ends in "> " and would match one.
+    embed.getDescription.linesIterator.foreach(_ should not startWith "> ")
+  }
+
+  test("a free spawn is marked as free, in the glyph as well as the word") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs))
+    embed.getDescription should startWith("### 🟢 **Free** right now.")
+  }
+
+  test("the state glyph is the guild's own yes/no pair, not a circle") {
+    // Custom emoji in Discord's `<:name:id>` form, which is what Config holds —
+    // so the panel answers with the same two marks every other reply from this
+    // bot does, rather than a pair of coloured circles nothing else uses.
+    val yes = "<:yes:1135988738565099550>"
+    val no = "<:no:1135988651327766648>"
+    val free = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), yesEmoji = yes, noEmoji = no)
+    val taken = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      Some(claim("55")), now, image(cultOrcs), yesEmoji = yes, noEmoji = no)
+
+    free.getDescription should startWith(s"### $yes **Free**")
+    // Held is one line and no heading — see bookingPanel for why only one of the
+    // two states is short enough to be one.
+    taken.getDescription should startWith(s"$no Being hunted by ")
+    taken.getDescription should not startWith "###"
+    taken.getDescription.linesIterator.next() should include("hunter55")
+    // And no circle left behind either way.
+    free.getDescription should not include "🟢"
+    taken.getDescription should not include "🔴"
   }
 
   test("a slot somebody is waiting on an answer for says so") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4), requester = Some("12"))),
       holder = None, now, image(cultOrcs))
-    fields(embed)("Booked") should include("asked")
+    section(embed, AllBookings) should include("asked")
   }
 
   test("two bookings on one spawn are both described, earliest first") {
@@ -440,15 +486,30 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       List(reserved("99", now.plusHours(1), 60), reserved("99", now.plusHours(2), 60)),
       holder = None, now, image(cultOrcs))
 
-    embed.getDescription should include("2 bookings")
     // One per line, not a semicolon-joined paragraph.
     embed.getDescription should not include ";"
-    embed.getDescription.linesIterator.count(_.startsWith("▸")) shouldBe 2
+    // Counted inside their own section: the All Bookings rows below wear the
+    // same marker, so counting the whole description would find both lists.
+    val yours = section(embed, YourBookings).linesIterator.toList
+    yours should have size 2
+    // Rows and nothing else — the title says whose they are, so there is no
+    // sentence above them saying it again.
+    all(yours) should startWith("▸")
     val morningAt = s"<t:${now.plusHours(1).toInstant.getEpochSecond}:t>"
     val eveningAt = s"<t:${now.plusHours(2).toInstant.getEpochSecond}:t>"
     embed.getDescription.indexOf(morningAt) should be < embed.getDescription.indexOf(eveningAt)
-    // The old rule is gone, so the footer must not still be claiming it.
-    embed.getFooter.getText should not include "one booking"
+  }
+
+  test("the panel closes by saying how to add a booking, naming both ways") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs))
+    val footer = Option(embed.getFooter).map(_.getText).getOrElse("")
+    footer should include("doesn't overlap")
+    footer should include("Book")
+    footer should include("Dashboard")
+    // Bare, not emphasised: a footer is plain text, so asterisks here would be
+    // read as asterisks.
+    footer should not include "**"
   }
 
   test("the booking panel lists the next ten bookings and owns up to the rest") {
@@ -456,7 +517,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", slots,
       holder = None, now, image(cultOrcs))
 
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     booked.linesIterator.count(_.startsWith(indent)) shouldBe 10
     // Soonest first, and the ten it kept are the ten soonest rather than
     // whichever ten fit.
@@ -473,7 +534,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
       holder = None, now, image(cultOrcs), upcoming = List(booking(userId = "77")))
 
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     booked should include("hunter77")
     // Said as the standing arrangement it is, not as a one-off evening.
     booked should include("every day")
