@@ -101,6 +101,11 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private val stateTtl = 10.minutes
   private val secureRandom = new java.security.SecureRandom()
 
+  /** How much of a deep link may ride through the sign-in round trip. Ample for
+   *  anything the bot itself builds, and a bound on what a hand-made login link
+   *  can put into the `state` we hand Discord. */
+  private val MaxResumeLength = 512
+
   private def hmac(data: String): String = {
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(new SecretKeySpec(sessionSecret.getBytes("UTF-8"), "HmacSHA256"))
@@ -358,9 +363,10 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                 case Some(preview) =>
                   complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, preview(matched.toString)))
                 case None =>
-                  val area = cookiePaths.find(p => matched.toString.startsWith(p))
-                  redirect(area.fold(loginPath)(p => s"$loginPath?next=${URLEncoder.encode(p, "UTF-8")}"),
-                    StatusCodes.Found)
+                  // The whole request, not just the path it matched: a link from
+                  // Discord names its spawn in the query, and the area alone
+                  // would come back having forgotten which one.
+                  extractUri(uri => redirect(loginUrlFor(uri), StatusCodes.Found))
               }
             }
           }
@@ -386,19 +392,100 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private def landingIndex(next: Option[String]): Int =
     next.map(cookiePaths.indexOf).filter(_ >= 0).getOrElse(0)
 
-  private def landingPath(state: String): String =
+  private def areaAt(index: String): String = Try(cookiePaths(index.toInt)).getOrElse(mountPath)
+
+  /** Where to land after signing in: the exact page that was asked for when the
+   *  state carries one, the area's front door otherwise.
+   *
+   *  The index above answers "which area", which is all a login needed while
+   *  every gated area had one page worth landing on. A link from Discord names a
+   *  guild and a spawn, and an area is not a useful answer to it — somebody
+   *  pressing Dashboard on a spawn's panel and being handed the server picker
+   *  has been given a chore instead of a page.
+   */
+  private[web] def landingPath(state: String): String =
     state.split('.') match {
-      case Array(_, index) => Try(cookiePaths(index.toInt)).getOrElse(mountPath)
-      case _               => mountPath
+      case Array(_, index, resume) => decodeResume(resume).getOrElse(areaAt(index))
+      case Array(_, index)         => areaAt(index)
+      case _                       => mountPath
     }
+
+  /** The sign-in to send somebody to, carrying where they were going.
+   *
+   *  Used by [[authenticatedUser]]'s own bounce, and offered to callers because
+   *  a page can find a session wanting for reasons this class cannot see. The
+   *  respawn dashboard's board page is the one that does: the guild list behind
+   *  a session lives in memory and does not survive a restart, while the cookie
+   *  it belongs to lasts a week — so a visitor can arrive perfectly signed in
+   *  and still resolve to nothing. Signing in again is the whole fix, and going
+   *  through here is what stops the spawn they were opening being the price of
+   *  it.
+   */
+  def loginUrlFor(uri: Uri): String = {
+    val area = cookiePaths.find(p => uri.path.toString.startsWith(p))
+    val params =
+      area.map(p => s"next=${URLEncoder.encode(p, "UTF-8")}").toList ++
+        resumeTarget(uri).map(target => s"to=${encodeResume(target)}")
+    if (params.isEmpty) loginPath else s"$loginPath?${params.mkString("&")}"
+  }
+
+  /** The page an unauthenticated visitor was actually asking for, when it is one
+   *  worth coming back to. Path and query, relative — never a whole URL. */
+  private def resumeTarget(uri: Uri): Option[String] = {
+    val target = uri.path.toString + uri.rawQueryString.fold("")("?" + _)
+    Some(target).filter(t => t.length <= MaxResumeLength && isOurs(t))
+  }
+
+  /** Whether a string is a relative path into one of this auth's own areas, and
+   *  so somewhere a redirect of ours may send a browser.
+   *
+   *  This is the whole of the open-redirect guard, so it is a whitelist and not
+   *  a hunt for the ways out. A login URL's query is public — anybody can hand
+   *  anybody a `?to=`, and the value rides the round trip in a cookie we set
+   *  ourselves — which makes the check on the way *back* the one that matters.
+   *  Hence [[decodeResume]] applying this again to what it decodes rather than
+   *  trusting that it was checked on the way in.
+   *
+   *  A value that passes starts with a known mount and continues at a boundary,
+   *  so `/dashboardish` is not `/dashboard`; and holds nothing that turns a
+   *  relative path into an absolute one — `//host` is a protocol-relative URL, a
+   *  backslash is read as one by some browsers, and a control character can end
+   *  the `Location` header early and start another.
+   */
+  private def isOurs(target: String): Boolean =
+    !target.contains("//") && !target.contains('\\') && !target.exists(_.isControl) &&
+      cookiePaths.exists(p => target == p || target.startsWith(s"$p/") || target.startsWith(s"$p?"))
+
+  /** Base64url, so the destination survives inside a dot-separated `state` and
+   *  needs no further escaping in a query string of its own — the alphabet is
+   *  `A-Za-z0-9-_` and carries neither a dot nor anything a URL minds. */
+  private def encodeResume(target: String): String =
+    Base64.getUrlEncoder.withoutPadding.encodeToString(target.getBytes("UTF-8"))
+
+  /** The reverse, refusing anything that is not one of ours — including
+   *  something that is not Base64 at all, which a truncated or hand-edited state
+   *  will produce. None everywhere, so the caller falls back to the area. */
+  private def decodeResume(encoded: String): Option[String] =
+    Try(new String(Base64.getUrlDecoder.decode(encoded), "UTF-8")).toOption.filter(isOurs)
+
+  /** Exposed for [[DiscordAuthSpec]]: the guard above is the security-critical
+   *  half of this class and is otherwise reachable only through a round trip
+   *  that ends at Discord. */
+  private[web] def resumableForTest(target: String): Boolean = isOurs(target)
 
   val routes: akka.http.scaladsl.server.Route =
     path("auth" / "login") {
       get {
-        parameter("next".optional) { next =>
+        parameter("next".optional, "to".optional) { (next, to) =>
           // The nonce and the destination travel together, so the comparison on
           // the way back still covers both and neither can be swapped alone.
-          val state = s"${newState()}.${landingIndex(next)}"
+          //
+          // `to` is checked here as well as on the way back, so a login link
+          // carrying somewhere it should not go is refused before it reaches
+          // Discord rather than after — the visitor is bounced to the area's
+          // front door, which is where they would have landed anyway.
+          val resume = to.flatMap(decodeResume).map(encodeResume)
+          val state = s"${newState()}.${landingIndex(next)}${resume.fold("")("." + _)}"
           setCookie(stateCookie(state)) {
             redirect(authorizeUrl(state), StatusCodes.Found)
           }
@@ -434,9 +521,11 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                   onComplete(resolveUserId(code)) {
                     case Success(Some(userId)) =>
                       val expiry = Instant.now().plusSeconds(sessionTtl.toSeconds).getEpochSecond
-                      // Back to whichever area sent them, which the state
+                      // Back to whichever page sent them, which the state
                       // carried and which has just been verified against the
-                      // cookie — so it can only ever be one of ours.
+                      // cookie — and which is checked against `isOurs` once
+                      // more as it is decoded, so it can only ever be one of
+                      // ours however it got here.
                       val landing: String = stateCookieOpt.map(c => landingPath(c.value)).getOrElse(mountPath)
                       setSession(signSession(userId, expiry)) {
                         redirect(landing, StatusCodes.Found)

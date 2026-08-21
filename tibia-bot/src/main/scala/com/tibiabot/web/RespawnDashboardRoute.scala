@@ -103,13 +103,51 @@ final class RespawnDashboardRoute(
   /** As [[withAccess]], but also hands over everything else the visitor can
    *  reach. Only the board page needs it, and only to decide whether its server
    *  chip is a switcher or a label — there is no point offering a choice to
-   *  somebody with one server. */
+   *  somebody with one server.
+   *
+   *  And, unlike the guards above, this one answers a *page* rather than a
+   *  payload, so a visitor it cannot admit is sent to the front door instead of
+   *  being handed the word "Forbidden".
+   *
+   *  That mattered little while this URL was only ever reached from the
+   *  dashboard itself. It is a link in Discord now — the Dashboard button on a
+   *  spawn's Book panel — and there are two ordinary ways to arrive holding a
+   *  session that resolves to nothing. Either the guild genuinely is not
+   *  theirs, or, far more often, we no longer know which servers they are in:
+   *  [[UserGuildCache]] lives in memory and is written only by the OAuth
+   *  callback, so every restart empties it while the seven-day cookies it
+   *  belongs to go on working. Somebody pressing that button after a deploy was
+   *  shown a bare error page for what is really "sign in again".
+   *
+   *  The landing route already tells those cases apart and has a page for each,
+   *  so this defers to it rather than growing a second opinion. Nothing loops:
+   *  the landing draws a board itself and never redirects on to one.
+   *
+   *  The data endpoints keep their 403 — the page's own fetches read that status
+   *  as "no longer have access" and say so in the header, which is the right
+   *  answer to a poll and would be a strange one to a browser.
+   */
   private def withAccessAmong(guildId: String)(inner: (GuildAccess, AccessReport) => Route): Route =
     discordAuth.authenticatedUser { userId =>
       read(accessService.rememberedReportFor(userId, guildIdsOf(userId), Some(guildId))) { report =>
         report.granted.find(_.guildId == guildId) match {
           case Some(access) => inner(access, report)
-          case None         => complete(StatusCodes.Forbidden -> "Forbidden")
+          // Signed in, and yet we hold no list of their servers at all: the
+          // session outlived the memory of what is behind it. Signing in again
+          // is the entire fix, so send them to do it *through the bounce*, which
+          // takes the spawn along — landing them on the dashboard's front door
+          // would make them find it again by hand, which is the version of this
+          // that was reported.
+          //
+          // `None` from the cache, not an empty set: a login writes an entry
+          // whatever Discord says, so somebody genuinely in no servers comes
+          // back with `Some(empty)` and takes the branch below. That is what
+          // keeps this from being a loop.
+          case None if discordAuth.userGuilds.get(userId).isEmpty =>
+            extractUri(uri => redirect(discordAuth.loginUrlFor(uri), StatusCodes.Found))
+          // We know their servers; this one simply is not among them. Nothing a
+          // fresh login would change, so the landing route explains it instead.
+          case None => redirect(RespawnDashboardRoute.LandingPath, StatusCodes.Found)
         }
       }
     }
@@ -750,6 +788,10 @@ object RespawnDashboardRoute {
   /** Where the sign-in lives. Written once here rather than at each use, since
    *  three screens now point at it. */
   private[web] val LoginPath = "/dashboard/auth/login"
+
+  /** The dashboard's own front door — where somebody goes to be told which
+   *  boards they can see, or shown the one they can. */
+  private[web] val LandingPath = "/dashboard"
 
   /** The title and body for a visitor who is signed in and has nothing.
    *

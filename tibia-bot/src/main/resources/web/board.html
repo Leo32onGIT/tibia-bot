@@ -2135,6 +2135,11 @@ const windowEl = document.getElementById('window');
  *  to the card, which is the trade for not having to define what a bookmarked
  *  card means.
  *
+ *  A link that names a spawn does not change that. `openDeepLink` spends its
+ *  parameter before opening anything, so by the time a card is pushed the
+ *  address is the plain board again — the link is a way in, not an address the
+ *  card lives at.
+ *
  *  `history.state` rather than a variable of our own, because a reload keeps the
  *  state and would not keep the variable — and the two disagreeing is exactly
  *  how a Back button ends up needing two presses. */
@@ -4443,9 +4448,41 @@ document.getElementById('filter').addEventListener('input', e => {
   renderBoard();
 });
 
+/** The spawn a link asked for, opened once there is a board to open it on.
+ *
+ *  `?spawn=CODE` — what the Dashboard button on a spawn's Book panel in Discord
+ *  points at, so pressing it lands on that spawn's card with its week drawn
+ *  rather than on the board to go and find it.
+ *
+ *  Spent on arrival. The parameter is an instruction from the link that was
+ *  followed, not a description of where the reader now is, and clearing it
+ *  before the card opens is what keeps the history honest: the entry the card
+ *  is pushed on top of is already the plain board, so Back lands somewhere that
+ *  says what it shows, and a reload comes back to the board exactly as it did
+ *  before any of this existed.
+ *
+ *  Matched without case, because a code is read off a Discord post and typed
+ *  back by hand as often as it is clicked. A code that is not in the catalogue —
+ *  a spawn removed since the link was posted — quietly leaves the reader on the
+ *  board, which is the page they asked for the spawn on.
+ */
+function openDeepLink() {
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get('spawn');
+  if (!wanted) return;
+  params.delete('spawn');
+  const rest = params.toString();
+  history.replaceState(history.state, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+  const spawn = board && board.spawns.find(s => s.code.toLowerCase() === wanted.toLowerCase());
+  if (spawn) openWindow(spawn.code);
+}
+
 setUpModPanel();
 refreshScale();
-refresh();
+// After the first poll, not beside it: openWindow reads the guild's limits and
+// the spawn's own ceiling to decide what length the card opens at, and neither
+// is there until the board has landed.
+refresh().then(openDeepLink);
 // The board keeps up on its own. The open window is left alone while somebody is
 // mid-decision: rebuilding the grid under a half-made selection would throw it
 // away, and a week of bookings does not change under the reader the way a live

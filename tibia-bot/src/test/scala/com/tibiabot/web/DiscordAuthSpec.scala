@@ -61,6 +61,16 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   private def routes = pathPrefix("dashboard")(auth.routes)
 
+  /** The `to` parameter as the bounce writes it, and as a caller crafting a
+   *  login link by hand would have to. */
+  private def encodeTo(target: String): String =
+    java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(target.getBytes("UTF-8"))
+
+  /** The destination read back out of a login redirect. */
+  private def decoded(location: String): String =
+    new String(java.util.Base64.getUrlDecoder.decode(
+      akka.http.scaladsl.model.Uri(location).query().get("to").get), "UTF-8")
+
   /** The nonce the login redirect just minted, read back out of the two places
    *  it has to agree — the authorize URL's `state` and the cookie. */
   private def loginState(): (String, String) = {
@@ -140,13 +150,102 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   }
 
   test("an unauthenticated visitor to a guarded route is sent to login, and back afterwards") {
-    // The return path rides along so somebody who opens a gated area cold is
-    // returned there rather than dropped on whichever one happens to be primary.
+    // Both halves ride along: the area, so somebody who opens a gated area cold
+    // is returned there rather than dropped on whichever one happens to be
+    // primary — and the page itself, so they are returned to the one they asked
+    // for rather than to its front door.
     val guarded = pathPrefix("dashboard")(path("thing")(auth.authenticatedUser(_ => complete("ok"))))
     Get(s"$mountPath/thing") ~> guarded ~> check {
       status shouldBe StatusCodes.Found
-      header("Location").get.value() shouldBe s"$mountPath/auth/login?next=%2Fdashboard"
+      val location = header("Location").get.value()
+      location should startWith(s"$mountPath/auth/login?next=%2Fdashboard&to=")
+      decoded(location) shouldBe s"$mountPath/thing"
     }
+  }
+
+  test("the page a deep link named comes back with its query intact") {
+    // The whole point of carrying more than the area: a link from Discord names
+    // a guild in the path and a spawn in the query, and either one lost leaves
+    // the reader somewhere they have to start again from.
+    val guarded = pathPrefix("dashboard")(path("g" / Segment)(_ =>
+      auth.authenticatedUser(_ => complete("ok"))))
+    Get(s"$mountPath/g/12345?spawn=415") ~> guarded ~> check {
+      decoded(header("Location").get.value()) shouldBe s"$mountPath/g/12345?spawn=415"
+    }
+  }
+
+  test("login carries a checked destination through as a third part of the state") {
+    Get(s"$mountPath/auth/login?next=%2Fdashboard&to=${encodeTo(s"$mountPath/g/1?spawn=415")}") ~>
+      routes ~> check {
+      val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+      state.split('.') should have length 3
+      new String(java.util.Base64.getUrlDecoder.decode(state.split('.')(2)), "UTF-8") shouldBe
+        s"$mountPath/g/1?spawn=415"
+    }
+  }
+
+  // A login URL's query is public — anyone can hand anyone a `?to=` — so the
+  // destination is checked on the way in as well as on the way back, and a bad
+  // one leaves the visitor heading for the area's front door as before.
+  test("a destination that leaves our own areas is dropped before Discord sees it") {
+    val refused = List(
+      "https://evil.test/steal",      // an absolute URL
+      "//evil.test/steal",            // protocol-relative, which a browser follows off-site
+      "/dashboardish/g/1",            // a prefix that only looks like ours
+      "/nowhere",                     // real path, not a gated area
+      "\\evil.test",              // read as a slash pair by some browsers
+      mountPath + "/g/1\nLocation: https://evil.test" // a header split
+    )
+    refused.foreach { target =>
+      withClue(s"$target: ") {
+        Get(s"$mountPath/auth/login?to=${encodeTo(target)}") ~> routes ~> check {
+          val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+          state.split('.') should have length 2
+        }
+      }
+    }
+  }
+
+  test("a destination that is not even Base64 is dropped rather than erroring") {
+    Get(s"$mountPath/auth/login?to=not-base-64-at-all!!") ~> routes ~> check {
+      status shouldBe StatusCodes.Found
+      val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+      state.split('.') should have length 2
+    }
+  }
+
+  // The far side of the round trip, which no route test can reach: completing a
+  // callback means exchanging a real code with Discord. This is the step that
+  // turns the state we minted back into somewhere to send the browser.
+  test("the state a login minted comes back as the page it named") {
+    val target = s"$mountPath/g/1082484147492237515?spawn=415"
+    auth.landingPath(s"nonce.0.${encodeTo(target)}") shouldBe target
+  }
+
+  test("a state with no destination in it still lands on its area") {
+    auth.landingPath("nonce.1") shouldBe adminPath
+    auth.landingPath("nonce.0") shouldBe mountPath
+  }
+
+  test("a destination that no longer passes the guard falls back to the area") {
+    // Belt and braces: this value cannot arrive here, since it is checked on the
+    // way in and covered by the cookie comparison. Checked anyway, because it is
+    // the last thing standing between a tampered cookie and an off-site redirect.
+    auth.landingPath(s"nonce.1.${encodeTo("https://evil.test")}") shouldBe adminPath
+    auth.landingPath("nonce.0.not-base-64!!") shouldBe mountPath
+    auth.landingPath("nonsense") shouldBe mountPath
+  }
+
+  test("the guard admits our own areas and nothing that reaches outside them") {
+    auth.resumableForTest(mountPath) shouldBe true
+    auth.resumableForTest(s"$mountPath/g/1?spawn=415") shouldBe true
+    // The other mount is gated by the same session, so it is just as much ours.
+    auth.resumableForTest(s"$adminPath/whatever") shouldBe true
+    auth.resumableForTest(s"$mountPath?x=1") shouldBe true
+    auth.resumableForTest(s"${mountPath}ish") shouldBe false
+    auth.resumableForTest("//evil.test") shouldBe false
+    auth.resumableForTest("https://evil.test") shouldBe false
+    auth.resumableForTest("") shouldBe false
   }
 
   // A crawler follows the redirect to Discord's OAuth screen and reports what it
@@ -198,7 +297,11 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val guarded = pathPrefix("status")(path("thing")(auth.authenticatedUser(_ => complete("ok"))))
     Get(s"$adminPath/thing") ~> guarded ~> check {
       status shouldBe StatusCodes.Found
-      header("Location").get.value() shouldBe s"$mountPath/auth/login?next=%2Fstatus"
+      val location = header("Location").get.value()
+      location should startWith(s"$mountPath/auth/login?next=%2Fstatus&to=")
+      // And to the page within it, since the admin area is gated by this same
+      // session and so is just as resumable as the member one.
+      decoded(location) shouldBe s"$adminPath/thing"
     }
   }
 

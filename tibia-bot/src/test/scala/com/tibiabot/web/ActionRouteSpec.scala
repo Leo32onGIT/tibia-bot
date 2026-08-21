@@ -141,10 +141,15 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   private def routes(actions: RespawnActionPort,
                      member: Option[MemberAccess] = Some(MemberAccess(false, Set.empty, Set(CategoryId))),
                      moderatorRole: String = "0",
-                     theirGuilds: Set[String] = Set("g1")) = {
+                     theirGuilds: Set[String] = Set("g1"),
+                     /** No entry at all, as opposed to an empty one: what a
+                      *  restart leaves behind, since the cache is in memory and
+                      *  only a login writes to it. The two are different answers
+                      *  — see the board page's guard. */
+                     forgotten: Boolean = false) = {
     val a = auth
     // The guild list is seeded directly; a real one arrives at login.
-    a.userGuilds.put("user-1", theirGuilds)
+    if (!forgotten) a.userGuilds.put("user-1", theirGuilds)
     val access = new DashboardAccessService(
       new FakeGateway(member),
       respawnForumExists = _ => true,
@@ -231,6 +236,49 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       status shouldBe StatusCodes.Forbidden
     }
     actions.claims shouldBe empty
+  }
+
+  // The board *page*, not a payload. It is a link in Discord now, so somebody
+  // arriving on a guild that resolves to nothing needs a page to go on with
+  // rather than the word "Forbidden" — and the commonest reason to arrive that
+  // way is a session that outlived the memory of which servers it belongs to,
+  // which is really "sign in again".
+  // The case a restart creates, and the one that was reported: the cookie is
+  // good for a week, the guild list behind it lives in memory and does not
+  // survive the process. The visitor is signed in as far as the session goes,
+  // resolves to nothing, and needs to sign in again — which must not cost them
+  // the spawn they were opening.
+  test("a session that outlived its guild list signs in again, keeping the page") {
+    Get("/dashboard/g/g1?spawn=415") ~> signedIn ~>
+      routes(new RecordingActions, forgotten = true) ~> check {
+      status shouldBe StatusCodes.Found
+      val location = header("Location").get.value()
+      location should startWith("/dashboard/auth/login?")
+      val to = akka.http.scaladsl.model.Uri(location).query().get("to").get
+      new String(java.util.Base64.getUrlDecoder.decode(to), "UTF-8") shouldBe "/dashboard/g/g1?spawn=415"
+    }
+  }
+
+  // And the other half of that branch, which is what stops it looping: a login
+  // records whatever Discord said, so somebody whose list we *do* hold and who
+  // simply cannot see this guild gets the front door instead of a second login.
+  test("a guild that is known not to be theirs goes to the front door, not back to login") {
+    // Including when the list we hold is empty — that is still a list, written
+    // by a login, so a second one would say the same thing.
+    Get("/dashboard/g/g-other?spawn=415") ~> signedIn ~>
+      routes(new RecordingActions, theirGuilds = Set.empty) ~> check {
+      status shouldBe StatusCodes.Found
+      header("Location").get.value() shouldBe "/dashboard"
+    }
+  }
+
+  // The page redirects; its data does not. A poll reads 403 as "no longer have
+  // access" and says so in the header, where a redirect would be answered with
+  // the sign-in HTML and parsed as JSON.
+  test("the board's own data still answers a caller it cannot admit with 403") {
+    Get("/dashboard/g/g-other/board") ~> signedIn ~> routes(new RecordingActions) ~> check {
+      status shouldBe StatusCodes.Forbidden
+    }
   }
 
   // Knowing a guild id must get you nothing — the check is the authorization.
