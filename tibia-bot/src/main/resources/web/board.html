@@ -1712,24 +1712,29 @@ function paintCard(spawn) {
   }
 }
 
-/** Which spawns are shown, and in what order: most recently claimed first, and
- *  a spawn nobody has ever claimed last.
+/** Which spawns are shown, and in what order: the ones being hunted right now
+ *  first, soonest to finish at the front, then everything else by how recently
+ *  it was touched — and a spawn nobody has ever claimed last.
  *
- *  The same rule Discord's forum follows — a post is bumped when somebody takes
- *  the spawn and keeps that place until something else is taken, so letting a
- *  spawn go does not cost you the top of the list. Whether it is *currently*
- *  held is deliberately not part of the order: a hunt claimed three hours ago
- *  and still running is older news than one claimed a minute ago and finished.
+ *  A live hunt is the one thing on the board that is about to change, so the
+ *  front of the list is ordered by when it changes. Letting a spawn go drops it
+ *  behind everything still held, which is the point: the top of the board is
+ *  for what is happening, not for who was last to do something.
  *
- *  This briefly sorted held spawns into a group of their own, which looked like
- *  the fix for claiming not reaching the top. It was not: a booked slot's
- *  starts_at counted as activity that had already happened, so a spawn booked
- *  for tomorrow outranked everything until tomorrow — see lastActivityByRespawn,
- *  where that is now excluded until the slot actually comes round.
+ *  The second tier is still plain recency, the rule Discord's forum follows for
+ *  a post. A booked slot that has not come round yet does not count as activity
+ *  — see lastActivityByRespawn, without which a spawn booked for tomorrow
+ *  outranked everything until tomorrow.
  */
 function shownSpawns() {
+  const held = s => (s.state === 'claimed' ? 0 : 1);
+  // A held spawn with no window on it — both ends have to be present for the
+  // server to send either — has no time left to read, so it sorts to the back
+  // of the held group rather than turning the comparison into NaN.
+  const ends = s => (s.endsAt ? new Date(s.endsAt).getTime() : Infinity);
   const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
-  return board.spawns.filter(matches).slice().sort((a, b) => since(a) - since(b));
+  return board.spawns.filter(matches).slice().sort((a, b) =>
+    held(a) - held(b) || (held(a) === 0 ? ends(a) - ends(b) : since(a) - since(b)));
 }
 
 /** Put the cards in the right order, making and removing only what changed.
