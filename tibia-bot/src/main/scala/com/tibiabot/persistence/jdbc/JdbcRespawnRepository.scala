@@ -216,6 +216,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
       statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_nickname VARCHAR(255);")
+      statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
 
       // Give a name back to every row that has none, from the newest one the
@@ -369,6 +371,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       requestDeadline = optionalZoned(result, "request_deadline"),
       requesterUserId = Option(result.getString("requester_user_id")).filter(_.nonEmpty),
       requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty),
+      requesterNickname = Option(result.getString("requester_nickname")).filter(_.nonEmpty),
       nickname = Option(result.getString("nickname")).getOrElse(""),
       requestedStartsAt = optionalZoned(result, "requested_starts_at"),
       requestedDurationMinutes = {
@@ -1448,7 +1451,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         """UPDATE respawn_claims
           |SET user_id = ?, user_name = ?, nickname = ?, character_name = '', kind = 'adhoc',
           |    schedule_id = NULL, asked_at = NULL, request_deadline = NULL,
-          |    requester_user_id = NULL, requester_user_name = NULL,
+          |    requester_user_id = NULL, requester_user_name = NULL, requester_nickname = NULL,
           |    requested_starts_at = NULL, requested_duration_minutes = NULL,
           |    confirmed_at = NULL
           |WHERE id = ? AND status = 'reserved'
@@ -1596,7 +1599,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
-                        requesterUserName: String, askedAt: ZonedDateTime,
+                        requesterUserName: String, requesterNickname: String, askedAt: ZonedDateTime,
                         deadline: ZonedDateTime,
                         wanted: Option[(ZonedDateTime, Int)]): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
@@ -1605,7 +1608,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET asked_at = ?, request_deadline = ?, requester_user_id = ?, requester_user_name = ?,
-          |    requested_starts_at = ?, requested_duration_minutes = ?
+          |    requester_nickname = ?, requested_starts_at = ?, requested_duration_minutes = ?
           |WHERE id = ? AND status = 'reserved' AND asked_at IS NULL
           |RETURNING *;""".stripMargin)
       try {
@@ -1613,15 +1616,16 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(2, Timestamp.from(deadline.toInstant))
         statement.setString(3, requesterUserId)
         statement.setString(4, requesterUserName)
+        statement.setString(5, requesterNickname)
         wanted match {
           case Some((start, minutes)) =>
-            statement.setTimestamp(5, Timestamp.from(start.toInstant))
-            statement.setInt(6, minutes)
+            statement.setTimestamp(6, Timestamp.from(start.toInstant))
+            statement.setInt(7, minutes)
           case None =>
-            statement.setNull(5, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
-            statement.setNull(6, java.sql.Types.INTEGER)
+            statement.setNull(6, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setNull(7, java.sql.Types.INTEGER)
         }
-        statement.setLong(7, claimId)
+        statement.setLong(8, claimId)
         val result = statement.executeQuery()
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
@@ -1653,6 +1657,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """UPDATE respawn_claims
         |SET request_deadline = NULL, requester_user_id = NULL, requester_user_name = NULL,
+        |    requester_nickname = NULL,
         |    requested_starts_at = NULL, requested_duration_minutes = NULL
         |WHERE id = ? AND status = 'reserved'
         |RETURNING *;""".stripMargin)

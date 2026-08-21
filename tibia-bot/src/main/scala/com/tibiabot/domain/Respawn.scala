@@ -92,6 +92,11 @@ final case class RespawnClaim(
   requestDeadline: Option[ZonedDateTime] = None,
   requesterUserId: Option[String] = None,
   requesterUserName: Option[String] = None,
+  /** What the guild calls whoever asked, kept beside their account name for the
+   *  same reason the owner's is: the DM putting the question names them, and a
+   *  request granted becomes their booking under both names. Cleared with the
+   *  rest of the request, so it never outlives the question it belongs to. */
+  requesterNickname: Option[String] = None,
   /** The window the asker actually booked, which merely overlaps this slot
    *  rather than matching it — so granting the request has to create their
    *  window, not hand over this one.

@@ -284,10 +284,16 @@ object RespawnEmbeds {
     // way to ask; the plainer opening survives for a request that was already in
     // flight when the Request button was removed, and for nothing else.
     //
-    // The name recorded on the request rather than a mention — see Names.user.
-    // "Someone" is the fallback for a row written before the name was kept.
+    // The names recorded on the request rather than a mention — see Names.user.
+    // "Someone" is the fallback for a row written before they were kept.
     // Already emphasised, so the sentences below interpolate it bare.
-    val asker = slot.requesterUserName.filter(_.nonEmpty).map(Names.user).getOrElse("**Someone**")
+    //
+    // Worth both names here more than anywhere else in the feature: this is the
+    // message asking somebody to give a slot up, and they can only weigh that if
+    // they recognise who is asking.
+    val asker = slot.requesterUserName.filter(_.nonEmpty)
+      .map(name => Names.user(slot.requesterNickname.getOrElse(""), name))
+      .getOrElse("**Someone**")
     val opening = wanted match {
       case Some((start, minutes)) =>
         s"$asker wants to book ${spawnLink(respawn)} from ${clockTime(start)} " +

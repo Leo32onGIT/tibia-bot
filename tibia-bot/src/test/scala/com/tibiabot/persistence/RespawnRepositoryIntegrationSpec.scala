@@ -591,13 +591,13 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
-    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60), None)
     asked.flatMap(_.requesterUserId) shouldBe Some("u2")
     asked.flatMap(_.askedAt) should not be empty
 
     // The rule: once asked, never again — and two people pressing Request at the
     // same moment cannot both get in.
-    repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60), None) shouldBe None
+    repo.requestOccurrence(g, slot.id, "u3", "Three", "Threesie", now, now.plusMinutes(60), None) shouldBe None
   }
 
   test("a request raised by booking over a slot remembers the window that was booked") {
@@ -611,7 +611,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // window from the one they are asking about — so it has to be stored, not
     // inferred from the slot when the answer comes back.
     val wanted = now.plusHours(1)
-    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60),
       Some((wanted, 180))).get
 
     asked.requestedSlot.map(_._2) shouldBe Some(180)
@@ -631,7 +631,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // The owner has a few minutes past the start to say they are there, so the
     // slot cannot start on its own in the meantime — that would answer for them,
     // and would strand the request on a row the sweep no longer looks at.
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, start.plusMinutes(5), None)
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, start.plusMinutes(5), None)
     repo.dueReservations(g, start) shouldBe empty
     repo.dueReservations(g, start.plusMinutes(4)) shouldBe empty
 
@@ -646,7 +646,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60),
       Some((now.plusHours(1), 180)))
 
     val kept = repo.keepOccurrence(g, slot.id)
@@ -661,13 +661,48 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.expiredRequests(g, now.plusHours(1)) shouldBe empty
   }
 
+  test("a request carries the asker's guild name, and gives it up with the rest of the request") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    // Both names, because the DM putting the question to the owner names whoever
+    // is asking, and an account name alone is not who their server knows.
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now,
+      now.plusMinutes(60), None).get
+    asked.requesterUserName shouldBe Some("Two")
+    asked.requesterNickname shouldBe Some("Twosie")
+
+    // Settled: the name goes with the question it belonged to, rather than
+    // lingering on a slot nobody is asking about any more.
+    val kept = repo.keepOccurrence(g, slot.id).get
+    kept.requesterUserName shouldBe None
+    kept.requesterNickname shouldBe None
+    // The one part of a request that deliberately survives being answered.
+    kept.askedAt should not be empty
+  }
+
+  test("an asker the guild has no name for is stored without one, not as an empty name") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "", now, now.plusMinutes(60), None).get
+    asked.requesterUserName shouldBe Some("Two")
+    asked.requesterNickname shouldBe None
+  }
+
   test("an unanswered request is picked up only once its deadline has gone by") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60), None)
 
     repo.expiredRequests(g, now.plusMinutes(59)) shouldBe empty
     repo.expiredRequests(g, now.plusMinutes(60)).map(_.id) shouldBe List(slot.id)
@@ -825,7 +860,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // Asked first, then confirmed from the reminder rather than from the request
     // DM — the two prompts overlap, and both are ways of saying yes.
-    repo.requestOccurrence(g, slot.id, "asker", "Asker", now, now.plusMinutes(60)) should not be empty
+    repo.requestOccurrence(g, slot.id, "asker", "Asker", "Askersie", now, now.plusMinutes(60)) should not be empty
     repo.confirmClaim(g, slot.id, now.plusMinutes(30)) should not be empty
     repo.expiredRequests(g, now.plusMinutes(61)) shouldBe empty
   }

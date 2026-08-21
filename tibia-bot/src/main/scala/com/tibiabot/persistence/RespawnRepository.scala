@@ -446,7 +446,7 @@ trait RespawnRepository {
    *  necessarily matching it. None only for a request raised before booking over
    *  a slot became the one way to ask. */
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
-                        requesterUserName: String, askedAt: ZonedDateTime,
+                        requesterUserName: String, requesterNickname: String, askedAt: ZonedDateTime,
                         deadline: ZonedDateTime,
                         wanted: Option[(ZonedDateTime, Int)] = None): Option[RespawnClaim]
 

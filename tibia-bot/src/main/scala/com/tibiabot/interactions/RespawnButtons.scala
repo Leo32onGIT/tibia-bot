@@ -126,9 +126,10 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} stays yours — " +
                   "I've let them know you're hunting it.")
                 clearOfferButtons(event)
-              case SlotAnswer.Passed(respawn, toUserName) =>
+              case SlotAnswer.Passed(respawn, toUserName, toNickname) =>
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} has gone to " +
-                  s"${Names.user(toUserName)} for that slot. Your booking still stands for the days after.")
+                  s"${Names.user(toNickname, toUserName)} for that slot. " +
+                  "Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.PassedUnclaimed(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've given up that slot on " +

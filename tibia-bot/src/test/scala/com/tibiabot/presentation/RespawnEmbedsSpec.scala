@@ -369,12 +369,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       minutes, active = true, createdAt = now, daysOfWeek = days)
 
   private def reserved(userId: String, at: ZonedDateTime, minutes: Int = 120,
-                       requester: Option[String] = None) =
+                       requester: Option[String] = None, requesterNickname: Option[String] = None) =
     claim(userId, minutes, RespawnClaim.StatusReserved).copy(
       startsAt = Some(at), endsAt = Some(at.plusMinutes(minutes.toLong)),
       requesterUserId = requester,
       // Named the same way the claimant is, since that is what gets rendered.
-      requesterUserName = requester.map(id => s"hunter$id"))
+      requesterUserName = requester.map(id => s"hunter$id"),
+      requesterNickname = requesterNickname)
 
   test("the booking panel shows the whole evening, not just your own slot") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
@@ -473,6 +474,27 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       text should not include "<@"
       text should include("the slot goes to them")
     }
+  }
+
+  test("the asker is named the way the server knows them, where it knows them") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"),
+      requesterNickname = Some("Bald Dwarf"))
+    val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), None)
+
+    // The account is what makes them findable; the guild name is what makes the
+    // owner recognise who is asking them to give a slot up.
+    text should include("hunter42")
+    text should include("Bald Dwarf")
+    text should not include "<@"
+  }
+
+  test("an asker with no guild name is still named by their account alone") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"))
+    val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), None)
+
+    text should include("hunter42")
+    // Not a dangling "(@)" where a name it never had would have gone.
+    text should not include "(@"
   }
 
   test("a request with no asker recorded still reads as a sentence") {

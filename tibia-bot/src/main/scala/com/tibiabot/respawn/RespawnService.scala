@@ -240,10 +240,11 @@ sealed trait SlotAnswer
 object SlotAnswer {
   /** They are hunting it, so the request is refused and the slot stays theirs. */
   final case class Kept(respawn: Respawn) extends SlotAnswer
-  /** They are not, so it passes to whoever asked. Carries the asker's name
-   *  rather than their id: the only thing done with it is naming them in the
-   *  reply, and the row already knows what they are called. */
-  final case class Passed(respawn: Respawn, toUserName: String) extends SlotAnswer
+  /** They are not, so it passes to whoever asked. Carries the asker's names
+   *  rather than their id: the only thing done with them is naming them in the
+   *  reply, and the row already knows what they are called. Both, so the person
+   *  who just gave a slot up is told who has it in the words their server uses. */
+  final case class Passed(respawn: Respawn, toUserName: String, toNickname: String) extends SlotAnswer
   /** They are not — but the asker had booked a longer window than the slot they
    *  asked about, and the rest of it is somebody else's now. The slot is given up
    *  all the same; it simply goes back to being free rather than to them. */
@@ -1202,8 +1203,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         else if (durationMinutes >= RespawnSchedule.Daily)
           Left("A slot has to be shorter than a day.")
         else {
+          // The nickname belongs on the candidate as much as on the saved rule:
+          // a booking that clashes never becomes a row of its own, so this
+          // stand-in is the only record of who is asking, and the request it
+          // turns into is named from it.
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
-            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
+            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek,
+            nickname = nickname)
           // Checking for a clash and then writing the booking is two decisions
           // on one picture, and without the lock two people booking the same
           // evening at the same moment each got the picture from before the
@@ -1282,7 +1288,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
 
         repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
-          now, deadline, theirs) match {
+          candidate.nickname, now, deadline, theirs) match {
           case None => refuse(" Somebody else asked about it first.")
           case Some(asked) =>
             RespawnThreads.dm(guild, asked.userId,
@@ -1512,12 +1518,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // longer an occurrence of anybody's standing rule, and the audit trail
             // keeps both halves of what happened.
             repository.reserveFor(guildId, respawn.id, requester,
-              slot.requesterUserName.getOrElse(""), "", start, minutes)
+              slot.requesterUserName.getOrElse(""), slot.requesterNickname.getOrElse(""),
+              start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
                 RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
-            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""))
+            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""),
+              slot.requesterNickname.getOrElse(""))
           }
       }
     }
