@@ -230,6 +230,30 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.findByCode(g, "415") should not be empty
   }
 
+  test("syncSeed keeps a dropped code whose booking is still only a rule") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+    val spawn = repo.findByCode(g, "415").get
+    // A daily booking whose next evening is far enough off that no slot row has
+    // been written for it — which is most of the day, since a slot appears only
+    // when its start comes within the look-ahead. The rule is the whole of the
+    // arrangement until then.
+    val rule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusDays(2), 1440, 120)
+    repo.reservationsFor(g, spawn.id, now) shouldBe empty
+
+    val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
+    sync.retired shouldBe 0
+    sync.inUse shouldBe 1
+    repo.findByCode(g, "415") should not be empty
+    repo.findSchedule(g, rule.id) should not be empty
+
+    // And once the standing arrangement is dropped, the code retires as any
+    // other unused one does.
+    repo.deactivateSchedule(g, rule.id)
+    repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", ""))).retired shouldBe 1
+    repo.findByCode(g, "415") shouldBe None
+  }
+
   test("syncSeedCreatures updates seed rows, and only what actually changed") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", ""), ("806", "Port Hope", "Hydra Mountain", "Hydra")))

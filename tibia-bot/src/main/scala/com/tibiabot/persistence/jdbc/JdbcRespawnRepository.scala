@@ -712,14 +712,35 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  /** Whether anybody is holding, waiting for, or has booked this spawn. */
+  /** Whether anybody is holding, waiting for, or has booked this spawn.
+   *
+   *  A booking counts in both the shapes it can have. A slot row exists only
+   *  once its start comes within the look-ahead — half a day — so a repeating
+   *  booking spends most of its life as a rule and nothing else. Asking about
+   *  rows alone read a daily 7:30am booking as an unclaimed spawn for the other
+   *  eleven hours of the day, and `removeRespawn` deletes the rules along with
+   *  the row: retiring a code out from under somebody's standing arrangement,
+   *  silently, on a restart.
+   *
+   *  This is the same question [[RespawnService.removeCustomSpawn]] asks before
+   *  it lets a moderator delete a spawn, and it asked it more carefully than the
+   *  automatic path did — which was backwards.
+   *
+   *  `active` on the rule, as `schedulesForRespawn` has it: cancelling a booking
+   *  flags the row rather than deleting it, so counting every rule ever written
+   *  would keep a code in the catalogue on the strength of an arrangement
+   *  somebody dropped a year ago.
+   */
   private def hasOpenClaims(guildId: String, respawnId: Long): Boolean = withGuild(guildId) { conn =>
     val statement = conn.prepareStatement(
       """SELECT 1 FROM respawn_claims
         |WHERE respawn_id = ? AND status IN ('active', 'queued', 'offered', 'reserved')
+        |UNION ALL
+        |SELECT 1 FROM respawn_schedules WHERE respawn_id = ? AND active
         |LIMIT 1;""".stripMargin)
     try {
       statement.setLong(1, respawnId)
+      statement.setLong(2, respawnId)
       statement.executeQuery().next()
     } finally statement.close()
   }
