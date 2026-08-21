@@ -217,6 +217,40 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
+
+      // Give a name back to every row that has none, from the newest one the
+      // same account has left anywhere else in this guild.
+      //
+      // Two kinds of row need it. Everything booked before the column existed
+      // defaulted to blank, and a *schedule* that predates it keeps minting
+      // fresh blank occurrences for as long as it runs — so healing the rules
+      // matters more than healing the claims. And a handful of paths still
+      // write a claim with no second name because the one that made it never
+      // had one to hand.
+      //
+      // Deliberately not run once and marked done: it is re-run per guild on
+      // each start precisely so it keeps mopping up the second kind. It is
+      // cheap and it shrinks — every pass leaves fewer rows for the next one to
+      // match — and a row whose owner has never been seen under a name simply
+      // stays as it is, which is no worse than before.
+      val knownNicknames =
+        """WITH known AS (
+          |  SELECT DISTINCT ON (user_id) user_id, nickname FROM (
+          |    SELECT user_id, nickname, claimed_at AS seen_at FROM respawn_claims WHERE nickname <> ''
+          |    UNION ALL
+          |    SELECT user_id, nickname, created_at AS seen_at FROM respawn_schedules WHERE nickname <> ''
+          |  ) seen ORDER BY user_id, seen_at DESC
+          |)""".stripMargin
+      statement.executeUpdate(
+        knownNicknames +
+          """
+            |UPDATE respawn_schedules s SET nickname = known.nickname
+            |FROM known WHERE s.user_id = known.user_id AND s.nickname = '';""".stripMargin)
+      statement.executeUpdate(
+        knownNicknames +
+          """
+            |UPDATE respawn_claims c SET nickname = known.nickname
+            |FROM known WHERE c.user_id = known.user_id AND c.nickname = '';""".stripMargin)
       // The window the asker wants, when they asked by trying to book over this
       // slot. Null for a Request-button ask, where the slot itself is what they
       // are asking for.
