@@ -210,7 +210,10 @@ object RespawnEmbeds {
   def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
                    reservations: List[RespawnClaim], holder: Option[RespawnClaim],
                    now: ZonedDateTime, imageUrl: String,
-                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
+                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty,
+                   /** Bookings that exist only as a rule so far, as
+                    *  [[claimCard]] takes them and for the same reason. */
+                   upcoming: List[RespawnSchedule] = Nil): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
@@ -223,8 +226,9 @@ object RespawnEmbeds {
     val booked = mine.flatMap(schedule =>
       schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map(schedule -> _))
     val yours =
-      // A moderator opens this panel with nothing of their own booked here, so
-      // "your booking has been and gone" would be a lie rather than an absence.
+      // Most people open this panel with nothing of their own booked here — it
+      // is where booking starts, not only where it is reviewed — so "your
+      // booking has been and gone" would be a lie rather than an absence.
       if (mine.isEmpty) "You have nothing booked here."
       else if (booked.isEmpty) "Your booking on this respawn has been and gone."
       else if (booked.size == 1) {
@@ -243,24 +247,42 @@ object RespawnEmbeds {
     // so they get a line each rather than running together as one sentence.
     embed.setDescription(s"$state\n$yours")
 
-    if (reservations.nonEmpty) {
-      // No cap: this is somebody looking at one spawn's evening on purpose, so
-      // the three-line summary the claim card uses would hide the very slots they
-      // are trying to book around. truncateLines keeps it inside the field limit.
-      val lines = reservations.map { slot =>
-        val when = slot.startsAt.map(dateTime).getOrElse("?")
-        val pending = if (slot.requestPending) " · *asked*" else ""
-        // A marker rather than a highlight — an embed has no way to shade a line,
-        // and bolding alone doesn't survive a list where every name is bold.
-        // Filled for yours, hollow for everybody else's: one glyph pair from one
-        // Unicode block, so both rows are the same width and the dates line up
-        // with no spacing to tune. Padding a mismatched pair does not work here —
-        // Discord collapses a run of ordinary spaces to one. The small triangles
-        // rather than U+25B6/7, which some clients render as the emoji.
-        val marker = if (slot.userId == viewerId) "▸ " else "▹ "
-        s"$marker$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+    // The next ten bookings on this spawn, soonest first — what somebody
+    // deciding when to book needs, at the length a field can hold without
+    // swallowing the panel.
+    //
+    // A marker rather than a highlight — an embed has no way to shade a line,
+    // and bolding alone doesn't survive a list where every name is bold. Filled
+    // for yours, hollow for everybody else's: one glyph pair from one Unicode
+    // block, so both rows are the same width and the dates line up with no
+    // spacing to tune. Padding a mismatched pair does not work here — Discord
+    // collapses a run of ordinary spaces to one. The small triangles rather than
+    // U+25B6/7, which some clients render as the emoji.
+    val marker = (userId: String) => if (userId == viewerId) "▸ " else "▹ "
+    // Two sources, the same pair the claim card merges: a slot row is only
+    // written once its start comes within the look-ahead, so a booking further
+    // out than that is still nothing but a rule. Listing rows alone answered
+    // "nothing booked" on a spawn whose every evening is spoken for, which is
+    // the opposite of what this panel is opened to find out.
+    val ahead =
+      reservations.flatMap { slot =>
+        slot.startsAt.map { start =>
+          val pending = if (slot.requestPending) " · *asked*" else ""
+          start -> s"${marker(slot.userId)}${dateTime(start)} · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
+        }
+      } ++ upcoming.flatMap { schedule =>
+        // Only the next evening each rule still holds — a weekly booking has
+        // occurrences forever, and ten of them would be one booking said ten
+        // times where ten spawns' worth of evenings was the question.
+        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
+          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+          start -> s"${marker(schedule.userId)}${dateTime(start)} · ${humanDuration(schedule.durationMinutes)} — ${scheduleLabel(schedule)}$repeat"
+        }
       }
-      embed.addField("Booked", truncateLines(lines, 1000), false)
+
+    if (ahead.nonEmpty) {
+      val ordered = ahead.sortBy(_._1.toInstant).map(_._2)
+      embed.addField("Booked", cappedField(ordered.take(RowsPerField), ordered.size), false)
     }
 
     embed.setFooter("Book another time for a slot that doesn't overlap one already here.")

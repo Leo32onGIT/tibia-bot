@@ -451,6 +451,34 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getFooter.getText should not include "one booking"
   }
 
+  test("the booking panel lists the next ten bookings and owns up to the rest") {
+    val slots = (1 to 14).map(hour => reserved(s"$hour", now.plusHours(hour.toLong), 30)).toList
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", slots,
+      holder = None, now, image(cultOrcs))
+
+    val booked = fields(embed)("Booked")
+    booked.linesIterator.count(_.startsWith(indent)) shouldBe 10
+    // Soonest first, and the ten it kept are the ten soonest rather than
+    // whichever ten fit.
+    booked should include("hunter1")
+    booked should include("hunter10")
+    booked should not include "hunter11"
+    booked should include("…and 4 more")
+  }
+
+  test("a booking too far out to have a slot yet is still one of the next ten") {
+    // Nothing written down at all: a spawn booked beyond the look-ahead has only
+    // its rules, and answering "nothing booked" is what this panel is opened to
+    // avoid.
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), upcoming = List(booking(userId = "77")))
+
+    val booked = fields(embed)("Booked")
+    booked should include("hunter77")
+    // Said as the standing arrangement it is, not as a one-off evening.
+    booked should include("every day")
+  }
+
   test("being asked for a slot reads differently from being asked about a booking over it") {
     val slot = reserved("99", now.plusHours(2))
     val deadline = now.plusMinutes(60)
