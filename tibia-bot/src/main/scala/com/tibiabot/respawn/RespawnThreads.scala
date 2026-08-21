@@ -180,19 +180,41 @@ object RespawnThreads extends StrictLogging {
       Button.danger(RespawnButtonId.passSlot(guildId, claimId), "Not tonight")
     )
 
-  /** What somebody with bookings on a spawn can do: add another slot, or drop
-   *  the ones they have.
+  /** What anybody can do about their bookings on a spawn: add one, or drop the
+   *  ones they have.
+   *
+   *  One panel for everybody, moderator or not. Somebody pressing Book is asking
+   *  what is already spoken for here, which is the same question whoever asks
+   *  it, and two layouts for one question is one to learn twice. The moderator
+   *  variant this replaces differed only in that its cancel cleared the whole
+   *  spawn — a blunt instrument sitting exactly where a member's own cancel sits,
+   *  which is the last place a button that touches everybody's bookings should
+   *  be. Cancel here is always and only the presser's own.
    *
    *  One cancel, not one per booking. A member's bookings on a single spawn are
    *  one decision to them, and a button each turned the panel into a row of
-   *  near-identical red buttons that had to be read to tell apart. */
-  def scheduleButtons(schedules: List[RespawnSchedule], respawnId: Long): ActionRow =
-    ActionRow.of(
-      Button.success(RespawnButtonId.bookAnother(respawnId), "Book Another")
-        .withEmoji(Emoji.fromUnicode("📅")),
-      Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
-        if (schedules.size == 1) "Cancel Booking" else s"Cancel All ${schedules.size} Bookings")
-    )
+   *  near-identical red buttons that had to be read to tell apart. Dropped
+   *  entirely when they have nothing here, since a cancel with nothing to cancel
+   *  is a button whose only answer is "you have no bookings".
+   *
+   *  Dashboard last, and a link button like the board's — Discord opens the URL
+   *  itself and the press never reaches the bot, so it needs no id and no
+   *  handler. It is the way out of what this panel cannot do: a modal asks for
+   *  one start time in a box, where the week on the dashboard shows what is
+   *  already taken and lets somebody point at a gap. Which is why it opens on
+   *  *this* spawn rather than on the dashboard's front page. */
+  def spawnBookingButtons(guildId: String, respawnId: Long, code: String, mine: Int): ActionRow = {
+    val cancel =
+      if (mine <= 0) Nil
+      else List(Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
+        if (mine == 1) "Cancel Booking" else s"Cancel All $mine Bookings"))
+    val buttons =
+      Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
+        .withEmoji(Emoji.fromUnicode(BookEmoji)) ::
+        (cancel :+ Button.link(spawnDashboardLink(guildId, code), "Dashboard")
+          .withEmoji(Emoji.fromUnicode(DashboardEmoji)))
+    ActionRow.of(buttons.asJava)
+  }
 
   /** Under a moderator's /stamina. Everybody sees their own tank; a moderator
    *  also gets the one thing they might want to do about somebody else's. */
@@ -212,23 +234,6 @@ object RespawnThreads extends StrictLogging {
   def moderatorBookingsButtons: ActionRow =
     ActionRow.of(Button.secondary(RespawnButtonId.myBookings, "My bookings")
       .withEmoji(Emoji.fromUnicode("📅")))
-
-  /** What a moderator gets under the same panel: a way to book for themselves,
-   *  and a way to clear the spawn.
-   *
-   *  The panel itself is identical to a member's — same title, same state, same
-   *  list of who has what — because a moderator looking at a spawn is asking the
-   *  same question as anybody else, and two layouts for one question is one to
-   *  learn twice. Only the buttons differ, which is the only part that actually
-   *  does differ. */
-  def moderatorSpawnBookingButtons(respawnId: Long, bookings: Int): ActionRow = {
-    val clear =
-      if (bookings <= 0) Nil
-      else List(Button.danger(RespawnButtonId.cancelSpawnAll(respawnId),
-        if (bookings == 1) "Cancel Booking" else s"Cancel All $bookings Bookings"))
-    ActionRow.of((Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
-      .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
-  }
 
   /** The single button on a booking's confirmation DMs.
    *
@@ -367,6 +372,21 @@ object RespawnThreads extends StrictLogging {
    *  of its own, and posting the board is not something only the bot with a
    *  dashboard does. See `Config.Web.dashboardOrigin`. */
   def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
+
+  /** The same dashboard, opened on one spawn's card with its week already drawn.
+   *
+   *  The guild is named in the path so the link skips the server picker, which
+   *  otherwise asks somebody in two guilds a question their own link already
+   *  answered. The spawn rides in the query, by code: the page is keyed on codes
+   *  throughout, a code is unique and nothing ever rewrites one, and it is the
+   *  same word the panel this button sits on is titled with.
+   *
+   *  Encoded even though a code is only ever letters, digits and hyphens (see
+   *  RespawnService.spawnFault) — the rule lives over there, and a link that
+   *  quietly depends on it would break somewhere far from wherever it changed.
+   */
+  def spawnDashboardLink(guildId: String, code: String): String =
+    s"$dashboardLink/g/$guildId?spawn=${java.net.URLEncoder.encode(code, "UTF-8")}"
 
   /** The text above the board, inside the card.
    *
@@ -872,16 +892,22 @@ object RespawnButtonId {
 
   /** Book, or cancel, a repeating slot on this spawn. */
   def spawnSchedule(respawnId: Long): String = s"${Prefix}schedule:$respawnId"
-  /** Book a *further* slot on a spawn you already have one on. A separate id
-   *  from `schedule` because that one now opens the panel — pressing it again
-   *  would only reopen what you are looking at. */
+  /** Open the booking form itself — the panel's Book Yourself. A separate id
+   *  from `schedule` because that one opens the panel — pressing it again would
+   *  only reopen what you are looking at. */
   def bookAnother(respawnId: Long): String = s"${Prefix}booknew:$respawnId"
   def cancelSchedule(scheduleId: Long): String = s"${Prefix}unschedule:$scheduleId"
   /** Drop every booking the presser has on one spawn — so this one carries the
    *  *respawn* id, unlike `cancelSchedule` above. */
   def cancelSpawnBookings(respawnId: Long): String = s"${Prefix}unschedules:$respawnId"
   /** Clear *everybody's* bookings on one spawn — a moderator action, so it is a
-   *  different id from the one that clears only the presser's. */
+   *  different id from the one that clears only the presser's.
+   *
+   *  Nothing draws this any more: the Book panel is one panel for everybody now
+   *  (see [[RespawnThreads.spawnBookingButtons]]) and its cancel is always the
+   *  presser's own. Kept, with its handler, so a panel still sitting in somebody's
+   *  scrollback from before that answers rather than erroring — and because a
+   *  moderator wanting to clear a spawn outright has nowhere else to press. */
   def cancelSpawnAll(respawnId: Long): String = s"${Prefix}unschedulesall:$respawnId"
 
   /** Moderator actions reached from a spawn's Config panel. */

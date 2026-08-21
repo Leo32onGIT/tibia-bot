@@ -427,32 +427,33 @@ object RespawnButtons extends StrictLogging {
 
               case "schedule" =>
                 // One panel for everybody — same title, same state, same list of
-                // who has what. A moderator looking at a spawn is asking the same
-                // question as anybody else; only the buttons under it differ.
+                // who has what, same two buttons. A moderator looking at a spawn
+                // is asking the same question as anybody else, and so is somebody
+                // with nothing booked here: what is already spoken for, before
+                // deciding what to ask for.
                 //
-                // Not deferred only in the one case that opens a modal: a member
-                // with nothing booked here, who wants the form rather than a
-                // panel telling them so.
+                // Book used to open the form outright for that last case. It
+                // saved a press at the cost of the answer — you were typing a
+                // start time with no idea which ones were taken, which is what
+                // this panel exists to tell you. The form is one press away, and
+                // now it is one press away from knowing.
+                event.deferReply(true).queue()
+                val deferredRespond = new Responder(event, deferred = true)
+                val now = java.time.ZonedDateTime.now()
                 val mine = service.schedulesForUser(guildId, user.getId).filter(_.respawnId == respawn.id)
-                val moderator = RespawnModals.moderates(guild, event.getMember)
-                if (mine.isEmpty && !moderator) {
-                  event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
-                } else {
-                  event.deferReply(true).queue()
-                  val deferredRespond = new Responder(event, deferred = true)
-                  val now = java.time.ZonedDateTime.now()
-                  val buttons =
-                    if (moderator)
-                      RespawnThreads.moderatorSpawnBookingButtons(respawn.id,
-                        service.schedulesForRespawn(guildId, respawn.id).size)
-                    else RespawnThreads.scheduleButtons(mine, respawn.id)
-                  deferredRespond.embed(
-                    RespawnEmbeds.bookingPanel(respawn, mine, user.getId,
-                      service.reservationsFor(guildId, respawn.id, now),
-                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
-                      service.daysGivenUp(guildId, now, respawnId = Some(respawn.id))),
-                    Some(buttons))
-                }
+                val reservations = service.reservationsFor(guildId, respawn.id, now)
+                // The rules with no slot written yet, exactly as the claim card
+                // derives them — a repeating booking whose next evening is
+                // already a row is on the panel through that row, and adding
+                // its rule as well would list the one booking twice.
+                val written = reservations.flatMap(_.scheduleId).toSet
+                val upcoming = service.schedulesForRespawn(guildId, respawn.id)
+                  .filterNot(rule => written.contains(rule.id))
+                deferredRespond.embed(
+                  RespawnEmbeds.bookingPanel(respawn, mine, user.getId, reservations,
+                    service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
+                    service.daysGivenUp(guildId, now, respawnId = Some(respawn.id)), upcoming),
+                  Some(RespawnThreads.spawnBookingButtons(guildId, respawn.id, respawn.code, mine.size)))
 
               case "booknew" =>
                 // Straight to the form: they are looking at the panel that
