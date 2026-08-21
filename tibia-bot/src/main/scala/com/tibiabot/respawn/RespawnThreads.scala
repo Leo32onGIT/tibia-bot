@@ -609,6 +609,20 @@ object RespawnThreads extends StrictLogging {
   /** How far back through a forum's archived posts [[resolveThread]] will look. */
   private val ArchiveSearchLimit = 500
 
+  /** What a spawn's post is called: its display name, cut to what Discord will
+   *  accept as a channel name.
+   *
+   *  Cut here rather than refused, so the comparison in [[openThread]] is against
+   *  the title that would actually be set. A name Discord would shorten — or
+   *  reject outright — is one the post could never match, and the rename would
+   *  then fire again on every claim, for ever, one REST call at a time. Seed
+   *  names are not length-checked the way a guild's own are (see
+   *  `RespawnService.spawnFault`), so this is the guard for a long one arriving
+   *  through respawns.json. */
+  private val MaxThreadName = 100
+  private[respawn] def threadTitle(respawn: Respawn): String =
+    respawn.displayName.take(MaxThreadName)
+
   /** Get the spawn's post ready to show `card`, creating it on first claim and
    *  un-archiving it if the spawn has been idle. Returns the thread, or None if
    *  Discord refused (missing permission, deleted channel) — the caller keeps
@@ -617,15 +631,34 @@ object RespawnThreads extends StrictLogging {
    *
    *  `onCreated` reports a freshly created thread's id so the caller can store
    *  it on the catalogue row; it isn't called when an existing post is reused.
+   *
+   *  A reused post is also brought back into line with its spawn's name. The
+   *  post is titled once, when it is created, and `respawns.json` renaming a
+   *  spawn afterwards reaches the catalogue and the board picture on the next
+   *  boot but never the title — so a renamed spawn kept the old name in the
+   *  channel list indefinitely. Corrected here rather than by a pass of its own
+   *  because this is the moment the thread is already being edited: on a
+   *  sleeping spawn the un-archive and the rename travel as one call, where a
+   *  sweep of its own would have to wake every renamed post to retitle it and
+   *  then wait for the reconciler to put them all back to sleep.
+   *
+   *  A spawn nobody touches keeps its old title until somebody claims or books
+   *  it. That is the trade for not waking the whole forum over a rename, and
+   *  the board picture — which is where anybody actually reads a code — is
+   *  right immediately either way.
    */
   def openThread(guild: Guild, forum: ForumChannel, respawn: Respawn, card: MessageEmbed,
                  buttons: ActionRow, onCreated: String => Unit): Option[OpenedThread] = {
     val existing = resolveThread(guild, forum, respawn.threadId)
     existing match {
       case Some(thread) =>
-        if (thread.isArchived) {
-          Try(thread.getManager.setArchived(false).complete()).failed.foreach { error =>
-            logger.warn(s"Could not un-archive respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
+        val renaming = thread.getName != threadTitle(respawn)
+        if (thread.isArchived || renaming) {
+          val manager = thread.getManager
+          val unarchived = if (thread.isArchived) manager.setArchived(false) else manager
+          val edit = if (renaming) unarchived.setName(threadTitle(respawn)) else unarchived
+          Try(edit.complete()).failed.foreach { error =>
+            logger.warn(s"Could not open respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
           }
         }
         Some(OpenedThread(thread, created = false))
@@ -633,7 +666,7 @@ object RespawnThreads extends StrictLogging {
       case None =>
         Try {
           val message = new MessageCreateBuilder().setEmbeds(card).setComponents(buttons).build()
-          val post = forum.createForumPost(respawn.displayName, message).complete()
+          val post = forum.createForumPost(threadTitle(respawn), message).complete()
           val thread = post.getThreadChannel
           onCreated(thread.getId)
           OpenedThread(thread, created = true)
