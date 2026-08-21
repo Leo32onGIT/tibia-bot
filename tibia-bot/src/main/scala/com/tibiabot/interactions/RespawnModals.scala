@@ -700,8 +700,15 @@ object RespawnModals extends StrictLogging {
 
         val reassigned = giveTo match {
           case None       => Right(None)
-          case Some(user) => service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName)
-                               .map(_ => Some(user.getId -> user.getName))
+          case Some(user) =>
+            // A mention resolves to an account rather than a member, so the
+            // guild name is looked up beside it — and falls back to the
+            // account's own display name, which everybody has. Without it the
+            // hunt would carry on under the previous holder's nickname.
+            val toNickname = Option(event.getGuild.getMemberById(user.getId))
+              .map(_.getEffectiveName).getOrElse(user.getEffectiveName)
+            service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName, toNickname)
+              .map(_ => Some(user.getId -> user.getName))
         }
 
         reassigned match {

@@ -1085,6 +1085,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Both are told. The one losing it especially: their hunt ending is not
    *  something they should have to notice from the card. */
   def reassignClaim(guild: Guild, respawnId: Long, toUserId: String, toUserName: String,
+                    toNickname: String,
                     now: ZonedDateTime = ZonedDateTime.now()): Either[String, (Respawn, RespawnClaim)] =
     settings(guild.getId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
@@ -1101,10 +1102,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (remaining > 0 &&
                 !repository.reserveStamina(guildId, toUserId, remaining, config.staminaMinutes, boundary)) {
               val tank = repository.stamina(guildId, toUserId, config.staminaMinutes, boundary)
-              Left(s"${Names.user(toUserName)} has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
+              Left(s"${Names.user(toNickname, toUserName)} has " +
+                s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
                 s"stamina left, and the rest of this hunt needs " +
                 s"**${RespawnEmbeds.humanDuration(remaining)}**.")
-            } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName) match {
+            } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName, toNickname) match {
               case None => Left("That hunt has already ended.")
               case Some(moved) =>
                 if (remaining > 0) repository.refundStamina(guildId, claim.userId, remaining, boundary)

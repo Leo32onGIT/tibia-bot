@@ -242,7 +242,8 @@ final class JdaRespawnActions(
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.reassignClaim(guild, respawn.id, toUserId, displayName(toUserId)) match {
+          val (toName, toNickname) = namesFor(guild, toUserId)
+          respawnService.reassignClaim(guild, respawn.id, toUserId, toName, toNickname) match {
             case Right((spawn, claim)) =>
               logger.info(s"Dashboard: '$actorId' reassigned ${spawn.code} to '$toUserId' in guild '$guildId'")
               ActionResult(ok = true, s"${spawn.displayName} now belongs to ${claim.userName}.")

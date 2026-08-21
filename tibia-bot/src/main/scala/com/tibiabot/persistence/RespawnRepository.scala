@@ -261,8 +261,14 @@ trait RespawnRepository {
 
   /** Move a running claim to a different member, keeping its start, end and
    *  everything else. Returns the stored row, or None if it is no longer active
-   *  — which is what stops a moderator reassigning a hunt that just ended. */
-  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String): Option[RespawnClaim]
+   *  — which is what stops a moderator reassigning a hunt that just ended.
+   *
+   *  Both of the new owner's names, like [[reassignReservation]]: a row that
+   *  took the account name alone kept whatever nickname the previous holder
+   *  left on it, and so named the hunt after one person in the guild's words
+   *  and another in Discord's. */
+  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String,
+                    nickname: String): Option[RespawnClaim]
 
   def markWarned(guildId: String, claimId: Long): Unit
 

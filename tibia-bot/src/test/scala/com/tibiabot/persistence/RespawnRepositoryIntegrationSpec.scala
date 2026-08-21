@@ -401,6 +401,48 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.expiredClaims(g, now.plusMinutes(10)).map(_.id) shouldBe List(claim.id)
   }
 
+  test("handing a running hunt over moves both of the new owner's names") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "Knight", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+
+    val moved = repo.reassignClaim(g, claim.id, "u2", "Two", "Twosie").get
+
+    moved.userId shouldBe "u2"
+    moved.userName shouldBe "Two"
+    // The point of the whole thing: leaving this behind used to name the hunt
+    // as the new owner in Discord's words and the old one in the guild's.
+    moved.nickname shouldBe "Twosie"
+    // Not theirs to inherit — whoever takes the hunt brings their own.
+    moved.characterName shouldBe ""
+    // Nothing about the window moves with it.
+    moved.id shouldBe claim.id
+    moved.endsAt.map(_.toInstant) shouldBe Some(now.plusHours(2).toInstant)
+    moved.durationMinutes shouldBe 120
+
+    repo.activeClaim(g, spawn.id).map(c => (c.userId, c.nickname)) shouldBe Some(("u2", "Twosie"))
+  }
+
+  test("handing over to somebody the guild has no name for leaves no name behind") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+
+    repo.reassignClaim(g, claim.id, "u2", "Two", "").get.nickname shouldBe ""
+  }
+
+  test("a hunt that has already ended cannot be handed over") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+    repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
+
+    repo.reassignClaim(g, claim.id, "u2", "Two", "Twosie") shouldBe None
+  }
+
   test("cancelQueued clears exactly the named users, leaving the rest in order") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")

@@ -1120,16 +1120,20 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  def reassignClaim(guildId: String, claimId: Long, userId: String,
-                    userName: String): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String,
+                    nickname: String): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+    // The nickname moves with the account name. Leaving it behind — which this
+    // did — kept the outgoing holder's, so the row read as the new owner under
+    // the old one's guild name.
     val statement = conn.prepareStatement(
-      """UPDATE respawn_claims SET user_id = ?, user_name = ?, character_name = ''
+      """UPDATE respawn_claims SET user_id = ?, user_name = ?, nickname = ?, character_name = ''
         |WHERE id = ? AND status = 'active'
         |RETURNING *;""".stripMargin)
     try {
       statement.setString(1, userId)
       statement.setString(2, userName)
-      statement.setLong(3, claimId)
+      statement.setString(3, nickname)
+      statement.setLong(4, claimId)
       val result = statement.executeQuery()
       if (result.next()) Some(readClaim(result)) else None
     } finally statement.close()
