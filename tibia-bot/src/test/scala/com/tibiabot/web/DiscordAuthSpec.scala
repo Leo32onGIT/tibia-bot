@@ -49,6 +49,35 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
    *  substring search rather than a prefix. */
   private val DiscordUnfurler = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"
 
+  /** Enough Redis to be a place things survive a restart in — which is the
+   *  whole of what the guild store asks of one. */
+  private final class SpecRedis extends com.tibiabot.persistence.RedisCache {
+    private val store = scala.collection.concurrent.TrieMap.empty[String, String]
+    def get(key: String): scala.concurrent.Future[Option[String]] =
+      scala.concurrent.Future.successful(store.get(key))
+    def setEx(key: String, value: String, ttl: scala.concurrent.duration.FiniteDuration)
+      : scala.concurrent.Future[Unit] = scala.concurrent.Future.successful { store.put(key, value); () }
+    def setIfAbsent(key: String, value: String, ttl: scala.concurrent.duration.FiniteDuration)
+      : scala.concurrent.Future[Boolean] =
+      scala.concurrent.Future.successful(store.putIfAbsent(key, value).isEmpty)
+    def delete(key: String): scala.concurrent.Future[Unit] =
+      scala.concurrent.Future.successful { store.remove(key); () }
+    def keysMatching(pattern: String): scala.concurrent.Future[List[String]] =
+      scala.concurrent.Future.successful(Nil)
+    def close(): Unit = ()
+  }
+
+  /** An auth whose guild list outlives it, as every deployed one has. */
+  private def authOn(redis: com.tibiabot.persistence.RedisCache) = new DiscordAuth(
+    clientId = "1234",
+    clientSecret = "secret",
+    sessionSecret = "session-secret",
+    redirectUri = s"https://example.test$mountPath/auth/callback",
+    mountPath = mountPath,
+    extraCookiePaths = List(adminPath),
+    userGuildStore = redis
+  )(system, executor)
+
   /** A session cookie signed the way the class signs its own, so a test can be
    *  authenticated without going through Discord. */
   private def signedSession(userId: String): String = {
@@ -146,6 +175,41 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       val cleared = headers.collect { case `Set-Cookie`(c) if c.name == "vb_oauth_state" => c }
       cleared should have size 1
       cleared.head.value shouldBe "deleted"
+    }
+  }
+
+  test("a restart does not cost a signed-in visitor their sign-in") {
+    // The bug this fixes: the cookie is signed rather than stored and survives a
+    // deploy, while the guild list behind it lived in this process and did not
+    // — so everybody came back authenticated, resolving to no servers, and was
+    // bounced through Discord to say so. A new instance sharing the store is
+    // exactly what a restarted bot is.
+    val redis = new SpecRedis
+    val before = authOn(redis)
+    before.userGuilds.put("user-1", Set("g1", "g2"))
+
+    val after = authOn(redis)
+    after.userGuilds.get("user-1") shouldBe None
+
+    val guarded = pathPrefix("dashboard")(path("thing")(after.authenticatedUser(_ => complete("ok"))))
+    Get(s"$mountPath/thing") ~> Cookie("vb_session" -> signedSession("user-1")) ~> guarded ~> check {
+      status shouldBe StatusCodes.OK
+      // Read back before the route ran, so what it goes on to ask about their
+      // servers is answered rather than empty.
+      after.userGuilds.get("user-1") shouldBe Some(Set("g1", "g2"))
+    }
+  }
+
+  test("a visitor the store has never heard of is still sent to sign in") {
+    // The store makes a miss rarer, not impossible — an entry does expire, and
+    // what happens then has to be the sign-in it always was.
+    val after = authOn(new SpecRedis)
+    val guarded = pathPrefix("dashboard")(path("thing")(after.authenticatedUser(_ => complete("ok"))))
+    Get(s"$mountPath/thing") ~> Cookie("vb_session" -> signedSession("user-2")) ~> guarded ~> check {
+      // Authenticated is still authenticated: this directive only answers who,
+      // and it is the dashboard that turns an empty list into a login.
+      status shouldBe StatusCodes.OK
+      after.userGuilds.get("user-2") shouldBe None
     }
   }
 

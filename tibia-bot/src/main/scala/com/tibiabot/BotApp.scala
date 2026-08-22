@@ -297,7 +297,12 @@ object BotApp extends App with StrictLogging {
     // redirect it was following. Built from the configured origin, so it names
     // whichever domain this deployment actually answers on, and picked per area
     // so the two mounts above describe themselves rather than the site.
-    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl))
+    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl)),
+    // So a restart is not a sign-in. The session cookie is signed rather than
+    // stored and already survives one; the guild list behind it lived in memory,
+    // so every member came back perfectly authenticated and resolving to no
+    // servers at all. Ids only, and they grant nothing — see UserGuildCache.
+    userGuildStore = persistence.RedisCacheProvider.cache
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,

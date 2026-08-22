@@ -7,6 +7,7 @@ import akka.http.scaladsl.model.headers.HttpCookie
 import akka.http.scaladsl.server.{Directive, Directive0, StandardRoute}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.unmarshalling.Unmarshal
+import com.tibiabot.persistence.{NoopRedisCache, RedisCache}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 import spray.json.DefaultJsonProtocol._
@@ -54,7 +55,12 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                          *  things to whoever is shown the card, and only the
                          *  caller knows what each of them is called. None keeps
                          *  the old behaviour for every caller. */
-                        linkPreview: Option[String => String] = None)
+                        linkPreview: Option[String => String] = None,
+                        /** Where the guild list behind a session outlives this
+                         *  process — see [[UserGuildCache]]. Unset keeps it in
+                         *  memory alone, which is every test and any deployment
+                         *  without Redis. */
+                        userGuildStore: RedisCache = NoopRedisCache)
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
 
   /** Every area this session is good for. `mountPath` is where the auth routes
@@ -87,7 +93,7 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
 
   /** Guild ids from the login, kept only long enough to save asking again on
    *  every request. Not a permission — see [[UserGuildCache]]. */
-  val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl)
+  val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl, store = userGuildStore)
 
   /** Short-lived companion to the session cookie, holding the OAuth `state`
    *  nonce for exactly as long as one login round-trip: set when we send the
@@ -344,7 +350,17 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   val authenticatedUser: Directive[Tuple1[String]] = Directive[Tuple1[String]] { inner =>
     optionalCookie(cookieName) { cookieOpt =>
       cookieOpt.flatMap(c => verifySession(c.value)) match {
-        case Some(userId) => inner(Tuple1(userId))
+        // Their guild list is read back out of the store first, where this
+        // process has not seen them sign in — which after a restart is
+        // everybody, and used to be a bounce through Discord each. Everything
+        // downstream reads that list synchronously and unchanged; this is only
+        // the one point where it can be fetched before they do.
+        //
+        // A hit costs nothing and is every request after the first, and a miss
+        // that the store cannot answer either lands where it always did: on the
+        // sign-in below, one page later.
+        case Some(userId) if userGuilds.get(userId).isDefined => inner(Tuple1(userId))
+        case Some(userId) => onComplete(userGuilds.warm(userId))(_ => inner(Tuple1(userId)))
         case None =>
           // A link unfurler gets a page rather than the redirect. It cannot hold
           // a session, so following the bounce only lands it on discord.com,
