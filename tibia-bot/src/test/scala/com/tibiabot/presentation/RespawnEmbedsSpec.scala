@@ -67,6 +67,24 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getColorRaw shouldBe RespawnEmbeds.RedColor
   }
 
+  test("the card names the holder once, by the name people call them") {
+    // The account name is a moderator's business, and the moderator panel still
+    // carries it — a card read by everybody hunting here says who to go and ask.
+    val held = claim("99").copy(nickname = "Beams")
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(held), Nil, Nil, settings, image(cultOrcs))
+    embed.getDescription should include("**@Beams**")
+    embed.getDescription should not include "hunter99"
+  }
+
+  test("a booked row on the card names its owner the same way") {
+    val booking = claim("77", status = RespawnClaim.StatusReserved)
+      .copy(nickname = "Beams", startsAt = Some(now.plusHours(3)))
+    val booked = fields(
+      RespawnEmbeds.claimCard(cultOrcs, None, Nil, List(booking), settings, image(cultOrcs)))("Booked")
+    booked should include("**@Beams**")
+    booked should not include "hunter77"
+  }
+
   test("a claimant with no character is still pingable") {
     val embed = RespawnEmbeds.claimCard(cultOrcs, Some(claim("99")), Nil, Nil, settings, image(cultOrcs))
     embed.getDescription should include("hunter99")
@@ -410,6 +428,21 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked.linesIterator.count(_.startsWith(indent)) shouldBe 1
   }
 
+  test("the booking panel names people the way the card does — once") {
+    // The same rows in another surface, read by the same people, so the two say
+    // a name the same way. The moderator panel is the one that keeps the account.
+    val holder = claim("55").copy(nickname = "Beams")
+    val theirs = reserved("77", now.plusHours(4)).copy(nickname = "Rook")
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "99", List(theirs),
+      holder = Some(holder), now, image(cultOrcs))
+
+    embed.getDescription should include("**@Beams**")
+    embed.getDescription should not include "hunter55"
+    val booked = section(embed, AllBookings)
+    booked should include("**@Rook**")
+    booked should not include "hunter77"
+  }
+
   test("the panel a moderator sees is the same panel, minus any bookings of their own") {
     // Same builder, same shape — only the buttons under it differ, which is the
     // only part that actually differs.
@@ -418,7 +451,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs))
 
     embed.getTitle shouldBe "415 — Cult Orcs"
-    embed.getDescription should include("nothing booked here")
+    // No section at all where they have booked nothing — see the test below.
+    embed.getDescription should not include YourBookings
     // Everyone else's bookings are still listed, and none is marked as theirs.
     val booked = section(embed, AllBookings)
     booked should include("hunter99")
@@ -426,6 +460,31 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should not include "▸"
     // Every line starts with a marker, so the times share a left edge.
     booked.linesIterator.foreach(_ should startWith(indent))
+  }
+
+  test("having booked nothing here is said by there being no section, not by a sentence") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "99",
+      List(reserved("77", now.plusHours(4))), holder = None, now, image(cultOrcs))
+
+    embed.getDescription should not include YourBookings
+    embed.getDescription should not include "nothing booked"
+    // The panel is still the two things it was opened for: the state, and what
+    // is already spoken for.
+    embed.getDescription should startWith("###")
+    section(embed, AllBookings) should include("hunter77")
+    // One break, between the state and the list — no leftover blank where the
+    // section used to be.
+    embed.getDescription.linesIterator.count(_.isEmpty) shouldBe 1
+  }
+
+  test("a booking that has been and gone still says so, having been made") {
+    // The absence that stayed: they booked this spawn and are looking for the
+    // row, which is a different question from never having booked.
+    val past = booking(days = RespawnSchedule.OneOff).copy(anchorAt = now.minusDays(2))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(past), "99", Nil,
+      holder = None, now, image(cultOrcs))
+
+    section(embed, YourBookings) shouldBe "> Your booking on this respawn has been and gone."
   }
 
   test("the booking panel says who is on the respawn now, which is a different question") {

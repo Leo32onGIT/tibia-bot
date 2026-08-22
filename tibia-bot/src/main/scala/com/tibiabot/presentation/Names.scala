@@ -69,4 +69,26 @@ object Names {
     if (nick.isEmpty || nick.equalsIgnoreCase(username.trim)) user(username)
     else s"${user(username)} (**@$nick**)"
   }
+
+  /** One name for somebody, where [[user(nickname:String,username:String)*]]
+   *  writes two: what they are called here, and the account name only when
+   *  there is no nickname to use in its place.
+   *
+   *  For the surfaces people hunting together read, where the pair is a second
+   *  name for somebody they already know by the first — and where the second is
+   *  the one nobody says out loud. The account name is still what a moderator
+   *  needs, and a moderator has their own surfaces to find it on, so nothing is
+   *  lost by leaving it off a card.
+   *
+   *  Both halves are written the same way, `@name`, rather than the nickname as
+   *  an `@` and the fallback as a code span: a list of these is read as a
+   *  column, and one row in a different shape reads as a different kind of
+   *  thing. Still not a mention — see [[user(name:String)*]].
+   */
+  def called(nickname: String, username: String): String = {
+    def clean(name: String) = name.replace("`", "").replace("*", "").trim
+    val nick = clean(nickname)
+    val name = if (nick.nonEmpty) nick else clean(username)
+    if (name.isEmpty) user("") else s"**@$name**"
+  }
 }

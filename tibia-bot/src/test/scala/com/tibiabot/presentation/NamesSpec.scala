@@ -43,6 +43,23 @@ class NamesSpec extends AnyFunSuite with Matchers {
     Names.user("Beams", "vio`lent") shouldBe "**`violent`** (**@Beams**)"
   }
 
+  test("one name is the one they go by here") {
+    Names.called("Beams", "violentbeams") shouldBe "**@Beams**"
+  }
+
+  test("one name falls back to the account, in the same shape as a nickname") {
+    // Same shape so a column of these reads as a column — and Discord writes
+    // an account name as @name too, so nothing is claimed that isn't true.
+    Names.called("", "violentbeams") shouldBe "**@violentbeams**"
+    Names.called("   ", "violentbeams") shouldBe "**@violentbeams**"
+    Names.called("", "") shouldBe "**`someone`**"
+  }
+
+  test("one name cannot break out of its own formatting either") {
+    Names.called("ev*il`", "violentbeams") shouldBe "**@evil**"
+    Names.called("", "vio`lent") shouldBe "**@violent**"
+  }
+
   test("a user with neither name still reads as somebody") {
     Names.user("", "") shouldBe "**`someone`**"
   }

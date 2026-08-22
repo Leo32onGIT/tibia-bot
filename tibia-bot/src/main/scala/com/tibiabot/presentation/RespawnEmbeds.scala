@@ -74,24 +74,43 @@ object RespawnEmbeds {
     else s"${remainder}m"
   }
 
-  /** How a claimant is named: their Tibia character when they gave one, followed
-   *  by the Discord name the claim was made under. Both are plain text — see
-   *  [[Names.user]] for why none of these read as a mention. */
+  /** How somebody is named on the surfaces the people hunting beside them read:
+   *  their Tibia character when they gave one, then the single Discord name
+   *  everybody calls them by.
+   *
+   *  One Discord name rather than the account/nickname pair [[accountLabel]]
+   *  writes. What a card or a Book panel is opened for is who to go and ask, and
+   *  the name they'd be called in chat answers that on its own — the account
+   *  name beside it made every row half again as long to say a word nobody uses.
+   *  Somebody wearing a nickname to be taken for somebody else is a moderator's
+   *  problem, and [[spawnModeratorPanel]] still names the account.
+   *
+   *  Plain text either way — see [[Names.user]] for why none of these read as a
+   *  mention.
+   */
+  private def personLabel(character: String, nickname: String, username: String): String =
+    if (character.nonEmpty && username.nonEmpty) s"**$character** (${Names.called(nickname, username)})"
+    else if (character.nonEmpty) s"**$character**"
+    // No character given, so the guild name is what identifies them.
+    else Names.called(nickname, username)
+
   private def claimantLabel(claim: RespawnClaim): String =
+    personLabel(claim.characterName, claim.nickname, claim.userName)
+
+  /** The same, for a booking that has not produced a slot row yet — the rule
+   *  carries the same three names, so it names its owner identically. */
+  private def scheduleLabel(schedule: RespawnSchedule): String =
+    personLabel(schedule.characterName, schedule.nickname, schedule.userName)
+
+  /** How a claimant is named to a moderator: the account as well as the name
+   *  they go by, since the account is the half that is unique, searchable, and
+   *  the same tomorrow — which is what somebody about to end another person's
+   *  hunt is checking they have the right person by. */
+  private def accountLabel(claim: RespawnClaim): String =
     (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)  => s"**${claim.characterName}** (${Names.user(claim.userName)})"
       case (true, false) => s"**${claim.characterName}**"
-      // No character given, so the guild name is what identifies them.
       case _             => Names.user(claim.nickname, claim.userName)
-    }
-
-  /** The same, for a booking that has not produced a slot row yet — the rule
-   *  carries the character too, so it names its owner identically. */
-  private def scheduleLabel(schedule: RespawnSchedule): String =
-    (schedule.characterName.nonEmpty, schedule.userName.nonEmpty) match {
-      case (true, true)  => s"**${schedule.characterName}** (${Names.user(schedule.userName)})"
-      case (true, false) => s"**${schedule.characterName}**"
-      case _             => Names.user(schedule.nickname, schedule.userName)
     }
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
@@ -226,8 +245,8 @@ object RespawnEmbeds {
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
     // Free is a heading and held is not: only one of the two answers is short
-    // enough to be read at a glance, and a holder's account, nickname and hour
-    // at heading size is a paragraph shouting the one state nobody can act on.
+    // enough to be read at a glance, and a holder's name, character and hour at
+    // heading size is a paragraph shouting the one state nobody can act on.
     val state = holder match {
       case Some(active) =>
         val until = active.endsAt.map(end => s" until ${clockTime(end)}").getOrElse("")
@@ -238,12 +257,18 @@ object RespawnEmbeds {
     val mineNext = mine.flatMap(schedule =>
       schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map(schedule -> _))
     val yours: List[String] =
-      // Rows are marked, absences are quoted — so an empty section still looks
-      // like a section. Most people open this panel with nothing of their own
-      // booked here (it is where booking starts, not only where it is reviewed),
-      // which is why the two absences are told apart: "been and gone" would be a
-      // lie to somebody who never booked.
-      if (mine.isEmpty) List("> You have nothing booked here.")
+      // Nothing at all where there is nothing booked — no title, no line under
+      // it. Most people open this panel with none of their own here (it is where
+      // booking starts, not only where it is reviewed), and a heading followed by
+      // a sentence saying the heading is empty spends two lines saying less than
+      // the blank space does.
+      //
+      // Rows are marked, and the absence that remains is quoted, so it reads as
+      // a note rather than as a booking. It remains because it answers a
+      // question somebody actually has: they booked this spawn, and they are
+      // looking for the row — where somebody who never booked was being told
+      // about a thing they had not done.
+      if (mine.isEmpty) Nil
       else if (mineNext.isEmpty) List("> Your booking on this respawn has been and gone.")
       else if (mineNext.size == 1) {
         val (schedule, start) = mineNext.head
@@ -314,8 +339,10 @@ object RespawnEmbeds {
     // of the panel is the shape of this list. truncateLines then drops whole
     // rows off the end rather than cutting one mid-mention at the description's
     // own limit.
+    val yourBookings = if (yours.isEmpty) Nil else "**Your Bookings**" :: yours
     val lines =
-      (state :: "" :: "**Your Bookings**" :: yours) ++
+      (state :: Nil) ++
+        (if (yourBookings.isEmpty) Nil else "" :: yourBookings) ++
         (if (allBookings.isEmpty) Nil else "" :: allBookings)
     embed.setDescription(truncateLines(lines))
 
@@ -536,7 +563,7 @@ object RespawnEmbeds {
     holder match {
       case Some(claim) =>
         val ends = claim.endsAt.map(relative).getOrElse("unknown")
-        embed.setDescription(s"Held by ${claimantLabel(claim)}, ending $ends.")
+        embed.setDescription(s"Held by ${accountLabel(claim)}, ending $ends.")
         embed.addField("Hunt length", humanDuration(claim.durationMinutes), true)
         if (queueSize > 0) embed.addField("Waiting", queueSize.toString, true)
         embed.setFooter("Force leave hands it to whoever is next, and refunds their unused stamina.")
