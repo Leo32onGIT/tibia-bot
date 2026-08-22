@@ -46,7 +46,8 @@ trait RespawnRepository {
 
   // --- settings -----------------------------------------------------------
 
-  /** The guild's respawn settings, or None if `/respawn` was never set up here. */
+  /** The guild's respawn settings, or None if the respawn system was never set
+   *  up here. */
   def settings(guildId: String): Option[RespawnSettings]
 
   /** Create or replace the guild's settings row. */
@@ -139,7 +140,7 @@ trait RespawnRepository {
 
   def queueFor(guildId: String, respawnId: Long): List[RespawnClaim]
 
-  /** Every spawn currently held, for `/respawn list`. */
+  /** Every spawn currently held, for the dashboard's board. */
   def allActiveClaims(guildId: String): List[RespawnClaim]
 
   /** Every queued claim in the guild, for callers that need the whole board at
@@ -159,8 +160,8 @@ trait RespawnRepository {
    *  Spawns never claimed at all are simply absent. */
   def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)]
 
-  /** Active or queued claims belonging to one user, for `/respawn release` and
-   *  the per-user stamina display. */
+  /** Active or queued claims belonging to one user, for the Release and Leave
+   *  buttons and `/stamina`'s display. */
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
 
   /** The expiry sweep's work list — active claims that are due to end.

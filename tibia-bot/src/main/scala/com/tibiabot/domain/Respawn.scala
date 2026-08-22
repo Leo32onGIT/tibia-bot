@@ -47,8 +47,8 @@ final case class Respawn(
 object Respawn {
   /** Catalogue rows that came from the bundled seed file. */
   val SourceSeed: String = "seed"
-  /** Catalogue rows a guild's admins added themselves. `/respawn admin seed`
-   *  never touches these. */
+  /** Catalogue rows a guild added itself from the dashboard. Syncing the
+   *  bundled seed never touches these. */
   val SourceCustom: String = "custom"
 }
 
@@ -304,7 +304,8 @@ object RespawnClaim {
     }
   }
 
-  /** A claim someone made themselves via `/respawn claim` or the Next button. */
+  /** A claim someone made themselves — a spawn's Claim button, the board's claim
+   *  form, or the Next button. */
   val KindAdHoc: String = "adhoc"
   /** RESERVED — materialised from a recurring schedule. Not produced by any
    *  code path yet; see the scheduled-claim notes in RespawnService. */

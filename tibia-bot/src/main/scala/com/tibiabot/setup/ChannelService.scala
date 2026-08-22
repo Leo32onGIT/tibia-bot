@@ -461,7 +461,7 @@ final class ChannelService(
       case e: Exception =>
         logger.warn(s"Respawn forum setup on guild '${guild.getId}' failed before completing", e)
         s"${Config.noEmoji} Something went wrong creating the respawn forum. Wait a moment, then run " +
-          "`/respawn admin setup` again."
+          "`/repair` to try again."
     }
   }
 

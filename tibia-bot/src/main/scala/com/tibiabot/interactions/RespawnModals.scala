@@ -77,8 +77,8 @@ object RespawnModals extends StrictLogging {
 
   /** Prompt for a spawn to claim. Free text rather than a dropdown because a
    *  catalogue runs to several hundred entries and Discord caps a select menu at
-   *  25 options — and the same resolver behind `/respawn claim` already accepts
-   *  a code or a name. */
+   *  25 options — and the resolver behind it already accepts a code, a name or a
+   *  unique fragment. */
   def claimModal: Modal =
     Modal.create(RespawnButtonId.modalClaim, "Claim a respawn")
       .addComponents(
@@ -538,10 +538,10 @@ object RespawnModals extends StrictLogging {
       case Some(respawn) => submitSchedule(event, respawn)
     }
 
-  /** The board's booking form, which asks. Resolved through the same resolver
-   *  `/respawn claim` and the board's own Claim button use, so a code, a name
-   *  or a unique fragment all work — and, like those, an unknown code and an
-   *  ambiguous one are indistinguishable from here, so the reply covers both. */
+  /** The board's booking form, which asks. Resolved through the same resolver the
+   *  board's own Claim button uses, so a code, a name or a unique fragment all
+   *  work — and, like it, an unknown code and an ambiguous one are
+   *  indistinguishable from here, so the reply covers both. */
   private def submitBoardSchedule(event: ModalInteractionEvent): Unit = {
     val query = value(event, SpawnField)
     BotApp.respawnService.resolve(event.getGuild.getId, query) match {

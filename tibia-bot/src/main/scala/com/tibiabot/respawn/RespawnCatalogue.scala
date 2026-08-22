@@ -17,8 +17,8 @@ final case class SeedSpawn(code: String, region: String, name: String, creature:
  *  changes at runtime, so re-reading it per guild import or per autocomplete
  *  keystroke would be pure waste. A malformed or missing file degrades to an
  *  empty catalogue with a warning rather than taking the bot down at boot: the
- *  seed is a convenience, and admins can still build a catalogue by hand with
- *  `/respawn admin add`.
+ *  seed is a convenience, and a guild can still build a catalogue by hand from
+ *  the dashboard.
  */
 object RespawnCatalogue extends StrictLogging {
 
@@ -54,7 +54,7 @@ object RespawnCatalogue extends StrictLogging {
         spawns
       case Left(error) =>
         logger.warn(s"Could not load the respawn seed catalogue from $ResourcePath — " +
-          s"guilds will start with an empty catalogue and can add spawns with `/respawn admin add`: $error")
+          s"guilds will start with an empty catalogue and can only add spawns from the dashboard: $error")
         Nil
     }
   }

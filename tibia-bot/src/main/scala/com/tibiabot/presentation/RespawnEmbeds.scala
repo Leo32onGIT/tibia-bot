@@ -456,7 +456,7 @@ object RespawnEmbeds {
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
       s"Your stamina refills at server save ${relative(resetsAt)}."
 
-  /** Standing bookings, for the Schedule panel and `/respawn schedules`.
+  /** Standing bookings, for the Schedule panel and `/bookings`.
    *
    *  `everyones` switches from "yours" to the whole server, which is what a
    *  moderator sees — and names the owner, since otherwise the list is a wall of
@@ -758,7 +758,7 @@ object RespawnEmbeds {
   /** The "your time is nearly up" nudge, sent by DM rather than posted in the
    *  spawn's thread — it is aimed at one person, and a thread ping turns a
    *  shared card into a stream of notices nobody else needs. */
-  /** Deliberately says nothing about `/respawn extend`: stretching a claim is the
+  /** Deliberately says nothing about extending: stretching a claim is the
    *  exception, not the expected reply to this, and offering it up invites people
    *  to hold spawns longer than they need. Leaving early is the useful action, so
    *  that is the one that gets a button. */

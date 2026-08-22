@@ -134,7 +134,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("re-adding an existing code returns the stored row without overwriting it") {
     val (repo, g) = freshRepo()
     val first = repo.addRespawn(g, "806", "Hydra Mountain", "Hydra", "Port Hope", "", "", Respawn.SourceSeed, "seed")
-    // This is what makes `/respawn admin seed` safe to re-run over a guild's
+    // This is what makes re-importing the bundled seed safe over a guild's
     // own edits.
     val second = repo.addRespawn(g, "806", "SOMETHING ELSE", "Wrong", "Nowhere", "", "", Respawn.SourceCustom, "x")
     second.id shouldBe first.id

@@ -219,7 +219,8 @@ object Config {
     val sharingEnabled: Boolean = current != Disabled
   }
 
-  /** The respawn claim system (`/respawn` + the `📅・sᴘᴀᴡɴs` forum).
+  /** The respawn claim system (the `📅・sᴘᴀᴡɴs` forum, plus `/stamina` and
+   *  `/bookings`).
    *
    *  `enabled` was the feature's rollout gate, defaulting to false so that the
    *  first deploy of the branch couldn't start creating forum channels in every
@@ -229,7 +230,7 @@ object Config {
    *  shipped feature.
    *
    *  Setting it false is still a clean withdrawal rather than a broken state:
-   *  `/respawn` isn't registered with Discord and `/setup`/`/repair` skip the
+   *  neither command is registered with Discord and `/setup`/`/repair` skip the
    *  forum entirely. Worth keeping for a local run that shouldn't touch a
    *  guild's forums.
    *

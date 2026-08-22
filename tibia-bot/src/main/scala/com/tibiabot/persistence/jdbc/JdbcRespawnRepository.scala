@@ -583,7 +583,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def updateRespawn(guildId: String, respawnId: Long, name: Option[String], creature: Option[String],
                     world: Option[String], mapperLink: Option[String]): Unit = withGuild(guildId) { conn =>
     // COALESCE(?, column) leaves a field alone when its argument is None, so
-    // `/respawn admin edit` can set one attribute without restating the rest.
+    // a caller can set one attribute without restating the rest.
     val statement = conn.prepareStatement(
       """UPDATE respawns SET
         |name = COALESCE(?, name),

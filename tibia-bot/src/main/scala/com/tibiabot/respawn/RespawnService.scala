@@ -17,8 +17,8 @@ import com.tibiabot.presentation.Names
 
 /** What a claim attempt did, for the command/button layer to render. Modelled
  *  as a result type rather than the handler poking at the repository itself, so
- *  the rules live in one place and `/respawn claim` and the Claim button can't
- *  drift apart. */
+ *  the rules live in one place and the Claim button, the board's claim form and
+ *  the dashboard can't drift apart. */
 sealed trait ClaimOutcome
 object ClaimOutcome {
   /** The caller now holds the spawn. */
@@ -40,7 +40,7 @@ object ClaimOutcome {
   final case class NoStamina(respawn: Respawn, needed: Int, stamina: Stamina, resetsAt: ZonedDateTime) extends ClaimOutcome
   final case class UnknownSpawn(query: String) extends ClaimOutcome
   final case class BadDuration(requested: Int, max: Int) extends ClaimOutcome
-  /** `/respawn` has never been set up in this guild. */
+  /** The respawn system has never been set up in this guild. */
   case object NotConfigured extends ClaimOutcome
 }
 
@@ -312,7 +312,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   // --- settings -----------------------------------------------------------
 
-  /** The guild's settings, or None when `/respawn` was never set up here. */
+  /** The guild's settings, or None when the respawn system was never set up here. */
   def settings(guildId: String): Option[RespawnSettings] = repository.settings(guildId)
 
   /** The settings a guild gets on first setup — the bot's configured defaults,
@@ -334,10 +334,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   /** Apply a partial change to the guild's rules, validated.
    *
-   *  Shared by `/respawn admin config` and the board's moderator panel so the two
-   *  can't drift on what counts as a legal combination — a default claim longer
-   *  than the maximum being the one that actually bites, since every later claim
-   *  would be refused for exceeding a ceiling nobody set deliberately. */
+   *  Validated here rather than in the board's moderator panel — its only caller
+   *  today — so a second one can't drift on what counts as a legal combination,
+   *  a default claim longer than the maximum being the one that actually bites,
+   *  since every later claim would be refused for exceeding a ceiling nobody set
+   *  deliberately. */
   /** `warnMinutes` is deliberately absent: it is the fallback reminder for
    *  members who have not set their own, and there is no longer anywhere to
    *  change it per guild — it sits at `Config.Respawn.warnMinutes` for everybody.
@@ -2536,7 +2537,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       .filter(_.startsAt(startsAt))
       .find(_ => !startsAt.isBefore(now))
 
-  /** `/respawn status <spawn>` — one spawn's current state. */
+  /** One spawn's current state, for its card and for the dashboard. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =
     (repository.activeClaim(guildId, respawn.id), repository.queueFor(guildId, respawn.id))
 

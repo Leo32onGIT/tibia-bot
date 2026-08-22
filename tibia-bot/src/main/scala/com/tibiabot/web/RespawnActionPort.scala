@@ -40,7 +40,7 @@ trait RespawnActionPort {
             code: String, minutes: Option[Int]): Future[ActionResult]
 
   /** Give up a held spawn, or leave its queue. `code` empty releases whatever
-   *  the caller holds, matching `/respawn release` with no argument. */
+   *  the caller holds, rather than naming a spawn. */
   def release(guildId: String, userId: String, code: Option[String]): Future[ActionResult]
 
   /** Add time to the claim the caller is currently holding. */
