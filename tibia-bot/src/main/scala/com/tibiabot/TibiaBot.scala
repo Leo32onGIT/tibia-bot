@@ -121,8 +121,14 @@ class TibiaBot(
   // selected, so it is gone rather than left looking meaningful.
   private val tibiaDataClient: TibiaApi = {
     val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
-    if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
-    else caching
+    val shared =
+      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
+      else caching
+    // Outermost, so a skippable character fetch costs nothing at all — not the
+    // request, and not the shared-cycle Redis read in front of it either. One
+    // instance per world, holding only that world's characters.
+    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings)
+    else shared
   }
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying

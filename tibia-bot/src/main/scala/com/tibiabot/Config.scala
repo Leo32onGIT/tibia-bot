@@ -36,6 +36,23 @@ object Config {
     val onlineDurationTtl: FiniteDuration = dur("online-duration-ttl")
     val killerLevelTtl: FiniteDuration = dur("killer-level-ttl")
   }
+
+  /** Settings for the character age cache — see
+   *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
+   *  because it is not only durations, and because `enabled` is meant to be a
+   *  one-env-var way back to always-fetch behaviour without a rollback. */
+  object CharacterCache {
+    private def sub(key: String): String = s"character-cache.$key"
+    val enabled: Boolean = discord.getBoolean(sub("enabled"))
+    val ttl: FiniteDuration = discord.getDuration(sub("ttl")).toScala
+    val margin: FiniteDuration = discord.getDuration(sub("margin")).toScala
+    val maxStale: FiniteDuration = discord.getDuration(sub("max-stale")).toScala
+    val canaryFraction: Double = discord.getDouble(sub("canary-fraction"))
+    val maxEntries: Int = discord.getInt(sub("max-entries"))
+
+    def settings: tibiadata.AgeCacheSettings =
+      tibiadata.AgeCacheSettings(ttl, margin, maxStale, canaryFraction, maxEntries)
+  }
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
