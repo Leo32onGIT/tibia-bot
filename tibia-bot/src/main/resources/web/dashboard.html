@@ -618,6 +618,7 @@ function renderDetail(worlds) {
     <div class="detail-stat"><i class="ti ti-skull" style="color:var(--bad)" aria-hidden="true"></i><div><div class="num">${world.deaths15m}</div><div class="num-label">Deaths (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-arrow-big-up-lines" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${world.levels15m}</div><div class="num-label">Levels (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-edit" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${world.edits15m}</div><div class="num-label">Edits (15m)</div></div></div>
+    <div class="detail-stat" title="Average gap between a death happening and this bot first seeing it, over ${world.deathDetections15m || 0} deaths. Includes delays upstream of the bot (Tibia publishing the death, TibiaData scraping it, its cache holding the sheet), so read it for changes rather than as an absolute.${world.deathLagMax15m ? ` Worst in this window: ${fmtLag(world.deathLagMax15m)}.` : ''}"><i class="ti ti-hourglass-low" style="color:var(--bad)" aria-hidden="true"></i><div><div class="num">${world.deathDetections15m ? fmtLag(world.deathLagAvg15m) : '—'}</div><div class="num-label">Death lag (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-clock" style="color:var(--muted)" aria-hidden="true"></i><div><div class="num">${timeAgo(world.lastPollAt)}</div><div class="num-label">Last poll</div></div></div>
   `;
 
@@ -681,6 +682,11 @@ function fmtWait(ms) {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
+// Death lag arrives in seconds, but fmtWait is the formatter with the right
+// granularity for it — "5m 30s", where fmtDuration would round to "5m" and
+// hide the ~30s shift that is the whole point of watching this number.
+const fmtLag = (seconds) => fmtWait(seconds * 1000);
+
 function fmtDuration(seconds) {
   if (seconds < 60) return `${Math.floor(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
@@ -731,10 +737,11 @@ const API_SOURCES = [
 // breakdown hides its catch-all row, so sharing against the visible rows would
 // inflate each one to cover traffic it didn't do. Such a group won't sum to
 // 100%, which is the honest result.
-function renderDetailGroup(title, note, nameHeader, rows, color, denominator) {
+function renderDetailGroup(title, note, nameHeader, rows, color, denominator, keepOrder) {
   if (!rows.length) return '';
   const groupTotal = denominator || rows.reduce((sum, r) => sum + r.total, 0) || 1;
-  const body = rows.slice().sort((a, b) => b.total - a.total).map(r => {
+  const ordered = keepOrder ? rows.slice() : rows.slice().sort((a, b) => b.total - a.total);
+  const body = ordered.map(r => {
     const share = r.total / groupTotal;
     const pct = share < 0.001 ? '&lt;1%' : `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
     return `<div class="drow">
@@ -788,6 +795,30 @@ function renderLaneGroup(lanes) {
   </div>`;
 }
 
+// Cache-age buckets read as a lifecycle, not a leaderboard: the request that
+// refilled the upstream entry, then that entry ageing out bucket by bucket,
+// then the responses that never had an age to report. Sorting these by size
+// (the default for detail groups) would scramble a histogram, so they keep
+// this order instead. Anything unrecognised sorts to the end rather than
+// silently vanishing.
+const CACHE_AGE_ORDER = ['fresh', '0-59s', '60-119s', '120-179s', '180-239s', '240-299s', '300-359s', '360s+', 'error'];
+
+// 'fresh' is the only bucket that actually learned something new, so it reads
+// as the good one; 'error' is a wasted call. The ageing buckets are deliberately
+// uncoloured — a high age is not a fault, it is just what a cache does.
+function cacheAgeColor(name) {
+  if (name === 'fresh') return 'var(--good)';
+  if (name === 'error') return 'var(--warn)';
+  return null;
+}
+
+function cacheAgeRows(throughput) {
+  const rank = (n) => { const i = CACHE_AGE_ORDER.indexOf(n); return i === -1 ? CACHE_AGE_ORDER.length : i; };
+  return dimensionRows(throughput, 'cacheAge')
+    .sort((a, b) => rank(a.name) - rank(b.name))
+    .map(r => ({ ...r, color: cacheAgeColor(r.name) }));
+}
+
 function renderApiDetail(sourceKey, throughput, lanes) {
   if (sourceKey === 'discord') {
     // Catch-all dropped from the view (see DiscordApiRoute.Other): it is
@@ -802,7 +833,9 @@ function renderApiDetail(sourceKey, throughput, lanes) {
   }
   return renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
     + renderDetailGroup('By response', '', 'Status',
-        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff');
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff')
+    + renderDetailGroup('By cache age', 'how old the upstream copy was', 'Age',
+        cacheAgeRows(throughput), '#5b8cff', throughput.total, true);
 }
 
 function renderApiSourceRow(bot, source, throughput, lanes) {

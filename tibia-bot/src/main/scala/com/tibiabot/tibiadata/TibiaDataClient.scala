@@ -17,7 +17,7 @@ import com.tibiabot.state.StreamState
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 import spray.json.DeserializationException
-import akka.http.scaladsl.model.headers.{Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
+import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 import java.time.{ZonedDateTime, ZoneId}
 import java.time.format.DateTimeFormatter
 
@@ -57,6 +57,37 @@ class TibiaDataClient(
       }
     }
 
+  /** Which slice of the upstream cache's life this response was served from,
+   *  for the dashboard's cache-age breakdown.
+   *
+   *  `api.tibiadata.com` sits behind a Kong cache that stamps `Age` with how
+   *  long the entry it just served has been sitting there — measured at a 300s
+   *  TTL on `/v4/character` and 60s on `/v4/world`. That makes `Age` the one
+   *  header that says whether a request actually learned anything: a response
+   *  with `Age` 200 is byte-identical to the one the previous caller got, and
+   *  the entry cannot change for another 100s. Bucketing it here is what tells
+   *  us how much of the character firehose is re-fetching bytes we already had.
+   *
+   *  `fresh` is a 2xx with no `Age` at all — the entry was cold and this
+   *  request is what refilled it from the origin. `error` keeps non-2xx out of
+   *  the age picture: a 503 also carries no `Age`, and folding those into
+   *  `fresh` would read as a healthy origin fetch when it is the opposite.
+   *
+   *  Buckets run past the observed 300s TTL deliberately — if some characters
+   *  are cached longer than that, they show up as their own row rather than
+   *  hiding inside a catch-all at exactly the boundary we assumed.
+   *
+   *  Recorded for every endpoint, not just characters, so the dimension still
+   *  sums to the overall total (which is what the dashboard's share column is
+   *  taken against). `/v4/character` is ~99% of the traffic, so in practice
+   *  this reads as the character histogram anyway. */
+  private def cacheAgeOf(response: HttpResponse, status: Int): String =
+    if (status / 100 != 2) "error"
+    else response.header[AgeHeader] match {
+      case Some(age) => TibiaDataClient.cacheAgeBucket(age.deltaSeconds)
+      case None      => "fresh"
+    }
+
   /** The endpoint a request belongs to, for the dashboard's per-endpoint
    *  breakdown: the first two path segments, so `/v4/character/Bubble` and
    *  `/v4/world/Antica` collapse onto `/v4/character` and `/v4/world` rather
@@ -79,7 +110,7 @@ class TibiaDataClient(
       // Counted per attempt, not per logical fetch: a retried request really is
       // a second call on TibiaData, and hiding that would make the panel
       // understate our load exactly when an upstream wobble is causing it.
-      metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString)
+      metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt) match {
         case RetryDecision.RetryIn(delay) =>
@@ -263,4 +294,23 @@ class TibiaDataClient(
 
     decoder.decodeMessage(response)
   }
+}
+
+object TibiaDataClient {
+  /** Width of one cache-age bucket, and the age past which they stop being
+   *  split. 60s buckets against a 300s TTL give five rows across an entry's
+   *  life plus an overflow, which is enough to see the shape without turning
+   *  the dashboard panel into a wall of rows. */
+  private[tibiadata] val CacheAgeBucketSeconds = 60L
+  private[tibiadata] val CacheAgeMaxBucket = 360L
+
+  /** Label for the bucket `seconds` of upstream cache age falls in — e.g. 0
+   *  -> "0-59s", 240 -> "240-299s", 400 -> "360s+". Pure, so the bucketing can
+   *  be pinned by tests without going near HTTP. */
+  private[tibiadata] def cacheAgeBucket(seconds: Long): String =
+    if (seconds >= CacheAgeMaxBucket) s"${CacheAgeMaxBucket}s+"
+    else {
+      val floor = (math.max(0L, seconds) / CacheAgeBucketSeconds) * CacheAgeBucketSeconds
+      s"$floor-${floor + CacheAgeBucketSeconds - 1}s"
+    }
 }

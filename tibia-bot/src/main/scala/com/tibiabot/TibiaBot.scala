@@ -724,6 +724,12 @@ class TibiaBot(
           val charDeath = CharKey(char.character.character.name, deathTime)
           if (deathAge < deathRecentDuration && !recentDeaths.contains(charDeath)) {
             recentDeaths.add(charDeath)
+            // First sight of this death, so deathAge is how far behind it we
+            // were — the baseline any change to the poll schedule moves. A
+            // world starting cold has no dedup history and briefly records
+            // whatever it finds, up to deathRecentDuration old; the 15-minute
+            // window this lands in clears that on its own.
+            worldMetrics.recordDeathDetected(deathAge)
             BotApp.addDeathsCache(world, char.character.character.name, deathTime.toString)
             Some(CharDeath(char, death))
           }
