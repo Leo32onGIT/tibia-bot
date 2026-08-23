@@ -253,6 +253,82 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include(weekly.repeatLabel)
   }
 
+  // A recurring rule was already one row. This is the same booking made by hand
+  // — seven separate one-off rules for the same hour on seven days — which is
+  // the shape a card actually fills up with, since nothing stops somebody
+  // booking a week an evening at a time.
+  test("one person's identical bookings are one row, counted") {
+    val evenings = (2 to 8).toList.map(day =>
+      RespawnSchedule(20L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), evenings, now))("Booked")
+
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 1
+    // The soonest of them, since that is the one anybody is planning around.
+    booked should include(s"<t:${now.plusDays(2).toInstant.getEpochSecond}:s>")
+    booked should include("+6 repeats")
+    // Nothing left over for the row cap's note to own up to.
+    booked should not include "more"
+  }
+
+  test("a single extra booking is a repeat, not repeats") {
+    val pair = List(3, 4).map(day =>
+      RespawnSchedule(30L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), pair, now))("Booked")
+
+    booked should include("+1 repeat")
+    booked should not include "repeats"
+  }
+
+  // Same person, different evening — two different things to somebody reading
+  // the list to find an evening that is still free. Grouping by person alone
+  // would fold one into the other and say the free one was taken.
+  test("bookings at different hours stay their own rows") {
+    val early = RespawnSchedule(41L, 1L, "77", "hunter77", "", now.plusDays(2).withHour(9),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val late = RespawnSchedule(42L, 1L, "77", "hunter77", "", now.plusDays(3).withHour(21),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(early, late), now))("Booked")
+
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 2
+    booked should not include "repeat"
+  }
+
+  test("two people booking the same hour are two rows") {
+    val theirs = List("77", "88").map(user =>
+      RespawnSchedule(50L + user.toLong, 1L, user, s"hunter$user", "", now.plusDays(2),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), theirs, now))("Booked")
+
+    booked.linesIterator.size shouldBe 2
+    booked should not include "repeat"
+  }
+
+  // The repeat label and the asked marker are each true of one row only, so a
+  // count behind either would be claiming it of the rows it swallowed.
+  test("a row with a label of its own is not folded into the plain ones") {
+    val weekly = RespawnSchedule(61L, 1L, "77", "hunter77", "", now.plusDays(2),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now,
+      daysOfWeek = RespawnSchedule.maskOf(List(now.plusDays(2).getDayOfWeek)))
+    val oneOff = RespawnSchedule(62L, 1L, "77", "hunter77", "", now.plusDays(9),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(weekly, oneOff), now))("Booked")
+
+    booked.linesIterator.size shouldBe 2
+    booked should include(weekly.repeatLabel)
+    // No count behind either of them.
+    booked should not include "+"
+  }
+
   test("rows and rules are one list, in time order") {
     val tonight = reserved("77", now.plusHours(3))
     val thursday = RespawnSchedule(9L, 1L, "99", "hunter99", "", now.plusDays(4),
@@ -584,6 +660,38 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include("hunter10")
     booked should not include "hunter11"
     booked should include("…and 4 more")
+  }
+
+  // The same fold the card does, for the same reason and more so: this list is
+  // opened to find an evening that is still free, and a week of one person's
+  // 7pm pushed the other evenings off the end of it.
+  test("the booking panel folds one person's identical bookings too") {
+    val evenings = (2 to 8).toList.map(day =>
+      RespawnSchedule(70L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), upcoming = evenings)
+
+    val booked = section(embed, AllBookings)
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 1
+    booked should include("+6 repeats")
+    // Room the fold made back: nothing is behind a "…and N more" any more.
+    booked should not include "…and"
+  }
+
+  test("a folded row is still marked as the reader's own") {
+    val mine = (2 to 4).toList.map(day =>
+      RespawnSchedule(80L + day, 1L, "55", "hunter55", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), upcoming = mine)
+
+    val booked = section(embed, AllBookings)
+    // The filled marker, not the hollow one every other row gets.
+    booked.linesIterator.toList.filter(_.contains("hunter55")).map(_.take(1)) shouldBe List("▸")
+    booked should include("+2 repeats")
   }
 
   test("a booking too far out to have a slot yet is still one of the next ten") {

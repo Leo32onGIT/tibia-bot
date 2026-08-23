@@ -119,6 +119,96 @@ object RespawnEmbeds {
   private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
     s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **·** $who$note"
 
+  /** One booking as the Booked list needs it before it becomes a line: what to
+   *  sort by, what to group the hand-made repeats by, and what to render. */
+  private final case class BookedEntry(start: ZonedDateTime, minutes: Int, who: String,
+                                       userId: String, note: String)
+
+  /** The Booked rows, with a person's identical bookings folded into one line.
+   *
+   *  A recurring rule is already one row — it is listed as the next evening it
+   *  holds rather than as every evening it will ever hold. What this collapses is
+   *  the same booking made by hand: one person taking 7pm for two and a half
+   *  hours on seven separate days is seven rules, and so was seven rows, and a
+   *  card is not made more useful by saying one thing seven times. It is the same
+   *  fact a repeat label states, so it is stated the same way, on the soonest of
+   *  them, and the rest become a count.
+   *
+   *  Same person, same hour, same length is the whole test. Grouping by person
+   *  alone would fold a Tuesday evening in with a Saturday morning, which are two
+   *  different things to anybody reading the list to find a free evening.
+   *
+   *  A row that already carries a note of its own — a repeat label, or the marker
+   *  saying somebody has asked for the slot — stands alone. Both say something
+   *  true only of that one row, which a count behind it would attach to the
+   *  others.
+   *
+   *  `zone` is the guild's, and the hour is compared in it: the rendered times
+   *  are Discord timestamps drawn in each reader's own clock, so the hour a
+   *  grouping is named for has to be one fixed clock's rather than nobody's. Any
+   *  fixed zone agrees with any other on which bookings share an hour, so every
+   *  reader sees the same rows collapsed — at their own time of day.
+   */
+  /** The two sources a booked list has, as one list of entries.
+   *
+   *  A booking exists before its slot does: a slot row is only written once its
+   *  start comes within the look-ahead, so one made for later in the week has
+   *  nothing but the rule behind it for days, and a list of rows alone would
+   *  answer "nothing booked" to somebody who had just booked it. `upcoming` is
+   *  the rules with no row yet, and the caller is what decides that, since only
+   *  it can see both.
+   *
+   *  Shared by the spawn's card and the Book panel because they list the same
+   *  bookings and differ only in how a row is drawn — which is what
+   *  [[collapseBooked]] takes a renderer for. */
+  private def bookedEntries(reservations: List[RespawnClaim], upcoming: List[RespawnSchedule],
+                            now: ZonedDateTime,
+                            givenUp: Map[Long, Set[java.time.Instant]]): List[BookedEntry] =
+    reservations.flatMap { slot =>
+      slot.startsAt.map { start =>
+        // Somebody is waiting on an answer — worth showing, since until it is
+        // given the slot may or may not still belong to the name beside it.
+        val pending = if (slot.requestPending) " · *asked*" else ""
+        BookedEntry(start, slot.durationMinutes, claimantLabel(slot), slot.userId, pending)
+      }
+    } ++ upcoming.flatMap { schedule =>
+      // Only the next evening each rule still holds. A weekly booking has
+      // occurrences forever, and listing them would be one booking said ten
+      // times where ten spawns' worth of evenings was the question.
+      //
+      // The next one it still holds, at that: a rule that gave tonight away
+      // offers tomorrow, rather than standing beside the booking that took it
+      // and naming the same hour.
+      schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
+        val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+        BookedEntry(start, schedule.durationMinutes, scheduleLabel(schedule), schedule.userId, repeat)
+      }
+    }
+
+  private def collapseBooked(entries: List[BookedEntry], zone: java.time.ZoneId)
+                            (render: (BookedEntry, String) => String): List[String] =
+    entries
+      .sortBy(_.start.toInstant)
+      .groupBy(entry =>
+        if (entry.note.nonEmpty) Left(entry.start.toInstant)
+        else Right((entry.userId, entry.start.withZoneSameInstant(zone).toLocalTime, entry.minutes)))
+      .values.toList
+      // groupBy keeps each group in the order it met them, so the head of every
+      // group is its soonest — which is both the row to show and the one the
+      // groups themselves are ordered by.
+      .sortBy(_.head.start.toInstant)
+      .map { group =>
+        val more = group.size - 1
+        val repeats =
+          if (more <= 0) ""
+          // The plain separator the repeat label uses, not the bold one between
+          // a row's own fields: this is a note in the same slot, and the two
+          // never appear together to be told apart anyway.
+          else if (more == 1) " · +1 repeat"
+          else s" · +$more repeats"
+        render(group.head, repeats)
+      }
+
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted
    *  creature posts use. Falls back to a neutral sign for the many catalogue
@@ -178,36 +268,12 @@ object RespawnEmbeds {
     // Booked windows that haven't started. Shown whether or not the spawn is free
     // right now, because the point of booking ahead is that people can plan
     // around it.
-    //
-    // Two sources, because a booking exists before its slot does. A slot row is
-    // only written once its start comes within the look-ahead, so a booking made
-    // for Thursday has nothing but the rule behind it for days — and a card that
-    // showed only rows would answer "nothing booked" to somebody who had just
-    // booked it. `upcoming` is the rules with no row yet, and the caller is what
-    // decides that, since only it can see both.
-    val booked =
-      reservations.flatMap { slot =>
-        slot.startsAt.map { start =>
-          // Somebody is waiting on an answer — worth showing, since until it is
-          // given the slot may or may not still belong to the name beside it.
-          val pending = if (slot.requestPending) " · *asked*" else ""
-          start -> bookedRow(start, slot.durationMinutes, claimantLabel(slot), pending)
-        }
-      } ++ upcoming.flatMap { schedule =>
-        // Only the next one. A weekly booking has occurrences forever, and a card
-        // listing every Tuesday from now on would say the same thing ten times.
-        //
-        // The next one it still holds, at that: a rule that gave tonight away
-        // offers tomorrow, rather than standing beside the booking that took it
-        // and naming the same hour.
-        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
-          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
-          start -> bookedRow(start, schedule.durationMinutes, scheduleLabel(schedule), repeat)
-        }
-      }
+    val booked = bookedEntries(reservations, upcoming, now, givenUp)
 
     if (booked.nonEmpty) {
-      val ordered = booked.sortBy(_._1.toInstant).map(_._2)
+      val ordered = collapseBooked(booked, now.getZone) { (entry, repeats) =>
+        bookedRow(entry.start, entry.minutes, entry.who, entry.note + repeats)
+      }
       embed.addField("Booked", cappedField(ordered.take(RowsPerList), ordered.size), false)
     }
 
@@ -298,26 +364,12 @@ object RespawnEmbeds {
     // collapses a run of ordinary spaces to one. The small triangles rather than
     // U+25B6/7, which some clients render as the emoji.
     def marker(userId: String): String = if (userId == viewerId) "▸ " else "▹ "
-    // Two sources, the same pair the claim card merges: a slot row is only
-    // written once its start comes within the look-ahead, so a booking further
-    // out than that is still nothing but a rule. Listing rows alone answered
-    // "nothing booked" on a spawn whose every evening is spoken for, which is
-    // the opposite of what this panel is opened to find out.
-    val ahead =
-      reservations.flatMap { slot =>
-        slot.startsAt.map { start =>
-          val pending = if (slot.requestPending) " · *asked*" else ""
-          start -> s"${marker(slot.userId)}${dateTime(start)} · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
-        }
-      } ++ upcoming.flatMap { schedule =>
-        // Only the next evening each rule still holds — a weekly booking has
-        // occurrences forever, and ten of them would be one booking said ten
-        // times where ten spawns' worth of evenings was the question.
-        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
-          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
-          start -> s"${marker(schedule.userId)}${dateTime(start)} · ${humanDuration(schedule.durationMinutes)} — ${scheduleLabel(schedule)}$repeat"
-        }
-      }
+    // The same pair the claim card merges, built the same way, and folded the
+    // same way: a person's identical bookings become one row and a count. This
+    // list is read to find an evening that is still free, and seven lines
+    // saying the same person has the same hour is seven lines that answer that
+    // question once.
+    val ahead = bookedEntries(reservations, upcoming, now, givenUp)
 
     // Sections of the description, and no fields at all. A field name is
     // Discord's own section break, but it is drawn small and flat where a bold
@@ -328,7 +380,10 @@ object RespawnEmbeds {
     // Both lists are titled the same way, and named as a pair so it is plain
     // which is the subset of which. The spawn's own card still titles its list
     // "Booked"; that surface has no second list to pair with.
-    val ordered = ahead.sortBy(_._1.toInstant).map(_._2)
+    val ordered = collapseBooked(ahead, now.getZone) { (entry, repeats) =>
+      s"${marker(entry.userId)}${dateTime(entry.start)} · ${humanDuration(entry.minutes)} — " +
+        s"${entry.who}${entry.note}$repeats"
+    }
     val hidden = math.max(0, ordered.size - RowsPerList)
     val allBookings =
       if (ordered.isEmpty) Nil
