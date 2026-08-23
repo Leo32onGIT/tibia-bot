@@ -131,9 +131,9 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
   }
 
   test("primary: does not publish a character Left result — an error is not data") {
-    val stub = new StubApi(characterResult = Left("Hit cache")); val cache = new FakeCache()
+    val stub = new StubApi(characterResult = Left("503 Service Unavailable")); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
-    await(api.getCharacter("Abu Shusha")) shouldBe Left("Hit cache")
+    await(api.getCharacter("Abu Shusha")) shouldBe Left("503 Service Unavailable")
     cache.sets shouldBe 0
   }
 
