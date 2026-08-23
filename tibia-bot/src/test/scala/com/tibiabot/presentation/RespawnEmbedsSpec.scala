@@ -662,10 +662,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include("…and 4 more")
   }
 
-  // The same fold the card does, for the same reason and more so: this list is
-  // opened to find an evening that is still free, and a week of one person's
-  // 7pm pushed the other evenings off the end of it.
-  test("the booking panel folds one person's identical bookings too") {
+  test("a person's repeat bookings are each their own row on the panel") {
+    // The card folds these into "+6 repeats". The panel is where the specific
+    // evening behind that count is looked up, so it says all seven.
     val evenings = (2 to 8).toList.map(day =>
       RespawnSchedule(70L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
         RespawnSchedule.Daily, 150, active = true, createdAt = now,
@@ -674,24 +673,11 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs), upcoming = evenings)
 
     val booked = section(embed, AllBookings)
-    booked.linesIterator.count(_.contains("hunter77")) shouldBe 1
-    booked should include("+6 repeats")
-    // Room the fold made back: nothing is behind a "…and N more" any more.
-    booked should not include "…and"
-  }
-
-  test("a folded row is still marked as the reader's own") {
-    val mine = (2 to 4).toList.map(day =>
-      RespawnSchedule(80L + day, 1L, "55", "hunter55", "", now.plusDays(day.toLong),
-        RespawnSchedule.Daily, 150, active = true, createdAt = now,
-        daysOfWeek = RespawnSchedule.OneOff))
-    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
-      holder = None, now, image(cultOrcs), upcoming = mine)
-
-    val booked = section(embed, AllBookings)
-    // The filled marker, not the hollow one every other row gets.
-    booked.linesIterator.toList.filter(_.contains("hunter55")).map(_.take(1)) shouldBe List("▸")
-    booked should include("+2 repeats")
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 7
+    booked should not include "repeat"
+    // Each row carries its own evening, which is the whole point of the list.
+    evenings.foreach(e =>
+      booked should include(s"<t:${e.anchorAt.toInstant.getEpochSecond}:s>"))
   }
 
   test("a booking too far out to have a slot yet is still one of the next ten") {

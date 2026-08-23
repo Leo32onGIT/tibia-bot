@@ -364,11 +364,17 @@ object RespawnEmbeds {
     // collapses a run of ordinary spaces to one. The small triangles rather than
     // U+25B6/7, which some clients render as the emoji.
     def marker(userId: String): String = if (userId == viewerId) "▸ " else "▹ "
-    // The same pair the claim card merges, built the same way, and folded the
-    // same way: a person's identical bookings become one row and a count. This
-    // list is read to find an evening that is still free, and seven lines
-    // saying the same person has the same hour is seven lines that answer that
-    // question once.
+    // The same pair the claim card merges, and built the same way — but every
+    // booking, one row each, where the card folds a person's identical ones into
+    // a count.
+    //
+    // Deliberately the two surfaces disagreeing. The card is the summary nobody
+    // opened: it is already in the thread, it has a field's 1024 characters to
+    // live in, and what it owes a passing reader is the shape of the week. This
+    // panel is what somebody pressed Bookings to see, and the question that
+    // press asks is which particular evenings are spoken for — a folded row
+    // names an hour and a count, which is exactly the specific booking it was
+    // opened to find.
     val ahead = bookedEntries(reservations, upcoming, now, givenUp)
 
     // Sections of the description, and no fields at all. A field name is
@@ -380,9 +386,9 @@ object RespawnEmbeds {
     // Both lists are titled the same way, and named as a pair so it is plain
     // which is the subset of which. The spawn's own card still titles its list
     // "Booked"; that surface has no second list to pair with.
-    val ordered = collapseBooked(ahead, now.getZone) { (entry, repeats) =>
+    val ordered = ahead.sortBy(_.start.toInstant).map { entry =>
       s"${marker(entry.userId)}${dateTime(entry.start)} · ${humanDuration(entry.minutes)} — " +
-        s"${entry.who}${entry.note}$repeats"
+        s"${entry.who}${entry.note}"
     }
     val hidden = math.max(0, ordered.size - RowsPerList)
     val allBookings =
