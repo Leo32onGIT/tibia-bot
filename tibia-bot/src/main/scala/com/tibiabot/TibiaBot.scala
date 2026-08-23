@@ -40,7 +40,6 @@ class TibiaBot(
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
-  private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
   private case class OnlineListEntry(name: String, level: Int, lastUpdated: ZonedDateTime)
@@ -48,7 +47,6 @@ class TibiaBot(
   private val recentDeaths = mutable.Set.empty[CharKey]
   private val levelTracker = new tracking.LevelTracker
   private val recentOnline = mutable.Set.empty[CharKey]
-  private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private val onlineTracker = new tracking.OnlineTracker
   private val onlineDurationPersistence = new persistence.OnlineDurationPersistence(persistence.RedisCacheProvider.cache, world, Config.Cache.onlineDurationTtl)
 
@@ -122,14 +120,17 @@ class TibiaBot(
   // `ExecutionContext.global` binding used to sit here but was never actually
   // selected, so it is gone rather than left looking meaningful.
   private val tibiaDataClient: TibiaApi = {
-    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(BotApp.streamState), persistence.RedisCacheProvider.cache)
-    if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
-    else caching
+    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
+    val shared =
+      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current,
+        characterTtl = Config.CharacterCache.ttl)
+      else caching
+    // Outermost, so a skippable character fetch costs nothing at all — not the
+    // request, and not the shared-cycle Redis read in front of it either. One
+    // instance per world, holding only that world's characters.
+    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings(TibiaBot.PollInterval))
+    else shared
   }
-
-  // The one world whose character lookups go through the level-gated bypass
-  // endpoint (getCharacterV2) instead of the plain one.
-  private val NocteraWorld = "Noctera"
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
@@ -153,7 +154,7 @@ class TibiaBot(
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 60.seconds, ())
+  private lazy val sourceTick = Source.tick(2.seconds, TibiaBot.PollInterval, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -195,24 +196,10 @@ class TibiaBot(
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
-      // cache bypass for Noctera
-      if (worldResponse.world.name == NocteraWorld) {
-        // Remove existing online chars from the list...
-        recentOnlineBypass.filterInPlace { i =>
-          !online.exists(player => player.name == i.char)
-        }
-        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-        fanOut(recentOnlineBypass.map(key => (key.char, key.level)).toSet)(tibiaDataClient.getCharacterV2)
-      } else {
-        fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
-      }
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
     // World poll failed: fall back to re-checking whoever was last seen online.
-    // Always the plain character endpoint here, including on Noctera — the
-    // level-gated bypass needs a level, and this path has no fresh online list
-    // to take one from.
     case Left(_) =>
-      val lastSeen = if (world == NocteraWorld) recentOnlineBypass.map(_.char) else recentOnline.map(_.char)
-      fanOut(lastSeen.toSet)(tibiaDataClient.getCharacter)
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
   }.withAttributes(logAndResume)
 
   /** Fetch every character in `inputs` at the shared 32-way concurrency and
@@ -744,6 +731,12 @@ class TibiaBot(
           val charDeath = CharKey(char.character.character.name, deathTime)
           if (deathAge < deathRecentDuration && !recentDeaths.contains(charDeath)) {
             recentDeaths.add(charDeath)
+            // First sight of this death, so deathAge is how far behind it we
+            // were — the baseline any change to the poll schedule moves. A
+            // world starting cold has no dedup history and briefly records
+            // whatever it finds, up to deathRecentDuration old; the 15-minute
+            // window this lands in clears that on its own.
+            worldMetrics.recordDeathDetected(deathAge)
             BotApp.addDeathsCache(world, char.character.character.name, deathTime.toString)
             Some(CharDeath(char, death))
           }
@@ -1634,10 +1627,6 @@ class TibiaBot(
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < onlineRecentDuration
     }
-    recentOnlineBypass.filterInPlace { i =>
-      val diff = java.time.Duration.between(i.time, now).getSeconds
-      diff < onlineRecentDuration
-    }
     recentDeaths.filterInPlace { i =>
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < deathRecentDuration
@@ -1882,4 +1871,13 @@ class TibiaBot(
     }
   }
 
+}
+
+object TibiaBot {
+  /** How often a world re-polls. Named because two things depend on it and
+   *  they must not drift apart: the stream's own tick, and the character age
+   *  cache, which rounds each character's next fetch to the nearest poll and
+   *  would lose a whole interval of death-detection latency if it were working
+   *  from a different number than the tick actually uses. */
+  val PollInterval: FiniteDuration = 60.seconds
 }

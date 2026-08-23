@@ -85,7 +85,6 @@ class CachingTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
     def getGuild(guild: String) = Future.successful(Left("x"))
     def getGuildWithInput(input: (String, String)) = Future.successful((Left("x"), input._1, input._2))
     def getKillerFallback(name: String) = Future.successful(Left("x"))
-    def getCharacterV2(input: (String, Int)) = Future.successful(Left("x"))
     def getCharacterWithInput(input: (String, String, String)) = Future.successful((Left("x"), input._1, input._2, input._3))
   }
 

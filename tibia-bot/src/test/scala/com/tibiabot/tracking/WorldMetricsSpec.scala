@@ -69,4 +69,43 @@ class WorldMetricsSpec extends AnyFunSuite with Matchers {
     snap.population shouldBe 200
     snap.lastPollAt shouldBe Some(now)
   }
+
+  test("death lag averages over detections, and keeps the worst one in the window") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(100)
+    m.recordDeathDetected(300)
+    m.recordDeathDetected(200)
+    val snap = m.snapshot()
+    snap.deathDetections shouldBe 3
+    snap.deathLagAvgSeconds shouldBe 200.0
+    snap.deathLagMaxSeconds shouldBe 300
+  }
+
+  test("death lag is counted per detection, not per post — incrementDeaths does not move it") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(120)
+    // the same death posting to three discords
+    m.incrementDeaths(); m.incrementDeaths(); m.incrementDeaths()
+    val snap = m.snapshot()
+    snap.deaths shouldBe 3
+    snap.deathDetections shouldBe 1
+    snap.deathLagAvgSeconds shouldBe 120.0
+  }
+
+  test("no detections reports a zero average rather than dividing by zero") {
+    val snap = new WorldMetrics().snapshot()
+    snap.deathDetections shouldBe 0
+    snap.deathLagAvgSeconds shouldBe 0.0
+    snap.deathLagMaxSeconds shouldBe 0
+  }
+
+  test("resetCounters clears the lag window, so a quiet window does not inherit the last one's worst") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(900)
+    m.resetCounters()
+    val snap = m.snapshot()
+    snap.deathDetections shouldBe 0
+    snap.deathLagAvgSeconds shouldBe 0.0
+    snap.deathLagMaxSeconds shouldBe 0
+  }
 }

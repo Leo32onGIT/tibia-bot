@@ -33,10 +33,28 @@ object Config {
     private def dur(key: String): FiniteDuration = discord.getDuration(s"cache.$key").toScala
     val boostedTtl: FiniteDuration = dur("boosted-ttl")
     val worldListTtl: FiniteDuration = dur("world-list-ttl")
-    val characterSnapshotTtl: FiniteDuration = dur("character-snapshot-ttl")
-    val characterSnapshotInterval: FiniteDuration = dur("character-snapshot-interval")
     val onlineDurationTtl: FiniteDuration = dur("online-duration-ttl")
     val killerLevelTtl: FiniteDuration = dur("killer-level-ttl")
+  }
+
+  /** Settings for the character age cache — see
+   *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
+   *  because it is not only durations, and because `enabled` is meant to be a
+   *  one-env-var way back to always-fetch behaviour without a rollback. */
+  object CharacterCache {
+    private def sub(key: String): String = s"character-cache.$key"
+    val enabled: Boolean = discord.getBoolean(sub("enabled"))
+    val ttl: FiniteDuration = discord.getDuration(sub("ttl")).toScala
+    val maxStale: FiniteDuration = discord.getDuration(sub("max-stale")).toScala
+    val canaryFraction: Double = discord.getDouble(sub("canary-fraction"))
+    val maxEntries: Int = discord.getInt(sub("max-entries"))
+
+    /** `pollInterval` is the caller's own poll cadence rather than a setting:
+     *  the cache rounds to the nearest poll, so a value that drifted from the
+     *  real tick would quietly cost a whole interval of latency. The stream
+     *  that owns the tick passes it in. */
+    def settings(pollInterval: FiniteDuration): tibiadata.AgeCacheSettings =
+      tibiadata.AgeCacheSettings(ttl, pollInterval, maxStale, canaryFraction, maxEntries)
   }
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString

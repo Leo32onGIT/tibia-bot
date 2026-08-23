@@ -24,9 +24,9 @@ object OnlinePlayerSnapshot {
  *  Deliberately omits `time` (last-updated-at) from the snapshot — restoring
  *  it verbatim would make the first post-restart poll's delta count the
  *  entire downtime gap toward duration; OnlineTracker.restore re-stamps it to
- *  the restore moment instead. Same whole-blob-per-cycle shape as
- *  CharacterCachePersistence, for the same reason: the state this wraps is
- *  rebuilt in full every poll, so per-entry writes are not an option.
+ *  the restore moment instead. Written as one whole blob per cycle rather
+ *  than per entry, because the state this wraps is rebuilt in full every poll
+ *  and the poll must never touch Redis per character.
  *
  *  No-op when Redis is disabled (NoopRedisCache); all failures degrade to an
  *  empty load / dropped save, so this can never affect correctness. */
