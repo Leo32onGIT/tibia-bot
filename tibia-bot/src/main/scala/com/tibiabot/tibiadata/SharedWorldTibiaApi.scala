@@ -17,31 +17,62 @@ import scala.util.control.NonFatal
  *  (primary hasn't fetched this cycle yet, is down, or the value aged out).
  *  Every other method passes straight through to `underlying` unchanged.
  *
- *  `getCharacter` has a correctness trap worth documenting: the underlying
- *  TibiaDataClient already does its own process-local dedup (comparing the
- *  response's Date header against what it last saw) and can return
- *  `Left("Hit cache")` with no character data at all. That signal reflects
- *  only the calling process's own fetch history — it says nothing about
- *  whether another process has seen this data — so it must never be
- *  published; only a genuine `Right` result is shared. A `Left` from a
- *  Primary (cache-hit-locally or a real error) is simply not published this
- *  cycle, leaving whatever's already in Redis (if anything) to age normally.
+ *  Only a genuine `Right` is ever published. An error must not be shared as
+ *  though it were data, and a Primary that failed simply leaves whatever is
+ *  already in Redis to expire on its own.
+ *
+ *  '''A published character sheet is kept for exactly as long as the upstream
+ *  copy it came from is still the current one''' — its origin timestamp plus
+ *  that copy's lifetime, not a flat duration. A flat one is wrong in both
+ *  directions now that [[AgeCachedTibiaApi]] sits in front. The Primary only
+ *  reaches this class when a character comes due, roughly once per upstream
+ *  lifetime, so a TTL shorter than that leaves the key missing for most of the
+ *  cycle and every Secondary fetches directly anyway — which is what a flat 90
+ *  seconds against a 300 second lifetime did. Overshooting is worse than
+ *  useless rather than merely useless: a Secondary reads Redis and only falls
+ *  through to a real fetch on a miss, so an entry outliving its copy is one a
+ *  Secondary keeps being served after it stopped being current, and if the
+ *  Primary died it would go on being served until the key expired. Tying the
+ *  key's life to the copy's makes it vanish exactly when it stops being the
+ *  current answer, at which point a Secondary either finds the newly published
+ *  one or goes and fetches.
+ *
+ *  Correctness does not rest on that, though — it is about hit rate and blast
+ *  radius. The payload carries its own `information.timestamp`, so a
+ *  Secondary's own [[AgeCachedTibiaApi]] re-derives freshness from the sheet
+ *  itself: handed an out-of-date one it records the old origin, stays due, and
+ *  asks again next poll rather than settling for it.
+ *
+ *  `getWorld` keeps a flat TTL. Its upstream copy lives 60s and both bots poll
+ *  every 60s, so the Primary republishes each cycle and the key is
+ *  continuously present — the mismatch that broke the character path does not
+ *  arise there, and nothing here changes what the online list sees.
  *
  *  Deliberately a separate decorator from CachingTibiaApi rather than an
- *  extension of it — that class's own doc explains why the world/character
- *  firehose is never cached there (it would delay death detection); the TTL
- *  here is short enough (well under the ~60s poll interval) to not have that
- *  effect, but the concerns are different enough to keep them apart. Sits in
- *  front of CachingTibiaApi (which wraps TibiaDataClient), so a Primary's own
- *  fetch still benefits from whatever CachingTibiaApi caches on other
- *  endpoints. */
+ *  extension of it — that class's own doc explains why the character firehose
+ *  is never cached there. Sits in front of CachingTibiaApi (which wraps
+ *  TibiaDataClient), so a Primary's own fetch still benefits from whatever
+ *  CachingTibiaApi caches on other endpoints. */
 final class SharedWorldTibiaApi(
     underlying: TibiaApi,
     cache: RedisCache,
     role: Config.BotRole.Role,
-    ttl: FiniteDuration = 90.seconds
+    worldTtl: FiniteDuration = 90.seconds,
+    characterTtl: FiniteDuration = 300.seconds,
+    now: () => java.time.Instant = () => java.time.Instant.now()
 )(implicit ec: ExecutionContext)
     extends TibiaApi with JsonSupport with StrictLogging {
+
+  /** How long this sheet is worth keeping: what is left of the upstream copy
+   *  it came from. A response whose origin cannot be read has unknown
+   *  freshness, so it gets the floor rather than a guess — barely shared, but
+   *  the path still works if that field ever goes away. */
+  private def characterPublishTtl(response: CharacterResponse): FiniteDuration = {
+    val remaining = OriginTimestamp.of(response.information).map { origin =>
+      java.time.Duration.between(now(), origin.plusSeconds(characterTtl.toSeconds)).getSeconds
+    }.getOrElse(0L)
+    math.max(SharedWorldTibiaApi.MinCharacterPublishTtl.toSeconds, remaining).seconds
+  }
 
   private def sharedWorldKey(world: String): String = s"tibia:world-shared:${world.toLowerCase}"
   private def sharedCharacterKey(name: String): String = s"tibia:character-shared:${name.toLowerCase}"
@@ -50,7 +81,7 @@ final class SharedWorldTibiaApi(
     case Config.BotRole.Primary =>
       underlying.getWorld(world).map { result =>
         result.foreach { worldResponse =>
-          cache.setEx(sharedWorldKey(world), worldResponse.toJson.compactPrint, ttl).recover {
+          cache.setEx(sharedWorldKey(world), worldResponse.toJson.compactPrint, worldTtl).recover {
             case NonFatal(e) => logger.warn(s"Failed to publish shared world data for '$world': ${e.getMessage}")
           }
         }
@@ -74,11 +105,10 @@ final class SharedWorldTibiaApi(
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = role match {
     case Config.BotRole.Primary =>
       underlying.getCharacter(name).map { result =>
-        // Only a genuine fresh fetch is shareable — see the class doc for why
-        // a Left (including the underlying client's own "Hit cache" signal)
-        // must never be published.
+        // Only a genuine fetch is shareable — an error must never be published
+        // as though it were data.
         result.foreach { characterResponse =>
-          cache.setEx(sharedCharacterKey(name), characterResponse.toJson.compactPrint, ttl).recover {
+          cache.setEx(sharedCharacterKey(name), characterResponse.toJson.compactPrint, characterPublishTtl(characterResponse)).recover {
             case NonFatal(e) => logger.warn(s"Failed to publish shared character data for '$name': ${e.getMessage}")
           }
         }
@@ -106,4 +136,11 @@ final class SharedWorldTibiaApi(
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)] = underlying.getGuildWithInput(input)
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = underlying.getKillerFallback(name)
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = underlying.getCharacterWithInput(input)
+}
+
+object SharedWorldTibiaApi {
+  /** Floor on a published sheet's life. A copy fetched right at its turnover
+   *  has a full lifetime left, but one adopted late has little, and writing a
+   *  key that expires before anybody could read it is just work. */
+  val MinCharacterPublishTtl: FiniteDuration = 15.seconds
 }

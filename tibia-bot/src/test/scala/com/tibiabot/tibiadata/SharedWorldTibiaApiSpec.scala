@@ -7,6 +7,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import spray.json._
 
+import java.time.Instant
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -36,7 +37,10 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     var gets = 0
     var sets = 0
     def get(key: String): Future[Option[String]] = { gets += 1; Future.successful(store.get(key)) }
-    def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = { sets += 1; store.put(key, value); Future.unit }
+    var lastTtl: Map[String, FiniteDuration] = Map.empty
+    def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] = {
+      sets += 1; store.put(key, value); lastTtl += (key -> ttl); Future.unit
+    }
     /** Real enough to be useful: wins only when nothing holds the key, which
      *  is the property anything relying on this actually depends on. */
     def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
@@ -126,7 +130,7 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     cache.store(sharedCharacterKey).parseJson.convertTo[CharacterResponse] shouldBe character
   }
 
-  test("primary: does not publish a character Left result, including a local 'Hit cache' signal") {
+  test("primary: does not publish a character Left result — an error is not data") {
     val stub = new StubApi(characterResult = Left("Hit cache")); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
     await(api.getCharacter("Abu Shusha")) shouldBe Left("Hit cache")
@@ -163,6 +167,49 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     stub.characterCalls shouldBe 1
     cache.gets shouldBe 0
     cache.sets shouldBe 0
+  }
+
+  test("primary: a published sheet is kept exactly as long as the copy it came from stays current") {
+    // Fixture origin is 2026-05-30T14:57:58Z; 200s into a 300s copy leaves 100s.
+    val at = Instant.parse("2026-05-30T15:01:18Z")
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary,
+      characterTtl = 300.seconds, now = () => at)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    cache.lastTtl(sharedCharacterKey) shouldBe 100.seconds
+  }
+
+  test("primary: a sheet fetched at its turnover is shared for a full copy lifetime") {
+    val at = Instant.parse("2026-05-30T14:57:58Z")
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary,
+      characterTtl = 300.seconds, now = () => at)
+    await(api.getCharacter("Abu Shusha"))
+    cache.lastTtl(sharedCharacterKey) shouldBe 300.seconds
+  }
+
+  test("primary: a copy already past its turnover is published only for the floor, never a negative life") {
+    val at = Instant.parse("2026-05-30T15:30:00Z") // long past the copy's 300s
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary,
+      characterTtl = 300.seconds, now = () => at)
+    await(api.getCharacter("Abu Shusha"))
+    cache.lastTtl(sharedCharacterKey) shouldBe SharedWorldTibiaApi.MinCharacterPublishTtl
+  }
+
+  test("primary: a sheet with no readable origin has unknown freshness, so it gets the floor rather than a guess") {
+    val noStamp = character.copy(information = character.information.copy(timestamp = None))
+    val stub = new StubApi(characterResult = Right(noStamp)); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacter("Abu Shusha"))
+    cache.lastTtl(sharedCharacterKey) shouldBe SharedWorldTibiaApi.MinCharacterPublishTtl
+  }
+
+  test("primary: the world share keeps its flat TTL, since its copy and the poll are both 60s") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary, worldTtl = 90.seconds)
+    await(api.getWorld("Antica"))
+    cache.lastTtl(sharedWorldKey) shouldBe 90.seconds
   }
 
   test("every other method passes straight through to the underlying API regardless of role") {

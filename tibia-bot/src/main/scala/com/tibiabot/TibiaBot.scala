@@ -122,7 +122,8 @@ class TibiaBot(
   private val tibiaDataClient: TibiaApi = {
     val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
     val shared =
-      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
+      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current,
+        characterTtl = Config.CharacterCache.ttl)
       else caching
     // Outermost, so a skippable character fetch costs nothing at all — not the
     // request, and not the shared-cycle Redis read in front of it either. One

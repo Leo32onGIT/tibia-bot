@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
-import scala.util.control.NonFatal
 
 /** How long a character sheet is reused before it is worth asking for again,
  *  and the guard rails around that. See [[AgeCachedTibiaApi]]. */
@@ -99,15 +98,6 @@ final class AgeCachedTibiaApi(
 
   private def key(name: String): String = name.toLowerCase
 
-  /** The origin timestamp out of a response, or None when it is absent or
-   *  unparseable — in which case the response simply is not cached, and this
-   *  character keeps being fetched every cycle exactly as before. */
-  private def originOf(response: CharacterResponse): Option[Instant] =
-    response.information.timestamp.flatMap { raw =>
-      try Some(Instant.parse(raw))
-      catch { case NonFatal(_) => None }
-    }
-
   /** When the upstream copy built at `origin` turns over. */
   private def refetchAt(origin: Instant): Instant =
     origin.plusSeconds(settings.ttl.toSeconds)
@@ -176,7 +166,10 @@ final class AgeCachedTibiaApi(
       case _ =>
         underlying.getCharacter(name).map {
           case right @ Right(response) =>
-            originOf(response).foreach(origin => entries.put(cacheKey, Entry(response, storedOrigin(origin, at))))
+            // No origin means unknown freshness, so it is not cached at all and
+            // this character keeps being fetched every cycle exactly as before.
+            OriginTimestamp.of(response.information)
+              .foreach(origin => entries.put(cacheKey, Entry(response, storedOrigin(origin, at))))
             right
           case left =>
             // Nothing stored, so this character stays due and the next tick
