@@ -16,11 +16,13 @@ import scala.util.control.NonFatal
  *  Caches only the freshness-tolerant, fan-out-heavy endpoints that hit the
  *  rate-limited local instance: boosted boss and boosted creature. These change
  *  once a day yet fan out per-guild at server-save, so caching collapses N
- *  identical calls into one.
+ *  identical calls into one. They are also the ONLY endpoints that may use that
+ *  instance — it is rate-limited hard enough that the character firehose must
+ *  never be pointed at it.
  *
- *  The per-cycle character firehose and the lvl>=1000 bypass are deliberately
- *  passed straight through: caching them would delay death detection, which is
- *  exactly what the bot exists to do quickly.
+ *  The per-cycle character firehose is deliberately passed straight through:
+ *  caching it here would delay death detection, which is exactly what the bot
+ *  exists to do quickly.
  *
  *  Boosted boss/creature flip at the 10:00 Berlin server save, and the
  *  change-detection that fires the daily notification compares the API value to
@@ -86,6 +88,5 @@ final class CachingTibiaApi(
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)] = underlying.getGuildWithInput(input)
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = underlying.getCharacter(name)
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = underlying.getKillerFallback(name)
-  def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]] = underlying.getCharacterV2(input)
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = underlying.getCharacterWithInput(input)
 }

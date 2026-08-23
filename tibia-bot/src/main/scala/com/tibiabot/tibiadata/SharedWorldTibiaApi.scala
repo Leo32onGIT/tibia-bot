@@ -15,11 +15,7 @@ import scala.util.control.NonFatal
  *  publishes each successful result to Redis; a `Secondary` reads that
  *  published result first, falling back to fetching it directly on a miss
  *  (primary hasn't fetched this cycle yet, is down, or the value aged out).
- *  Every other method passes straight through to `underlying` unchanged —
- *  `getCharacterV2` deliberately included: it exists solely to defeat
- *  TibiaData's own upstream caching for Noctera (name-case-randomised on
- *  every call), so sharing on top of it would reintroduce exactly the
- *  staleness it's designed to avoid.
+ *  Every other method passes straight through to `underlying` unchanged.
  *
  *  `getCharacter` has a correctness trap worth documenting: the underlying
  *  TibiaDataClient already does its own process-local dedup (comparing the
@@ -109,6 +105,5 @@ final class SharedWorldTibiaApi(
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = underlying.getGuild(guild)
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)] = underlying.getGuildWithInput(input)
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = underlying.getKillerFallback(name)
-  def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]] = underlying.getCharacterV2(input)
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = underlying.getCharacterWithInput(input)
 }

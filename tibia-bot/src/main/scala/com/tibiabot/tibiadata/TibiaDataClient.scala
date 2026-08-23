@@ -12,7 +12,6 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, Worlds
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
-import scala.util.Random
 import scala.util.control.NonFatal
 import com.tibiabot.state.StreamState
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -198,12 +197,10 @@ class TibiaDataClient(
       s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"))
   }
 
-  /** The Date-header-gated character cache shared by getCharacter and
-   *  getCharacterV2: when the response carries a Date no newer than the cached
-   *  timestamp for `name`, skip unmarshalling (drain + report a cache hit);
-   *  otherwise record the timestamp and unmarshal. The request URL differs
-   *  between callers (plain vs the level>=1000 bypass), so it is built by the
-   *  caller and passed in as `responseFuture`. */
+  /** The Date-header-gated character cache behind getCharacter: when the
+   *  response carries a Date no newer than the cached timestamp for `name`,
+   *  skip unmarshalling (drain + report a cache hit); otherwise record the
+   *  timestamp and unmarshal. */
   private def fetchCharacterCached(name: String, encodedName: String, responseFuture: Future[HttpResponse]): Future[Either[String, CharacterResponse]] =
     responseFuture.flatMap { response =>
       response.header[DateHeader] match {
@@ -240,26 +237,6 @@ class TibiaDataClient(
           Future.successful(Left("No Date header in response"))
       }
     }
-  }
-
-  def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]] = {
-    val name = input._1
-    val level = input._2
-    val apiUrl = if (level >= 1000) {
-      s"${Config.tibiadataApi}/v4/character/"
-    } else {
-      characterUrl
-    }
-    val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val bypassName: String = if (level >= 1000) {
-          val randomizedName = encodedName.map { c =>
-            if (c.isLetter)
-              if (Random.nextBoolean()) c.toUpper else c.toLower
-            else c
-          }
-          randomizedName
-        } else encodedName
-    fetchCharacterCached(name, encodedName, requestWithRetry(HttpRequest(uri = s"$apiUrl$bypassName")))
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {

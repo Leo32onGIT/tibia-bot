@@ -40,7 +40,6 @@ class TibiaBot(
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
-  private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
   private case class OnlineListEntry(name: String, level: Int, lastUpdated: ZonedDateTime)
@@ -48,7 +47,6 @@ class TibiaBot(
   private val recentDeaths = mutable.Set.empty[CharKey]
   private val levelTracker = new tracking.LevelTracker
   private val recentOnline = mutable.Set.empty[CharKey]
-  private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private val onlineTracker = new tracking.OnlineTracker
   private val onlineDurationPersistence = new persistence.OnlineDurationPersistence(persistence.RedisCacheProvider.cache, world, Config.Cache.onlineDurationTtl)
 
@@ -127,10 +125,6 @@ class TibiaBot(
     else caching
   }
 
-  // The one world whose character lookups go through the level-gated bypass
-  // endpoint (getCharacterV2) instead of the plain one.
-  private val NocteraWorld = "Noctera"
-
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
@@ -195,24 +189,10 @@ class TibiaBot(
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
-      // cache bypass for Noctera
-      if (worldResponse.world.name == NocteraWorld) {
-        // Remove existing online chars from the list...
-        recentOnlineBypass.filterInPlace { i =>
-          !online.exists(player => player.name == i.char)
-        }
-        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-        fanOut(recentOnlineBypass.map(key => (key.char, key.level)).toSet)(tibiaDataClient.getCharacterV2)
-      } else {
-        fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
-      }
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
     // World poll failed: fall back to re-checking whoever was last seen online.
-    // Always the plain character endpoint here, including on Noctera — the
-    // level-gated bypass needs a level, and this path has no fresh online list
-    // to take one from.
     case Left(_) =>
-      val lastSeen = if (world == NocteraWorld) recentOnlineBypass.map(_.char) else recentOnline.map(_.char)
-      fanOut(lastSeen.toSet)(tibiaDataClient.getCharacter)
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
   }.withAttributes(logAndResume)
 
   /** Fetch every character in `inputs` at the shared 32-way concurrency and
@@ -1631,10 +1611,6 @@ class TibiaBot(
   private def cleanUp(): Unit = {
     val now = ZonedDateTime.now()
     recentOnline.filterInPlace { i =>
-      val diff = java.time.Duration.between(i.time, now).getSeconds
-      diff < onlineRecentDuration
-    }
-    recentOnlineBypass.filterInPlace { i =>
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < onlineRecentDuration
     }

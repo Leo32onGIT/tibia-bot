@@ -15,8 +15,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
  *  successful getWorld/getCharacter fetch to Redis (never a Left) and returns
  *  it unchanged; a Secondary reads that published value on a hit without
  *  touching the underlying API, and falls back to it on a miss or a corrupt
- *  value; Disabled and every other method (including getCharacterV2, which
- *  must stay a pure pass-through — see the class doc) are unaffected. */
+ *  value; Disabled and every other method are unaffected. */
 class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
 
   private implicit val ec: ExecutionContext = ExecutionContext.global
@@ -59,7 +58,6 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
   ) extends TibiaApi {
     var worldCalls = 0
     var characterCalls = 0
-    var characterV2Calls = 0
     def getWorld(w: String): Future[Either[String, WorldResponse]] = { worldCalls += 1; Future.successful(worldResult) }
     def getWorlds() = Future.successful(Left("x"))
     def getBoostedBoss() = Future.successful(Left("x"))
@@ -68,7 +66,6 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     def getGuildWithInput(input: (String, String)) = Future.successful((Left("x"), input._1, input._2))
     def getCharacter(name: String) = { characterCalls += 1; Future.successful(characterResult) }
     def getKillerFallback(name: String) = Future.successful(Left("x"))
-    def getCharacterV2(input: (String, Int)) = { characterV2Calls += 1; Future.successful(Left("x")) }
     def getCharacterWithInput(input: (String, String, String)) = Future.successful((Left("x"), input._1, input._2, input._3))
   }
 
@@ -164,15 +161,6 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Disabled)
     await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
     stub.characterCalls shouldBe 1
-    cache.gets shouldBe 0
-    cache.sets shouldBe 0
-  }
-
-  test("getCharacterV2 stays a pure pass-through even as primary — sharing would defeat its Noctera cache-bypass purpose") {
-    val stub = new StubApi(); val cache = new FakeCache()
-    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
-    await(api.getCharacterV2(("Abu Shusha", 1000))) shouldBe Left("x")
-    stub.characterV2Calls shouldBe 1
     cache.gets shouldBe 0
     cache.sets shouldBe 0
   }
