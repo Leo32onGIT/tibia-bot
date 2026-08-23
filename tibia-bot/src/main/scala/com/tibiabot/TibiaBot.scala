@@ -120,7 +120,7 @@ class TibiaBot(
   // `ExecutionContext.global` binding used to sit here but was never actually
   // selected, so it is gone rather than left looking meaningful.
   private val tibiaDataClient: TibiaApi = {
-    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(BotApp.streamState), persistence.RedisCacheProvider.cache)
+    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
     if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
     else caching
   }

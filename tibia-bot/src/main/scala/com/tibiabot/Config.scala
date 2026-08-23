@@ -33,8 +33,6 @@ object Config {
     private def dur(key: String): FiniteDuration = discord.getDuration(s"cache.$key").toScala
     val boostedTtl: FiniteDuration = dur("boosted-ttl")
     val worldListTtl: FiniteDuration = dur("world-list-ttl")
-    val characterSnapshotTtl: FiniteDuration = dur("character-snapshot-ttl")
-    val characterSnapshotInterval: FiniteDuration = dur("character-snapshot-interval")
     val onlineDurationTtl: FiniteDuration = dur("online-duration-ttl")
     val killerLevelTtl: FiniteDuration = dur("killer-level-ttl")
   }

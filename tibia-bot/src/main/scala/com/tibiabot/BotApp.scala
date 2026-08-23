@@ -114,7 +114,7 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.scheduleWithFixedDelay(15.minutes, 15.minutes)(() => worldMetricsRegistry.resetAllCounters())(ex)
 
   private val tibiaDataClient: tibiadata.TibiaApi =
-    new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl)(scala.concurrent.ExecutionContext.global)
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
@@ -627,8 +627,6 @@ object BotApp extends App with StrictLogging {
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
-  def characterCache: Map[String, ZonedDateTime] = streamState.characterCache
-  def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit = streamState.warmCharacterCache(loaded)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
@@ -690,22 +688,6 @@ object BotApp extends App with StrictLogging {
     streamState.modifyWorldsData(f)
   def modifyActivityCommandBlocker(f: Map[String, Boolean] => Map[String, Boolean]): Unit =
     streamState.modifyActivityCommandBlocker(f)
-
-  // Warm the Date-header character cache from the last Redis snapshot so a
-  // restart doesn't re-baseline every character against the rate-limited API,
-  // then snapshot it every 60s (configurable). Whole-map snapshot keeps the
-  // per-character hot path off Redis entirely; no-op + empty load when Redis
-  // is disabled.
-  private val charCachePersistence =
-    new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
-  charCachePersistence.load().foreach { loaded =>
-    if (loaded.nonEmpty) {
-      warmCharacterCache(loaded) // existing (fresher) entries win
-      logger.info(s"Warmed character cache from Redis snapshot: ${loaded.size} entries")
-    }
-  }
-  private val snapshotInterval = Config.Cache.characterSnapshotInterval
-  actorSystem.scheduler.scheduleWithFixedDelay(snapshotInterval, snapshotInterval)(() => { charCachePersistence.save(characterCache); () })(ex)
 
   // Per-guild channel/role setup lifecycle (create/repair/remove, join/leave).
   // State mutation for join/leave stays in BotApp via the forgetGuild callback;
@@ -963,7 +945,6 @@ object BotApp extends App with StrictLogging {
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
       galthenService.cleanExpired()
-      cleanOnlineListCache(30)
       updateOnOdd = 0
     } else {
       updateOnOdd += 1
@@ -1470,13 +1451,6 @@ object BotApp extends App with StrictLogging {
         val newlyLinkedIds = enriched.flatMap(_.discordUserId).toSet -- previouslyLinkedIds
         val reclaimed = paywallService.reclaimOverridesFromPatreon(newlyLinkedIds)
         if (reclaimed.nonEmpty) logger.info(s"Patreon sync picked up ${reclaimed.size} newly-linked Discord account(s) with a dashboard-granted seat override — reset to the default")
-    }
-  }
-
-  def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
-    val currentTime = ZonedDateTime.now()
-    streamState.pruneCharacterCache { timestamp =>
-      timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES) <= maxAgeMinutes
     }
   }
 

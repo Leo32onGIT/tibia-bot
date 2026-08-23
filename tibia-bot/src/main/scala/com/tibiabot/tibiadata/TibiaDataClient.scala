@@ -13,13 +13,10 @@ import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
 import scala.util.control.NonFatal
-import com.tibiabot.state.StreamState
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 import spray.json.DeserializationException
 import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
-import java.time.{ZonedDateTime, ZoneId}
-import java.time.format.DateTimeFormatter
 
 /** `metrics` defaults to the process-wide TibiaData counter rather than being
  *  wired in at each call site: this class is constructed in three places
@@ -27,7 +24,6 @@ import java.time.format.DateTimeFormatter
  *  dashboard wants one figure for the process, not three. Tests pass their own
  *  instance to keep assertions isolated. */
 class TibiaDataClient(
-  streamState: StreamState,
   metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData
 )(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
 
@@ -35,12 +31,6 @@ class TibiaDataClient(
 
   private val characterUrl = "https://api.tibiadata.com/v4/character/"
   private val guildUrl = "https://api.tibiadata.com/v4/guild/"
-
-  // Built once: fetchCharacterCached runs on every character response (tens of
-  // thousands a minute across all worlds), and DateTimeFormatter is immutable
-  // and thread-safe, so there is no reason to rebuild it per response.
-  private val dateHeaderFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("GMT"))
 
   private val retryPolicy = new RetryPolicy()
   private val maxRetries = 2
@@ -228,32 +218,9 @@ class TibiaDataClient(
       s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"))
   }
 
-  /** The Date-header-gated character cache behind getCharacter: when the
-   *  response carries a Date no newer than the cached timestamp for `name`,
-   *  skip unmarshalling (drain + report a cache hit); otherwise record the
-   *  timestamp and unmarshal. */
-  private def fetchCharacterCached(name: String, encodedName: String, responseFuture: Future[HttpResponse]): Future[Either[String, CharacterResponse]] =
-    responseFuture.flatMap { response =>
-      response.header[DateHeader] match {
-        case Some(dateHeader) =>
-          val responseDate = ZonedDateTime.parse(dateHeader.date.toString, dateHeaderFormatter)
-          streamState.characterSeenAt(name) match {
-            case Some(existingDate) if !responseDate.isAfter(existingDate) =>
-              response.discardEntityBytes()
-              Future.successful(Left("Hit cache"))
-            case _ =>
-              streamState.recordCharacterSeen(name, responseDate)
-              unmarshalCharacter(response, encodedName)
-          }
-        case None =>
-          response.discardEntityBytes()
-          Future.successful(Left("No Date header in response"))
-      }
-    }
-
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    fetchCharacterCached(name, encodedName, requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")))
+    requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")).flatMap(unmarshalCharacter(_, encodedName))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {

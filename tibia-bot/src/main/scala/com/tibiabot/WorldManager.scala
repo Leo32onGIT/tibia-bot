@@ -12,11 +12,8 @@ object WorldManager extends StrictLogging {
 
   implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
 
-  // WorldManager only calls getWorlds(), which never touches the character-freshness
-  // cache, so it gets its own isolated (and never populated) StreamState rather than
-  // sharing BotApp's.
   private val tibiaDataClient: tibiadata.TibiaApi =
-    new tibiadata.CachingTibiaApi(new TibiaDataClient(new state.StreamState), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
   // The world list changes only at major game updates, so cache it (default 1h)
   // instead of making a blocking API call on every getWorldList(). Falls back to
