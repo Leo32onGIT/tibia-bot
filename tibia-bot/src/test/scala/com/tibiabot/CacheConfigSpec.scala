@@ -30,7 +30,6 @@ class CacheConfigSpec extends AnyFunSuite with Matchers {
     // 300s is the Kong TTL measured on /v4/character — the one value here that
     // describes the upstream rather than our own policy.
     characterCache.getDuration("ttl").toScala.toSeconds shouldBe 300
-    characterCache.getDuration("margin").toScala.toSeconds shouldBe 5
     characterCache.getDuration("max-stale").toScala.toMinutes shouldBe 15
     characterCache.getDouble("canary-fraction") shouldBe 0.02
     characterCache.getInt("max-entries") shouldBe 20000

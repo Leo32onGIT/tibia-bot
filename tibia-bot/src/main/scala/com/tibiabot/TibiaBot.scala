@@ -127,7 +127,7 @@ class TibiaBot(
     // Outermost, so a skippable character fetch costs nothing at all — not the
     // request, and not the shared-cycle Redis read in front of it either. One
     // instance per world, holding only that world's characters.
-    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings)
+    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings(TibiaBot.PollInterval))
     else shared
   }
 
@@ -153,7 +153,7 @@ class TibiaBot(
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 60.seconds, ())
+  private lazy val sourceTick = Source.tick(2.seconds, TibiaBot.PollInterval, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -1870,4 +1870,13 @@ class TibiaBot(
     }
   }
 
+}
+
+object TibiaBot {
+  /** How often a world re-polls. Named because two things depend on it and
+   *  they must not drift apart: the stream's own tick, and the character age
+   *  cache, which rounds each character's next fetch to the nearest poll and
+   *  would lose a whole interval of death-detection latency if it were working
+   *  from a different number than the tick actually uses. */
+  val PollInterval: FiniteDuration = 60.seconds
 }

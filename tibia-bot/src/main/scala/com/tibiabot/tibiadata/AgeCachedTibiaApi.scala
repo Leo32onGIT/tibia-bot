@@ -15,7 +15,7 @@ import scala.util.control.NonFatal
  *  and the guard rails around that. See [[AgeCachedTibiaApi]]. */
 final case class AgeCacheSettings(
     ttl: FiniteDuration,
-    margin: FiniteDuration,
+    pollInterval: FiniteDuration,
     maxStale: FiniteDuration,
     canaryFraction: Double,
     maxEntries: Int
@@ -33,7 +33,9 @@ final case class AgeCacheSettings(
  *  response says so in `information.timestamp`: the moment the origin generated
  *  the data, which stays pinned across the whole life of a cached copy while
  *  the Date header moves on. So `timestamp + ttl` is when the upstream copy
- *  turns over, and there is no reason to ask before then.
+ *  turns over, and the poll that lands nearest that moment is the one worth
+ *  spending — see `worthReusing` for why nearest, and not simply the first
+ *  poll after it.
  *
  *  Three things about this are load-bearing:
  *
@@ -67,6 +69,17 @@ final case class AgeCacheSettings(
  *  The canary keeps a small unbiased sample flowing so that number stays
  *  honest and a wrong TTL shows up in prod rather than staying silent.
  *
+ *  Characters skipped together come due together, and nothing here spreads
+ *  them out. That is deliberate. A copy's life is fixed by when it was built,
+ *  so asking early cannot move it — the same copy comes back and the entry is
+ *  still due. Only asking *late* shifts a character's phase, which means any
+ *  smoothing is paid for in exactly the delay this exists to avoid. And there
+ *  is nothing to buy with it: a poll on which every character comes due sends
+ *  what every poll sent before this class existed, so the peak is the one the
+ *  bot already sustains, now reached a fifth as often. Player churn re-seeds
+ *  phases continuously anyway, so the lockstep case needs a cold start to
+ *  arise and decays on its own.
+ *
  *  Every other endpoint passes straight through: the world poll is already
  *  matched to its own 60s upstream TTL, and the rest are neither hot nor
  *  cached upstream.
@@ -97,7 +110,26 @@ final class AgeCachedTibiaApi(
 
   /** When the upstream copy built at `origin` turns over. */
   private def refetchAt(origin: Instant): Instant =
-    origin.plusSeconds(settings.ttl.toSeconds + settings.margin.toSeconds)
+    origin.plusSeconds(settings.ttl.toSeconds)
+
+  /** Whether `entry` is worth reusing at `at` rather than asking again.
+   *
+   *  Asks whether this poll or the next one lands closer to the moment the
+   *  upstream copy turns over, rather than whether that moment has already
+   *  passed. The difference is not academic: fetches only happen on the poll
+   *  tick, the TTL is an exact multiple of it, so an entry created by one poll
+   *  expires exactly on a later one. Asking "has it expired yet" then turns on
+   *  a fraction of a second — the request latency between the poll firing and
+   *  the origin stamping the copy is enough to make the answer no — and losing
+   *  that coin flip costs a whole poll interval of death-detection latency.
+   *
+   *  Rounding to the nearest tick instead lands on the expiry poll with half an
+   *  interval of slack either side, which is far more than request latency,
+   *  tick drift and the whole-second rounding of the timestamp combined. Being
+   *  early costs nothing worse than one wasted request that returns the same
+   *  copy and leaves the entry due again. */
+  private def worthReusing(entry: Entry, at: Instant): Boolean =
+    refetchAt(entry.origin).isAfter(at.plusSeconds(settings.pollInterval.toSeconds / 2))
 
   /** The origin time to actually store, never later than the moment we saw it.
    *
@@ -137,7 +169,7 @@ final class AgeCachedTibiaApi(
     pruneIfDue(at)
     val cacheKey = key(name)
     val cached = Option(entries.get(cacheKey))
-    val reusable = cached.filter(entry => refetchAt(entry.origin).isAfter(at))
+    val reusable = cached.filter(worthReusing(_, at))
     reusable match {
       case Some(entry) if random() >= settings.canaryFraction =>
         Future.successful(Right(entry.response))

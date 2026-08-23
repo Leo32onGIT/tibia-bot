@@ -31,8 +31,9 @@ class AgeCachedTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
   private def sheetFrom(at: Instant): CharacterResponse =
     base.copy(information = base.information.copy(timestamp = Some(at.toString)))
 
+  private val poll = 60.seconds
   private val settings = AgeCacheSettings(
-    ttl = 300.seconds, margin = 5.seconds, maxStale = 15.minutes,
+    ttl = 300.seconds, pollInterval = poll, maxStale = 15.minutes,
     canaryFraction = 0.0, maxEntries = 20000)
 
   /** Underlying API whose clock and answer the test drives. `calls` is what
@@ -88,22 +89,75 @@ class AgeCachedTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
   test("once the upstream copy is due to turn over, it asks again") {
     val f = new Fixture()
     f.get()
-    f.advance(304.seconds) // ttl 300 + margin 5, so still inside
+    f.advance(269.seconds) // still more than half a poll short of the turnover
     f.get()
     f.stub.calls shouldBe 1
-    f.advance(2.seconds) // now past it
+    f.advance(2.seconds) // now within half a poll of it
     f.get()
     f.stub.calls shouldBe 2
+  }
+
+  test("the poll that lands on the turnover spends the fetch, not the one after it") {
+    // The trap this guards: fetches only happen on the poll tick and the TTL is
+    // an exact multiple of it, so a copy created by one poll turns over exactly
+    // on a later one. The origin stamp always trails the poll that caused it by
+    // the request latency, so asking "has it expired yet" answers no by a
+    // fraction of a second — and waiting for the next poll costs a full
+    // interval of death-detection latency.
+    val requestLatency = 1
+    val f = new Fixture(result = Right(sheetFrom(t0.plusSeconds(requestLatency))))
+    f.get()
+    f.stub.calls shouldBe 1
+    List(60, 120, 180, 240).foreach { _ =>
+      f.advance(poll)
+      f.get()
+      f.stub.calls shouldBe 1 // nothing spent on the four polls in between
+    }
+    f.advance(poll) // the poll on which the copy turns over
+    f.get()
+    f.stub.calls shouldBe 2
+  }
+
+  test("alignment holds despite a slow request, tick drift or a rounded timestamp") {
+    // Anything up to half a poll of skew still lands on the same poll, in
+    // either direction — far more slack than those three combined need.
+    List(-29, -5, 0, 5, 29).foreach { skew =>
+      val f = new Fixture(result = Right(sheetFrom(t0.plusSeconds(skew.toLong))))
+      f.get()
+      (1 to 4).foreach { _ => f.advance(poll); f.get() }
+      withClue(s"skew ${skew}s should not have spent a fetch before the turnover poll: ") {
+        f.stub.calls shouldBe 1
+      }
+      f.advance(poll)
+      f.get()
+      withClue(s"skew ${skew}s should have fetched on the turnover poll: ") {
+        f.stub.calls shouldBe 2
+      }
+    }
+  }
+
+  test("a fetch that lands early gets the same copy back and leaves the entry due") {
+    // Rounding to the nearest poll can ask slightly early. That returns the
+    // copy already held, so the entry keeps its origin, stays due, and is asked
+    // for again — one wasted request, never a stuck entry.
+    val f = new Fixture()
+    f.get()
+    f.advance(271.seconds) // within half a poll of turnover, so due
+    f.get()
+    f.stub.calls shouldBe 2
+    f.advance(1.second)
+    f.get()
+    f.stub.calls shouldBe 3 // still due, because the copy never turned over
   }
 
   test("age is counted from when the origin built the copy, not from when we stored it") {
     // A copy already 250s old when first seen has 50s of life left, not 300.
     val f = new Fixture(result = Right(sheetFrom(t0.minusSeconds(250))))
     f.get()
-    f.advance(40.seconds)
+    f.advance(15.seconds)
     f.get()
     f.stub.calls shouldBe 1
-    f.advance(20.seconds)
+    f.advance(10.seconds)
     f.get()
     f.stub.calls shouldBe 2
   }
@@ -122,7 +176,7 @@ class AgeCachedTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
   test("a failure after a good fetch is answered from the stored sheet rather than as a hole") {
     val f = new Fixture()
     f.get() shouldBe Right(sheetFrom(t0))
-    f.advance(310.seconds) // due again
+    f.advance(280.seconds) // due again
     f.stub.result = Left("503")
     f.get() shouldBe Right(sheetFrom(t0)) // the stored sheet, not the error
     f.stub.calls shouldBe 2
@@ -131,7 +185,7 @@ class AgeCachedTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
   test("a failure keeps the character due, so it is retried every tick through an outage") {
     val f = new Fixture()
     f.get()
-    f.advance(310.seconds)
+    f.advance(280.seconds)
     f.stub.result = Left("503")
     f.get(); f.advance(60.seconds)
     f.get(); f.advance(60.seconds)
@@ -171,7 +225,7 @@ class AgeCachedTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport {
     f.stub.calls shouldBe 1 // still inside the clamped window
     f.advance(200.seconds)
     f.get()
-    f.stub.calls shouldBe 2 // clamped to ttl + margin from first sight, not a day
+    f.stub.calls shouldBe 2 // clamped to one TTL from first sight, not a day
   }
 
   test("the canary fetches anyway, so the age histogram keeps an unbiased sample") {

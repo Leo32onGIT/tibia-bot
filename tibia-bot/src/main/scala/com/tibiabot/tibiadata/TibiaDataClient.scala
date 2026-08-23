@@ -93,8 +93,12 @@ class TibiaDataClient(
    *  a 429 telling us to send less — is returned as-is, since retrying an
    *  answer just gets the same answer, and retrying a rate limit makes it
    *  worse. A response the policy declines to retry degrades to the existing
-   *  logged-Left behaviour untouched. */
-  private def requestWithRetry(request: HttpRequest, attempt: Int = 0): Future[HttpResponse] =
+   *  logged-Left behaviour untouched.
+   *
+   *  `callerRetriesSoon` turns the inline retry off entirely for callers that
+   *  are already on a poll cycle — see [[RetryPolicy]] for why that is the
+   *  better trade on the character firehose. */
+  private def requestWithRetry(request: HttpRequest, attempt: Int = 0, callerRetriesSoon: Boolean = false): Future[HttpResponse] =
     Http().singleRequest(request).flatMap { response =>
       val status = response.status.intValue
       // Counted per attempt, not per logical fetch: a retried request really is
@@ -102,11 +106,11 @@ class TibiaDataClient(
       // understate our load exactly when an upstream wobble is causing it.
       metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
       val retryAfter = retryAfterOf(response)
-      retryPolicy.onResponse(status, retryAfter, attempt) match {
+      retryPolicy.onResponse(status, retryAfter, attempt, callerRetriesSoon) match {
         case RetryDecision.RetryIn(delay) =>
           logger.warn(s"Got ${response.status} from '${request.uri}' (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms")
           response.discardEntityBytes()
-          after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+          after(delay, system.scheduler)(requestWithRetry(request, attempt + 1, callerRetriesSoon))
         case RetryDecision.GiveUp =>
           // Worth its own line: being rate-limited is the one upstream response
           // that says something about our own behaviour rather than theirs.
@@ -122,10 +126,10 @@ class TibiaDataClient(
         // "failed" keeps timeouts and resets visible on the panel instead of
         // silently shrinking the total.
         metrics.record("endpoint" -> endpointOf(request), "status" -> "failed")
-        retryPolicy.onConnectionFailure(attempt) match {
+        retryPolicy.onConnectionFailure(attempt, callerRetriesSoon) match {
           case RetryDecision.RetryIn(delay) =>
             logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
-            after(delay, system.scheduler)(requestWithRetry(request, attempt + 1))
+            after(delay, system.scheduler)(requestWithRetry(request, attempt + 1, callerRetriesSoon))
           case RetryDecision.GiveUp => Future.failed(ex)
         }
     }
@@ -218,9 +222,13 @@ class TibiaDataClient(
       s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"))
   }
 
+  /** The poll's character fetch — ~99% of this process's traffic against the
+   *  API, and the one caller with its own retry: a failure here is picked up by
+   *  the next poll a minute later, so it does not buy one inline. */
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName")).flatMap(unmarshalCharacter(_, encodedName))
+    requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName"), callerRetriesSoon = true)
+      .flatMap(unmarshalCharacter(_, encodedName))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
