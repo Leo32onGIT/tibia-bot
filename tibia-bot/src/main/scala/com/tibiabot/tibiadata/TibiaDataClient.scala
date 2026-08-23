@@ -24,7 +24,8 @@ import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `
  *  dashboard wants one figure for the process, not three. Tests pass their own
  *  instance to keep assertions isolated. */
 class TibiaDataClient(
-  metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData
+  metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData,
+  inFlight: InFlightLimit = InFlightLimit.tibiaData
 )(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
 
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
@@ -99,7 +100,7 @@ class TibiaDataClient(
    *  are already on a poll cycle — see [[RetryPolicy]] for why that is the
    *  better trade on the character firehose. */
   private def requestWithRetry(request: HttpRequest, attempt: Int = 0, callerRetriesSoon: Boolean = false): Future[HttpResponse] =
-    Http().singleRequest(request).flatMap { response =>
+    inFlight(Http().singleRequest(request)).flatMap { response =>
       val status = response.status.intValue
       // Counted per attempt, not per logical fetch: a retried request really is
       // a second call on TibiaData, and hiding that would make the panel

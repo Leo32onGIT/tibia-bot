@@ -37,6 +37,8 @@ object Config {
     val killerLevelTtl: FiniteDuration = dur("killer-level-ttl")
   }
 
+  val tibiaDataMaxInFlight: Int = discord.getInt("tibiadata-max-in-flight")
+
   /** Settings for the character age cache — see
    *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
    *  because it is not only durations, and because `enabled` is meant to be a

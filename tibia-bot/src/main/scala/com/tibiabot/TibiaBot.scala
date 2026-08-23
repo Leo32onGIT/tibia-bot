@@ -23,7 +23,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 import java.time.OffsetDateTime
 import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
@@ -154,7 +154,7 @@ class TibiaBot(
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, TibiaBot.PollInterval, ())
+  private lazy val sourceTick = Source.tick(TibiaBot.firstPollDelay(Random.nextInt), TibiaBot.PollInterval, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -1880,4 +1880,24 @@ object TibiaBot {
    *  would lose a whole interval of death-detection latency if it were working
    *  from a different number than the tick actually uses. */
   val PollInterval: FiniteDuration = 60.seconds
+
+  /** A moment for the process to finish starting before any world polls. */
+  private[tibiabot] val SettleDelay: FiniteDuration = 2.seconds
+
+  /** How long a world waits before its first poll: the settle delay, plus a
+   *  random offset spread across one whole interval.
+   *
+   *  Every stream is built in the same startup loop and used to wait the same
+   *  two seconds, so every world polled on the same second and went on doing so
+   *  forever — tens of thousands of character requests leaving in one burst a
+   *  second or two wide, then near silence until the next minute. Averaged over
+   *  the minute that looks modest; arriving at somebody else's gateway it is a
+   *  spike, and a spike from one address is what load shedding is for.
+   *
+   *  Offsetting the start spreads those bursts across the interval instead.
+   *  Each world still polls exactly once per interval, so nothing waits any
+   *  longer than it did — only the phase differs, and phase is the one property
+   *  of a poll schedule nothing downstream depends on. */
+  private[tibiabot] def firstPollDelay(jitterSeconds: Int => Int): FiniteDuration =
+    SettleDelay + jitterSeconds(PollInterval.toSeconds.toInt).seconds
 }

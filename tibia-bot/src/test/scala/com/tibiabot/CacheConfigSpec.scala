@@ -35,6 +35,14 @@ class CacheConfigSpec extends AnyFunSuite with Matchers {
     characterCache.getInt("max-entries") shouldBe 20000
   }
 
+  test("the in-flight ceiling is far below what an unbounded fan-out would reach") {
+    // Each world fans out at 32; with dozens of worlds the real ceiling without
+    // this would be in the thousands of concurrent connections from one address.
+    val ceiling = config.getInt("tibiadata-max-in-flight")
+    ceiling should be > 32     // never bind on a single world's own fan-out
+    ceiling should be < 1000   // but well under an unbounded fleet-wide burst
+  }
+
   test("the canary fraction stays a small, sane share of fetches") {
     // Zero would blind the age histogram that validates the ttl above; a large
     // share would give back the saving the cache exists for.
