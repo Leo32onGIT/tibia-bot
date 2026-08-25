@@ -293,19 +293,20 @@ final class ChannelService(
 
   /** What a seed sync did, in words. Silent when nothing changed, so a repair
    *  run for some other reason doesn't report a catalogue that is already right.
-   *  A code left alone because somebody is on it is always mentioned — it is the
-   *  one part that needs coming back to. */
+   *
+   *  Retiring names the codes rather than counting them. It is the one part of a
+   *  sync that takes something away — the code, anything booked on it and its
+   *  post — and a moderator reading "retired 12" cannot tell whether the twelve
+   *  were the ones they expected. */
   private def seedSummary(sync: com.tibiabot.persistence.SeedSync): String = {
     val parts = List(
       Option(sync.added).filter(_ > 0).map(n => s"added **$n**"),
       Option(sync.updated).filter(_ > 0).map(n => s"renamed **$n**"),
-      Option(sync.retired).filter(_ > 0).map(n => s"retired **$n**")
+      Option(sync.retired).filter(_.nonEmpty)
+        .map(gone => s"retired **${gone.map(_.code).mkString(", ")}**")
     ).flatten
-    val held = if (sync.inUse > 0)
-      s" **${sync.inUse}** dropped from the list are still in use, so I've left them."
-    else ""
-    if (parts.isEmpty) s"The catalogue was already up to date.$held"
-    else s"Catalogue: ${parts.mkString(", ")}.$held"
+    if (parts.isEmpty) "The catalogue was already up to date."
+    else s"Catalogue: ${parts.mkString(", ")}."
   }
 
   /** What the respawn system needs that this bot was not given.
@@ -401,6 +402,11 @@ final class ChannelService(
           // reaches a guild that already exists, now that there are no catalogue
           // commands.
           val sync = respawnService.syncSeed(guild.getId)
+          // The posts of whatever it just retired, and any post left over from a
+          // retirement that could not take its own — see
+          // RespawnService.deleteOrphanedThreads.
+          respawnService.deleteRetiredThreads(guild, settings, sync.retired)
+          respawnService.deleteOrphanedThreads(guild, settings)
 
           val boardMissing = com.tibiabot.respawn.RespawnThreads
             .resolveThread(guild, existing, settings.boardThread).isEmpty

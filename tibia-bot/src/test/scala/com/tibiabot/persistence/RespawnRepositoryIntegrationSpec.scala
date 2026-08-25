@@ -170,8 +170,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     sync.added shouldBe 1
     sync.updated shouldBe 1
-    sync.retired shouldBe 1
-    sync.inUse shouldBe 0
+    // The rows themselves, not a count: the caller needs their threadIds to take
+    // the forum posts down, and by the time it is handed them the rows are gone.
+    sync.retired.map(_.code) shouldBe List("999")
 
     repo.findByCode(g, "806").map(_.name) shouldBe Some("Hydra Cave")
     repo.findByCode(g, "806").map(_.region) shouldBe Some("Liberty Bay")
@@ -191,67 +192,60 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val sync = repo.syncSeed(g, List(("415", "Edron", "Cult Orcs", "")))
 
     sync.updated shouldBe 0
-    sync.retired shouldBe 0
+    sync.retired shouldBe empty
     repo.findByCode(g, "415").map(_.name) shouldBe Some("My Own Name")
     // Not in the bundled file at all, and still here — the file only speaks for
     // the rows that came from it.
     repo.findByCode(g, "7777") should not be empty
   }
 
-  test("syncSeed leaves a dropped code alone while somebody is on it") {
+  test("syncSeed retires a dropped code out from under an active claim") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc).get
 
-    // 415 is gone from the file, but ending somebody's hunt to tidy a catalogue
-    // is the wrong trade — it is reported instead.
+    // 415 is gone from the file, so it goes — hunt included. A code the bundled
+    // list has dropped is almost always one that has been split into sub-codes,
+    // and leaving it claimable until it happened to be idle left people hunting
+    // a spawn that no longer exists beside the codes that replaced it.
     val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
-    sync.retired shouldBe 0
-    sync.inUse shouldBe 1
-    repo.findByCode(g, "415") should not be empty
-
-    // Once the hunt is over it retires on the next repair.
-    repo.finishClaim(g, repo.activeClaim(g, spawn.id).get.id, RespawnClaim.Outcome.Completed)
-    repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", ""))).retired shouldBe 1
+    sync.retired.map(_.code) shouldBe List("415")
     repo.findByCode(g, "415") shouldBe None
+    repo.activeClaim(g, spawn.id) shouldBe None
   }
 
-  test("syncSeed keeps a dropped code that is only booked for later") {
+  test("syncSeed retires a dropped code that is only booked for later") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
     repo.reserveFor(g, spawn.id, "u2", "Two", "", now.plusHours(3), 120)
 
-    // A booking is a hunt that hasn't happened yet; removing the spawn under it
-    // would cancel somebody's evening.
     val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
-    sync.inUse shouldBe 1
-    repo.findByCode(g, "415") should not be empty
+    sync.retired.map(_.code) shouldBe List("415")
+    repo.findByCode(g, "415") shouldBe None
+    repo.reservationsFor(g, spawn.id, now) shouldBe empty
   }
 
-  test("syncSeed keeps a dropped code whose booking is still only a rule") {
+  test("syncSeed retires a dropped code whose booking is still only a rule") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
     // A daily booking whose next evening is far enough off that no slot row has
     // been written for it — which is most of the day, since a slot appears only
     // when its start comes within the look-ahead. The rule is the whole of the
-    // arrangement until then.
+    // arrangement until then, so a retirement that only looked at slot rows
+    // would take this one without appearing to take anything.
     val rule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusDays(2), 1440, 120)
     repo.reservationsFor(g, spawn.id, now) shouldBe empty
 
     val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
-    sync.retired shouldBe 0
-    sync.inUse shouldBe 1
-    repo.findByCode(g, "415") should not be empty
-    repo.findSchedule(g, rule.id) should not be empty
-
-    // And once the standing arrangement is dropped, the code retires as any
-    // other unused one does.
-    repo.deactivateSchedule(g, rule.id)
-    repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", ""))).retired shouldBe 1
+    sync.retired.map(_.code) shouldBe List("415")
     repo.findByCode(g, "415") shouldBe None
+    // removeRespawn takes the standing arrangement with the spawn, or the
+    // materialiser would go on writing slots against a row that is not there.
+    repo.findSchedule(g, rule.id) shouldBe None
   }
 
   test("syncSeedCreatures updates seed rows, and only what actually changed") {

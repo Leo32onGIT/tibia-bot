@@ -15,7 +15,7 @@ import net.dv8tion.jda.api.utils.FileUpload
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
 
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /** Everything the respawn system does to Discord: the forum channel, the board
  *  post, and the one reused post per spawn.
@@ -293,14 +293,119 @@ object RespawnThreads extends StrictLogging {
    *  Best effort, and says so in the log rather than to the caller: the spawn is
    *  gone from the catalogue either way, and a post that outlives it is untidy
    *  rather than broken. */
-  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit =
-    if (threadId.nonEmpty) {
-      findForum(guild, settings).flatMap(forum => resolveThread(guild, forum, threadId)).foreach { thread =>
-        Try(thread.delete().complete()).failed.foreach { error =>
-          logger.warn(s"Could not delete the post for a removed spawn in guild '${guild.getId}'", error)
-        }
+  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit = {
+    deleteThreads(guild, settings, List(threadId))
+    ()
+  }
+
+  /** The same for a batch of removed spawns, returning how many posts actually
+   *  went.
+   *
+   *  Not a loop over [[deleteThread]]. A spawn's post is archived for most of
+   *  its life, and finding an archived post means paging the forum's archive —
+   *  so a loop pays for that paging once per code retired, which for a seed file
+   *  that has just split a dozen codes is a dozen times over the same pages.
+   *  This reads the forum once and matches every id against it. */
+  def deleteThreads(guild: Guild, settings: RespawnSettings, threadIds: List[String]): Int = {
+    val wanted = threadIds.filter(_.nonEmpty).toSet
+    if (wanted.isEmpty) 0
+    else findForum(guild, settings).fold(0) { forum =>
+      val live = forum.getThreadChannels.asScala.toList.filter(thread => wanted.contains(thread.getId))
+      // The archive is only paged for what the cache could not answer. Most of a
+      // batch of retired codes will be in there, but the single-post caller — a
+      // moderator removing a spawn from the dashboard — is usually deleting one
+      // somebody was just looking at, and that one is awake.
+      val missing = wanted -- live.map(_.getId).toSet
+      val archived =
+        if (missing.isEmpty) Nil
+        else archivedThreads(forum).filter(thread => missing.contains(thread.getId))
+      (live ++ archived).count(deleteOne)
+    }
+  }
+
+  /** Delete this bot's posts in the respawn forum that `keep` does not name,
+   *  returning how many went.
+   *
+   *  The backstop under [[deleteThreads]], and the only way to reach a post
+   *  whose catalogue row is already gone: nothing else records that the post
+   *  exists, so a delete that failed — or a retirement from before it deleted
+   *  posts at all — leaves a card in the forum that no id in the database
+   *  points at. It is found by not being pointed at.
+   *
+   *  Three guards, because "delete what I don't recognise" is how a forum gets
+   *  emptied by a bad read:
+   *
+   *   - the board post is kept whatever the caller passed, since losing it
+   *     costs the guild the one place its codes are written down;
+   *   - only posts this bot created are touched, so the posts members open in
+   *     the forum themselves are not ours to tidy;
+   *   - `limit` caps a pass, so a mistake takes a handful of posts and shows up
+   *     in the log rather than clearing the channel in one boot.
+   *
+   *  A spawn whose post exists but whose row lost its `threadId` is deleted
+   *  here too. That is the right outcome rather than a missed guard: the row can
+   *  no longer find that post, so it would open a second one on the next claim
+   *  and leave the first sitting there for ever. */
+  def deleteUnknownThreads(guild: Guild, settings: RespawnSettings,
+                           keep: Set[String], limit: Int): Int =
+    findForum(guild, settings).fold(0) { forum =>
+      val threads = allThreads(forum)
+      val doomed = orphanIds(
+        threads.map(thread => thread.getId -> thread.getOwnerId),
+        keep + settings.boardThread,
+        guild.getSelfMember.getId,
+        limit).toSet
+      threads.filter(thread => doomed.contains(thread.getId)).count { thread =>
+        val gone = deleteOne(thread)
+        if (gone) logger.info(s"Deleted the orphaned respawn post '${thread.getName}' " +
+          s"in guild '${guild.getId}' — no catalogue row points at it")
+        gone
       }
     }
+
+  /** Which of a forum's posts, as `(id, ownerId)` pairs, are ours to delete.
+   *
+   *  Pure, and separate from the call that acts on it, because this is the part
+   *  that can be wrong in a way nobody can undo: what the guards actually spare
+   *  is checkable here without a Discord to point at.
+   *
+   *  An owner Discord did not give us reads as somebody else's, which spares the
+   *  post. That is the direction to be wrong in — a post we skipped comes back
+   *  round on the next sweep, and one we should not have deleted does not. */
+  private[respawn] def orphanIds(threads: List[(String, String)], keep: Set[String],
+                                 selfId: String, limit: Int): List[String] =
+    threads.iterator
+      .filterNot { case (id, _) => keep.contains(id) }
+      .filter { case (_, ownerId) => ownerId != null && ownerId == selfId }
+      .map { case (id, _) => id }
+      .take(limit)
+      .toList
+
+  private def deleteOne(thread: ThreadChannel): Boolean =
+    Try(thread.delete().complete()) match {
+      case Success(_) => true
+      case Failure(error) =>
+        logger.warn(s"Could not delete the post for a removed spawn in guild " +
+          s"'${thread.getGuild.getId}'", error)
+        false
+    }
+
+  /** Every post the forum holds, archived ones included and deduplicated.
+   *
+   *  `getThreadChannels` is cache-only and lists the un-archived posts; a
+   *  spawn's post spends most of its life on the other side of that, so the
+   *  archive has to be paged as well. Bounded by [[ArchiveSearchLimit]], the
+   *  same bound [[resolveThread]] works to — a post further back than that is
+   *  old enough that leaving it one more boot costs nothing. */
+  private def allThreads(forum: ForumChannel): List[ThreadChannel] =
+    (forum.getThreadChannels.asScala.toList ++ archivedThreads(forum)).distinctBy(_.getId)
+
+  /** The forum's archived posts, bounded by [[ArchiveSearchLimit]] and empty
+   *  rather than fatal when Discord refuses — a sweep that could not read the
+   *  archive should do less, not fail the boot it is running on. */
+  private def archivedThreads(forum: ForumChannel): List[ThreadChannel] =
+    Try(forum.retrieveArchivedPublicThreadChannels()
+      .takeAsync(ArchiveSearchLimit).get().asScala.toList).toOption.getOrElse(Nil)
 
   /** Give the guild's moderator role a working set of powers over the spawns
    *  forum: see it, talk in a claim, and manage or delete posts when a thread

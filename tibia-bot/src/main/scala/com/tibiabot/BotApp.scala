@@ -839,8 +839,19 @@ object BotApp extends App with StrictLogging {
             val sync = respawnService.syncSeed(guild.getId)
             if (sync.changedAnything)
               logger.info(s"Respawn catalogue in guild '${guild.getId}': ${sync.added} added, " +
-                s"${sync.updated} corrected, ${sync.retired} retired" +
-                (if (sync.inUse > 0) s", ${sync.inUse} kept because somebody is on them" else ""))
+                s"${sync.updated} corrected, ${sync.retired.size} retired")
+            // A retired code's post goes with it. Left in the forum it is still
+            // a card people can find and press Claim on, for a spawn the
+            // catalogue can no longer resolve.
+            val posts = respawnService.deleteRetiredThreads(guild, config, sync.retired)
+            if (posts > 0) logger.info(s"Deleted $posts retired respawn posts in guild '${guild.getId}'")
+            // And the ones nothing can name any more: a delete that Discord
+            // refused on an earlier boot, or a code retired back when
+            // retirement only took the row. Nothing records those, so they are
+            // found by being a post of ours the catalogue does not point at.
+            val orphans = respawnService.deleteOrphanedThreads(guild, config)
+            if (orphans > 0)
+              logger.info(s"Deleted $orphans orphaned respawn posts in guild '${guild.getId}'")
             // And the picture of them, which is what anybody actually reads a
             // code off. A no-op unless the catalogue really differs from what
             // the pinned post was last drawn from, so a plain restart costs

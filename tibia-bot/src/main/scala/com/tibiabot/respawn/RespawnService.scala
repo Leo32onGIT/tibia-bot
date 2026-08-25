@@ -478,9 +478,52 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  names and cities that have changed, and codes the file has dropped.
    *
    *  What `/repair` runs, and — with no catalogue commands left — the only way an
-   *  edit to respawns.json reaches a guild that was set up before it. */
+   *  edit to respawns.json reaches a guild that was set up before it.
+   *
+   *  Only half the job on its own: hand the rows it returns to
+   *  [[deleteRetiredThreads]], or every dropped code stays in Discord as a card
+   *  offering Claim, Book and Config on a spawn nothing can resolve. */
   def syncSeed(guildId: String): SeedSync =
     repository.syncSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
+
+  /** Take down the forum posts of codes [[syncSeed]] has just retired, and say
+   *  how many went.
+   *
+   *  Its other half, split off only because the repository has no Discord to
+   *  delete with. To a member the row and the post are one thing: a code that
+   *  has been retired but whose card is still in the forum is a spawn they can
+   *  still find, still open and still press Claim on, and all they get for it is
+   *  a refusal. This is the same call `/repair`'s Remove button already makes
+   *  when a moderator deletes a spawn by hand. */
+  def deleteRetiredThreads(guild: Guild, config: RespawnSettings, retired: List[Respawn]): Int =
+    RespawnThreads.deleteThreads(guild, config, retired.map(_.threadId))
+
+  /** Delete respawn-forum posts that no catalogue row points at, and say how
+   *  many went.
+   *
+   *  What [[deleteRetiredThreads]] cannot reach. A post is found from the
+   *  `threadId` on its spawn's row, so the moment a row goes without its post
+   *  going too there is nothing left that knows the post exists — which is the
+   *  state every code retired before this existed is in. Those are found from
+   *  the other side: by being a post of ours that nothing claims.
+   *
+   *  Cheap to be wrong about in one direction and expensive in the other, so an
+   *  empty catalogue is treated as a failed read rather than as a guild with no
+   *  spawns. The two are indistinguishable from here, and acting on the first
+   *  would delete the whole forum. [[RespawnThreads.deleteUnknownThreads]]
+   *  carries the rest of the guards. */
+  def deleteOrphanedThreads(guild: Guild, config: RespawnSettings,
+                            limit: Int = OrphanSweepLimit): Int = {
+    val known = repository.listRespawns(guild.getId)
+    if (known.isEmpty) 0
+    else RespawnThreads.deleteUnknownThreads(guild, config,
+      known.map(_.threadId).filter(_.nonEmpty).toSet, limit)
+  }
+
+  /** How many orphaned posts one sweep will take. Generous next to the handful
+   *  a seed edit can strand, and small enough that a sweep gone wrong is a log
+   *  line somebody reads rather than an empty forum. */
+  private val OrphanSweepLimit = 25
 
   /** Put the pinned board post back in step with the catalogue, if it isn't.
    *
@@ -544,8 +587,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Refused, too, while anybody is holding, waiting for or has booked it.
    *  `removeRespawn` deletes those rows along with the spawn, and somebody's
    *  evening disappearing because a moderator was tidying up is not a trade
-   *  worth making silently — the same guard `syncSeed` applies to a retired
-   *  code. Free it first and the removal goes through.
+   *  worth making silently. Free it first and the removal goes through.
+   *
+   *  `syncSeed` retires a dropped code without asking this, and the difference
+   *  is what the two are for: the file dropping a code says that spawn is not a
+   *  thing any more, where a moderator pressing Remove is tidying and can be
+   *  told to come back in an hour.
    */
   def removeCustomSpawn(guildId: String, code: String): Either[String, Respawn] =
     resolve(guildId, code) match {
