@@ -20,6 +20,8 @@ class CacheConfigSpec extends AnyFunSuite with Matchers {
 
   test("every centralised cache TTL key is present with its expected default") {
     cache.getDuration("boosted-ttl").toScala.toMinutes shouldBe 1
+    // Ours, not the endpoint's — Kong holds /v4/worlds for only ~60s and a
+    // self-hosted TibiaData instance not at all. See WorldManager.
     cache.getDuration("world-list-ttl").toScala.toHours shouldBe 1
     cache.getDuration("online-duration-ttl").toScala.toMinutes shouldBe 20
     cache.getDuration("killer-level-ttl").toScala.toMinutes shouldBe 10

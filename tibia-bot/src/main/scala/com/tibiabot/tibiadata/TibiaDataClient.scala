@@ -53,16 +53,20 @@ class TibiaDataClient(
    *
    *  `api.tibiadata.com` sits behind a Kong cache that stamps `Age` with how
    *  long the entry it just served has been sitting there — measured at a 300s
-   *  TTL on `/v4/character` and 60s on `/v4/world`. That makes `Age` the one
-   *  header that says whether a request actually learned anything: a response
-   *  with `Age` 200 is byte-identical to the one the previous caller got, and
-   *  the entry cannot change for another 100s. Bucketing it here is what tells
-   *  us how much of the character firehose is re-fetching bytes we already had.
+   *  TTL on `/v4/character`, and 60s on both `/v4/world` and `/v4/worlds`. That
+   *  makes `Age` the one header that says whether a request actually learned
+   *  anything: a response with `Age` 200 is byte-identical to the one the
+   *  previous caller got, and the entry cannot change for another 100s.
+   *  Bucketing it here is what tells us how much of the character firehose is
+   *  re-fetching bytes we already had.
    *
    *  `fresh` is a 2xx with no `Age` at all — the entry was cold and this
-   *  request is what refilled it from the origin. `error` keeps non-2xx out of
-   *  the age picture: a 503 also carries no `Age`, and folding those into
-   *  `fresh` would read as a healthy origin fetch when it is the opposite.
+   *  request is what refilled it from the origin. A self-hosted TibiaData
+   *  instance has no cache in front of it at all, so everything it serves reads
+   *  as `fresh` — correctly, since every one of those really did come from the
+   *  origin. `error` keeps non-2xx out of the age picture: a 503 also carries no
+   *  `Age`, and folding those into `fresh` would read as a healthy origin fetch
+   *  when it is the opposite.
    *
    *  Buckets run past the observed 300s TTL deliberately — if some characters
    *  are cached longer than that, they show up as their own row rather than

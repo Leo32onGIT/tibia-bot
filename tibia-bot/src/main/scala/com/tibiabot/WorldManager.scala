@@ -15,9 +15,14 @@ object WorldManager extends StrictLogging {
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
-  // The world list changes only at major game updates, so cache it (default 1h)
-  // instead of making a blocking API call on every getWorldList(). Falls back to
-  // the last good value, then the static list.
+  // Cached so getWorldList() is not a blocking API call every time. Falls back
+  // to the last good value, then the static list.
+  //
+  // The 1h default is our own policy and nothing to do with the endpoint: Kong
+  // holds /v4/worlds and /v4/world/:name for only ~60s, and a self-hosted
+  // TibiaData instance does not cache them at all. So this TTL — not anything
+  // upstream — is what decides how long a newly released world stays invisible
+  // to /setup.
   // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
   private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 
