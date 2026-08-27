@@ -1696,7 +1696,7 @@ class TibiaBot(
     if (wanted.nonEmpty) {
       val batch = wanted.take(killerLevelBatchCap)
       if (wanted.size > batch.size)
-        logger.info(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
+        logger.debug(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
       // Each lookup caches its own outcome as it lands, rather than the batch
       // recording them together at the end — so a batch that times out still
       // keeps whatever did resolve in time. Recovered per element, never per

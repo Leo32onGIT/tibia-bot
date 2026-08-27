@@ -150,7 +150,7 @@ final class CreatureSpriteCache(
       val temp = Files.createTempFile(directory, safeName, ".part")
       Files.write(temp, bytes)
       Files.move(temp, fileFor(safeName), StandardCopyOption.REPLACE_EXISTING)
-      logger.info(s"Cached creature sprite '$safeName' (${bytes.length} bytes)")
+      logger.debug(s"Cached creature sprite '$safeName' (${bytes.length} bytes)")
       // Measured here, with the bytes already in hand, because this is the only
       // moment a sprite that was not on disk becomes one that is.
       measure(safeName, bytes)

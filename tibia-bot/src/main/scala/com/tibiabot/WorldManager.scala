@@ -54,11 +54,11 @@ object WorldManager extends StrictLogging {
   /** One blocking fetch of the sorted regular-world names, as an Either so the
    *  cache can decide whether to keep the previous value on failure. */
   private def fetchWorldNames(): Either[String, List[String]] = {
-    logger.info("Fetching world list from TibiaData API...")
+    logger.debug("Fetching world list from TibiaData API...")
     Try(Await.result(tibiaDataClient.getWorlds(), 30.seconds)) match {
       case Success(Right(response)) =>
         val worldNames = response.worlds.regular_worlds.map(_.name).sorted
-        logger.info(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
+        logger.debug(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
         Right(worldNames)
       case Success(Left(error)) =>
         logger.warn(s"Failed to fetch worlds from API: $error, using last good / fallback list")

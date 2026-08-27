@@ -238,7 +238,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         statement.executeUpdate(s"CREATE DATABASE ${guildDbName(guildId)};")
         logger.info(s"Database '$guildId' for discord '$guildName' created successfully")
       } else {
-        logger.info(s"Database '$guildId' already exists")
+        logger.debug(s"Database '$guildId' already exists")
       }
       statement.close()
       !exist
@@ -328,18 +328,14 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |PRIMARY KEY (name)
               |);""".stripMargin
 
+        // Not logged one line per table: the database line above already says a
+        // guild was set up, and these only ever run together with it.
         newStatement.executeUpdate(createDiscordInfoTable)
-        logger.info("Table 'discord_info' created successfully")
         newStatement.executeUpdate(createHuntedPlayersTable)
-        logger.info("Table 'hunted_players' created successfully")
         newStatement.executeUpdate(createHuntedGuildsTable)
-        logger.info("Table 'hunted_guilds' created successfully")
         newStatement.executeUpdate(createAlliedPlayersTable)
-        logger.info("Table 'allied_players' created successfully")
         newStatement.executeUpdate(createAlliedGuildsTable)
-        logger.info("Table 'allied_guilds' created successfully")
         newStatement.executeUpdate(createWorldsTable)
-        logger.info("Table 'worlds' created successfully")
         newStatement.close()
       }
     }

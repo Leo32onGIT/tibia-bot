@@ -1419,11 +1419,9 @@ final class ChannelService(
     val guildId = event.getGuild.getId
     forgetGuild(guildId)
     streamSupervisor.removeGuild(guildId)
-    logger.info(guildId)
-    if (sharedConfigGuilds.contains(guildId)) {
-      logger.info("Config is shared between Pulsera Bot, will use as alpha environment will delete when guild wants it deleted")
-    } else {
-      schemaInitializer.dropGuild(guildId)
-    }
+    // A guild sharing its config with Pulsera Bot keeps its database: dropping it
+    // here would take the other bot's setup with it. It goes when that guild asks
+    // for it, not when this bot happens to be removed.
+    if (!sharedConfigGuilds.contains(guildId)) schemaInitializer.dropGuild(guildId)
   }
 }

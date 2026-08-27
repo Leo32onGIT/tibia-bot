@@ -150,7 +150,7 @@ final class AgeCachedTibiaApi(
           .sortBy(_._2.origin)(Ordering.by[Instant, Long](_.toEpochMilli))
           .take(excess)
           .foreach { case (name, _) => entries.remove(name) }
-        logger.info(s"Character age-cache over ${settings.maxEntries} entries, dropped the $excess oldest")
+        logger.debug(s"Character age-cache over ${settings.maxEntries} entries, dropped the $excess oldest")
       }
     }
 
