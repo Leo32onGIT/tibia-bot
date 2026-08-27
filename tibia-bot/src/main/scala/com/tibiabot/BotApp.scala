@@ -132,6 +132,10 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
     new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+  // Temporary, for the move of announced transfers from guild scope to world
+  // scope — see JdbcLegacyWorldTransferMigration.
+  private val legacyWorldTransferMigration =
+    new persistence.jdbc.JdbcLegacyWorldTransferMigration(connectionProvider)
 
   /** How long an announced world transfer is remembered. Must outlast the ~180
    *  days Tibia shows a former world for: prune inside that window and the field
@@ -632,13 +636,23 @@ object BotApp extends App with StrictLogging {
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
     streamState.modifyWorldTransfersData(f)
 
-  /** Record an incoming world transfer as announced for `guildId`, in cache and db. */
-  def recordWorldTransfer(guildId: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
+  /** Record an incoming world transfer as seen on `world`, in cache and db. */
+  def recordWorldTransfer(world: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
     val transfer = WorldTransfer(name.toLowerCase, formerWorlds, detectedAt)
     streamState.modifyWorldTransfersData { m =>
-      m + (guildId -> (transfer :: m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(name))))
+      m + (world -> (transfer :: m.getOrElse(world, List()).filterNot(_.name.equalsIgnoreCase(name))))
     }
-    worldTransferRepository.record(guildId, name, formerWorlds, detectedAt)
+    worldTransferRepository.record(world, name, formerWorlds, detectedAt)
+  }
+
+  /** Load `world`'s announced transfers into streamState, minus anything old
+   *  enough that the former-world field it suppresses has long since cleared.
+   *  Called once as a world's stream starts, beside the deaths and levels caches
+   *  it sits with in the database. */
+  def loadWorldTransfers(world: String): Unit = {
+    val cutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
+    modifyWorldTransfersData(_ + (world -> worldTransferRepository.getTransfers(world).filter(_.detectedAt.isAfter(cutoff))))
+    worldTransferRepository.removeExpired(world, cutoff)
   }
 
   /** Move any announced-transfer record filed under a former name of `charName`
@@ -652,24 +666,24 @@ object BotApp extends App with StrictLogging {
    *  and keeps the table from carrying rows keyed to names nobody answers to.
    *
    *  The list is re-derived inside the lock rather than from the caller's read,
-   *  for the same reason the activity list is: a discord's records are shared by
-   *  every world it tracks and those streams poll concurrently. */
-  def rekeyWorldTransfer(guildId: String, charName: String, formerNames: List[String]): Unit = {
+   *  for the same reason the activity list is: the map holds every world's
+   *  records and those streams poll concurrently. */
+  def rekeyWorldTransfer(world: String, charName: String, formerNames: List[String]): Unit = {
     var stale: List[String] = Nil
     var moved: Option[WorldTransfer] = None
     streamState.modifyWorldTransfersData { m =>
-      val live = m.getOrElse(guildId, List())
+      val live = m.getOrElse(world, List())
       stale = presentation.WorldTransfers.staleKeys(live, charName, formerNames)
       val updated = presentation.WorldTransfers.applyRename(live, charName, formerNames)
       moved = updated.find(_.name.equalsIgnoreCase(charName))
-      m + (guildId -> updated)
+      m + (world -> updated)
     }
     // Written under the new key before the old ones are dropped: a crash between
     // the two leaves the transfer suppressed twice over, where the other order
     // would leave it suppressed by nothing and announce it again.
     if (stale.nonEmpty) {
-      moved.foreach(t => worldTransferRepository.record(guildId, charName, t.formerWorlds, t.detectedAt))
-      stale.foreach(name => worldTransferRepository.remove(guildId, name))
+      moved.foreach(t => worldTransferRepository.record(world, charName, t.formerWorlds, t.detectedAt))
+      stale.foreach(name => worldTransferRepository.remove(world, name))
     }
   }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
@@ -782,7 +796,14 @@ object BotApp extends App with StrictLogging {
     // (only created lazily by /setup itself) — checkConfigDatabase must gate
     // worldConfig, not just the world-list query inside it, or this throws
     // instead of returning empty.
-    val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
+    val guildConfigured = checkConfigDatabase(g)
+    val guildWorlds = if (guildConfigured) worldConfig(g) else Nil
+    val hasWorldConfigured = guildWorlds.nonEmpty
+    // One-shot carry-forward of this guild's announced transfers onto the world
+    // they happened on, now that the record is world-scoped rather than kept per
+    // guild. Here because it has to run before the world streams start below, and
+    // because this loop already has the guild's world list in hand.
+    if (guildConfigured) legacyWorldTransferMigration.migrate(g.getId, guildWorlds.map(_.name))
     val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(g.getIdLong, g.getJDA.getSelfUser.getId)
     g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll, Config.Respawn.enabled).asJava).complete()
   }
@@ -1489,13 +1510,9 @@ object BotApp extends App with StrictLogging {
     val activityInfo = activityConfig(g)
     modifyActivityData(_ + (guildId -> activityInfo))
 
-    // Announced world transfers, minus anything old enough that the former-world
-    // field it suppresses has long since cleared. Read before the prune: the read
-    // is what creates the table on a guild that has never had one.
-    val transferCutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
-    val transferInfo = worldTransferConfig(g).filter(_.detectedAt.isAfter(transferCutoff))
-    modifyWorldTransfersData(_ + (guildId -> transferInfo))
-    worldTransferRepository.removeExpired(guildId, transferCutoff)
+    // Announced world transfers are not loaded here: they are keyed by world, not
+    // by guild, and each world's stream loads its own as it starts (see
+    // loadWorldTransfers).
 
     val customSortInfo = customSortConfig(g)
     modifyCustomSortData(_ + (guildId -> customSortInfo))
@@ -1663,9 +1680,6 @@ object BotApp extends App with StrictLogging {
 
   private def activityConfig(guild: Guild): List[PlayerCache] =
     activityRepository.getActivity(guild.getId)
-
-  private def worldTransferConfig(guild: Guild): List[WorldTransfer] =
-    worldTransferRepository.getTransfers(guild.getId)
 
   def discordRetrieveConfig(guild: Guild): Map[String, String] =
     discordConfigRepository.getConfig(guild.getId)

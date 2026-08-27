@@ -11,8 +11,8 @@ import com.tibiabot.domain.{Killers, WorldTransfer}
  *  set, they moved within the last six months. What it does not carry is *when* in
  *  that window, so the first sighting of a character cannot tell yesterday's move
  *  from one five months old — only that a later change to the list is a new move.
- *  Nor does it carry whether we have already said so, which is what the per-guild
- *  `world_transfers` record is for. */
+ *  Nor does it carry whether we have already said so, which is what the
+ *  world-scoped `world_transfers` record is for. */
 object WorldTransfers {
 
   /** The worlds a character on `streamWorld` has recently come from.
@@ -25,8 +25,8 @@ object WorldTransfers {
     if (!charWorld.equalsIgnoreCase(streamWorld)) Nil
     else formerWorlds.map(_.trim).filter(w => w.nonEmpty && !w.equalsIgnoreCase(streamWorld)).distinct
 
-  /** The worlds to announce, or None when this is not an arrival or is one this
-   *  guild has already posted.
+  /** The worlds to announce, or None when this is not an arrival or is one
+   *  already posted for this world.
    *
    *  `alreadyPosted` is the former-worlds list as it read when we last posted for
    *  this character, so a second transfer — which changes the list — is told apart

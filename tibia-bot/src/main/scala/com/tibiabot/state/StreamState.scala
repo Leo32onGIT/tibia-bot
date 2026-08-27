@@ -11,6 +11,10 @@ import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, 
  * latest committed map); every read-modify-write goes through the synchronized
  * `modify*` methods so a concurrent update to one guild's entry can never clobber
  * a concurrent update to another guild's.
+ *
+ * Every map here is keyed by guild id except `_worldTransfers`, which is keyed by
+ * world — the same locking argument holds either way, since what it protects is
+ * one stream's update to its own key against another stream's to a different one.
  */
 final class StreamState {
   private val lock = new Object()
@@ -24,9 +28,13 @@ final class StreamState {
   @volatile private var _discords: Map[String, List[Discords]] = Map.empty
   @volatile private var _worlds: Map[String, List[Worlds]] = Map.empty
   @volatile private var _activityBlocker: Map[String, Boolean] = Map.empty
+  // The one map here keyed by world rather than by guild: an arrival is a fact
+  // about the world, shared by every discord tracking it. See
+  // WorldTransferRepository.
   @volatile private var _worldTransfers: Map[String, List[WorldTransfer]] = Map.empty
 
   def activityData: Map[String, List[PlayerCache]] = _activity
+  /** Announced world transfers, keyed by world. */
   def worldTransfersData: Map[String, List[WorldTransfer]] = _worldTransfers
   def huntedPlayersData: Map[String, List[Players]] = _huntedPlayers
   def alliedPlayersData: Map[String, List[Players]] = _alliedPlayers

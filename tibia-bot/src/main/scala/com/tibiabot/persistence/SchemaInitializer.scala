@@ -154,6 +154,21 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |tag VARCHAR(255)
            |);""".stripMargin
 
+      // Which incoming world transfers have already been announced. World-scoped
+      // like deaths and levels, and for the same reason: the answer to "have we
+      // seen this arrival before?" is a fact about the world, not about any one
+      // discord. Keyed per-guild it used to mean a discord adding a world it had
+      // never tracked found an empty table and announced every former-world flag
+      // Tibia still had set — up to six months of them.
+      val createWorldTransfersTable =
+        s"""CREATE TABLE IF NOT EXISTS world_transfers (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |former_worlds VARCHAR(255) NOT NULL,
+           |detected TIMESTAMP NOT NULL,
+           |PRIMARY KEY (world, name)
+           |);""".stripMargin
+
       newStatement.executeUpdate(createDeathsTable)
       //logger.info("Table 'deaths' created successfully")
 
@@ -165,6 +180,9 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
       newStatement.executeUpdate(createSatchelTable)
       //logger.info("Table 'satchel' created successfully")
+
+      newStatement.executeUpdate(createWorldTransfersTable)
+      //logger.info("Table 'world_transfers' created successfully")
 
       // The two DM subscriptions behind the notification-channel autoroles.
       // Guild-scoped rows in the shared cache database (see NotifyRepository for

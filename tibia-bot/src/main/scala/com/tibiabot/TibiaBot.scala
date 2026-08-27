@@ -73,9 +73,10 @@ class TibiaBot(
   // reading off the roster.
   private val bountyPresence = new tracking.BountyPresence
 
-  // initialize cached deaths/levels from database
+  // initialize cached deaths/levels/transfers from database
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
   levelTracker.load(BotApp.getLevelsCache(world).map(levelsCache => tracking.LevelRecord(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time))))
+  BotApp.loadWorldTransfers(world)
 
   // Best-effort warm restore of online-duration state from a pre-restart
   // Redis snapshot (see OnlineDurationPersistence) — async, so it may race a
@@ -236,6 +237,44 @@ class TibiaBot(
           cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
         }
 
+        // Incoming world transfer, detected once for the world rather than once
+        // per discord watching it. The record lives in the shared bot_cache
+        // beside deaths and levels, so every discord tracking this world shares
+        // one answer to "have we seen this arrival already?", and one that adds
+        // the world later inherits that answer instead of replaying every
+        // former-world flag Tibia still has set — a backlog up to six months deep.
+        //
+        // Detecting and recording are deliberately unconditional, where posting
+        // below is not: which discords announce an arrival depends on their own
+        // filters, and if the record were only written when somebody announced it,
+        // what the shared baseline held would depend on who happened to be
+        // looking.
+        //
+        // The former-world field says somebody moved within about 180 days, never
+        // when, so the first sweep of a world nobody has tracked before still
+        // announces whoever moved at some point in that window, however long ago.
+        // It settles into real arrivals once every character has been seen once.
+        //
+        // Matched on former names as well as the live one: the record is keyed by
+        // whatever the character was called when it was written, so looking only
+        // under the name they carry now reads a renamed character as a stranger
+        // and posts their months-old transfer over again under the new name.
+        val postedTransfer = presentation.WorldTransfers.postedFor(
+          BotApp.worldTransfersData.getOrElse(world, List()), charName, formerNamesList)
+        // A record still filed under a dropped name is moved onto the live one.
+        // This is the only place that happens, and it has to be here rather than
+        // in the rename branch below: that branch only fires for characters with
+        // an activity row — members of a tracked guild — and an untracked arrival
+        // has none.
+        if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
+          BotApp.rekeyWorldTransfer(world, charName, formerNamesList)
+        }
+        val transferSources = presentation.WorldTransfers.unreported(
+          char.character.character.world, world, formerWorldsList, postedTransfer.map(_.formerWorlds))
+        transferSources.foreach { arrivedFrom =>
+          BotApp.recordWorldTransfer(world, charName, arrivedFrom, ZonedDateTime.now())
+        }
+
         // update the guildIcon depending on the discord this would be posted to
         if (discordsData.contains(world)) {
           val discordsList = discordsData(world)
@@ -269,45 +308,22 @@ class TibiaBot(
               val charVocation = vocEmoji(char.character.character.vocation)
               val charLevel = char.character.character.level.toInt
 
-              // Incoming world transfer. Independent of the guild join/leave logic
-              // below, and posted first so a character who transferred in and joined
-              // a tracked guild in the same poll reads in the order it happened.
+              // Incoming world transfer, detected once for the world above.
+              // Independent of the guild join/leave logic below, and posted first so
+              // a character who transferred in and joined a tracked guild in the same
+              // poll reads in the order it happened.
               //
               // Anyone tracked is announced at any level — that is the whole point of
               // tracking them. Everybody else has to clear the world's bar (see
-              // WorldTransfers.untrackedMinLevel), which keeps this from turning a
+              // WorldTransfers.UntrackedMinLevel), which keeps this from turning a
               // channel about hunted and allied players into a feed of every stranger
               // who moved house.
-              //
-              // No baseline is kept for the untracked, and none can be: the former-world
-              // field says somebody moved within about 180 days, never when. So the first
-              // sweep of a world announces whoever is over the bar and moved at some point
-              // in that window, however long ago, and only settles into real arrivals once
-              // everybody over the bar has been seen once. The bar is what keeps that
-              // opening burst to a handful.
               val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
               val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
               val notableStranger =
                 showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
               if (trackedHere || notableStranger) {
-                // Matched on former names as well as the live one: the record is
-                // keyed by whatever the character was called when it was written, so
-                // looking only under the name they carry now reads a renamed
-                // character as a stranger and posts their months-old transfer over
-                // again under the new name.
-                val postedTransfer = presentation.WorldTransfers.postedFor(
-                  BotApp.worldTransfersData.getOrElse(guildId, List()), charName, formerNamesList)
-                // A record still filed under a dropped name is moved onto the live
-                // one. This is the only place that happens, and it has to be here
-                // rather than in the rename branch below: that branch only fires for
-                // characters with an activity row — members of a tracked guild — and
-                // an untracked arrival over the level bar has none.
-                if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
-                  BotApp.rekeyWorldTransfer(guildId, charName, formerNamesList)
-                }
-                presentation.WorldTransfers.unreported(
-                  char.character.character.world, world, formerWorldsList, postedTransfer.map(_.formerWorlds)
-                ).foreach { arrivedFrom =>
+                transferSources.foreach { arrivedFrom =>
                   if (activityTextChannel != null) {
                     if (activityTextChannel.canTalk() || (!Config.prod)) {
                       val activityEmbed = new EmbedBuilder()
@@ -322,7 +338,6 @@ class TibiaBot(
                       sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                     }
                   }
-                  BotApp.recordWorldTransfer(guildId, charName, arrivedFrom, ZonedDateTime.now())
                 }
               }
 
