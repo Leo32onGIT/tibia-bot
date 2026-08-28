@@ -838,7 +838,7 @@
      the week is only ever as wide as the panel — but a phone shows four days of
      seven and slides sideways for the rest, and a heading row outside that
      movement would sit still while its own columns went past underneath. */
-  .wk-headrow, .wk-rows { display: grid; grid-template-columns: var(--gutter, 56px) repeat(7, 1fr); }
+  .wk-headrow, .wk-rows { display: grid; grid-template-columns: var(--gutter) repeat(var(--days, 7), var(--daycol)); }
   .wk-headrow { position: sticky; top: 0; z-index: 7; background: var(--panel); }
   .wk-head { font-family: var(--mono); font-size: calc(10px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); text-align: center; padding: 8px 0 7px; border-bottom: 1px solid var(--panel-border); }
   .wk-head.today { color: var(--accent); }
@@ -878,12 +878,23 @@
      Everything absolutely placed on the week — the now line, the selection —
      belongs to the lower one, so its coordinates stay measured from midnight and
      owe nothing to how tall the headings happen to be. */
-  .wk-grid { position: relative; --gutter: calc(56px * var(--ui-scale)); }
+  .wk-grid {
+    position: relative; --gutter: calc(56px * var(--ui-scale));
+    /* A day is a fixed width and the strip is as long as it needs to be, at
+       every size. It used to be a seventh of the panel, which is what made the
+       week a page: seven columns, exactly one screenful, nothing either side to
+       scroll to. A fixed column turns the same grid into a strip that runs on
+       as far as there are days, and a wide panel simply shows more of it. */
+    --daycol: calc(150px * var(--ui-scale));
+    width: max-content;
+  }
   .wk-rows { position: relative; }
   /* Relative only so the now flag can hang off it; it earns a background and a
      layer of its own on a phone, where it is stuck to the left edge and has the
      rest of the week passing behind it. */
-  .wk-hours { border-right: 1px solid var(--panel-border); position: relative; z-index: 5; }
+  /* Stuck to the left edge with the days sliding behind it. It needs its own
+     background for that, or the columns show through the hour labels. */
+  .wk-hours { border-right: 1px solid var(--panel-border); position: sticky; left: 0; z-index: 5; background: var(--panel); }
   .wk-hour {
     height: calc(var(--row-base) * var(--ui-scale)); font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--muted);
     text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
@@ -892,6 +903,11 @@
      without doing the arithmetic in your head. */
   .wk-hour .srv { display: block; font-size: calc(8px * var(--ui-scale)); opacity: 0.5; margin-top: -3px; }
   .wk-col { border-left: 1px solid var(--panel-border); position: relative; }
+  /* The strip is dragged about with a plain mouse, which has no sideways
+     gesture of its own — see dragPan. */
+  .wk-body { cursor: grab; }
+  .wk-body.panning { cursor: grabbing; user-select: none; }
+  .wk-body.panning .wk-cell { cursor: grabbing; }
   .wk-cell { height: calc(var(--row-base) * var(--ui-scale)); border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
   .wk-cell:hover { background: rgba(91,140,255,0.07); }
   .wk-cell.past { cursor: not-allowed; background: rgba(0,0,0,0.3); }
@@ -956,7 +972,10 @@
 
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
   .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
-  .now-line { position: absolute; left: var(--gutter, 56px); right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  /* Inside today's column rather than across the grid. Drawn over a week it
+     read as "now" for the week; drawn over two months of strip it would be a
+     line through sixty days that are not now. */
+  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
   /* Carried by the hour gutter rather than by the grid, so that on a phone — where
      the gutter is stuck to the left edge and the days slide past it — the time
      stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
@@ -1044,10 +1063,7 @@
       /* The four that fit: the body's own width (the window, less its margins)
          less the gutter, split four ways. */
       --daycol: calc((100vw - 20px - var(--gutter)) / 4);
-      width: max-content;
     }
-    .wk-headrow, .wk-rows { grid-template-columns: var(--gutter) repeat(7, var(--daycol)); }
-    .wk-hours { position: sticky; left: 0; background: var(--panel); }
     /* Every pixel of a narrow column goes to the label, so a whole time fits on
        one line and the name has somewhere to be above it. The size follows the
        screen, because a quarter of a 320px phone is not a quarter of a 430px one
@@ -1471,7 +1487,11 @@ const weekKey = (code, offset) => `${code}|${weekStart(offset).getTime()}`;
 
 const view = {
   code: null,              // the spawn whose window is open, or null
-  weekOffset: 0,
+  // The strip of days on screen, as offsets from today: -1 is yesterday, which
+  // is where it opens. Both ends grow towards whichever one is being scrolled
+  // at — see stretchRange — so further ahead is a scroll rather than a page.
+  from: -1,
+  to: 27,
   duration: null,
   // The length the reader themselves chose, which is not always the one on
   // screen: selecting somebody's booking shows that booking's length, and their
@@ -1914,9 +1934,12 @@ function fetchWeek(code, offset) {
     if (!res.ok) throw new Error('could not read that week');
     const data = await res.json();
     const week = data.slots.map(s => ({ ...s, start: new Date(s.startsAt), end: new Date(s.endsAt) }));
-    // Bounded, so paging through a lot of spawns cannot grow this without
-    // limit. A week thrown away costs the one read that brings it back.
-    if (weekCache.size > 48) weekCache.clear();
+    // Bounded, so visiting a lot of spawns cannot grow this without limit. A
+    // week thrown away costs the one read that brings it back. The ceiling is
+    // generous because the strip is: a panel scrolled a month out is holding
+    // nine weeks of one spawn on its own, and a limit set for the days when the
+    // grid was a single week would empty the cache every few spawns.
+    if (weekCache.size > 200) weekCache.clear();
     weekCache.set(key, { slots: week, at: Date.now() });
     return week;
   })();
@@ -1931,19 +1954,73 @@ function fetchWeek(code, offset) {
 /** Read the week on screen from the server, whatever the cache says. */
 async function loadSlots() {
   if (!view.code) { slots = []; return; }
-  const code = view.code, offset = view.weekOffset;
-  const week = await fetchWeek(code, offset);
+  const code = view.code;
+  // Only what is actually on screen. The strip is a month long and the poll runs
+  // every ten seconds; re-reading all of it that often would be a month of
+  // requests a minute for a panel showing four days.
+  await Promise.allSettled(weeksInView(0).map(w => fetchWeek(code, w)));
   // The reader may have moved on while this was in the air. A late answer for a
-  // week nobody is looking at goes into the cache and no further — drawing it
-  // would put last week's bookings on this week's grid.
-  if (view.code === code && view.weekOffset === offset) {
-    slots = week;
+  // spawn nobody is looking at goes into the cache and no further.
+  if (view.code === code) {
+    slots = gatherSlots();
     weekPending = false;
     weekError = false;
   }
 }
 
-/** Draw whatever week `view.weekOffset` now names, at once.
+/** Everything read that the strip can currently draw, as one list.
+ *
+ *  The wire still speaks in weeks — one request per week, cached per week, which
+ *  is what makes a week already seen cost nothing — but the grid spans several
+ *  of them at once, so what it draws is their union. A hunt running across a
+ *  week boundary comes back in both weeks either side of it, hence the dedup:
+ *  the same booking twice is two blocks fighting over the same pixels.
+ */
+function gatherSlots() {
+  const seen = new Set(), out = [];
+  for (let w = weekOf(view.from); w <= weekOf(view.to); w++) {
+    const held = weekCache.get(weekKey(view.code, w));
+    if (!held) continue;
+    held.slots.forEach(b => {
+      const key = `${b.owner}|${b.startsAt}|${b.endsAt}|${b.state}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(b);
+    });
+  }
+  return out;
+}
+
+/** Which weeks the reader can see, padded by `pad` weeks either side.
+ *
+ *  Before the grid exists there is nothing to measure, so it answers for the
+ *  strip's own beginning — which is where it will open. */
+function weeksInView(pad = 1) {
+  const first = visibleFrom(), last = first + visibleCols() - 1;
+  const out = [];
+  for (let w = weekOf(first) - pad; w <= weekOf(last) + pad; w++) {
+    if (w >= weekOf(view.from) && w <= weekOf(view.to)) out.push(w);
+  }
+  return out;
+}
+
+const colWidth = () => {
+  const col = gridEl && gridEl.querySelector('.wk-col');
+  const w = col ? col.getBoundingClientRect().width : 0;
+  return w || 1;
+};
+function visibleFrom() {
+  if (!gridEl) return view.from;
+  return view.from + Math.max(0, Math.round(gridEl.scrollLeft / colWidth()));
+}
+function visibleCols() {
+  if (!gridEl) return 7;
+  const gutter = gridEl.querySelector('.wk-hours');
+  const g = gutter ? gutter.getBoundingClientRect().width : 0;
+  return Math.max(1, Math.round((gridEl.clientWidth - g) / colWidth()));
+}
+
+/** Draw the strip as it stands, and read whatever part of it is missing.
  *
  *  The grid is a function of the date and nothing else — its columns, its hour
  *  gutter, where server save falls, whether the now line belongs in it — so it
@@ -1952,48 +2029,85 @@ async function loadSlots() {
  *  is what made the arrows feel broken: nothing on screen answered the click
  *  until the server had been to the database and back.
  */
-function showWeek() {
-  if (!view.code) return;
-  const code = view.code, offset = view.weekOffset;
-  const held = weekCache.get(weekKey(code, offset));
-  slots = held ? held.slots : [];
-  weekPending = !held;
-  weekError = false;
-  renderWindow();
-
-  const fresh = held && Date.now() - held.at < WEEK_TTL;
-  if (fresh) { prefetchNeighbours(); return; }
-  // A stale week is left on screen while it is checked, rather than blanked:
-  // it is almost certainly still right, and flashing it away to draw it again
-  // is a worse answer than being a few seconds behind.
-  const stillHere = () => view.code === code && view.weekOffset === offset;
-  loadSlots().then(
-    () => {
-      if (view.code === code) prefetchNeighbours();
-      if (stillHere()) { weekPending = false; renderWindow(); }
-    },
-    () => {
-      // An empty grid must not be allowed to read as "nothing is booked" when
-      // the truth is that we never found out.
-      if (stillHere()) { weekPending = false; weekError = true; renderWindow(); }
-    });
-}
-
-/** The weeks either side, read quietly once this one has settled.
- *
- *  Somebody paging through a month presses the same arrow several times over,
- *  so the week after the one being looked at is nearly always the next one
- *  wanted. Two reads per week visited buys arrows that answer with no wait at
- *  all.
- */
-function prefetchNeighbours() {
+function showRange() {
   if (!view.code) return;
   const code = view.code;
-  [view.weekOffset - 1, view.weekOffset + 1].forEach(offset => {
-    const held = weekCache.get(weekKey(code, offset));
-    if (held && Date.now() - held.at < WEEK_TTL) return;
-    fetchWeek(code, offset).catch(() => {});
+  slots = gatherSlots();
+  // The week either side of what is on screen as well, so a scroll of one
+  // column does not arrive at an empty one. Reading the whole strip up front
+  // would be six weeks of requests for a panel opened to check tonight.
+  const missing = weeksInView().filter(w => {
+    const held = weekCache.get(weekKey(code, w));
+    return !held || Date.now() - held.at >= WEEK_TTL;
   });
+  // A stale week is left on screen while it is checked, rather than blanked: it
+  // is almost certainly still right, and flashing it away to draw it again is a
+  // worse answer than being a few seconds behind. Only a week never read at all
+  // makes the panel say it is reading.
+  weekPending = missing.some(w => !weekCache.get(weekKey(code, w)));
+  weekError = false;
+  renderWindow();
+  if (!missing.length) return;
+
+  Promise.allSettled(missing.map(w => fetchWeek(code, w))).then(answers => {
+    if (view.code !== code) return;
+    slots = gatherSlots();
+    weekPending = false;
+    // An empty grid must not be allowed to read as "nothing is booked" when the
+    // truth is that we never found out.
+    weekError = answers.some(a => a.status === 'rejected');
+    renderWindow();
+  });
+}
+
+/** The strip grows at whichever end is being scrolled towards.
+ *
+ *  Rather than being two months long from the start: a spawn opened to see
+ *  tonight should not pay for sixty columns nobody looks at. Growing forwards
+ *  leaves the scroll alone, the content simply being longer to the right;
+ *  growing backwards moves every column along by what was added, so the scroll
+ *  is moved by the same amount and the reader stays where they were.
+ */
+function stretchRange() {
+  const first = visibleFrom(), last = first + visibleCols() - 1;
+
+  if (last > view.to - 4 && view.to < MAX_AHEAD) {
+    view.to = Math.min(MAX_AHEAD, view.to + 14);
+    // Columns dropped off the near end are columns that leave the left of the
+    // scroll, so the scroll comes back by exactly as many.
+    const drop = Math.max(0, gridDays() - MAX_SPAN);
+    const keep = gridEl ? gridEl.scrollLeft - drop * colWidth() : 0;
+    view.from += drop;
+    showRange();
+    if (drop && gridEl) { gridEl.style.scrollBehavior = 'auto'; gridEl.scrollLeft = keep; }
+    return true;
+  }
+
+  // Hard against the front of it, and put there by the reader. The strip opens
+  // at its own first column, so without that second condition every spawn
+  // opened would immediately grow a fortnight of history nobody asked to see.
+  if (userMoved && gridEl && gridEl.scrollLeft <= 2 && view.from > MIN_BEHIND) {
+    growBack();
+    return true;
+  }
+
+  return false;
+}
+
+/** Another fortnight in front of the strip, with the scroll moved to match.
+ *
+ *  Everything shifts along by what was added, so leaving the scroll where it was
+ *  would jump the reader a fortnight forward at the moment they asked to go
+ *  back. Trimmed at the far end to keep the span bounded — see MAX_SPAN.
+ */
+function growBack() {
+  const grow = Math.min(14, view.from - MIN_BEHIND);
+  if (grow <= 0) return;
+  view.from -= grow;
+  view.to -= Math.max(0, gridDays() - MAX_SPAN);
+  const keep = gridEl ? gridEl.scrollLeft + grow * colWidth() : 0;
+  showRange();
+  if (gridEl) { gridEl.style.scrollBehavior = 'auto'; gridEl.scrollLeft = keep; }
 }
 
 /** Everything read about this spawn is now suspect. Called after a write:
@@ -2018,21 +2132,43 @@ async function refresh() {
 // ---- The week -------------------------------------------------------------
 /** The first column's local midnight.
  *
- *  Yesterday, not the local Monday. A calendar week is the right shape for a
- *  month view and the wrong one for booking a hunt: on a Saturday it spends
- *  five of its seven columns on days that have already happened, so the part
- *  anybody is actually planning into is squeezed into the last two. Anchoring
- *  on yesterday keeps one day of context — a hunt that ran past midnight, and
- *  the run of bookings the reader remembers — and gives the other six to what
- *  is still bookable. The arrows still move a whole week at a time, so paging
- *  forward from here tiles the days without repeating any.
+ *  A unit of reading, not a unit of looking: the grid is one continuous strip
+ *  of days and knows nothing about weeks, but the server is asked for them a
+ *  week at a time and the cache is keyed by which — so this is what turns a
+ *  week number into the dates that go on the request.
+ *
+ *  Anchored on yesterday rather than on the local Monday, which is also where
+ *  the strip opens. A calendar week is the right shape for a month view and the
+ *  wrong one for booking a hunt: on a Saturday five of its seven columns are
+ *  days that have already happened. Yesterday keeps one day of context — a hunt
+ *  that ran past midnight, and the bookings the reader remembers — and gives
+ *  everything else to what is still bookable.
  */
-function weekStart(offset = view.weekOffset) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - 1 + offset * 7);   // yesterday, local
-  return d;
+function weekStart(offset) {
+  return dayAt(offset * 7 - 1);
 }
+
+/** Midnight, `off` days from today. The grid's coordinate for everything: which
+ *  column is where, which week to read, where the scroll is. */
+const dayAt = off => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + off); return d; };
+const gridStart = () => dayAt(view.from);
+const gridDays = () => view.to - view.from + 1;
+/** Which week's read covers a day. Week 0 begins yesterday — see [[weekStart]] —
+ *  so the offsets it holds are -1 through 5, and the arithmetic has to shift by
+ *  one before it divides. */
+const weekOf = off => Math.floor((off + 1) / 7);
+
+/** How far the strip may be walked in either direction, and how much of it may
+ *  exist at once.
+ *
+ *  The span is the important one. Every column on the strip is rebuilt by every
+ *  render, and a render happens on every poll — so a strip that only ever grew
+ *  would have somebody who had scrolled to Christmas paying for two hundred
+ *  columns of DOM ten seconds at a time. Days added at the end past this come
+ *  off the other one, and the scroll is moved to match so the reader does not
+ *  see it happen.
+ */
+const MAX_AHEAD = 180, MIN_BEHIND = -60, MAX_SPAN = 63;
 const dayStart = (start, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; };
 const localMinutes = d => d.getHours() * 60 + d.getMinutes();
 
@@ -2058,22 +2194,25 @@ function startFloor() {
  *  dividing by DAY_MS — the day a clock change falls on is not twenty-four
  *  hours long, and a column arrived at by arithmetic would be the wrong one
  *  for the rest of that week. */
-function columnOf(start, at) {
-  for (let i = 6; i > 0; i--) if (at.getTime() >= dayStart(start, i).getTime()) return i;
+function columnOf(start, at, days) {
+  for (let i = days - 1; i > 0; i--) if (at.getTime() >= dayStart(start, i).getTime()) return i;
   return 0;
 }
 
-/** The window on screen, as dates.
+/** What is on screen, as dates.
  *
- *  It used to read "This week" at offset 0, which was true while the columns
- *  were a calendar week and is not now: the window starts yesterday and rolls.
- *  The dates say what is actually on screen, and the button's own `on` state
- *  is what marks it as the one you came in on.
+ *  It read "This week" once, then a week's worth of dates. Neither is true of a
+ *  strip that slides: what the button can honestly say is the days actually in
+ *  front of the reader, which is why it is rewritten on scroll rather than on
+ *  render — see [[gridScrolled]].
  */
-function weekLabel(start) {
-  const end = new Date(start.getTime() + 6 * DAY_MS);
+function rangeLabel() {
+  const from = visibleFrom();
+  const a = dayAt(from), b = dayAt(from + Math.max(0, visibleCols() - 1));
   const month = d => d.toLocaleDateString(undefined, { month: 'short' });
-  return `${start.getDate()} ${month(start)} – ${end.getDate()} ${month(end)}`;
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()} – ${b.getDate()} ${month(b)}`
+    : `${a.getDate()} ${month(a)} – ${b.getDate()} ${month(b)}`;
 }
 
 // ---- Verdict --------------------------------------------------------------
@@ -2261,7 +2400,9 @@ function openWindow(code) {
   // cost of being wrong is a button that looks broken.
   if (!view.code) history.pushState({ spawn: code }, '');
   view.code = code;
-  view.weekOffset = 0;
+  view.from = -1;
+  view.to = 27;
+  userMoved = false;
   view.pick = null;
   view.answer = null;
   view.repeat = 'once';
@@ -2291,7 +2432,7 @@ function openWindow(code) {
   // in it and a header that lied until you opened it would be worse than no
   // header. Drawn first and filled in after, so the window itself is up as soon
   // as it is asked for.
-  showWeek();
+  showRange();
 }
 
 function closeWindow() {
@@ -2615,6 +2756,10 @@ function renderWindow() {
     gridEl.scrollTop = keepScroll.top;
     gridEl.scrollLeft = keepScroll.left;
   } else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
+  // Now that the grid is in the page and can be measured. What the week button
+  // says is a question about how many columns actually fit, which nothing knows
+  // while the panel is still being built — see rangeLabel.
+  if (gridEl) gridScrolled();
 }
 
 /** Already holding it, or already standing in its queue, means there is nothing
@@ -2855,13 +3000,16 @@ function upNextSection(spawn) {
  */
 function calendarSection() {
   const wrap = el('div', 'cal-section');
-  const booked = slots.filter(b => b.state !== 'claimed').length;
-  // A week we have not read yet, or could not, says so. "Nothing booked" is a
-  // claim about the week, and it is not one to make on no information.
-  const summary = weekError ? 'could not read that week'
-    : weekPending ? 'reading that week…'
-    : booked === 0 ? 'nothing booked this week'
-    : `${booked} booked this week`;
+  // What is still to come, rather than what the strip happens to hold: it opens
+  // on yesterday, and counting a hunt that finished last night as something
+  // booked would make the heading disagree with the grid under it.
+  const booked = slots.filter(b => b.state !== 'claimed' && b.end.getTime() > Date.now()).length;
+  // Days we have not read yet, or could not, say so. "Nothing booked" is a
+  // claim about the calendar, and it is not one to make on no information.
+  const summary = weekError ? 'could not read all of that'
+    : weekPending ? 'reading the calendar…'
+    : booked === 0 ? 'nothing booked ahead'
+    : `${booked} booked ahead`;
 
   wrap.appendChild(el('div', 'strip', `
     <i class="ti ti-calendar-month" aria-hidden="true"></i>
@@ -2879,7 +3027,8 @@ function calendarSection() {
 function calendar() {
   const wrap = el('div', 'cal');
   const now = new Date();
-  const start = weekStart();
+  const start = gridStart();
+  const days = gridDays();
 
   // --- booking controls
   // One group per decision — how often, which days, which week. How *long* is not
@@ -2900,9 +3049,9 @@ function calendar() {
       : ''}
     <span class="cc-row cc-week">
       <span class="seg" data-seg="week">
-        <button data-v="-1" aria-label="Previous week">&lsaquo;</button>
-        <button data-v="0" class="${view.weekOffset === 0 ? 'on' : ''}">${weekLabel(start)}</button>
-        <button data-v="1" aria-label="Next week">&rsaquo;</button>
+        <button data-v="-1" aria-label="Back a week">&lsaquo;</button>
+        <button data-v="0" id="wk-label" title="Back to today">${rangeLabel()}</button>
+        <button data-v="1" aria-label="Forward a week">&rsaquo;</button>
       </span>
       <button class="btn ghost small" id="jump"><i class="ti ti-crosshair" aria-hidden="true"></i> <span>Now</span></button>
     </span>`));
@@ -2919,14 +3068,25 @@ function calendar() {
   // --- grid
   const body = el('div', 'wk-body' + (weekPending ? ' pending' : ''));
   const grid = el('div', 'wk-grid');
+  // How many columns both grids are made of. In a variable rather than in the
+  // stylesheet because the strip's length is a thing that changes while the
+  // panel is open — see stretchRange.
+  grid.style.setProperty('--days', days);
 
   // --- day headings, inside the scroller so they slide with their own columns
-  grid.appendChild(el('div', 'wk-headrow', '<div class="wk-corner"></div>' + [0,1,2,3,4,5,6].map(i => {
+  const heads = [];
+  for (let i = 0; i < days; i++) {
     const d = dayStart(start, i);
     const today = d.toDateString() === now.toDateString();
+    // The first of a month says which month, so a strip scrolled a long way
+    // forward is never a run of bare numbers.
+    const first = d.getDate() === 1;
     // Off the date, not off `i` — the first column is yesterday, not Monday.
-    return `<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[(d.getDay() + 6) % 7]}<span class="dnum">${d.getDate()}</span></div>`;
-  }).join('')));
+    heads.push(`<div class="wk-head ${today ? 'today' : ''}">${DAY_NAMES[(d.getDay() + 6) % 7]}` +
+      `<span class="dnum">${d.getDate()}` +
+      `${first ? ' ' + d.toLocaleDateString(undefined, { month: 'short' }) : ''}</span></div>`);
+  }
+  grid.appendChild(el('div', 'wk-headrow', '<div class="wk-corner"></div>' + heads.join('')));
 
   const rows = el('div', 'wk-rows');
 
@@ -2950,31 +3110,24 @@ function calendar() {
   // Worked out once for the week rather than once per column: the answer does
   // not depend on which column is being drawn, and each entry may well belong
   // in two of them.
-  const selection = view.duration ? previews(start) : [];
+  const selection = view.duration ? previews(start, days) : [];
+  const columns = [];
 
-  for (let day = 0; day < 7; day++) {
+  for (let day = 0; day < days; day++) {
     const col = el('div', 'wk-col');
     const colStart = dayStart(start, day).getTime(), colEnd = colStart + DAY_MS;
+    columns.push(col);
 
+    // The hours are drawn but not wired one by one. The strip is weeks long, and
+    // a listener on every hour of every day of it is thousands to attach and
+    // throw away on each render — which happens on every poll. One listener on
+    // the grid reads the column and the hour back off the cell instead; see
+    // wireGrid and pickFromCell.
+    col.dataset.start = colStart;
     for (let h = 0; h < 24; h++) {
       const cell = el('div', 'wk-cell');
+      cell.dataset.h = h;
       if (colStart + (h + 1) * 3600000 <= Date.now()) cell.classList.add('past');
-      cell.addEventListener('click', e => {
-        const half = e.offsetY > cell.offsetHeight / 2 ? SLOT : 0;
-        const picked = new Date(colStart + (h * 60 + half) * 60000);
-        if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
-        view.pick = picked;
-        view.answer = null;
-        // A fresh slot is the reader's own again, whatever length the block they
-        // were looking at happened to run for.
-        ownDuration();
-        // A weekly booking defaults to the day it was picked on, read in server
-        // time — which is not always the column it was clicked in.
-        if (view.repeat === 'week' && view.days.size === 0) {
-          view.days.add(DAY_NAMES.indexOf(serverParts(picked).weekday));
-        }
-        renderWindow();
-      });
       col.appendChild(cell);
     }
 
@@ -3053,7 +3206,7 @@ function calendar() {
         // rule rather than a thing to take hold of, and moving one would have to
         // mean moving the anchor it is derived from — which is the block the
         // reader is not pointing at.
-        if (!p.echo) { sel.classList.add('b-drag'); dragSelection(sel, p.at, start, day); }
+        if (!p.echo) { sel.classList.add('b-drag'); dragSelection(sel, p.at, start, day, days); }
         // The handle goes only on the piece carrying the hunt's end — the half
         // above a midnight split is not where it finishes.
         if (!p.echo && pEnd.getTime() <= colEnd) sel.appendChild(stretchHandle(sel));
@@ -3072,21 +3225,21 @@ function calendar() {
     rows.appendChild(col);
   }
 
-  // Now line, if this week contains it. The line belongs to the days, the time
-  // to the hour axis — which is what keeps the time on screen when a phone has
-  // slid the days sideways.
-  const nowDay = Math.floor((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
-  if (nowDay >= 0 && nowDay < 7) {
+  // Now line, in today's own column — the time on the hour axis, which is what
+  // keeps it on screen when the days have been slid sideways.
+  const nowDay = Math.round((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
+  if (nowDay >= 0 && nowDay < days) {
     const y = (localMinutes(now) / 60) * ROW_H;
     const line = el('div', 'now-line'); line.style.top = y + 'px';
     const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
-    rows.appendChild(line); hours.appendChild(flag);
+    columns[nowDay].appendChild(line); hours.appendChild(flag);
   }
 
   grid.appendChild(rows);
   body.appendChild(grid);
   wrap.appendChild(body);
   gridEl = body;
+  wireGrid(body);
   // The verdict and the button that acts on it live in the panel's footer, not
   // here — see readout. They were part of the week once, which is what made them
   // move when it was folded away.
@@ -3107,13 +3260,13 @@ function calendar() {
  *  Asking per column could only ever produce the piece that began there, which
  *  is why the far side of midnight went missing.
  */
-function previews(start) {
+function previews(start, days) {
   if (!view.pick) return [];
   const weekly = view.repeat === 'week' && view.days.size > 0;
   const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
   const picked = new Date(view.pick).setSeconds(0, 0);
   const out = [];
-  for (let day = 0; day < 7; day++) {
+  for (let day = 0; day < days; day++) {
     const at = dayStart(start, day);
     at.setHours(view.pick.getHours(), view.pick.getMinutes(), 0, 0);
     if (at.getTime() === picked) {
@@ -3151,7 +3304,7 @@ function previews(start) {
  *  the DOM's shape — and the real render at the end puts it where it belongs,
  *  clipped and echoed properly.
  */
-function dragSelection(block, at, weekStart, day) {
+function dragSelection(block, at, weekStart, day, days) {
   block.addEventListener('pointerdown', down => {
     // The primary button only: right-click clears the selection, and the foot of
     // the block belongs to the stretch handle, which stops the event itself.
@@ -3172,15 +3325,14 @@ function dragSelection(block, at, weekStart, day) {
       moved = true;
       block.classList.add('dragging');
 
-      // Never off the week on either axis: the grid shows seven days, and a
-      // start dragged past midnight belongs to the next column rather than to
-      // the bottom of this one.
-      const days = Math.min(6, Math.max(0, day + Math.round(dx / column))) - day;
+      // Never off the strip on either axis: a start dragged past midnight
+      // belongs to the next column rather than to the bottom of this one.
+      const moves = Math.min(days - 1, Math.max(0, day + Math.round(dx / column))) - day;
       const raw = startMinutes + (dy / ROW_H) * 60;
       const snapped = Math.min(DAY_MS / 60000 - DRAG_SNAP,
         Math.max(0, Math.round(raw / DRAG_SNAP) * DRAG_SNAP));
 
-      landing = dayStart(weekStart, day + days);
+      landing = dayStart(weekStart, day + moves);
       landing.setHours(Math.floor(snapped / 60), snapped % 60, 0, 0);
       // The past is not somewhere a booking can be dragged to, so the block
       // stops at the first slot still ahead rather than following the pointer
@@ -3193,7 +3345,7 @@ function dragSelection(block, at, weekStart, day) {
       // Read back off the landing rather than off the pointer, because the
       // clamp may have moved it to another column — a block held over yesterday
       // is drawn on today, where it would actually be dropped.
-      const landed = columnOf(weekStart, landing) - day;
+      const landed = columnOf(weekStart, landing, days) - day;
 
       block.style.transform = landed ? `translateX(${landed * column}px)` : '';
       block.style.top = (localMinutes(landing) / 60) * ROW_H + 'px';
@@ -4319,6 +4471,232 @@ function button(label, className, onClick, icon) {
   return b;
 }
 
+/** How the strip is moved by hand, and how it comes to rest.
+ *
+ *  Three ways in, because three kinds of pointer exist. A finger swipes, and the
+ *  browser does the work — including the momentum, which is better than any
+ *  imitation of it. A trackpad or a tilt wheel scrolls sideways, and the browser
+ *  does that too. A plain mouse has neither, so it drags the grid about like a
+ *  map: both axes, since the day is taller than the panel as well as the week
+ *  being wider.
+ *
+ *  However it was moved, it lands on a day. The pull waits for everything to
+ *  stop, then travels along `t^PULL_CURVE` — a curve whose speed at the start is
+ *  zero and whose last pixels are its fastest, so the grid creeps away from
+ *  where it was let go and arrives with a snap rather than easing off like a
+ *  scroll. It is never in the way: any press, wheel, touch or key cancels it
+ *  outright, because a grid that fights the hand still on it would be worse than
+ *  one that never tidied itself at all.
+ *
+ *  The three numbers were chosen by feel, on a bench of the real grid at the
+ *  real size, against the alternatives — a weaker magnet that only acted near a
+ *  boundary, and the browser's own `scroll-snap`. The browser's is free and was
+ *  refused for a reason worth keeping written down: it only governs scrolls the
+ *  browser itself performed, so it would have snapped a trackpad and ignored a
+ *  mouse drag, and the feel would have depended on the device.
+ */
+const PULL_WAIT = 60, PULL_TIME = 300, PULL_CURVE = 4;
+let pullRaf = 0, pullTimer = 0, pulling = false, panning = false, touching = false;
+/** Whether the reader has moved the strip themselves. The difference between
+ *  sitting at the first column because that is where it opened and sitting
+ *  there because they scrolled back to it — only the second is a request for
+ *  more of the past. */
+let userMoved = false;
+
+function stopPull() { cancelAnimationFrame(pullRaf); pulling = false; }
+
+function pullToDay() {
+  if (!gridEl || panning || touching) return;
+  const w = colWidth();
+  const from = gridEl.scrollLeft;
+  const target = Math.max(0, Math.min(Math.round(from / w) * w,
+    gridEl.scrollWidth - gridEl.clientWidth));
+  const dist = target - from;
+  if (Math.abs(dist) < 0.6) return;
+  cancelAnimationFrame(pullRaf);
+  pulling = true;
+  // Ours to animate frame by frame, so the browser must not be smoothing the
+  // same property underneath us — see scrollToNow, which turns it back on.
+  gridEl.style.scrollBehavior = 'auto';
+  const t0 = performance.now();
+  const step = at => {
+    const t = Math.min(1, (at - t0) / PULL_TIME);
+    gridEl.scrollLeft = from + dist * Math.pow(t, PULL_CURVE);
+    if (t < 1) pullRaf = requestAnimationFrame(step);
+    else pulling = false;
+  };
+  pullRaf = requestAnimationFrame(step);
+}
+
+/** Everything that follows from the strip having moved.
+ *
+ *  The label is rewritten in place rather than through a render: it changes on
+ *  every frame of a scroll, and rebuilding the panel that often would make the
+ *  scroll itself stutter. The reads and the stretch are debounced behind the
+ *  scroll going quiet, so a long throw asks for the week it lands on rather than
+ *  for every week it passed over.
+ */
+let viewTimer = 0;
+function gridScrolled() {
+  const label = document.getElementById('wk-label');
+  if (label) label.textContent = rangeLabel();
+  clearTimeout(viewTimer);
+  viewTimer = setTimeout(() => {
+    if (!view.code) return;
+    // A stretch reads its own new end, so there is nothing left to do here.
+    if (stretchRange()) return;
+    const code = view.code;
+    const missing = weeksInView().filter(w => !weekCache.get(weekKey(code, w)));
+    if (!missing.length) return;
+    Promise.allSettled(missing.map(w => fetchWeek(code, w))).then(() => {
+      if (view.code !== code) return;
+      slots = gatherSlots();
+      renderWindow();
+    });
+  }, 140);
+}
+
+/** Back to today, wherever the strip has been walked to.
+ *
+ *  A strip scrolled far enough forward no longer contains today at all: it is
+ *  bounded, and [[stretchRange]] drops days off the near end as it adds them to
+ *  the far one. So coming back is sometimes a scroll and sometimes rebuilding
+ *  the strip around today first — which is why nothing calls scrollToNow for
+ *  this on its own.
+ */
+function backToNow() {
+  if (view.from > -1 || view.to < 0) {
+    view.from = -1;
+    view.to = 27;
+    showRange();
+  }
+  scrollToNow(true);
+}
+
+/** A week's worth of columns, for the arrows — which is what a plain mouse and
+ *  a keyboard have, and the distance the panel has always moved by. */
+function scrollDays(days) {
+  if (!gridEl) return;
+  stopPull();
+  userMoved = true;
+  // Walking off the front lengthens the strip rather than stopping against it:
+  // the arrows are how a mouse with no sideways gesture reaches last week, and
+  // clamping at column zero would leave them dead exactly where they are most
+  // needed. Forwards needs no such help — the scroll itself reaches the end and
+  // stretchRange grows it from there.
+  if (gridEl.scrollLeft + days * colWidth() < 0) growBack();
+  gridEl.style.scrollBehavior = 'smooth';
+  gridEl.scrollLeft += days * colWidth();
+}
+
+function wireGrid(box) {
+  box.addEventListener('click', e => {
+    // The hour that was pressed, not the one the click is reported against: a
+    // drag takes pointer capture, and a captured pointer's click is delivered to
+    // the grid rather than to the cell under it. The press is also the honest
+    // answer — it is where the reader aimed.
+    const cell = box._downCell || e.target.closest('.wk-cell');
+    // A press that turned into a pan is not a click on an hour: the pointer
+    // travelled, and whatever it came to rest over is an accident.
+    if (cell && !box._panned) pickFromCell(cell, e);
+  });
+  box.addEventListener('scroll', () => {
+    gridScrolled();
+    // The pull's own scrolling must not keep putting the pull off.
+    if (pulling) return;
+    clearTimeout(pullTimer);
+    pullTimer = setTimeout(pullToDay, PULL_WAIT);
+  }, { passive: true });
+  ['pointerdown', 'wheel', 'touchstart', 'keydown'].forEach(ev =>
+    box.addEventListener(ev, () => { userMoved = true; stopPull(); }, { passive: true }));
+  box.addEventListener('touchstart', () => { touching = true; }, { passive: true });
+  box.addEventListener('touchend', () => { touching = false; }, { passive: true });
+  dragPan(box);
+}
+
+/** Booking the hour that was clicked. Lifted out of the cell it used to be
+ *  bound to, so one listener on the grid can serve every cell on the strip. */
+function pickFromCell(cell, e) {
+  const colStart = Number(cell.parentElement.dataset.start);
+  // Measured against the cell itself rather than read off the event, which
+  // reports its offset from whatever it was delivered to — see wireGrid.
+  const box = cell.getBoundingClientRect();
+  const half = e.clientY - box.top > box.height / 2 ? SLOT : 0;
+  const picked = new Date(colStart + (Number(cell.dataset.h) * 60 + half) * 60000);
+  if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
+  view.pick = picked;
+  view.answer = null;
+  // A fresh slot is the reader's own again, whatever length the block they were
+  // looking at happened to run for.
+  ownDuration();
+  // A weekly booking defaults to the day it was picked on, read in server time —
+  // which is not always the column it was clicked in.
+  if (view.repeat === 'week' && view.days.size === 0) {
+    view.days.add(DAY_NAMES.indexOf(serverParts(picked).weekday));
+  }
+  renderWindow();
+}
+
+/** Drag the grid about with a plain mouse, both axes, with a throw at the end.
+ *
+ *  Mouse only. A finger already has this and the browser does it better, so
+ *  taking the gesture over would be swapping something good for an imitation.
+ *  A press that lands on a block belongs to the block — moving a booking and
+ *  moving the grid are different verbs — and a press that becomes a drag
+ *  swallows the click it would otherwise end with, so panning never books
+ *  anything.
+ */
+function dragPan(box) {
+  let id = null, lastX = 0, lastY = 0, lastT = 0, vx = 0, vy = 0, raf = 0, moved = 0;
+
+  box.addEventListener('pointerdown', e => {
+    // Both recorded for every pointer, not only the one that pans: a tap after
+    // a drag must not inherit the drag's verdict, and a tap is where it landed.
+    box._panned = false;
+    box._downCell = e.target.closest('.wk-cell');
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    if (e.target.closest('.wk-block, .stretch')) return;
+    id = e.pointerId; panning = true; moved = 0;
+    lastX = e.clientX; lastY = e.clientY; lastT = performance.now(); vx = vy = 0;
+    cancelAnimationFrame(raf);
+    stopPull();
+    box.style.scrollBehavior = 'auto';
+    box.classList.add('panning');
+    try { box.setPointerCapture(id); } catch (err) { /* pan on regardless */ }
+  });
+
+  box.addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    const at = performance.now(), dt = Math.max(1, at - lastT);
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    box.scrollLeft -= dx;
+    box.scrollTop -= dy;
+    moved += Math.abs(dx) + Math.abs(dy);
+    if (moved > 5) box._panned = true;
+    vx = dx / dt; vy = dy / dt;
+    lastX = e.clientX; lastY = e.clientY; lastT = at;
+    e.preventDefault();
+  });
+
+  const up = e => {
+    if (e.pointerId !== id) return;
+    id = null; panning = false;
+    box.classList.remove('panning');
+    // The throw. Decays to nothing in about a second, at which point the pull
+    // takes over and puts the columns straight.
+    let sx = vx * 16, sy = vy * 16;
+    const glide = () => {
+      sx *= 0.94; sy *= 0.94;
+      box.scrollLeft -= sx;
+      box.scrollTop -= sy;
+      if (Math.abs(sx) > 0.4 || Math.abs(sy) > 0.4) raf = requestAnimationFrame(glide);
+    };
+    if (Math.abs(sx) > 1.2 || Math.abs(sy) > 1.2) glide();
+  };
+  box.addEventListener('pointerup', up);
+  box.addEventListener('pointercancel', up);
+}
+
 function scrollToNow(smooth) {
   if (!gridEl) return;
   const now = new Date();
@@ -4335,17 +4713,14 @@ function scrollToNow(smooth) {
   gridEl.scrollTop = Math.max(0, Math.min(
     (localMinutes(now) / 60) * ROW_H - visible / 3, gridEl.scrollHeight - gridEl.clientHeight));
 
-  // Sideways, where the week is wider than the screen: open on yesterday, so the
-  // four days in view are the one just gone, today, and the two anybody is
-  // actually planning into. That is column 0 while the window is the current
-  // one; the arithmetic is kept because a window the arrows have been walked to
-  // has no "today" in it at all, and clamps to its own first day.
-  const col = gridEl.querySelector('.wk-col');
-  if (col && gridEl.scrollWidth > gridEl.clientWidth) {
-    const width = col.getBoundingClientRect().width;
-    const today = Math.round((new Date(now).setHours(0, 0, 0, 0) - weekStart().getTime()) / DAY_MS);
+  // Sideways: open on yesterday, so the days in view are the one just gone,
+  // today, and the ones anybody is actually planning into. Today's column is at
+  // -view.from, the strip being measured in offsets from today; the column
+  // before it is where the scroll goes.
+  if (gridEl.scrollWidth > gridEl.clientWidth) {
+    stopPull();
     gridEl.scrollLeft = Math.max(0, Math.min(
-      (today - 1) * width, gridEl.scrollWidth - gridEl.clientWidth));
+      (-view.from - 1) * colWidth(), gridEl.scrollWidth - gridEl.clientWidth));
   }
 }
 
@@ -4373,24 +4748,20 @@ function wireWindow() {
       const d = Number(v);
       view.days.has(d) ? view.days.delete(d) : view.days.add(d);
       renderWindow();
+    } else if (v === '0') {
+      backToNow();
     } else {
-      view.weekOffset = v === '0' ? 0 : view.weekOffset + Number(v);
-      view.pick = null;
-      showWeek();
+      // A week at a time, still. The arrows are what a mouse with no sideways
+      // gesture has, and a week is the distance the panel has always moved by.
+      // The selection is left alone: it used to be cleared on every page, which
+      // made sense while paging replaced the grid and makes none now that the
+      // days either side are simply further along the same strip.
+      scrollDays(Number(v) * 7);
     }
   }));
 
   const jump = body.querySelector('#jump');
-  if (jump) jump.addEventListener('click', () => {
-    if (view.weekOffset !== 0) {
-      view.weekOffset = 0;
-      view.pick = null;
-      showWeek();
-    }
-    // The grid is on screen either way by now, so the scroll no longer waits on
-    // a read to know where to put itself.
-    scrollToNow(true);
-  });
+  if (jump) jump.addEventListener('click', backToNow);
 }
 
 // ---- Writes ---------------------------------------------------------------
