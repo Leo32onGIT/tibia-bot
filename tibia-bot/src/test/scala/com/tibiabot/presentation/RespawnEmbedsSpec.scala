@@ -35,6 +35,19 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   private val mappings = Map.empty[String, String]
   private val fallback = "https://example.invalid/fallback.gif"
   private val indent = "▹"
+  /** The Book panel has no fields any more — every part of it is a paragraph of
+   *  the description, and both lists carry a bold title of their own. */
+  private val AllBookings = "**All Bookings**"
+  private val YourBookings = "**Your Bookings**"
+
+  /** The lines under `heading`, up to the blank line that ends its block.
+   *
+   *  By line rather than by paragraph, since a title need not begin one. */
+  private def section(embed: net.dv8tion.jda.api.entities.MessageEmbed, heading: String): String =
+    embed.getDescription.linesIterator.toList.dropWhile(_ != heading) match {
+      case Nil => fail(s"no '$heading' line in:\n${embed.getDescription}")
+      case _ :: rest => rest.takeWhile(_.nonEmpty).mkString("\n")
+    }
   private def image(respawn: Respawn) = RespawnEmbeds.imageFor(respawn, mappings, fallback)
 
   private def fields(embed: net.dv8tion.jda.api.entities.MessageEmbed): Map[String, String] =
@@ -52,6 +65,24 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("Galarzaa")
     embed.getDescription should include("hunter99")
     embed.getColorRaw shouldBe RespawnEmbeds.RedColor
+  }
+
+  test("the card names the holder once, by the name people call them") {
+    // The account name is a moderator's business, and the moderator panel still
+    // carries it — a card read by everybody hunting here says who to go and ask.
+    val held = claim("99").copy(nickname = "Beams")
+    val embed = RespawnEmbeds.claimCard(cultOrcs, Some(held), Nil, Nil, settings, image(cultOrcs))
+    embed.getDescription should include("**@Beams**")
+    embed.getDescription should not include "hunter99"
+  }
+
+  test("a booked row on the card names its owner the same way") {
+    val booking = claim("77", status = RespawnClaim.StatusReserved)
+      .copy(nickname = "Beams", startsAt = Some(now.plusHours(3)))
+    val booked = fields(
+      RespawnEmbeds.claimCard(cultOrcs, None, Nil, List(booking), settings, image(cultOrcs)))("Booked")
+    booked should include("**@Beams**")
+    booked should not include "hunter77"
   }
 
   test("a claimant with no character is still pingable") {
@@ -222,6 +253,82 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked should include(weekly.repeatLabel)
   }
 
+  // A recurring rule was already one row. This is the same booking made by hand
+  // — seven separate one-off rules for the same hour on seven days — which is
+  // the shape a card actually fills up with, since nothing stops somebody
+  // booking a week an evening at a time.
+  test("one person's identical bookings are one row, counted") {
+    val evenings = (2 to 8).toList.map(day =>
+      RespawnSchedule(20L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), evenings, now))("Booked")
+
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 1
+    // The soonest of them, since that is the one anybody is planning around.
+    booked should include(s"<t:${now.plusDays(2).toInstant.getEpochSecond}:s>")
+    booked should include("+6 repeats")
+    // Nothing left over for the row cap's note to own up to.
+    booked should not include "more"
+  }
+
+  test("a single extra booking is a repeat, not repeats") {
+    val pair = List(3, 4).map(day =>
+      RespawnSchedule(30L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), pair, now))("Booked")
+
+    booked should include("+1 repeat")
+    booked should not include "repeats"
+  }
+
+  // Same person, different evening — two different things to somebody reading
+  // the list to find an evening that is still free. Grouping by person alone
+  // would fold one into the other and say the free one was taken.
+  test("bookings at different hours stay their own rows") {
+    val early = RespawnSchedule(41L, 1L, "77", "hunter77", "", now.plusDays(2).withHour(9),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val late = RespawnSchedule(42L, 1L, "77", "hunter77", "", now.plusDays(3).withHour(21),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(early, late), now))("Booked")
+
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 2
+    booked should not include "repeat"
+  }
+
+  test("two people booking the same hour are two rows") {
+    val theirs = List("77", "88").map(user =>
+      RespawnSchedule(50L + user.toLong, 1L, user, s"hunter$user", "", now.plusDays(2),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), theirs, now))("Booked")
+
+    booked.linesIterator.size shouldBe 2
+    booked should not include "repeat"
+  }
+
+  // The repeat label and the asked marker are each true of one row only, so a
+  // count behind either would be claiming it of the rows it swallowed.
+  test("a row with a label of its own is not folded into the plain ones") {
+    val weekly = RespawnSchedule(61L, 1L, "77", "hunter77", "", now.plusDays(2),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now,
+      daysOfWeek = RespawnSchedule.maskOf(List(now.plusDays(2).getDayOfWeek)))
+    val oneOff = RespawnSchedule(62L, 1L, "77", "hunter77", "", now.plusDays(9),
+      RespawnSchedule.Daily, 150, active = true, createdAt = now, daysOfWeek = RespawnSchedule.OneOff)
+    val booked = fields(RespawnEmbeds.claimCard(cultOrcs, None, Nil, Nil, settings,
+      image(cultOrcs), List(weekly, oneOff), now))("Booked")
+
+    booked.linesIterator.size shouldBe 2
+    booked should include(weekly.repeatLabel)
+    // No count behind either of them.
+    booked should not include "+"
+  }
+
   test("rows and rules are one list, in time order") {
     val tonight = reserved("77", now.plusHours(3))
     val thursday = RespawnSchedule(9L, 1L, "99", "hunter99", "", now.plusDays(4),
@@ -369,12 +476,13 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       minutes, active = true, createdAt = now, daysOfWeek = days)
 
   private def reserved(userId: String, at: ZonedDateTime, minutes: Int = 120,
-                       requester: Option[String] = None) =
+                       requester: Option[String] = None, requesterNickname: Option[String] = None) =
     claim(userId, minutes, RespawnClaim.StatusReserved).copy(
       startsAt = Some(at), endsAt = Some(at.plusMinutes(minutes.toLong)),
       requesterUserId = requester,
       // Named the same way the claimant is, since that is what gets rendered.
-      requesterUserName = requester.map(id => s"hunter$id"))
+      requesterUserName = requester.map(id => s"hunter$id"),
+      requesterNickname = requesterNickname)
 
   test("the booking panel shows the whole evening, not just your own slot") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
@@ -382,9 +490,9 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs))
 
     embed.getTitle shouldBe "415 — Cult Orcs"
-    embed.getDescription should include("Free right now")
+    embed.getDescription should include("**Free** right now")
     embed.getDescription should include("every day")
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     // Yours is marked rather than filtered out, so the order still reads as the
     // evening it is.
     booked should include("▸")
@@ -396,6 +504,21 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     booked.linesIterator.count(_.startsWith(indent)) shouldBe 1
   }
 
+  test("the booking panel names people the way the card does — once") {
+    // The same rows in another surface, read by the same people, so the two say
+    // a name the same way. The moderator panel is the one that keeps the account.
+    val holder = claim("55").copy(nickname = "Beams")
+    val theirs = reserved("77", now.plusHours(4)).copy(nickname = "Rook")
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "99", List(theirs),
+      holder = Some(holder), now, image(cultOrcs))
+
+    embed.getDescription should include("**@Beams**")
+    embed.getDescription should not include "hunter55"
+    val booked = section(embed, AllBookings)
+    booked should include("**@Rook**")
+    booked should not include "hunter77"
+  }
+
   test("the panel a moderator sees is the same panel, minus any bookings of their own") {
     // Same builder, same shape — only the buttons under it differ, which is the
     // only part that actually differs.
@@ -404,32 +527,91 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       holder = None, now, image(cultOrcs))
 
     embed.getTitle shouldBe "415 — Cult Orcs"
-    embed.getDescription should include("nothing booked here")
+    // No section at all where they have booked nothing — see the test below.
+    embed.getDescription should not include YourBookings
     // Everyone else's bookings are still listed, and none is marked as theirs.
-    val booked = fields(embed)("Booked")
+    val booked = section(embed, AllBookings)
     booked should include("hunter99")
     booked should include("hunter77")
     booked should not include "▸"
-    // Every line still starts with something, so the times share a left edge.
+    // Every line starts with a marker, so the times share a left edge.
     booked.linesIterator.foreach(_ should startWith(indent))
+  }
+
+  test("having booked nothing here is said by there being no section, not by a sentence") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "99",
+      List(reserved("77", now.plusHours(4))), holder = None, now, image(cultOrcs))
+
+    embed.getDescription should not include YourBookings
+    embed.getDescription should not include "nothing booked"
+    // The panel is still the two things it was opened for: the state, and what
+    // is already spoken for.
+    embed.getDescription should startWith("###")
+    section(embed, AllBookings) should include("hunter77")
+    // One break, between the state and the list — no leftover blank where the
+    // section used to be.
+    embed.getDescription.linesIterator.count(_.isEmpty) shouldBe 1
+  }
+
+  test("a booking that has been and gone still says so, having been made") {
+    // The absence that stayed: they booked this spawn and are looking for the
+    // row, which is a different question from never having booked.
+    val past = booking(days = RespawnSchedule.OneOff).copy(anchorAt = now.minusDays(2))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(past), "99", Nil,
+      holder = None, now, image(cultOrcs))
+
+    section(embed, YourBookings) shouldBe "> Your booking on this respawn has been and gone."
   }
 
   test("the booking panel says who is on the respawn now, which is a different question") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2))), Some(claim("55")), now, image(cultOrcs))
     embed.getDescription should include("hunter55")
-    embed.getDescription should include("Your booking is every day")
-    // The spawn's state and the reader's own bookings are separate facts, so
-    // they sit on separate lines.
-    embed.getDescription.linesIterator.next() should endWith(".")
-    embed.getDescription.linesIterator.size should be >= 2
+    // Marked like a row: one booking is still a list of one.
+    section(embed, YourBookings) shouldBe
+      s"▸ Your booking is **every day** at <t:${now.plusHours(2).toInstant.getEpochSecond}:t> for **2h**."
+    // The state leads behind its glyph, one line, with the reader's own titled
+    // underneath it.
+    embed.getDescription should startWith("🔴 Being hunted by ")
+    embed.getDescription should include("\n**Your Bookings**\n")
+    // Nothing quoted anywhere: both lists are titled instead. By line, not by
+    // substring — every timestamp ends in "> " and would match one.
+    embed.getDescription.linesIterator.foreach(_ should not startWith "> ")
+  }
+
+  test("a free spawn is marked as free, in the glyph as well as the word") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs))
+    embed.getDescription should startWith("### 🟢 **Free** right now.")
+  }
+
+  test("the state glyph is the guild's own yes/no pair, not a circle") {
+    // Custom emoji in Discord's `<:name:id>` form, which is what Config holds —
+    // so the panel answers with the same two marks every other reply from this
+    // bot does, rather than a pair of coloured circles nothing else uses.
+    val yes = "<:yes:1135988738565099550>"
+    val no = "<:no:1135988651327766648>"
+    val free = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), yesEmoji = yes, noEmoji = no)
+    val taken = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      Some(claim("55")), now, image(cultOrcs), yesEmoji = yes, noEmoji = no)
+
+    free.getDescription should startWith(s"### $yes **Free**")
+    // Held is one line and no heading — see bookingPanel for why only one of the
+    // two states is short enough to be one.
+    taken.getDescription should startWith(s"$no Being hunted by ")
+    taken.getDescription should not startWith "###"
+    taken.getDescription.linesIterator.next() should include("hunter55")
+    // And no circle left behind either way.
+    free.getDescription should not include "🟢"
+    taken.getDescription should not include "🔴"
   }
 
   test("a slot somebody is waiting on an answer for says so") {
     val embed = RespawnEmbeds.bookingPanel(cultOrcs, List(booking()), "99",
       List(reserved("99", now.plusHours(2)), reserved("77", now.plusHours(4), requester = Some("12"))),
       holder = None, now, image(cultOrcs))
-    fields(embed)("Booked") should include("asked")
+    section(embed, AllBookings) should include("asked")
   }
 
   test("two bookings on one spawn are both described, earliest first") {
@@ -439,15 +621,76 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       List(reserved("99", now.plusHours(1), 60), reserved("99", now.plusHours(2), 60)),
       holder = None, now, image(cultOrcs))
 
-    embed.getDescription should include("2 bookings")
     // One per line, not a semicolon-joined paragraph.
     embed.getDescription should not include ";"
-    embed.getDescription.linesIterator.count(_.startsWith("▸")) shouldBe 2
+    // Counted inside their own section: the All Bookings rows below wear the
+    // same marker, so counting the whole description would find both lists.
+    val yours = section(embed, YourBookings).linesIterator.toList
+    yours should have size 2
+    // Rows and nothing else — the title says whose they are, so there is no
+    // sentence above them saying it again.
+    all(yours) should startWith("▸")
     val morningAt = s"<t:${now.plusHours(1).toInstant.getEpochSecond}:t>"
     val eveningAt = s"<t:${now.plusHours(2).toInstant.getEpochSecond}:t>"
     embed.getDescription.indexOf(morningAt) should be < embed.getDescription.indexOf(eveningAt)
-    // The old rule is gone, so the footer must not still be claiming it.
-    embed.getFooter.getText should not include "one booking"
+  }
+
+  test("the panel closes by saying how to add a booking, naming both ways") {
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs))
+    val footer = Option(embed.getFooter).map(_.getText).getOrElse("")
+    footer should include("doesn't overlap")
+    footer should include("Book")
+    footer should include("Dashboard")
+    // Bare, not emphasised: a footer is plain text, so asterisks here would be
+    // read as asterisks.
+    footer should not include "**"
+  }
+
+  test("the booking panel lists the next ten bookings and owns up to the rest") {
+    val slots = (1 to 14).map(hour => reserved(s"$hour", now.plusHours(hour.toLong), 30)).toList
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", slots,
+      holder = None, now, image(cultOrcs))
+
+    val booked = section(embed, AllBookings)
+    booked.linesIterator.count(_.startsWith(indent)) shouldBe 10
+    // Soonest first, and the ten it kept are the ten soonest rather than
+    // whichever ten fit.
+    booked should include("hunter1")
+    booked should include("hunter10")
+    booked should not include "hunter11"
+    booked should include("…and 4 more")
+  }
+
+  test("a person's repeat bookings are each their own row on the panel") {
+    // The card folds these into "+6 repeats". The panel is where the specific
+    // evening behind that count is looked up, so it says all seven.
+    val evenings = (2 to 8).toList.map(day =>
+      RespawnSchedule(70L + day, 1L, "77", "hunter77", "", now.plusDays(day.toLong),
+        RespawnSchedule.Daily, 150, active = true, createdAt = now,
+        daysOfWeek = RespawnSchedule.OneOff))
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), upcoming = evenings)
+
+    val booked = section(embed, AllBookings)
+    booked.linesIterator.count(_.contains("hunter77")) shouldBe 7
+    booked should not include "repeat"
+    // Each row carries its own evening, which is the whole point of the list.
+    evenings.foreach(e =>
+      booked should include(s"<t:${e.anchorAt.toInstant.getEpochSecond}:s>"))
+  }
+
+  test("a booking too far out to have a slot yet is still one of the next ten") {
+    // Nothing written down at all: a spawn booked beyond the look-ahead has only
+    // its rules, and answering "nothing booked" is what this panel is opened to
+    // avoid.
+    val embed = RespawnEmbeds.bookingPanel(cultOrcs, Nil, "55", Nil,
+      holder = None, now, image(cultOrcs), upcoming = List(booking(userId = "77")))
+
+    val booked = section(embed, AllBookings)
+    booked should include("hunter77")
+    // Said as the standing arrangement it is, not as a one-off evening.
+    booked should include("every day")
   }
 
   test("being asked for a slot reads differently from being asked about a booking over it") {
@@ -473,6 +716,27 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
       text should not include "<@"
       text should include("the slot goes to them")
     }
+  }
+
+  test("the asker is named the way the server knows them, where it knows them") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"),
+      requesterNickname = Some("Bald Dwarf"))
+    val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), None)
+
+    // The account is what makes them findable; the guild name is what makes the
+    // owner recognise who is asking them to give a slot up.
+    text should include("hunter42")
+    text should include("Bald Dwarf")
+    text should not include "<@"
+  }
+
+  test("an asker with no guild name is still named by their account alone") {
+    val slot = reserved("99", now.plusHours(2), requester = Some("42"))
+    val text = RespawnEmbeds.slotRequest(cultOrcs, slot, now.plusMinutes(60), None)
+
+    text should include("hunter42")
+    // Not a dangling "(@)" where a name it never had would have gone.
+    text should not include "(@"
   }
 
   test("a request with no asker recorded still reads as a sentence") {

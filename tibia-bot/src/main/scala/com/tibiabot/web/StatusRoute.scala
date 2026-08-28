@@ -116,7 +116,7 @@ final class StatusRoute(
     val bot = botIdentityJson
 
     val worldsJson = streams.keySet.union(worldSnapshots.keySet).toList.sorted.map { world =>
-      val snap = worldSnapshots.getOrElse(world, tracking.WorldSnapshot(0, None, None, 0, 0, 0, battleyeGreen = true, pvpType = ""))
+      val snap = worldSnapshots.getOrElse(world, tracking.WorldSnapshot.empty)
       val discordsJson = streams.get(world).map(_.usedBy).getOrElse(Nil).map { d =>
         val guild = discordGateway.guildById(d.id)
         val name = Option(guild).map(_.getName).getOrElse("Unknown")
@@ -141,6 +141,9 @@ final class StatusRoute(
         "deaths15m" -> JsNumber(snap.deaths),
         "levels15m" -> JsNumber(snap.levels),
         "edits15m" -> JsNumber(snap.edits),
+        "deathDetections15m" -> JsNumber(snap.deathDetections),
+        "deathLagAvg15m" -> JsNumber(snap.deathLagAvgSeconds),
+        "deathLagMax15m" -> JsNumber(snap.deathLagMaxSeconds),
         "battleyeGreen" -> JsBoolean(snap.battleyeGreen),
         "pvpType" -> JsString(snap.pvpType),
         "discords" -> JsArray(discordsJson.toVector),

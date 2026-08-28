@@ -99,7 +99,7 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     starts.map(_.getDayOfWeek).distinct shouldBe List(DayOfWeek.TUESDAY)
     starts.size shouldBe 4
     // Exactly a week apart, so the time of day never slides.
-    starts.sliding(2).foreach { case Seq(a, b) => b shouldBe a.plusDays(7) }
+    starts.zip(starts.drop(1)).foreach { case (a, b) => b shouldBe a.plusDays(7) }
   }
 
   test("a weekday not in the mask is not a start, however well it lines up") {
@@ -109,7 +109,7 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
   }
 
   test("every day and all seven days chosen are the same booking") {
-    val all = onlyOn(DayOfWeek.values(): _*)
+    val all = onlyOn(DayOfWeek.values().toIndexedSeq: _*)
     all.daysOfWeek shouldBe RespawnSchedule.EveryDay
     all.occurrencesBetween(anchor, anchor.plusDays(6)) shouldBe
       schedule().occurrencesBetween(anchor, anchor.plusDays(6))

@@ -16,7 +16,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
 
   implicit val apiFormat: RootJsonFormat[Api] = jsonFormat3(Api)
   implicit val statusFormat: RootJsonFormat[Status] = jsonFormat1(Status)
-  implicit val informationFormat: RootJsonFormat[Information] = jsonFormat2(Information)
+  implicit val informationFormat: RootJsonFormat[Information] = jsonFormat3(Information)
 
   implicit val onlinePlayersFormat: RootJsonFormat[OnlinePlayers] = jsonFormat3(OnlinePlayers)
   implicit val worldFormat: RootJsonFormat[World] = jsonFormat16(World)

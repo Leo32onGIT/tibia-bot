@@ -4,13 +4,6 @@ import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule, RespawnSetti
 
 import java.time.ZonedDateTime
 
-/** What bringing a guild's catalogue in line with the bundled file did.
- *
- *  `inUse` is the honest part: a code dropped from the file that somebody is
- *  hunting, queued for or has booked is left where it is, because removing it
- *  would end a hunt in progress. It is counted rather than silently skipped, so
- *  whoever ran the repair knows there is something to come back to.
- */
 /** Somebody the guild's respawn system knows about, for a picker to offer.
  *
  *  Both names travel and neither is a mention: the account is what is unique and
@@ -32,8 +25,16 @@ final case class KnownMember(userId: String, userName: String, nickname: String)
  *  goes on naming an evening its owner no longer has. */
 final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime)
 
-final case class SeedSync(added: Int, updated: Int, retired: Int, inUse: Int) {
-  def changedAnything: Boolean = added > 0 || updated > 0 || retired > 0
+/** What bringing a guild's catalogue in line with the bundled file did.
+ *
+ *  `retired` is the rows themselves rather than a count of them, because the
+ *  caller has a second job to do with each one: the spawn's forum post has to
+ *  come down too, and a post can only be found by the `threadId` on the row
+ *  that has just been deleted. A count would leave every retired code as a
+ *  card in Discord that nothing can resolve.
+ */
+final case class SeedSync(added: Int, updated: Int, retired: List[Respawn]) {
+  def changedAnything: Boolean = added > 0 || updated > 0 || retired.nonEmpty
 }
 
 /** Persistence port for the respawn claim system's per-guild tables
@@ -46,7 +47,8 @@ trait RespawnRepository {
 
   // --- settings -----------------------------------------------------------
 
-  /** The guild's respawn settings, or None if `/respawn` was never set up here. */
+  /** The guild's respawn settings, or None if the respawn system was never set
+   *  up here. */
   def settings(guildId: String): Option[RespawnSettings]
 
   /** Create or replace the guild's settings row. */
@@ -97,6 +99,10 @@ trait RespawnRepository {
                     world: Option[String], mapperLink: Option[String]): Unit
 
   /** Remove a catalogue entry and every claim attached to it. */
+  /** Set or clear one spawn's own ceiling on claim length. `None` clears it,
+   *  putting the spawn back on the guild's — see `RespawnSettings.maxFor`. */
+  def setRespawnMaxDuration(guildId: String, respawnId: Long, minutes: Option[Int]): Unit
+
   def removeRespawn(guildId: String, respawnId: Long): Unit
 
   /** Remember which forum post represents this spawn ("" to forget it). */
@@ -111,10 +117,15 @@ trait RespawnRepository {
    *  ones the file no longer has.
    *
    *  Only rows whose `source` is seed are touched, so a spawn a guild added
-   *  itself is never rewritten or removed by an edit to the bundled file. A
-   *  retired code that somebody is still hunting or has booked is left where it
-   *  is and counted in [[SeedSync.inUse]] — the catalogue can wait, a hunt in
-   *  progress cannot. */
+   *  itself is never rewritten or removed by an edit to the bundled file.
+   *
+   *  A retired code goes immediately, taking its claims and its bookings with
+   *  it. Waiting for one to be free first sounds kinder and is not: a code the
+   *  file has dropped is usually one that has been split into sub-codes, so
+   *  what a standing booking pins in place is a spawn nobody should be on any
+   *  more — live on the board, on the calendar and claimable, beside the codes
+   *  that replaced it, until whichever restart happens to find it idle. The
+   *  hunt it ends is on a spawn that no longer exists. */
   def syncSeed(guildId: String, spawns: List[(String, String, String, String)]): SeedSync
 
   /** Bring seed-derived rows' `creature` back in line with the bundled list,
@@ -135,7 +146,7 @@ trait RespawnRepository {
 
   def queueFor(guildId: String, respawnId: Long): List[RespawnClaim]
 
-  /** Every spawn currently held, for `/respawn list`. */
+  /** Every spawn currently held, for the dashboard's board. */
   def allActiveClaims(guildId: String): List[RespawnClaim]
 
   /** Every queued claim in the guild, for callers that need the whole board at
@@ -155,8 +166,8 @@ trait RespawnRepository {
    *  Spawns never claimed at all are simply absent. */
   def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)]
 
-  /** Active or queued claims belonging to one user, for `/respawn release` and
-   *  the per-user stamina display. */
+  /** Active or queued claims belonging to one user, for the Release and Leave
+   *  buttons and `/stamina`'s display. */
   def openClaimsForUser(guildId: String, userId: String): List[RespawnClaim]
 
   /** The expiry sweep's work list — active claims that are due to end.
@@ -257,8 +268,14 @@ trait RespawnRepository {
 
   /** Move a running claim to a different member, keeping its start, end and
    *  everything else. Returns the stored row, or None if it is no longer active
-   *  — which is what stops a moderator reassigning a hunt that just ended. */
-  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String): Option[RespawnClaim]
+   *  — which is what stops a moderator reassigning a hunt that just ended.
+   *
+   *  Both of the new owner's names, like [[reassignReservation]]: a row that
+   *  took the account name alone kept whatever nickname the previous holder
+   *  left on it, and so named the hunt after one person in the guild's words
+   *  and another in Discord's. */
+  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String,
+                    nickname: String): Option[RespawnClaim]
 
   def markWarned(guildId: String, claimId: Long): Unit
 
@@ -436,7 +453,7 @@ trait RespawnRepository {
    *  necessarily matching it. None only for a request raised before booking over
    *  a slot became the one way to ask. */
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
-                        requesterUserName: String, askedAt: ZonedDateTime,
+                        requesterUserName: String, requesterNickname: String, askedAt: ZonedDateTime,
                         deadline: ZonedDateTime,
                         wanted: Option[(ZonedDateTime, Int)] = None): Option[RespawnClaim]
 

@@ -43,6 +43,39 @@ class NamesSpec extends AnyFunSuite with Matchers {
     Names.user("Beams", "vio`lent") shouldBe "**`violent`** (**@Beams**)"
   }
 
+  test("one name is the one they go by here") {
+    Names.called("Beams", "violentbeams") shouldBe "**@Beams**"
+  }
+
+  test("one name falls back to the account, in the same shape as a nickname") {
+    // Same shape so a column of these reads as a column — and Discord writes
+    // an account name as @name too, so nothing is claimed that isn't true.
+    Names.called("", "violentbeams") shouldBe "**@violentbeams**"
+    Names.called("   ", "violentbeams") shouldBe "**@violentbeams**"
+    Names.called("", "") shouldBe "**`someone`**"
+  }
+
+  test("one name cannot break out of its own formatting either") {
+    Names.called("ev*il`", "violentbeams") shouldBe "**@evil**"
+    Names.called("", "vio`lent") shouldBe "**@violent**"
+  }
+
+  test("the plain one name makes the same choice, without the markdown") {
+    Names.calledPlain("Beams", "violentbeams") shouldBe "Beams"
+    Names.calledPlain("", "violentbeams") shouldBe "violentbeams"
+    Names.calledPlain("   ", "violentbeams") shouldBe "violentbeams"
+  }
+
+  test("the plain one name wears no @ either — the page writes its own") {
+    Names.calledPlain("Beams", "violentbeams") should not include "@"
+    Names.calledPlain("Beams", "violentbeams") should not include "*"
+  }
+
+  test("the plain one name is empty when there is neither, rather than a stand-in") {
+    // The dashboard says "someone" in its own markup, and only it knows where.
+    Names.calledPlain("", "") shouldBe ""
+  }
+
   test("a user with neither name still reads as somebody") {
     Names.user("", "") shouldBe "**`someone`**"
   }

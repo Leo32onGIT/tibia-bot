@@ -82,6 +82,11 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       lastRemove = Some(code); result
     }
     var lastRemove: Option[String] = None
+    def setSpawnMax(guildId: String, actorId: String, code: String,
+                    minutes: Option[Int]): Future[ActionResult] = {
+      lastSpawnMax = Some((code, minutes)); result
+    }
+    var lastSpawnMax: Option[(String, Option[Int])] = None
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = {
       lastExtend = Some((code, extraMinutes)); result
@@ -97,6 +102,11 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       lastSlotMove = Some((code, startsAt.toInstant.toString, toUserId)); result
     }
     var lastSlotMove: Option[(String, String, String)] = None
+    def editSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = {
+      lastSlotEdit = Some((code, startsAt.toInstant.toString, minutes)); result
+    }
+    var lastSlotEdit: Option[(String, String, Int)] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -208,6 +218,16 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       consumer(cache, local).sweep().futureValue
       pending.futureValue.ok shouldBe true
       local.lastSlotMove shouldBe Some(("415", "2026-08-13T11:00:00Z", "u9"))
+    }
+
+    "hand a re-timed calendar day across with its new length" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
+      val pending = relay(cache).editSlot("g1", "mod-1", "415", day, 150)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastSlotEdit shouldBe Some(("415", "2026-08-13T11:00:00Z", 150))
     }
 
     // The thing the whole lease design exists to prevent.
@@ -339,6 +359,7 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
     "hold an action it does not recognise to the moderator bar" in {
       RespawnCommand.requiredTier(RespawnCommand.Claim) shouldBe AccessTier.Member
       RespawnCommand.requiredTier(RespawnCommand.DropSlot) shouldBe AccessTier.Moderator
+      RespawnCommand.requiredTier(RespawnCommand.EditSlot) shouldBe AccessTier.Moderator
       RespawnCommand.requiredTier("something-from-a-newer-build") shouldBe AccessTier.Moderator
     }
   }

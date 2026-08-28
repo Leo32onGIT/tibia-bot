@@ -38,7 +38,7 @@ import scala.jdk.CollectionConverters._
  *  and a cancelled one are on identical footing.
  *
  *  The whole of the above steps aside on an install where Patreon was never
- *  set up — see [[patreonNotConfigured]]. That is what lets somebody
+ *  set up — see `patreonNotConfigured`. That is what lets somebody
  *  self-host this without the gate having to be edited out of the source. */
 final class PaywallService(
   discordGateway: DiscordGateway,
@@ -51,7 +51,7 @@ final class PaywallService(
   graceDays: Int,
   ownerId: String,
   /** Whether this install has Patreon API credentials at all (see
-   *  Config.PatreonApi.enabled) — half of [[patreonNotConfigured]]. Defaults
+   *  Config.PatreonApi.enabled) — half of `patreonNotConfigured`. Defaults
    *  to "configured", so anything constructing this without an opinion gets
    *  the paywall enforced rather than bypassed. */
   patreonApiConfigured: Boolean = true
@@ -62,7 +62,7 @@ final class PaywallService(
    *  TibiaBot. Defaults true (fail-open): a (guild, world) pair not yet
    *  checked, or one whose check errored transiently, is never silently cut
    *  off. Pairs already past their grace deadline are seeded false at
-   *  construction (see [[hydrateFromGrace]]), so that default no longer
+   *  construction (see `hydrateFromGrace`), so that default no longer
    *  covers a paused world between startup and the first [[refreshAll]]
    *  sweep. */
   def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
@@ -402,7 +402,7 @@ final class PaywallService(
    *
    *  Announcing is gated on the persisted `notified` flag rather than on an
    *  in-memory active -> inactive transition: the active-status map is
-   *  rebuilt from scratch every restart (see [[hydrateFromGrace]], which
+   *  rebuilt from scratch every restart (see `hydrateFromGrace`, which
    *  fails open if it can't read), so a transition test would re-announce
    *  already paused worlds after a deploy.
    *
@@ -447,11 +447,11 @@ final class PaywallService(
    *  not a second notification: it's the caller's chance to put back the
    *  paused presentation (channel name, online-list notice) for a world that
    *  lost it, which is possible for anything paused before a restart that
-   *  [[hydrateFromGrace]] couldn't seed. It fires on every sweep for as long
+   *  `hydrateFromGrace` couldn't seed. It fires on every sweep for as long
    *  as a world stays paused, so the caller must make it idempotent.
    *
    *  Sweeps at all only when there's a Patreon snapshot worth judging against
-   *  — see the match below and [[patreonSnapshotSize]]. */
+   *  — see the match below and `patreonSnapshotSize`. */
   def refreshAll(setups: List[(String, String)])(
     onLapsed: (Guild, String, String, String) => Unit,
     onStillLapsed: (Guild, String) => Unit
@@ -479,7 +479,7 @@ final class PaywallService(
    *  that breaks long enough to pause worlds resumes them on the first sweep
    *  after it's noticed, without waiting on a good snapshot first. Worlds are
    *  marked active here as well as cleared, since [[isActive]] is read from
-   *  the map on every send-loop tick and only [[hydrateFromGrace]] and
+   *  the map on every send-loop tick and only `hydrateFromGrace` and
    *  [[applyRefresh]] otherwise write it. */
   private def resumeOnEmptySnapshot(): Unit =
     try {

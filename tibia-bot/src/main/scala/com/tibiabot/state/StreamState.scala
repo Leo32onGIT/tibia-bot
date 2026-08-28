@@ -2,27 +2,19 @@ package com.tibiabot.state
 
 import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, Worlds, WorldTransfer}
 
-import java.time.ZonedDateTime
-import java.util.concurrent.ConcurrentHashMap
-import scala.jdk.CollectionConverters._
 
 /**
  * The per-guild working state mutated by BOTH the per-world streams and command
- * threads: activity tracking, the hunted/allied player lists, plus the
- * character-response freshness cache.
+ * threads: activity tracking and the hunted/allied player lists.
  *
  * Reads are lock-free on `@volatile` fields (so a running stream always sees the
  * latest committed map); every read-modify-write goes through the synchronized
  * `modify*` methods so a concurrent update to one guild's entry can never clobber
  * a concurrent update to another guild's.
  *
- * The character freshness cache is the one exception: it is written once per
- * character response — tens of thousands of times a minute across every world
- * stream at 32-way concurrency — so it is a ConcurrentHashMap with its own
- * per-entry striped locking rather than a copy-on-write immutable map behind
- * the single shared lock above. Under the old scheme every character response
- * rebuilt the whole map and blocked every unrelated guild-state write while
- * doing it.
+ * Every map here is keyed by guild id except `_worldTransfers`, which is keyed by
+ * world — the same locking argument holds either way, since what it protects is
+ * one stream's update to its own key against another stream's to a different one.
  */
 final class StreamState {
   private val lock = new Object()
@@ -36,10 +28,13 @@ final class StreamState {
   @volatile private var _discords: Map[String, List[Discords]] = Map.empty
   @volatile private var _worlds: Map[String, List[Worlds]] = Map.empty
   @volatile private var _activityBlocker: Map[String, Boolean] = Map.empty
+  // The one map here keyed by world rather than by guild: an arrival is a fact
+  // about the world, shared by every discord tracking it. See
+  // WorldTransferRepository.
   @volatile private var _worldTransfers: Map[String, List[WorldTransfer]] = Map.empty
-  private val _characterCache = new ConcurrentHashMap[String, ZonedDateTime]()
 
   def activityData: Map[String, List[PlayerCache]] = _activity
+  /** Announced world transfers, keyed by world. */
   def worldTransfersData: Map[String, List[WorldTransfer]] = _worldTransfers
   def huntedPlayersData: Map[String, List[Players]] = _huntedPlayers
   def alliedPlayersData: Map[String, List[Players]] = _alliedPlayers
@@ -49,25 +44,6 @@ final class StreamState {
   def discordsData: Map[String, List[Discords]] = _discords
   def worldsData: Map[String, List[Worlds]] = _worlds
   def activityCommandBlocker: Map[String, Boolean] = _activityBlocker
-
-  /** Point read on the hot path — never materialises the whole map. */
-  def characterSeenAt(name: String): Option[ZonedDateTime] = Option(_characterCache.get(name))
-
-  /** Record when `name`'s character sheet was last seen. Hot path: one entry
-   *  touched, no whole-map copy, no contention with unrelated guild state. */
-  def recordCharacterSeen(name: String, at: ZonedDateTime): Unit = { _characterCache.put(name, at); () }
-
-  /** Point-in-time copy, for the periodic Redis snapshot. Not on the hot path. */
-  def characterCache: Map[String, ZonedDateTime] = _characterCache.asScala.toMap
-
-  /** Seed from a snapshot without clobbering entries a live poll already wrote
-   *  (existing, fresher entries win — the load-vs-first-poll race). */
-  def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit =
-    loaded.foreach { case (name, at) => _characterCache.putIfAbsent(name, at) }
-
-  /** Drop every entry not matching `keep` (the periodic age-based cleanup). */
-  def pruneCharacterCache(keep: ZonedDateTime => Boolean): Unit =
-    _characterCache.entrySet().removeIf(e => !keep(e.getValue))
 
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     lock.synchronized { _activity = f(_activity) }

@@ -10,7 +10,7 @@ import scala.collection.mutable.ListBuffer
 /** JDBC implementation of RespawnRepository against a guild's own database.
  *
  *  The schema is checked on a guild's first use in this process, and not again
- *  — see [[ensureSchema]]. `SchemaInitializer.initGuild` only creates tables
+ *  — see `ensureSchema`. `SchemaInitializer.initGuild` only creates tables
  *  when it creates the database, so guilds that existed before this feature
  *  would otherwise never get them; this is the same create-on-read approach
  *  `JdbcGalthenRepository` uses for `satchel`, just not repeated per query.
@@ -150,6 +150,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS creature_pinned BOOLEAN NOT NULL DEFAULT FALSE;")
+      // Nullable with no default on purpose: NULL is "follow the server", which
+      // is what almost every row is and what lets a guild retune its own ceiling
+      // and have every un-singled-out spawn move with it. A DEFAULT here would
+      // freeze today's server value onto every existing row.
+      statement.executeUpdate(
+        "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS max_duration INT;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS outcome VARCHAR(24);")
       statement.executeUpdate(
@@ -210,7 +216,43 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_user_name VARCHAR(255);")
       statement.executeUpdate(
+        "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS requester_nickname VARCHAR(255);")
+      statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
+
+      // Give a name back to every row that has none, from the newest one the
+      // same account has left anywhere else in this guild.
+      //
+      // Two kinds of row need it. Everything booked before the column existed
+      // defaulted to blank, and a *schedule* that predates it keeps minting
+      // fresh blank occurrences for as long as it runs — so healing the rules
+      // matters more than healing the claims. And a handful of paths still
+      // write a claim with no second name because the one that made it never
+      // had one to hand.
+      //
+      // Deliberately not run once and marked done: it is re-run per guild on
+      // each start precisely so it keeps mopping up the second kind. It is
+      // cheap and it shrinks — every pass leaves fewer rows for the next one to
+      // match — and a row whose owner has never been seen under a name simply
+      // stays as it is, which is no worse than before.
+      val knownNicknames =
+        """WITH known AS (
+          |  SELECT DISTINCT ON (user_id) user_id, nickname FROM (
+          |    SELECT user_id, nickname, claimed_at AS seen_at FROM respawn_claims WHERE nickname <> ''
+          |    UNION ALL
+          |    SELECT user_id, nickname, created_at AS seen_at FROM respawn_schedules WHERE nickname <> ''
+          |  ) seen ORDER BY user_id, seen_at DESC
+          |)""".stripMargin
+      statement.executeUpdate(
+        knownNicknames +
+          """
+            |UPDATE respawn_schedules s SET nickname = known.nickname
+            |FROM known WHERE s.user_id = known.user_id AND s.nickname = '';""".stripMargin)
+      statement.executeUpdate(
+        knownNicknames +
+          """
+            |UPDATE respawn_claims c SET nickname = known.nickname
+            |FROM known WHERE c.user_id = known.user_id AND c.nickname = '';""".stripMargin)
       // The window the asker wants, when they asked by trying to book over this
       // slot. Null for a Request-button ask, where the slot itself is what they
       // are asking for.
@@ -295,7 +337,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       mapperLink = Option(result.getString("mapper_link")).getOrElse(""),
       threadId = Option(result.getString("thread_id")).getOrElse(""),
       source = Option(result.getString("source")).getOrElse(Respawn.SourceCustom),
-      addedBy = Option(result.getString("added_by")).getOrElse("")
+      addedBy = Option(result.getString("added_by")).getOrElse(""),
+      // getInt yields 0 for SQL NULL, which would read as a ceiling of zero
+      // minutes rather than as "no override" — so the null is asked about
+      // explicitly rather than inferred from the value.
+      maxDurationMinutes = {
+        val value = result.getInt("max_duration")
+        if (result.wasNull()) None else Some(value)
+      }
     )
 
   private def readClaim(result: ResultSet): RespawnClaim =
@@ -322,6 +371,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       requestDeadline = optionalZoned(result, "request_deadline"),
       requesterUserId = Option(result.getString("requester_user_id")).filter(_.nonEmpty),
       requesterUserName = Option(result.getString("requester_user_name")).filter(_.nonEmpty),
+      requesterNickname = Option(result.getString("requester_nickname")).filter(_.nonEmpty),
       nickname = Option(result.getString("nickname")).getOrElse(""),
       requestedStartsAt = optionalZoned(result, "requested_starts_at"),
       requestedDurationMinutes = {
@@ -533,7 +583,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def updateRespawn(guildId: String, respawnId: Long, name: Option[String], creature: Option[String],
                     world: Option[String], mapperLink: Option[String]): Unit = withGuild(guildId) { conn =>
     // COALESCE(?, column) leaves a field alone when its argument is None, so
-    // `/respawn admin edit` can set one attribute without restating the rest.
+    // a caller can set one attribute without restating the rest.
     val statement = conn.prepareStatement(
       """UPDATE respawns SET
         |name = COALESCE(?, name),
@@ -559,6 +609,25 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate()
     } finally statement.close()
   }
+
+  /** Set or clear one spawn's own claim ceiling.
+   *
+   *  Its own statement rather than another COALESCE argument on `updateRespawn`,
+   *  because clearing is a real operation here: COALESCE cannot tell "leave this
+   *  alone" from "set it back to NULL", and both are things a moderator asks for.
+   */
+  def setRespawnMaxDuration(guildId: String, respawnId: Long, minutes: Option[Int]): Unit =
+    withGuild(guildId) { conn =>
+      val statement = conn.prepareStatement("UPDATE respawns SET max_duration = ? WHERE id = ?;")
+      try {
+        minutes match {
+          case Some(value) => statement.setInt(1, value)
+          case None        => statement.setNull(1, java.sql.Types.INTEGER)
+        }
+        statement.setLong(2, respawnId)
+        statement.executeUpdate()
+      } finally statement.close()
+    }
 
   def removeRespawn(guildId: String, respawnId: Long): Unit = withGuildTransaction(guildId) { conn =>
     val claims = conn.prepareStatement("DELETE FROM respawn_claims WHERE respawn_id = ?;")
@@ -610,10 +679,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val orphans = listRespawns(guildId)
       .filter(_.source == Respawn.SourceSeed)
       .filterNot(respawn => wanted.contains(respawn.code.trim.toLowerCase))
-    val (busy, free) = orphans.partition(respawn => hasOpenClaims(guildId, respawn.id))
-    free.foreach(respawn => removeRespawn(guildId, respawn.id))
+    // Unconditionally, claims and bookings included — see the port's note on
+    // why holding a dropped code open until it happens to be idle is the worse
+    // of the two trades. The rows are returned so the caller can take their
+    // forum posts down; this layer has no Discord to do it with.
+    orphans.foreach(respawn => removeRespawn(guildId, respawn.id))
 
-    SeedSync(added, updated, free.size, busy.size)
+    SeedSync(added, updated, orphans)
   }
 
   /** Correct the name and city of seed rows the bundled file has changed.
@@ -642,18 +714,6 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.executeBatch().sum
       } finally statement.close()
     }
-
-  /** Whether anybody is holding, waiting for, or has booked this spawn. */
-  private def hasOpenClaims(guildId: String, respawnId: Long): Boolean = withGuild(guildId) { conn =>
-    val statement = conn.prepareStatement(
-      """SELECT 1 FROM respawn_claims
-        |WHERE respawn_id = ? AND status IN ('active', 'queued', 'offered', 'reserved')
-        |LIMIT 1;""".stripMargin)
-    try {
-      statement.setLong(1, respawnId)
-      statement.executeQuery().next()
-    } finally statement.close()
-  }
 
   def syncSeedCreatures(guildId: String, creaturesByCode: List[(String, String)]): Int =
     withGuildTransaction(guildId) { conn =>
@@ -1054,16 +1114,20 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  def reassignClaim(guildId: String, claimId: Long, userId: String,
-                    userName: String): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+  def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String,
+                    nickname: String): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
+    // The nickname moves with the account name. Leaving it behind — which this
+    // did — kept the outgoing holder's, so the row read as the new owner under
+    // the old one's guild name.
     val statement = conn.prepareStatement(
-      """UPDATE respawn_claims SET user_id = ?, user_name = ?, character_name = ''
+      """UPDATE respawn_claims SET user_id = ?, user_name = ?, nickname = ?, character_name = ''
         |WHERE id = ? AND status = 'active'
         |RETURNING *;""".stripMargin)
     try {
       statement.setString(1, userId)
       statement.setString(2, userName)
-      statement.setLong(3, claimId)
+      statement.setString(3, nickname)
+      statement.setLong(4, claimId)
       val result = statement.executeQuery()
       if (result.next()) Some(readClaim(result)) else None
     } finally statement.close()
@@ -1378,7 +1442,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         """UPDATE respawn_claims
           |SET user_id = ?, user_name = ?, nickname = ?, character_name = '', kind = 'adhoc',
           |    schedule_id = NULL, asked_at = NULL, request_deadline = NULL,
-          |    requester_user_id = NULL, requester_user_name = NULL,
+          |    requester_user_id = NULL, requester_user_name = NULL, requester_nickname = NULL,
           |    requested_starts_at = NULL, requested_duration_minutes = NULL,
           |    confirmed_at = NULL
           |WHERE id = ? AND status = 'reserved'
@@ -1526,7 +1590,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def requestOccurrence(guildId: String, claimId: Long, requesterUserId: String,
-                        requesterUserName: String, askedAt: ZonedDateTime,
+                        requesterUserName: String, requesterNickname: String, askedAt: ZonedDateTime,
                         deadline: ZonedDateTime,
                         wanted: Option[(ZonedDateTime, Int)]): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
@@ -1535,7 +1599,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET asked_at = ?, request_deadline = ?, requester_user_id = ?, requester_user_name = ?,
-          |    requested_starts_at = ?, requested_duration_minutes = ?
+          |    requester_nickname = ?, requested_starts_at = ?, requested_duration_minutes = ?
           |WHERE id = ? AND status = 'reserved' AND asked_at IS NULL
           |RETURNING *;""".stripMargin)
       try {
@@ -1543,15 +1607,16 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         statement.setTimestamp(2, Timestamp.from(deadline.toInstant))
         statement.setString(3, requesterUserId)
         statement.setString(4, requesterUserName)
+        statement.setString(5, requesterNickname)
         wanted match {
           case Some((start, minutes)) =>
-            statement.setTimestamp(5, Timestamp.from(start.toInstant))
-            statement.setInt(6, minutes)
+            statement.setTimestamp(6, Timestamp.from(start.toInstant))
+            statement.setInt(7, minutes)
           case None =>
-            statement.setNull(5, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
-            statement.setNull(6, java.sql.Types.INTEGER)
+            statement.setNull(6, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setNull(7, java.sql.Types.INTEGER)
         }
-        statement.setLong(7, claimId)
+        statement.setLong(8, claimId)
         val result = statement.executeQuery()
         if (result.next()) Some(readClaim(result)) else None
       } finally statement.close()
@@ -1583,6 +1648,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """UPDATE respawn_claims
         |SET request_deadline = NULL, requester_user_id = NULL, requester_user_name = NULL,
+        |    requester_nickname = NULL,
         |    requested_starts_at = NULL, requested_duration_minutes = NULL
         |WHERE id = ? AND status = 'reserved'
         |RETURNING *;""".stripMargin)

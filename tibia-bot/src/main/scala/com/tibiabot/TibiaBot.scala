@@ -23,7 +23,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 import java.time.OffsetDateTime
 import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
@@ -40,7 +40,6 @@ class TibiaBot(
 
   // A date-based "key" for a character, used to track recent deaths and recent online entries
   private case class CharKey(char: String, time: ZonedDateTime)
-  private case class CharKeyBypass(char: String, level: Int, time: ZonedDateTime)
   private case class CharDeath(char: CharacterResponse, death: Deaths)
   private case class CharSort(guildName: String, allyGuild: Boolean, huntedGuild: Boolean, allyPlayer: Boolean, huntedPlayer: Boolean, vocation: String, level: Int, message: String)
   private case class OnlineListEntry(name: String, level: Int, lastUpdated: ZonedDateTime)
@@ -48,7 +47,6 @@ class TibiaBot(
   private val recentDeaths = mutable.Set.empty[CharKey]
   private val levelTracker = new tracking.LevelTracker
   private val recentOnline = mutable.Set.empty[CharKey]
-  private val recentOnlineBypass = mutable.Set.empty[CharKeyBypass]
   private val onlineTracker = new tracking.OnlineTracker
   private val onlineDurationPersistence = new persistence.OnlineDurationPersistence(persistence.RedisCacheProvider.cache, world, Config.Cache.onlineDurationTtl)
 
@@ -75,9 +73,10 @@ class TibiaBot(
   // reading off the roster.
   private val bountyPresence = new tracking.BountyPresence
 
-  // initialize cached deaths/levels from database
+  // initialize cached deaths/levels/transfers from database
   recentDeaths ++= BotApp.getDeathsCache(world).map(deathsCache => CharKey(deathsCache.name, ZonedDateTime.parse(deathsCache.time)))
   levelTracker.load(BotApp.getLevelsCache(world).map(levelsCache => tracking.LevelRecord(levelsCache.name, levelsCache.level.toInt, levelsCache.vocation, ZonedDateTime.parse(levelsCache.lastLogin), ZonedDateTime.parse(levelsCache.time))))
+  BotApp.loadWorldTransfers(world)
 
   // Best-effort warm restore of online-duration state from a pre-restart
   // Redis snapshot (see OnlineDurationPersistence) — async, so it may race a
@@ -122,14 +121,17 @@ class TibiaBot(
   // `ExecutionContext.global` binding used to sit here but was never actually
   // selected, so it is gone rather than left looking meaningful.
   private val tibiaDataClient: TibiaApi = {
-    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(BotApp.streamState), persistence.RedisCacheProvider.cache)
-    if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current)
-    else caching
+    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
+    val shared =
+      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current,
+        characterTtl = Config.CharacterCache.ttl)
+      else caching
+    // Outermost, so a skippable character fetch costs nothing at all — not the
+    // request, and not the shared-cycle Redis read in front of it either. One
+    // instance per world, holding only that world's characters.
+    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings(TibiaBot.PollInterval))
+    else shared
   }
-
-  // The one world whose character lookups go through the level-gated bypass
-  // endpoint (getCharacterV2) instead of the plain one.
-  private val NocteraWorld = "Noctera"
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
@@ -153,7 +155,7 @@ class TibiaBot(
   }
 
   private val logAndResume: Attributes = supervisionStrategy(logAndResumeDecider)
-  private lazy val sourceTick = Source.tick(2.seconds, 60.seconds, ())
+  private lazy val sourceTick = Source.tick(TibiaBot.firstPollDelay(Random.nextInt), TibiaBot.PollInterval, ())
   private lazy val getWorld = Flow[Unit].mapAsync(1) { _ =>
     logger.info(s"Running stream for world: '$world'")
     tibiaDataClient.getWorld(world) // Pull all online characters
@@ -195,24 +197,10 @@ class TibiaBot(
       }
       recentOnline.addAll(online.map(player => CharKey(player.name, now)))
 
-      // cache bypass for Noctera
-      if (worldResponse.world.name == NocteraWorld) {
-        // Remove existing online chars from the list...
-        recentOnlineBypass.filterInPlace { i =>
-          !online.exists(player => player.name == i.char)
-        }
-        recentOnlineBypass.addAll(online.map(player => CharKeyBypass(player.name, player.level.toInt, now)))
-        fanOut(recentOnlineBypass.map(key => (key.char, key.level)).toSet)(tibiaDataClient.getCharacterV2)
-      } else {
-        fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
-      }
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
     // World poll failed: fall back to re-checking whoever was last seen online.
-    // Always the plain character endpoint here, including on Noctera — the
-    // level-gated bypass needs a level, and this path has no fresh online list
-    // to take one from.
     case Left(_) =>
-      val lastSeen = if (world == NocteraWorld) recentOnlineBypass.map(_.char) else recentOnline.map(_.char)
-      fanOut(lastSeen.toSet)(tibiaDataClient.getCharacter)
+      fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
   }.withAttributes(logAndResume)
 
   /** Fetch every character in `inputs` at the shared 32-way concurrency and
@@ -249,6 +237,44 @@ class TibiaBot(
           cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
         }
 
+        // Incoming world transfer, detected once for the world rather than once
+        // per discord watching it. The record lives in the shared bot_cache
+        // beside deaths and levels, so every discord tracking this world shares
+        // one answer to "have we seen this arrival already?", and one that adds
+        // the world later inherits that answer instead of replaying every
+        // former-world flag Tibia still has set — a backlog up to six months deep.
+        //
+        // Detecting and recording are deliberately unconditional, where posting
+        // below is not: which discords announce an arrival depends on their own
+        // filters, and if the record were only written when somebody announced it,
+        // what the shared baseline held would depend on who happened to be
+        // looking.
+        //
+        // The former-world field says somebody moved within about 180 days, never
+        // when, so the first sweep of a world nobody has tracked before still
+        // announces whoever moved at some point in that window, however long ago.
+        // It settles into real arrivals once every character has been seen once.
+        //
+        // Matched on former names as well as the live one: the record is keyed by
+        // whatever the character was called when it was written, so looking only
+        // under the name they carry now reads a renamed character as a stranger
+        // and posts their months-old transfer over again under the new name.
+        val postedTransfer = presentation.WorldTransfers.postedFor(
+          BotApp.worldTransfersData.getOrElse(world, List()), charName, formerNamesList)
+        // A record still filed under a dropped name is moved onto the live one.
+        // This is the only place that happens, and it has to be here rather than
+        // in the rename branch below: that branch only fires for characters with
+        // an activity row — members of a tracked guild — and an untracked arrival
+        // has none.
+        if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
+          BotApp.rekeyWorldTransfer(world, charName, formerNamesList)
+        }
+        val transferSources = presentation.WorldTransfers.unreported(
+          char.character.character.world, world, formerWorldsList, postedTransfer.map(_.formerWorlds))
+        transferSources.foreach { arrivedFrom =>
+          BotApp.recordWorldTransfer(world, charName, arrivedFrom, ZonedDateTime.now())
+        }
+
         // update the guildIcon depending on the discord this would be posted to
         if (discordsData.contains(world)) {
           val discordsList = discordsData(world)
@@ -282,32 +308,22 @@ class TibiaBot(
               val charVocation = vocEmoji(char.character.character.vocation)
               val charLevel = char.character.character.level.toInt
 
-              // Incoming world transfer. Independent of the guild join/leave logic
-              // below, and posted first so a character who transferred in and joined
-              // a tracked guild in the same poll reads in the order it happened.
+              // Incoming world transfer, detected once for the world above.
+              // Independent of the guild join/leave logic below, and posted first so
+              // a character who transferred in and joined a tracked guild in the same
+              // poll reads in the order it happened.
               //
               // Anyone tracked is announced at any level — that is the whole point of
               // tracking them. Everybody else has to clear the world's bar (see
-              // WorldTransfers.untrackedMinLevel), which keeps this from turning a
+              // WorldTransfers.UntrackedMinLevel), which keeps this from turning a
               // channel about hunted and allied players into a feed of every stranger
               // who moved house.
-              //
-              // No baseline is kept for the untracked, and none can be: the former-world
-              // field says somebody moved within about 180 days, never when. So the first
-              // sweep of a world announces whoever is over the bar and moved at some point
-              // in that window, however long ago, and only settles into real arrivals once
-              // everybody over the bar has been seen once. The bar is what keeps that
-              // opening burst to a handful.
               val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
               val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
               val notableStranger =
                 showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
               if (trackedHere || notableStranger) {
-                val postedTransfer = BotApp.worldTransfersData.getOrElse(guildId, List())
-                  .find(_.name.equalsIgnoreCase(charName)).map(_.formerWorlds)
-                presentation.WorldTransfers.unreported(
-                  char.character.character.world, world, formerWorldsList, postedTransfer
-                ).foreach { arrivedFrom =>
+                transferSources.foreach { arrivedFrom =>
                   if (activityTextChannel != null) {
                     if (activityTextChannel.canTalk() || (!Config.prod)) {
                       val activityEmbed = new EmbedBuilder()
@@ -322,7 +338,6 @@ class TibiaBot(
                       sendMessageWithRateLimit(activityTextChannel, "activity", embed = Some(activityEmbed))
                     }
                   }
-                  BotApp.recordWorldTransfer(guildId, charName, arrivedFrom, ZonedDateTime.now())
                 }
               }
 
@@ -731,6 +746,12 @@ class TibiaBot(
           val charDeath = CharKey(char.character.character.name, deathTime)
           if (deathAge < deathRecentDuration && !recentDeaths.contains(charDeath)) {
             recentDeaths.add(charDeath)
+            // First sight of this death, so deathAge is how far behind it we
+            // were — the baseline any change to the poll schedule moves. A
+            // world starting cold has no dedup history and briefly records
+            // whatever it finds, up to deathRecentDuration old; the 15-minute
+            // window this lands in clears that on its own.
+            worldMetrics.recordDeathDetected(deathAge)
             BotApp.addDeathsCache(world, char.character.character.name, deathTime.toString)
             Some(CharDeath(char, death))
           }
@@ -1621,10 +1642,6 @@ class TibiaBot(
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < onlineRecentDuration
     }
-    recentOnlineBypass.filterInPlace { i =>
-      val diff = java.time.Duration.between(i.time, now).getSeconds
-      diff < onlineRecentDuration
-    }
     recentDeaths.filterInPlace { i =>
       val diff = java.time.Duration.between(i.time, now).getSeconds
       diff < deathRecentDuration
@@ -1679,7 +1696,7 @@ class TibiaBot(
     if (wanted.nonEmpty) {
       val batch = wanted.take(killerLevelBatchCap)
       if (wanted.size > batch.size)
-        logger.info(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
+        logger.debug(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
       // Each lookup caches its own outcome as it lands, rather than the batch
       // recording them together at the end — so a batch that times out still
       // keeps whatever did resolve in time. Recovered per element, never per
@@ -1869,4 +1886,33 @@ class TibiaBot(
     }
   }
 
+}
+
+object TibiaBot {
+  /** How often a world re-polls. Named because two things depend on it and
+   *  they must not drift apart: the stream's own tick, and the character age
+   *  cache, which rounds each character's next fetch to the nearest poll and
+   *  would lose a whole interval of death-detection latency if it were working
+   *  from a different number than the tick actually uses. */
+  val PollInterval: FiniteDuration = 60.seconds
+
+  /** A moment for the process to finish starting before any world polls. */
+  private[tibiabot] val SettleDelay: FiniteDuration = 2.seconds
+
+  /** How long a world waits before its first poll: the settle delay, plus a
+   *  random offset spread across one whole interval.
+   *
+   *  Every stream is built in the same startup loop and used to wait the same
+   *  two seconds, so every world polled on the same second and went on doing so
+   *  forever — tens of thousands of character requests leaving in one burst a
+   *  second or two wide, then near silence until the next minute. Averaged over
+   *  the minute that looks modest; arriving at somebody else's gateway it is a
+   *  spike, and a spike from one address is what load shedding is for.
+   *
+   *  Offsetting the start spreads those bursts across the interval instead.
+   *  Each world still polls exactly once per interval, so nothing waits any
+   *  longer than it did — only the phase differs, and phase is the one property
+   *  of a poll schedule nothing downstream depends on. */
+  private[tibiabot] def firstPollDelay(jitterSeconds: Int => Int): FiniteDuration =
+    SettleDelay + jitterSeconds(PollInterval.toSeconds.toInt).seconds
 }

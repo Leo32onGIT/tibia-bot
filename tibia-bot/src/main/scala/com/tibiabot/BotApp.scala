@@ -114,7 +114,7 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.scheduleWithFixedDelay(15.minutes, 15.minutes)(() => worldMetricsRegistry.resetAllCounters())(ex)
 
   private val tibiaDataClient: tibiadata.TibiaApi =
-    new tibiadata.CachingTibiaApi(new TibiaDataClient(streamState), persistence.RedisCacheProvider.cache,
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl)(scala.concurrent.ExecutionContext.global)
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
@@ -132,6 +132,10 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
     new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+  // Temporary, for the move of announced transfers from guild scope to world
+  // scope — see JdbcLegacyWorldTransferMigration.
+  private val legacyWorldTransferMigration =
+    new persistence.jdbc.JdbcLegacyWorldTransferMigration(connectionProvider)
 
   /** How long an announced world transfer is remembered. Must outlast the ~180
    *  days Tibia shows a former world for: prune inside that window and the field
@@ -297,7 +301,12 @@ object BotApp extends App with StrictLogging {
     // redirect it was following. Built from the configured origin, so it names
     // whichever domain this deployment actually answers on, and picked per area
     // so the two mounts above describe themselves rather than the site.
-    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl))
+    linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl)),
+    // So a restart is not a sign-in. The session cookie is signed rather than
+    // stored and already survives one; the guild list behind it lived in memory,
+    // so every member came back perfectly authenticated and resolving to no
+    // servers at all. Ids only, and they grant nothing — see UserGuildCache.
+    userGuildStore = persistence.RedisCacheProvider.cache
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
     discordAuth, botOwner, streamSupervisor, worldMetricsRegistry, recentEventsRegistry,
@@ -312,11 +321,52 @@ object BotApp extends App with StrictLogging {
     if (Config.redisEnabled)
       Some(new web.RemoteGuildAccess(
         persistence.RedisCacheProvider.cache, actorSystem.scheduler,
-        isLocal = guildId => discordGateway.guildById(guildId) != null)(ex))
+        isLocal = guildId => discordGateway.guildById(guildId) != null,
+        selfBotId = discordGateway.selfUserId)(ex))
     else None
+  // Where an access answer that has fallen due is resolved again, behind
+  // whoever was handed the old one — see AccessCache's "two horizons".
+  //
+  // Small on purpose. Every refresh is a chain of blocking Discord REST calls,
+  // and Discord's budget is bot-wide and shared with the world scanning that is
+  // this bot's actual job; four threads is the ceiling on how much of it the
+  // dashboard can take at any instant. In the steady state it is nowhere near
+  // busy — a few hundred visitors, each refreshed once every few minutes, is a
+  // couple of lookups a second — so what this width really bounds is the cold
+  // start, when every visitor's entry is missing at once and the temptation is
+  // to resolve all of them together.
+  private val accessRefreshPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "access-refresh")
+      thread.setDaemon(true)
+      thread
+    }))
+  // Where a visitor's individual guilds are looked up, when they are in more
+  // than one this bot tracks. Its own pool because every other dashboard pool
+  // *waits* on it: reads, refreshes, another bot's questions and the write
+  // relay's permission check all resolve access, and fanning out onto the pool
+  // the caller already occupies is a deadlock rather than a slowdown.
+  //
+  // Wider than the pools that wait on it, since one resolution can want several
+  // of these at once and they are all parked on a Discord round trip. Nothing
+  // here governs how hard Discord is pushed — JDA's own rate limiter does that,
+  // and queues past it — so this is about not making a visitor wait for a
+  // thread, rather than about the budget.
+  private val dashboardLookupPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
+      val thread = new Thread(r, "dashboard-lookup")
+      thread.setDaemon(true)
+      thread
+    }))
   private val dashboardAccessService = new web.DashboardAccessService(
     discordGateway,
-    respawnConfigured = guildId => respawnService.settings(guildId).isDefined,
+    // Both halves of "is there a respawn dashboard here": the guild's settings
+    // row, and the forum that row names still existing on Discord. A settings
+    // row alone used to be enough, which offered the picker every guild whose
+    // setup wrote its row and then failed to build the forum — and every guild
+    // whose forum was deleted afterwards.
+    respawnForumExists = guild => respawnService.settings(guild.getId)
+      .flatMap(respawn.RespawnThreads.findForum(guild, _)).isDefined,
     worldsOf = guildId => worldConfigRepository.listWorlds(guildId)
       .map(w => web.WorldChannel(w.name, w.category)),
     moderatorRoleOf = moderatorRoleId,
@@ -325,7 +375,9 @@ object BotApp extends App with StrictLogging {
     // and ours. It is still reachable, and it is where somebody with no
     // community of their own lands.
     demoGuildId = Config.Patreon.supportGuildId,
-    remote = remoteGuildAccess
+    remote = remoteGuildAccess,
+    refreshOn = accessRefreshPool,
+    lookupOn = dashboardLookupPool
   )
   // Fetched on this host, which can reach the wiki even where the people
   // looking at the dashboard cannot, and served back from our own domain.
@@ -342,6 +394,25 @@ object BotApp extends App with StrictLogging {
   private val respawnActionPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
       val thread = new Thread(r, "respawn-action")
+      thread.setDaemon(true)
+      thread
+    }))
+  // Reads get their own, separate from the writes above.
+  //
+  // They shared one pool of four, and the sharing was the problem rather than
+  // the size: resolving access waits on the other bots in the fleet (see
+  // RemoteGuildAccess), so a few visitors loading the dashboard while another
+  // bot was slow could occupy every thread and leave nothing to perform a
+  // claim with. That coupling is also what forced the wait itself to be kept
+  // unrealistically short, which is what made the picker drop servers.
+  //
+  // Larger than the write pool because these threads are almost never running:
+  // they are parked on a Discord REST call or on an answer coming back over
+  // Redis. Bounded all the same, so a burst queues instead of spawning threads
+  // without limit.
+  private val dashboardReadPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
+      val thread = new Thread(r, "dashboard-read")
       thread.setDaemon(true)
       thread
     }))
@@ -375,10 +446,44 @@ object BotApp extends App with StrictLogging {
   // asks about a guild this bot is in. Resolved locally on purpose — going back
   // out over Redis here would have two bots asking each other the same question
   // until both timed out.
+  //
+  // On its own pool, and not on `ex`, which is what it used to run on. Every
+  // question answered here ends in a *blocking* JDA member lookup, and the
+  // sweep starts one per pending question at once — so a burst of questions
+  // put an unbounded number of blocking calls onto the default dispatcher.
+  // That dispatcher is eight-odd threads and also runs the HTTP server, the
+  // world poll streams and every scheduled job in this file: enough
+  // simultaneous questions and the bot stops answering requests at all, on the
+  // strength of somebody else's dashboard being opened.
+  //
+  // A fixed pool is the bound as well as the isolation — the fan-out can no
+  // longer exceed its width, and the work that does not fit queues instead of
+  // taking a thread from something else. Four is generous against a deadline
+  // of `RemoteGuildAccess.DefaultTimeout` and a lookup worth a few hundred
+  // milliseconds; deliberately not shared with the action pool, since the
+  // point of splitting reads off writes was that a slow answer must not be
+  // able to hold up a claim.
+  private val accessAnswerPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
+      val thread = new Thread(r, "access-answer")
+      thread.setDaemon(true)
+      thread
+    }))
   private val accessQueryConsumer = new web.AccessQueryConsumer(
     persistence.RedisCacheProvider.cache,
     resolve = (guildId, userId) => dashboardAccessService.localAccessIn(userId, guildId),
-    canSee = guildId => discordGateway.guildById(guildId) != null)(ex)
+    canSee = guildId => discordGateway.guildById(guildId) != null,
+    selfBotId = discordGateway.selfUserId)(accessAnswerPool)
+
+  /** Whether this bot is listening for access questions on its own channel, and
+   *  so whether its roster may tell the others to send them there.
+   *
+   *  Written once the subscription has actually been accepted, and read by
+   *  `publishGuildRoster` on every beat. It must not be a statement about what
+   *  this build is capable of: a bot advertising a channel it never subscribed
+   *  to would have every other bot publishing into silence and waiting out a
+   *  deadline to discover it, which is worse than the sweep this replaces. */
+  @volatile private var answeringOnChannel = false
 
   /** Republished well inside its own TTL, so a missed beat or two never drops
    *  this bot's guilds out of anybody's picker. */
@@ -400,7 +505,7 @@ object BotApp extends App with StrictLogging {
         .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
       persistence.RedisCacheProvider.cache.setEx(
         web.GuildRoster.key(discordGateway.selfUserId),
-        web.GuildRoster(discordGateway.selfUserId, guilds).toJson,
+        web.GuildRoster(discordGateway.selfUserId, guilds, pubSub = answeringOnChannel).toJson,
         guildRosterTtl
       ).recover { case e: Throwable => logger.warn(s"Failed to publish guild roster: ${e.getMessage}") }(ex)
     } catch {
@@ -408,9 +513,40 @@ object BotApp extends App with StrictLogging {
     }
 
   if (Config.Respawn.enabled && Config.redisEnabled) {
+    // Both halves of the channel transport, set up before the first roster goes
+    // out so nothing advertises a channel it is not yet on.
+    accessQueryConsumer.listen().foreach { listening =>
+      answeringOnChannel = listening
+      if (listening) logger.info("Dashboard access relay answering questions on its own channel")
+      else logger.warn("Dashboard access relay could not open its question channel; " +
+        "other bots will fall back to leaving questions as keys")
+    }(ex)
+    remoteGuildAccess.foreach(_.listen().foreach { listening =>
+      if (!listening) logger.warn("Dashboard access relay could not open its answer channel; " +
+        "questions to other bots will fall back to waiting on a key")
+    }(ex))
+    // Still swept, and more slowly, but only for as long as there is anybody
+    // left to sweep for: the only questions written as keys now come from a bot
+    // that has not yet been restarted onto this build, and the rosters say
+    // whether any such bot is still running. Once none is, this costs one
+    // cached read of that answer per beat and no `KEYS` at all — so the last of
+    // the keyspace walks goes away on its own, on the deploy that finishes the
+    // fleet, rather than waiting for somebody to come back and delete it.
+    //
+    // Nothing is lost if the answer is late or unavailable: not knowing reads
+    // as "somebody might still be old", and the sweep runs.
     actorSystem.scheduler.scheduleWithFixedDelay(
       web.AccessQueryConsumer.SweepEvery, web.AccessQueryConsumer.SweepEvery
-    )(() => { accessQueryConsumer.sweep(); () })(ex)
+    )(() => {
+      remoteGuildAccess match {
+        case Some(fleet) => fleet.fleetAllOnChannels.foreach {
+          case true  => ()
+          case false => accessQueryConsumer.sweep(); ()
+        }(ex)
+        case None => accessQueryConsumer.sweep(); ()
+      }
+      ()
+    })(ex)
     // Published straight away as well as on the beat, so a bot restarting does
     // not drop out of everybody else's server picker for half a minute.
     actorSystem.scheduler.scheduleWithFixedDelay(
@@ -436,7 +572,9 @@ object BotApp extends App with StrictLogging {
       },
       peopleOf = guildId => respawnService.knownMembers(guildId),
       actions = respawnActions,
-      boardChanged = boardSnapshots.invalidate)(respawnActionPool)
+      // The route's own pool is the one its *reads* run on; every write it
+      // makes goes through `respawnActions`, which carries the action pool.
+      boardChanged = boardSnapshots.invalidate)(dashboardReadPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
@@ -493,20 +631,60 @@ object BotApp extends App with StrictLogging {
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
-  def characterCache: Map[String, ZonedDateTime] = streamState.characterCache
-  def warmCharacterCache(loaded: Map[String, ZonedDateTime]): Unit = streamState.warmCharacterCache(loaded)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
     streamState.modifyWorldTransfersData(f)
 
-  /** Record an incoming world transfer as announced for `guildId`, in cache and db. */
-  def recordWorldTransfer(guildId: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
+  /** Record an incoming world transfer as seen on `world`, in cache and db. */
+  def recordWorldTransfer(world: String, name: String, formerWorlds: List[String], detectedAt: ZonedDateTime): Unit = {
     val transfer = WorldTransfer(name.toLowerCase, formerWorlds, detectedAt)
     streamState.modifyWorldTransfersData { m =>
-      m + (guildId -> (transfer :: m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(name))))
+      m + (world -> (transfer :: m.getOrElse(world, List()).filterNot(_.name.equalsIgnoreCase(name))))
     }
-    worldTransferRepository.record(guildId, name, formerWorlds, detectedAt)
+    worldTransferRepository.record(world, name, formerWorlds, detectedAt)
+  }
+
+  /** Load `world`'s announced transfers into streamState, minus anything old
+   *  enough that the former-world field it suppresses has long since cleared.
+   *  Called once as a world's stream starts, beside the deaths and levels caches
+   *  it sits with in the database. */
+  def loadWorldTransfers(world: String): Unit = {
+    val cutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
+    modifyWorldTransfersData(_ + (world -> worldTransferRepository.getTransfers(world).filter(_.detectedAt.isAfter(cutoff))))
+    worldTransferRepository.removeExpired(world, cutoff)
+  }
+
+  /** Move any announced-transfer record filed under a former name of `charName`
+   *  onto `charName`, in cache and db.
+   *
+   *  A rename does not undo an announcement, but the record is keyed by whatever
+   *  the character was called when it was written. Matching on former names is
+   *  what stops the transfer being posted again; moving the record is what keeps
+   *  that from depending on Tibia still listing the old name — the retention
+   *  window here is a year, longer than anything the character sheet promises —
+   *  and keeps the table from carrying rows keyed to names nobody answers to.
+   *
+   *  The list is re-derived inside the lock rather than from the caller's read,
+   *  for the same reason the activity list is: the map holds every world's
+   *  records and those streams poll concurrently. */
+  def rekeyWorldTransfer(world: String, charName: String, formerNames: List[String]): Unit = {
+    var stale: List[String] = Nil
+    var moved: Option[WorldTransfer] = None
+    streamState.modifyWorldTransfersData { m =>
+      val live = m.getOrElse(world, List())
+      stale = presentation.WorldTransfers.staleKeys(live, charName, formerNames)
+      val updated = presentation.WorldTransfers.applyRename(live, charName, formerNames)
+      moved = updated.find(_.name.equalsIgnoreCase(charName))
+      m + (world -> updated)
+    }
+    // Written under the new key before the old ones are dropped: a crash between
+    // the two leaves the transfer suppressed twice over, where the other order
+    // would leave it suppressed by nothing and announce it again.
+    if (stale.nonEmpty) {
+      moved.foreach(t => worldTransferRepository.record(world, charName, t.formerWorlds, t.detectedAt))
+      stale.foreach(name => worldTransferRepository.remove(world, name))
+    }
   }
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
     streamState.modifyHuntedPlayersData(f)
@@ -524,22 +702,6 @@ object BotApp extends App with StrictLogging {
     streamState.modifyWorldsData(f)
   def modifyActivityCommandBlocker(f: Map[String, Boolean] => Map[String, Boolean]): Unit =
     streamState.modifyActivityCommandBlocker(f)
-
-  // Warm the Date-header character cache from the last Redis snapshot so a
-  // restart doesn't re-baseline every character against the rate-limited API,
-  // then snapshot it every 60s (configurable). Whole-map snapshot keeps the
-  // per-character hot path off Redis entirely; no-op + empty load when Redis
-  // is disabled.
-  private val charCachePersistence =
-    new persistence.CharacterCachePersistence(persistence.RedisCacheProvider.cache, Config.Cache.characterSnapshotTtl)(ex)
-  charCachePersistence.load().foreach { loaded =>
-    if (loaded.nonEmpty) {
-      warmCharacterCache(loaded) // existing (fresher) entries win
-      logger.info(s"Warmed character cache from Redis snapshot: ${loaded.size} entries")
-    }
-  }
-  private val snapshotInterval = Config.Cache.characterSnapshotInterval
-  actorSystem.scheduler.scheduleWithFixedDelay(snapshotInterval, snapshotInterval)(() => { charCachePersistence.save(characterCache); () })(ex)
 
   // Per-guild channel/role setup lifecycle (create/repair/remove, join/leave).
   // State mutation for join/leave stays in BotApp via the forgetGuild callback;
@@ -634,7 +796,14 @@ object BotApp extends App with StrictLogging {
     // (only created lazily by /setup itself) — checkConfigDatabase must gate
     // worldConfig, not just the world-list query inside it, or this throws
     // instead of returning empty.
-    val hasWorldConfigured = checkConfigDatabase(g) && worldConfig(g).nonEmpty
+    val guildConfigured = checkConfigDatabase(g)
+    val guildWorlds = if (guildConfigured) worldConfig(g) else Nil
+    val hasWorldConfigured = guildWorlds.nonEmpty
+    // One-shot carry-forward of this guild's announced transfers onto the world
+    // they happened on, now that the record is world-scoped rather than kept per
+    // guild. Here because it has to run before the world streams start below, and
+    // because this loop already has the guild's world list in hand.
+    if (guildConfigured) legacyWorldTransferMigration.migrate(g.getId, guildWorlds.map(_.name))
     val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(g.getIdLong, g.getJDA.getSelfUser.getId)
     g.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(g.getIdLong, hasWorldConfigured, excludeAll, Config.Respawn.enabled).asJava).complete()
   }
@@ -691,8 +860,19 @@ object BotApp extends App with StrictLogging {
             val sync = respawnService.syncSeed(guild.getId)
             if (sync.changedAnything)
               logger.info(s"Respawn catalogue in guild '${guild.getId}': ${sync.added} added, " +
-                s"${sync.updated} corrected, ${sync.retired} retired" +
-                (if (sync.inUse > 0) s", ${sync.inUse} kept because somebody is on them" else ""))
+                s"${sync.updated} corrected, ${sync.retired.size} retired")
+            // A retired code's post goes with it. Left in the forum it is still
+            // a card people can find and press Claim on, for a spawn the
+            // catalogue can no longer resolve.
+            val posts = respawnService.deleteRetiredThreads(guild, config, sync.retired)
+            if (posts > 0) logger.info(s"Deleted $posts retired respawn posts in guild '${guild.getId}'")
+            // And the ones nothing can name any more: a delete that Discord
+            // refused on an earlier boot, or a code retired back when
+            // retirement only took the row. Nothing records those, so they are
+            // found by being a post of ours the catalogue does not point at.
+            val orphans = respawnService.deleteOrphanedThreads(guild, config)
+            if (orphans > 0)
+              logger.info(s"Deleted $orphans orphaned respawn posts in guild '${guild.getId}'")
             // And the picture of them, which is what anybody actually reads a
             // code off. A no-op unless the catalogue really differs from what
             // the pinned post was last drawn from, so a plain restart costs
@@ -712,11 +892,23 @@ object BotApp extends App with StrictLogging {
       // roughly daily instead of every 30 seconds.
       private var ticks = 0L
       private val ticksPerDay = math.max(1L, (24 * 60 * 60 * 1000L) / math.max(1L, sweepMillis))
+      // And so the stray-post reconciler runs roughly hourly. Far more often
+      // than the board refresh, because what it is recovering from is a restart
+      // dropping RespawnSleep's pending closes — leaving a guild's free spawns
+      // sitting open on the forum's front page for the rest of the day would
+      // defeat the point of closing them at all.
+      private val ticksPerHour = math.max(1L, (60 * 60 * 1000L) / math.max(1L, sweepMillis))
 
       def run(): Unit = {
         if (!startUpComplete) return
         ticks += 1
         val refreshBoards = ticks % ticksPerDay == 0
+        val reconcilePosts = ticks % ticksPerHour == 0
+        // Entries for guilds nothing drains — a press that reached a bot which
+        // does not own that guild's forum, or one whose settings have since
+        // gone. Cheap, and process-wide rather than per guild, so it sits above
+        // the loop.
+        respawn.RespawnSleep.evictStale()
         // Only guilds with a configured world are worth sweeping. The bot sits
         // in plenty of guilds that never ran /setup and so have no
         // `_<guildId>` database at all — asking those for their settings opens
@@ -735,6 +927,17 @@ object BotApp extends App with StrictLogging {
               .filter(respawnOwnership.ownsRespawns(guild, _))
               .foreach { config =>
                 respawnService.sweep(guild)
+                // After the sweep, so a spawn that has just come free has
+                // already had its own post closed and there is nothing here to
+                // race. Both of these are no-ops on a quiet guild: the first
+                // returns immediately with nothing due, and the second only
+                // looks at posts JDA already has cached as open.
+                respawnService.closeIdleThreads(guild, config)
+                if (reconcilePosts) {
+                  val closed = respawnService.reconcileThreads(guild, config)
+                  if (closed > 0)
+                    logger.info(s"Put $closed idle respawn post(s) back to sleep in guild '${guild.getId}'")
+                }
                 if (refreshBoards) respawn.RespawnThreads.refreshBoard(guild, config)
               }
           } catch {
@@ -774,7 +977,6 @@ object BotApp extends App with StrictLogging {
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
       galthenService.cleanExpired()
-      cleanOnlineListCache(30)
       updateOnOdd = 0
     } else {
       updateOnOdd += 1
@@ -1181,7 +1383,7 @@ object BotApp extends App with StrictLogging {
    *   - Every failure is swallowed and logged. A Patreon outage must never be
    *     the reason `/setup` errors, and it can't cost anyone access either: a
    *     failed fetch leaves the last good snapshot in place (see
-   *     [[syncPatreonMembers]]).
+   *     `syncPatreonMembers`).
    *
    *  Names are deliberately not resolved on this path (`resolveNames = false`)
    *  — that's a blocking Discord lookup per linked patron, easily the slowest
@@ -1284,13 +1486,6 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  def cleanOnlineListCache(maxAgeMinutes: Long): Unit = {
-    val currentTime = ZonedDateTime.now()
-    streamState.pruneCharacterCache { timestamp =>
-      timestamp.until(currentTime, java.time.temporal.ChronoUnit.MINUTES) <= maxAgeMinutes
-    }
-  }
-
   /** Load a guild's hunted/allied/worlds/activity/customSort config into
    *  streamState. Shared by both startBot paths (single-guild join vs. full
    *  startup) — previously copy-pasted identically in each. */
@@ -1315,13 +1510,9 @@ object BotApp extends App with StrictLogging {
     val activityInfo = activityConfig(g)
     modifyActivityData(_ + (guildId -> activityInfo))
 
-    // Announced world transfers, minus anything old enough that the former-world
-    // field it suppresses has long since cleared. Read before the prune: the read
-    // is what creates the table on a guild that has never had one.
-    val transferCutoff = ZonedDateTime.now().minusDays(TransferRecordRetentionDays)
-    val transferInfo = worldTransferConfig(g).filter(_.detectedAt.isAfter(transferCutoff))
-    modifyWorldTransfersData(_ + (guildId -> transferInfo))
-    worldTransferRepository.removeExpired(guildId, transferCutoff)
+    // Announced world transfers are not loaded here: they are keyed by world, not
+    // by guild, and each world's stream loads its own as it starts (see
+    // loadWorldTransfers).
 
     val customSortInfo = customSortConfig(g)
     modifyCustomSortData(_ + (guildId -> customSortInfo))
@@ -1489,9 +1680,6 @@ object BotApp extends App with StrictLogging {
 
   private def activityConfig(guild: Guild): List[PlayerCache] =
     activityRepository.getActivity(guild.getId)
-
-  private def worldTransferConfig(guild: Guild): List[WorldTransfer] =
-    worldTransferRepository.getTransfers(guild.getId)
 
   def discordRetrieveConfig(guild: Guild): Map[String, String] =
     discordConfigRepository.getConfig(guild.getId)

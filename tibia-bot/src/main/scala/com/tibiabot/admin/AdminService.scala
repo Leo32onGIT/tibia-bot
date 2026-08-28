@@ -125,7 +125,6 @@ final class AdminService(
   def info(callback: List[MessageEmbed] => Unit): Unit = {
     val allGuilds = discordGateway.guilds
     val allGuildsCleaned: List[String] = allGuilds.map(guild => s"**${guild.getName}** - `${guild.getId}`")
-    logger.info(allGuildsCleaned.toString)
     val embeds = com.tibiabot.presentation.ListEmbeds.pack(allGuildsCleaned, 3000).map { description =>
       new EmbedBuilder().setDescription(description).build()
     }

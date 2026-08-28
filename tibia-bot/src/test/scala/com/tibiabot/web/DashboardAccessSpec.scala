@@ -68,19 +68,19 @@ class DashboardAccessSpec extends AnyWordSpec with Matchers {
 
   "DashboardAccess.entryFor" should {
     "send somebody with nothing to the empty state" in {
-      DashboardAccess.entryFor(Nil) shouldBe DashboardEntry.Nowhere
+      DashboardAccess.entryFor(AccessReport.Empty) shouldBe DashboardEntry.Nowhere
     }
 
     "take a single guild straight through, asking nothing" in {
       val only = access("g1", "Violent")
-      DashboardAccess.entryFor(List(only)) shouldBe DashboardEntry.Straight(only)
+      DashboardAccess.entryFor(AccessReport.of(List(only))) shouldBe DashboardEntry.Straight(only)
     }
 
     "offer a choice once there is more than one" in {
       val a = access("g1", "Violent")
       val b = access("g2", "Allies")
-      DashboardAccess.entryFor(List(a, b)) match {
-        case DashboardEntry.Choose(options) => options.map(_.guildId) shouldBe List("g2", "g1")
+      DashboardAccess.entryFor(AccessReport.of(List(a, b))) match {
+        case DashboardEntry.Choose(options, _) => options.map(_.guildId) shouldBe List("g2", "g1")
         case other => fail(s"expected a picker, got $other")
       }
     }
@@ -91,7 +91,7 @@ class DashboardAccessSpec extends AnyWordSpec with Matchers {
     "take somebody with one community of their own straight there, ignoring the support server" in {
       val demo = access("support", "Violent Bot")
       val theirs = access("g1", "Antica Hunters")
-      DashboardAccess.entryFor(List(demo, theirs), demoGuildId = "support") shouldBe
+      DashboardAccess.entryFor(AccessReport.of(List(demo, theirs)), demoGuildId = "support") shouldBe
         DashboardEntry.Straight(theirs)
     }
 
@@ -99,31 +99,95 @@ class DashboardAccessSpec extends AnyWordSpec with Matchers {
     // the support server's board is what there is to look at.
     "take somebody with nothing but the support server straight into it, as the demo" in {
       val demo = access("support", "Violent Bot")
-      DashboardAccess.entryFor(List(demo), demoGuildId = "support") shouldBe DashboardEntry.Straight(demo)
+      DashboardAccess.entryFor(AccessReport.of(List(demo)), demoGuildId = "support") shouldBe DashboardEntry.Straight(demo)
     }
 
     "ask only once there are two communities of their own to choose between" in {
       val demo = access("support", "Violent Bot")
       val a = access("g1", "Antica Hunters")
       val b = access("g2", "Belobra Bois")
-      DashboardAccess.entryFor(List(demo, a, b), demoGuildId = "support") match {
+      DashboardAccess.entryFor(AccessReport.of(List(demo, a, b)), demoGuildId = "support") match {
         // And the support server is not among the options: it is not what they
         // are choosing between.
-        case DashboardEntry.Choose(options) => options.map(_.guildId) shouldBe List("g1", "g2")
+        case DashboardEntry.Choose(options, _) => options.map(_.guildId) shouldBe List("g1", "g2")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    // The bug this whole distinction exists for. Two servers, one of which did
+    // not answer, used to leave a list of one — which entryFor read as "there is
+    // nothing to ask" and turned into a redirect straight into the survivor's
+    // board. The visitor did not choose that server, was not told the other one
+    // was missing, and the board they landed on hid the switcher because it
+    // also counted the list as a list of one.
+    "not skip the picker when a server failed to answer" in {
+      val a = access("g1", "Violent")
+      val report = AccessReport(List(a), List(UnreachableGuild("g2", "Ruckus")))
+      DashboardAccess.entryFor(report) match {
+        case DashboardEntry.Choose(options, missing) =>
+          options.map(_.guildId) shouldBe List("g1")
+          missing.map(_.guildName) shouldBe List("Ruckus")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    // The same guard, one server further along: a picker that is already a
+    // picker still has to say it is short, or a visitor reads it as the whole
+    // truth and concludes they were removed from the missing one.
+    "carry what it could not reach into a picker it would have shown anyway" in {
+      val report = AccessReport(
+        List(access("g1", "Violent"), access("g2", "Allies")),
+        List(UnreachableGuild("g3", "Ruckus")))
+      DashboardAccess.entryFor(report) match {
+        case DashboardEntry.Choose(options, missing) =>
+          options.map(_.guildId) shouldBe List("g2", "g1")
+          missing.map(_.guildId) shouldBe List("g3")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    // One server, genuinely resolved, and nothing missing. The straight-through
+    // case has to survive all of this: it is what almost everybody gets.
+    "still go straight through when the one server is the whole truth" in {
+      val only = access("g1", "Violent")
+      DashboardAccess.entryFor(AccessReport(List(only), Nil)) shouldBe DashboardEntry.Straight(only)
+    }
+
+    // "You have no servers here" and "we could not reach your servers" are
+    // opposite advice — one says go and set the bot up, the other says wait a
+    // moment and reload.
+    "tell an empty answer apart from an unreachable one" in {
+      val missing = List(UnreachableGuild("g1", "Violent"))
+      DashboardAccess.entryFor(AccessReport(Nil, missing)) shouldBe DashboardEntry.Unreachable(missing)
+    }
+
+    // The support server is set aside from the landing decision, not from the
+    // question of whether the answer was complete. Somebody whose own server
+    // did not answer must not be dropped into the demo as though it were their
+    // only one.
+    "not fall back to the support server when their own did not answer" in {
+      val demo = access("support", "Violent Bot")
+      val report = AccessReport(List(demo), List(UnreachableGuild("g1", "Antica Hunters")))
+      DashboardAccess.entryFor(report, demoGuildId = "support") match {
+        // Offered, not entered: it is a choice they can make, next to the note
+        // saying the server they actually wanted has not answered.
+        case DashboardEntry.Choose(options, missing) =>
+          options.map(_.guildId) shouldBe List("support")
+          missing.map(_.guildName) shouldBe List("Antica Hunters")
         case other => fail(s"expected a picker, got $other")
       }
     }
 
     "still send somebody with nothing at all to the empty state" in {
-      DashboardAccess.entryFor(Nil, demoGuildId = "support") shouldBe DashboardEntry.Nowhere
+      DashboardAccess.entryFor(AccessReport.Empty, demoGuildId = "support") shouldBe DashboardEntry.Nowhere
     }
 
     // A picker that reorders itself between visits is one nobody builds muscle
     // memory for.
     "order the picker by name, case-insensitively, whatever order it was given" in {
       val unordered = List(access("g1", "zeta"), access("g2", "Alpha"), access("g3", "beta"))
-      DashboardAccess.entryFor(unordered) match {
-        case DashboardEntry.Choose(options) => options.map(_.guildName) shouldBe List("Alpha", "beta", "zeta")
+      DashboardAccess.entryFor(AccessReport.of(unordered)) match {
+        case DashboardEntry.Choose(options, _) => options.map(_.guildName) shouldBe List("Alpha", "beta", "zeta")
         case other => fail(s"expected a picker, got $other")
       }
     }

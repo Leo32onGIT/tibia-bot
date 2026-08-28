@@ -154,7 +154,8 @@ final class NotifyService(
    *  threshold it clears and isn't off, muted or inside their cooldown.
    *
    *  `zapCount` is the online list's own count of enemies inside
-   *  [[MasslogDetector.RecentLoginSeconds]] — the people wearing the `:zap:`. */
+   *  [[com.tibiabot.tracking.MasslogDetector.RecentLoginSeconds]] — the people
+   *  wearing the `:zap:`. */
   def onMasslog(guildId: String, world: String, guildName: String, zapCount: Int, enemiesOnline: Int): Unit = {
     val now = Instant.now()
     masslogFor(guildId, world).foreach { sub =>

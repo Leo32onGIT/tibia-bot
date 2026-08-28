@@ -103,13 +103,51 @@ final class RespawnDashboardRoute(
   /** As [[withAccess]], but also hands over everything else the visitor can
    *  reach. Only the board page needs it, and only to decide whether its server
    *  chip is a switcher or a label — there is no point offering a choice to
-   *  somebody with one server. */
-  private def withAccessAmong(guildId: String)(inner: (GuildAccess, List[GuildAccess]) => Route): Route =
+   *  somebody with one server.
+   *
+   *  And, unlike the guards above, this one answers a *page* rather than a
+   *  payload, so a visitor it cannot admit is sent to the front door instead of
+   *  being handed the word "Forbidden".
+   *
+   *  That mattered little while this URL was only ever reached from the
+   *  dashboard itself. It is a link in Discord now — the Dashboard button on a
+   *  spawn's Book panel — and there are two ordinary ways to arrive holding a
+   *  session that resolves to nothing. Either the guild genuinely is not
+   *  theirs, or, far more often, we no longer know which servers they are in:
+   *  [[UserGuildCache]] lives in memory and is written only by the OAuth
+   *  callback, so every restart empties it while the seven-day cookies it
+   *  belongs to go on working. Somebody pressing that button after a deploy was
+   *  shown a bare error page for what is really "sign in again".
+   *
+   *  The landing route already tells those cases apart and has a page for each,
+   *  so this defers to it rather than growing a second opinion. Nothing loops:
+   *  the landing draws a board itself and never redirects on to one.
+   *
+   *  The data endpoints keep their 403 — the page's own fetches read that status
+   *  as "no longer have access" and say so in the header, which is the right
+   *  answer to a poll and would be a strange one to a browser.
+   */
+  private def withAccessAmong(guildId: String)(inner: (GuildAccess, AccessReport) => Route): Route =
     discordAuth.authenticatedUser { userId =>
-      read(accessService.rememberedAccessFor(userId, guildIdsOf(userId), Some(guildId))) { granted =>
-        granted.find(_.guildId == guildId) match {
-          case Some(access) => inner(access, granted)
-          case None         => complete(StatusCodes.Forbidden -> "Forbidden")
+      read(accessService.rememberedReportFor(userId, guildIdsOf(userId), Some(guildId))) { report =>
+        report.granted.find(_.guildId == guildId) match {
+          case Some(access) => inner(access, report)
+          // Signed in, and yet we hold no list of their servers at all: the
+          // session outlived the memory of what is behind it. Signing in again
+          // is the entire fix, so send them to do it *through the bounce*, which
+          // takes the spawn along — landing them on the dashboard's front door
+          // would make them find it again by hand, which is the version of this
+          // that was reported.
+          //
+          // `None` from the cache, not an empty set: a login writes an entry
+          // whatever Discord says, so somebody genuinely in no servers comes
+          // back with `Some(empty)` and takes the branch below. That is what
+          // keeps this from being a loop.
+          case None if discordAuth.userGuilds.get(userId).isEmpty =>
+            extractUri(uri => redirect(discordAuth.loginUrlFor(uri), StatusCodes.Found))
+          // We know their servers; this one simply is not among them. Nothing a
+          // fresh login would change, so the landing route explains it instead.
+          case None => redirect(RespawnDashboardRoute.LandingPath, StatusCodes.Found)
         }
       }
     }
@@ -249,31 +287,37 @@ final class RespawnDashboardRoute(
   private def shell(title: String, inner: String): String =
     page("respawn.html").replace("<!--TITLE-->", esc(title)).replace("<!--BODY-->", inner)
 
-  private def nowhere: String = shell("Nothing here yet",
-    s"""<div class="empty">
-       |  <i class="ti ti-mood-empty" aria-hidden="true"></i>
-       |  <h1>Nothing to show yet</h1>
-       |  <p>The respawn dashboard needs a Discord server where Violent Bot is set up
-       |     <em>and</em> where you can see at least one tracked world's channels.</p>
-       |  <p class="hint">If you have just joined a server or been given access, sign in again to refresh.</p>
-       |  <a class="btn" href="/dashboard/auth/login">Refresh sign-in</a>
-       |</div>""".stripMargin)
+  /** Every candidate server failed to answer.
+   *
+   *  Deliberately not [[nowhere]]. That page tells somebody to go and set the
+   *  bot up, which is exactly the wrong advice for a visitor whose servers are
+   *  all perfectly fine and merely did not reply in time — and it is advice
+   *  they would have acted on, since nothing on that page suggests trying
+   *  again. */
+  private def unreachable(guilds: List[UnreachableGuild]): String =
+    shell("Couldn't reach your servers", RespawnDashboardRoute.unreachableBody(guilds))
 
-  private def picker(options: List[GuildAccess]): String = shell("Choose a server",
-    s"""<div class="picker">
-       |  <h1>Choose a server</h1>
-       |  <p>You can use the respawn board on more than one.</p>
-       |  <div class="choices">
-       |    ${options.map(choice).mkString("\n")}
-       |  </div>
-       |</div>""".stripMargin)
+  /** Signed in, and nothing resolved.
+   *
+   *  Two very different situations wearing one page until now. Either we never
+   *  learned which servers this visitor is in — the list lives in memory beside
+   *  their login and does not survive a restart — or we knew them, checked every
+   *  one, and none has a respawn list they can see.
+   *
+   *  The old page addressed only the second and offered only the first's fix, so
+   *  somebody in the second state signed in again, came back to the identical
+   *  page, and signed in again. `userGuildIds` is the whole of the difference,
+   *  and it was sitting in the caller untouched.
+   */
+  private def signedInEmpty(userGuildIds: Set[String]): String = {
+    val (title, body) =
+      RespawnDashboardRoute.signedInEmptyPage(guildIdsKnown = userGuildIds.nonEmpty)
+    shell(title, body)
+  }
 
-  private def choice(a: GuildAccess): String =
-    s"""<a class="choice" href="/dashboard/g/${esc(a.guildId)}">
-       |  <span class="choice-name">${esc(a.guildName)}</span>
-       |  <span class="choice-meta">${a.worlds.size} world${if (a.worlds.size == 1) "" else "s"} &middot; ${esc(a.worlds.take(3).map(esc).mkString(", "))}</span>
-       |  <span class="tier tier-${a.tier.name}">${a.tier.name}</span>
-       |</a>""".stripMargin
+  private def picker(options: List[GuildAccess],
+                     unreachable: List[UnreachableGuild] = Nil): String =
+    shell("Choose a server", RespawnDashboardRoute.pickerBody(options, unreachable))
 
   /** The board for one guild. Its own page rather than the shared shell,
    *  because it carries a script and fetches its own data.
@@ -282,7 +326,7 @@ final class RespawnDashboardRoute(
    *  arrives from `/board`, so the page is served once and then polls. The tier
    *  is presentation only: it decides which tools are drawn, never whether they
    *  are permitted, which every route re-checks for itself. */
-  private def board(a: GuildAccess, among: List[GuildAccess]): String =
+  private def board(a: GuildAccess, among: AccessReport): String =
     page("board.html")
       .replace("<!--TITLE-->", esc(a.guildName))
       .replace("<!--SERVER-->", serverChip(a, among))
@@ -307,13 +351,28 @@ final class RespawnDashboardRoute(
     pathEndOrSingleSlash {
       get {
         discordAuth.authenticatedUser { userId =>
+          // Bound rather than called twice: whether we knew this visitor's
+          // servers at all is what decides which empty state they see, and
+          // asking again after resolving could give a different answer.
+          val theirs = guildIdsOf(userId)
           // Resolved once and used twice: where to send them, and — if that is
           // straight to a board — whether its header has anywhere to switch to.
-          read(accessService.accessFor(userId, guildIdsOf(userId))) { granted =>
-            accessService.entryOf(granted) match {
-              case DashboardEntry.Nowhere          => html(nowhere)
-              case DashboardEntry.Straight(access) => html(board(access, granted))
-              case DashboardEntry.Choose(options)  => html(picker(options))
+          //
+          // From the short memory, like every other read here. This route
+          // alone resolved live, so the most-visited page on the dashboard
+          // paid a Discord REST call per candidate guild and a fresh wait on
+          // the other bots every single time it was opened — and, resolving
+          // outside the cache, never left an answer behind for the routes that
+          // do read it. Landing is a read: it decides where to send somebody,
+          // and the board it sends them to re-resolves before showing them
+          // anything, so nothing is granted on the strength of what is
+          // remembered here.
+          read(accessService.rememberedReportFor(userId, theirs)) { report =>
+            accessService.entryOf(report) match {
+              case DashboardEntry.Nowhere               => html(signedInEmpty(theirs))
+              case DashboardEntry.Unreachable(guilds)   => html(unreachable(guilds))
+              case DashboardEntry.Straight(access)      => html(board(access, report))
+              case DashboardEntry.Choose(opts, missing) => html(picker(opts, missing))
             }
           }
         }
@@ -326,9 +385,13 @@ final class RespawnDashboardRoute(
     path("choose") {
       get {
         discordAuth.authenticatedUser { userId =>
-          read(accessService.rememberedAccessFor(userId, guildIdsOf(userId))) {
-            case Nil     => html(nowhere)
-            case granted => html(picker(granted.sortBy(_.guildName.toLowerCase)))
+          val theirs = guildIdsOf(userId)
+          read(accessService.rememberedReportFor(userId, theirs)) { report =>
+            val sorted = report.granted.sortBy(_.guildName.toLowerCase)
+            val missing = report.unreachable.sortBy(_.guildName.toLowerCase)
+            if (sorted.nonEmpty) html(picker(sorted, missing))
+            else if (missing.nonEmpty) html(unreachable(missing))
+            else html(signedInEmpty(theirs))
           }
         }
       }
@@ -345,7 +408,7 @@ final class RespawnDashboardRoute(
       get {
         withAccess(guildId) { _ =>
           read(boardOf(guildId)) { entries =>
-            cachedJson(RespawnDashboardRoute.catalogueJson(entries),
+            cachedJson(RespawnDashboardRoute.catalogueJson(entries, spriteCache.nudgeFor),
               RespawnDashboardRoute.CatalogueMaxAge)
           }
         }
@@ -532,6 +595,22 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    path("g" / Segment / "edit-slot") { guildId =>
+      post {
+        withWrite(guildId, AccessTier.Moderator) { userId =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            (fields.get("code").map(_.trim).filter(_.nonEmpty),
+             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt),
+             fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption).filter(_ > 0)) match {
+              case (Some(code), Some(start), Some(minutes)) =>
+                actionResult(guildId, actions.editSlot(guildId, userId, code, start, minutes))
+              case _ => badRequest("Changing a slot's length needs a spawn, which day, and how long.")
+            }
+          }
+        }
+      }
+    } ~
     // Who a moderator may hand stamina to. Behind the moderator gate rather than
     // merely unadvertised: it is a list of everybody who has used the system
     // here, which is not something an ordinary member should be able to
@@ -615,6 +694,33 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
+    // One spawn's own claim ceiling. A moderator tool like the two above, and
+    // gated the same way.
+    //
+    // An absent or empty "minutes" clears the override rather than failing: on
+    // this endpoint "no value" is the instruction to follow the server again,
+    // which is the same thing an empty box means in the Discord form.
+    path("g" / Segment / "spawn-max") { guildId =>
+      post {
+        withWrite(guildId, AccessTier.Moderator) { userId =>
+          entity(as[String]) { body =>
+            val fields = RespawnDashboardRoute.parseBody(body)
+            fields.get("code").map(_.trim).filter(_.nonEmpty) match {
+              case None => badRequest("Which spawn?")
+              case Some(code) =>
+                // Read the same way the Discord form reads it — see ClaimDuration,
+                // which is the only thing on either side that knows what "2h"
+                // means. An empty box is a clear rather than a refusal.
+                com.tibiabot.domain.ClaimDuration.parse(fields.getOrElse("minutes", "")) match {
+                  case Right(minutes) =>
+                    actionResult(guildId, actions.setSpawnMax(guildId, userId, code, minutes))
+                  case Left(problem) => badRequest(problem)
+                }
+            }
+          }
+        }
+      }
+    } ~
     path("images" / Segment) { filename =>
       get {
         discordAuth.authenticatedUser { _ =>
@@ -663,6 +769,14 @@ object RespawnDashboardRoute {
    *  somebody with one server would offer a choice that does not exist, so that
    *  case stays a plain label.
    *
+   *  "Somewhere to go" includes a server that failed to answer. Landing here
+   *  because the picker collapsed to one entry used to strip the switcher too,
+   *  so the one page a visitor most needed a way off was the one page with no
+   *  way off - the full picker at `/dashboard/choose` was still there, but
+   *  nothing on screen said so. A server that could not be resolved is listed
+   *  unlinked, since we do not know it is theirs to open; what the menu is for
+   *  in that state is the "All servers" row beneath it.
+   *
    *  Rendered here rather than fetched, because the caller already holds every
    *  server this viewer can reach — it is what decides whether the chevron is
    *  drawn at all — so the menu costs one substitution and no round trip. The
@@ -671,14 +785,126 @@ object RespawnDashboardRoute {
    *  `/dashboard/choose` stays as the landing answer and for anyone who arrives
    *  there directly.
    */
-  private[web] def serverChip(a: GuildAccess, among: List[GuildAccess]): String = {
+  /** Where the sign-in lives. Written once here rather than at each use, since
+   *  three screens now point at it. */
+  private[web] val LoginPath = "/dashboard/auth/login"
+
+  /** The dashboard's own front door — where somebody goes to be told which
+   *  boards they can see, or shown the one they can. */
+  private[web] val LandingPath = "/dashboard"
+
+  /** The title and body for a visitor who is signed in and has nothing.
+   *
+   *  `guildIdsKnown` is the branch: false means we hold no list of their servers
+   *  and have to ask Discord again, true means we asked, checked every server,
+   *  and there was nothing on the other end. The second must not offer to sign
+   *  them in again — that is the loop the old single page created.
+   *
+   *  The two share a composition on purpose. It is the same handshake either
+   *  way; what differs is the state of the connection, which is doing the work
+   *  of a sentence before any sentence is read.
+   */
+  private[web] def signedInEmptyPage(guildIdsKnown: Boolean): (String, String) =
+    if (!guildIdsKnown)
+      ("Reconnect",
+       s"""<div class="empty auth">
+          |  <div class="shake" aria-hidden="true">
+          |    <img class="face" src="/dashboard/images/avatar.png" alt="">
+          |    <span class="wire"></span>
+          |    <span class="disc"><i class="ti ti-brand-discord"></i></span>
+          |  </div>
+          |  <h1>Reconnect your Discord</h1>
+          |  <p>We only keep your server list while you're signed in. Reconnect to see the respawn list.</p>
+          |  <a class="btn btn-discord" href="$LoginPath"><i class="ti ti-brand-discord" aria-hidden="true"></i> Continue with Discord</a>
+          |  <p class="foot">Violent Bot only reads which servers you're in &mdash; never your messages.</p>
+          |</div>""".stripMargin)
+    else
+      ("No respawn lists",
+       // "Check again" is a plain reload, and it is the action that actually
+       // helps here: somebody in this state is nearly always waiting on a
+       // moderator to let them into a channel, and the answer behind this page
+       // is cached for up to AccessCache.DefaultStaleAfter.
+       s"""<div class="empty auth">
+          |  <div class="shake" aria-hidden="true">
+          |    <img class="face" src="/dashboard/images/avatar.png" alt="">
+          |    <span class="wire done"></span>
+          |    <span class="slot"><i class="ti ti-minus"></i></span>
+          |  </div>
+          |  <h1>No respawn lists on your servers</h1>
+          |  <p>You're signed in &mdash; but none of the Discord servers you're in have a respawn list that you can view.</p>
+          |  <a class="btn btn-discord" href="/dashboard"><i class="ti ti-refresh" aria-hidden="true"></i> Check again</a>
+          |  <p class="foot">Already in a guild that uses this? Ask a moderator to let you see the respawn channels.</p>
+          |</div>""".stripMargin)
+
+  /** The servers a page could not reach, as a sentence.
+   *
+   *  Ids rather than names where the name was never known, which is better than
+   *  a blank: it is still something to search a log for. */
+  private[web] def namesOf(guilds: List[UnreachableGuild]): String = {
+    val named = guilds
+      .map(g => if (g.guildName.nonEmpty) g.guildName else g.guildId)
+      .map(name => s"<strong>${esc(name)}</strong>")
+    named match {
+      case Nil           => "Reload in a moment to try again."
+      case single :: Nil => s"Waiting on $single. Reload in a moment to try again."
+      case many          => s"Waiting on ${many.init.mkString(", ")} and ${many.last}. Reload in a moment to try again."
+    }
+  }
+
+  /** The body of the try-again page: every candidate server failed to answer.
+   *
+   *  Deliberately not the empty state. That page tells somebody to go and set
+   *  the bot up, which is exactly the wrong advice for a visitor whose servers
+   *  are all perfectly fine and merely did not reply in time — and it is advice
+   *  they would have acted on, since nothing on it suggests reloading. */
+  private[web] def unreachableBody(guilds: List[UnreachableGuild]): String =
+    s"""<div class="empty">
+       |  <i class="ti ti-plug-connected-x" aria-hidden="true"></i>
+       |  <h1>Couldn't reach your servers</h1>
+       |  <p>Your Discord servers didn't answer in time, so we can't tell what you
+       |     have access to. Nothing has changed &mdash; this is on our side.</p>
+       |  <p class="hint">${namesOf(guilds)}</p>
+       |  <a class="btn" href="/dashboard">Try again</a>
+       |</div>""".stripMargin
+
+  /** The body of the picker: the list, and — when the list is knowingly short —
+   *  what is missing from it.
+   *
+   *  The note is the whole reason a one-entry picker is worth showing at all.
+   *  Without it a visitor used to two servers sees one and reasonably concludes
+   *  they have lost access to the other; with it, they know to reload. Which is
+   *  also why the blurb above it does not promise a choice it cannot keep. */
+  private[web] def pickerBody(options: List[GuildAccess],
+                              unreachable: List[UnreachableGuild] = Nil): String =
+    s"""<div class="picker">
+       |  <h1>Choose a server</h1>
+       |  <p>${if (options.size > 1) "You can use the respawn board on more than one."
+                else "Where you can use the respawn board."}</p>
+       |  ${if (unreachable.isEmpty) "" else
+             s"""<p class="hint warn"><i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                 |     <span>Some of your servers didn't answer, so this list may be short.
+                 |     ${namesOf(unreachable)}</span></p>""".stripMargin}
+       |  <div class="choices">
+       |    ${options.map(choice).mkString("\n")}
+       |  </div>
+       |</div>""".stripMargin
+
+  private[web] def choice(a: GuildAccess): String =
+    s"""<a class="choice" href="/dashboard/g/${esc(a.guildId)}">
+       |  <span class="choice-name">${esc(a.guildName)}</span>
+       |  <span class="choice-meta">${a.worlds.size} world${if (a.worlds.size == 1) "" else "s"} &middot; ${esc(a.worlds.take(3).mkString(", "))}</span>
+       |  <span class="tier tier-${a.tier.name}">${a.tier.name}</span>
+       |</a>""".stripMargin
+
+  private[web] def serverChip(a: GuildAccess, among: AccessReport): String = {
     val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
     val suffix = """<span class="brand-suffix">/dashboard</span>"""
     // The name is wrapped rather than written bare, so it can be given a width
     // and cut when it is longer than the masthead has room for — see .sw-title.
     // `title` carries the whole of it for anyone who wants to read it.
     def named(name: String) = s"""<span class="sw-title" title="${esc(name)}">${esc(name)}</span>"""
-    if (among.size <= 1) s"""<span class="server">$glyph${named(a.guildName)}$suffix</span>"""
+    if (among.granted.size <= 1 && among.complete)
+      s"""<span class="server">$glyph${named(a.guildName)}$suffix</span>"""
     else {
       // The server's own face, and what the viewer is on it. A row of identical
       // Discord glyphs told you nothing you could pick a server by; an avatar is
@@ -688,7 +914,7 @@ object RespawnDashboardRoute {
       // The tier travels because a board you moderate and a board you are a
       // member of are very different places, and knowing which before you land
       // saves a page load to find out.
-      val items = among.map { g =>
+      val items = among.granted.map { g =>
         val here = g.guildId == a.guildId
         val tick = if (here) """<i class="ti ti-check sw-check" aria-hidden="true"></i>""" else ""
         val face = g.iconUrl match {
@@ -700,12 +926,28 @@ object RespawnDashboardRoute {
           s"""<span class="sw-name">${esc(g.guildName)}</span>""" +
           s"""<span class="tier tier-${g.tier.name}">${g.tier.name}</span>$tick</a>"""
       }.mkString
+      // Named but not linked: we never got an answer about this one, so
+      // offering it as a destination would be offering a 403. Saying it exists
+      // is the point — a visitor who came for that server needs to know it is
+      // missing rather than gone.
+      val pending = among.unreachable.map { g =>
+        val name = if (g.guildName.nonEmpty) g.guildName else g.guildId
+        s"""<span class="sw-item off" title="This server didn't answer — reload to try again">""" +
+          """<i class="ti ti-plug-connected-x sw-glyph" aria-hidden="true"></i>""" +
+          s"""<span class="sw-name">${esc(name)}</span>""" +
+          """<span class="tier">no answer</span></span>"""
+      }.mkString
+      // Always present in the menu, so there is one reliable way back to the
+      // full list however incomplete this menu happens to be.
+      val all = """<a class="sw-item sw-all" href="/dashboard/choose">""" +
+        """<i class="ti ti-layout-grid sw-glyph" aria-hidden="true"></i>""" +
+        """<span class="sw-name">All servers</span></a>"""
       s"""<span class="sw" id="server-switch">""" +
         s"""<button class="sw-btn" id="server-switch-btn" type="button" """ +
         s"""aria-haspopup="true" aria-expanded="false" title="Switch server">""" +
         s"""$glyph${named(a.guildName)}$suffix""" +
         s"""<i class="ti ti-chevron-down chev" aria-hidden="true"></i></button>""" +
-        s"""<span class="sw-menu"><span class="sw-label">Your servers</span>$items</span></span>"""
+        s"""<span class="sw-menu"><span class="sw-label">Your servers</span>$items$pending$all</span></span>"""
     }
   }
 
@@ -785,13 +1027,21 @@ object RespawnDashboardRoute {
     "id" -> JsString(claim.userId),
     "name" -> JsString(if (claim.characterName.nonEmpty) claim.characterName else claim.userName))
 
-  private def personName(claim: com.tibiabot.domain.RespawnClaim): String =
-    if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+  /** How a row of "up next" names somebody: the one Discord name everybody
+   *  calls them by, the same choice the card above the list makes — see
+   *  [[com.tibiabot.respawn.RespawnBoardEntry.holderLabel]] for why that is the
+   *  name and not their Tibia character. Without the `@`, which the page writes
+   *  itself; a row of the reader's own is labelled "You" and wears none.
+   */
+  private def personName(claim: com.tibiabot.domain.RespawnClaim): String = {
+    val called = com.tibiabot.presentation.Names.calledPlain(claim.nickname, claim.userName)
+    if (called.nonEmpty) called else claim.characterName
+  }
 
   private def instant(when: java.time.ZonedDateTime): JsValue = JsString(when.toInstant.toString)
 
   /** How many rows of "up next" a spawn sends. Matches
-   *  `RespawnEmbeds.RowsPerField`, because the panel and the Discord card are
+   *  `RespawnEmbeds.RowsPerList`, because the panel and the Discord card are
    *  meant to be the same list — a page that showed twelve where the card showed
    *  ten would read as two different answers to one question. The count of
    *  everything is sent alongside, so the page can own up to what it is not
@@ -877,7 +1127,12 @@ object RespawnDashboardRoute {
         "nickname" -> JsString(person.nickname)): JsValue
     }.toVector))
 
-  private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry]): JsObject =
+  /** `nudgeOf` says how far a creature's art should be shifted for the creature
+   *  to sit in the middle of it — see [[SpriteInk]]. A function rather than the
+   *  cache itself, so this stays a pure renderer that a test can read back
+   *  without a filesystem. */
+  private[web] def catalogueJson(entries: List[com.tibiabot.respawn.RespawnBoardEntry],
+                                 nudgeOf: String => Option[SpriteNudge]): JsObject =
     JsObject("spawns" -> JsArray(entries.map { entry =>
       val spawn = entry.respawn
       JsObject(Map[String, JsValue](
@@ -896,8 +1151,33 @@ object RespawnDashboardRoute {
         // picture ever disagreeing about which monster a spawn is. Empty for the
         // many catalogue rows whose creature is deliberately unset.
         "creature" -> JsString(spawn.creature)
-      ) ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue)))
+      )
+        ++ CreatureSprites.urlFor(spawn.creature).map(url => "sprite" -> (JsString(url): JsValue))
+        // How far the page should shift that sprite, where its creature is not
+        // drawn in the middle of its own canvas. Each axis is absent when it
+        // wants nothing, which for the sideways one is nearly always — so the
+        // ordinary row carries one number, and a centred sprite carries none.
+        ++ nudgeOf(spawn.creature).toList.flatMap(nudgeFields)
+        // This spawn's own claim ceiling, when it has been given one. Absent
+        // rather than equal to the server's, so the page can say *which* limit
+        // is binding — and so a guild retuning its own number does not need
+        // every catalogue row rewritten. In the catalogue rather than the board
+        // because it is configuration, not state: it changes when a moderator
+        // changes it, which is far rarer than the ten-second poll.
+        ++ spawn.maxDurationMinutes.map(m => "maxMinutes" -> (JsNumber(m): JsValue)))
     }.toVector))
+
+  /** The two halves of a nudge, each dropped when it is zero.
+   *
+   *  Rounded to four places because the page multiplies these by a box a
+   *  hundred pixels across — anything finer is a fraction of a pixel, and every
+   *  digit is paid for once per spawn in a payload a board holds for two
+   *  minutes. */
+  private def nudgeFields(nudge: SpriteNudge): Seq[(String, JsValue)] =
+    Seq("nudgeX" -> nudge.x, "nudgeY" -> nudge.y).collect {
+      case (name, value) if value != 0.0 =>
+        name -> (JsNumber(BigDecimal(value).setScale(4, BigDecimal.RoundingMode.HALF_UP)): JsValue)
+    }
 
   private def entryJson(entry: com.tibiabot.respawn.RespawnBoardEntry, viewerId: String): JsValue = {
     val spawn = entry.respawn

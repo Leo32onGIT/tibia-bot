@@ -24,7 +24,20 @@ final case class Respawn(
   mapperLink: String,
   threadId: String,
   source: String,
-  addedBy: String
+  addedBy: String,
+  /** This spawn's own ceiling on how long a single claim may run, when it has
+   *  one. `None` — the usual case — means it follows the guild's
+   *  `RespawnSettings.maxDurationMinutes`, so retuning the server still moves
+   *  every spawn nobody has singled out.
+   *
+   *  It *replaces* the guild's number rather than capping it, so a spawn worth a
+   *  long session can be given one above the server's ceiling as well as below.
+   *  Read it through [[RespawnSettings.maxFor]] and never directly: the point of
+   *  that method is that no caller does this resolution by hand.
+   *
+   *  Defaulted so that the many places building one of these for a test — where
+   *  the ceiling is beside the point — need say nothing about it. */
+  maxDurationMinutes: Option[Int] = None
 ) {
   /** "415 — Cult Orcs" — the forum post title and the way a spawn is named
    *  everywhere it's displayed. */
@@ -34,8 +47,8 @@ final case class Respawn(
 object Respawn {
   /** Catalogue rows that came from the bundled seed file. */
   val SourceSeed: String = "seed"
-  /** Catalogue rows a guild's admins added themselves. `/respawn admin seed`
-   *  never touches these. */
+  /** Catalogue rows a guild added itself from the dashboard. Syncing the
+   *  bundled seed never touches these. */
   val SourceCustom: String = "custom"
 }
 
@@ -79,6 +92,11 @@ final case class RespawnClaim(
   requestDeadline: Option[ZonedDateTime] = None,
   requesterUserId: Option[String] = None,
   requesterUserName: Option[String] = None,
+  /** What the guild calls whoever asked, kept beside their account name for the
+   *  same reason the owner's is: the DM putting the question names them, and a
+   *  request granted becomes their booking under both names. Cleared with the
+   *  rest of the request, so it never outlives the question it belongs to. */
+  requesterNickname: Option[String] = None,
   /** The window the asker actually booked, which merely overlaps this slot
    *  rather than matching it — so granting the request has to create their
    *  window, not hand over this one.
@@ -253,6 +271,12 @@ object RespawnClaim {
     /** A moderator put this day in somebody else's name. Recorded against the
      *  day the previous owner lost, not against the one they were given. */
     val SlotMoved: String = "slot-moved"
+    /** A moderator changed how long this day runs. Recorded only where the day
+     *  had to be rewritten to change it — an occurrence a rule had not written
+     *  down yet is settled and replaced at the new length, exactly as
+     *  [[SlotMoved]] settles one that changes hands. A booking that already had
+     *  a row is edited in place and leaves no trail here. */
+    val SlotResized: String = "slot-resized"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -275,11 +299,13 @@ object RespawnClaim {
       case Unconfirmed => "never confirmed, given up"
       case SlotRemoved => "taken off the calendar by a moderator"
       case SlotMoved   => "moved to somebody else by a moderator"
+      case SlotResized => "lengthened or shortened by a moderator"
       case other       => other
     }
   }
 
-  /** A claim someone made themselves via `/respawn claim` or the Next button. */
+  /** A claim someone made themselves — a spawn's Claim button, the board's claim
+   *  form, or the Next button. */
   val KindAdHoc: String = "adhoc"
   /** RESERVED — materialised from a recurring schedule. Not produced by any
    *  code path yet; see the scheduled-claim notes in RespawnService. */
@@ -591,7 +617,27 @@ final case class RespawnSettings(
   /** How long someone has to accept a handover offer before it's assumed they
    *  walked away and the spawn moves on to the next person. */
   handoverMinutes: Int
-)
+) {
+  /** The longest a single claim on `respawn` may run.
+   *
+   *  The one place the guild ceiling and a spawn's own override are reconciled.
+   *  Every check that used to read `maxDurationMinutes` straight off these
+   *  settings goes through here instead — claiming, extending, a moderator
+   *  setting somebody else's length, and booking a repeating slot — because ten
+   *  call sites each doing their own resolution is how a limit ends up
+   *  disagreeing with itself depending on which door you came in.
+   *
+   *  A spawn's own number wins outright, above the guild's as well as below.
+   *  "Maximum claim time for this spawn" reads as an absolute, and an admin who
+   *  types six hours on a raid spawn should not have it silently clamped to the
+   *  server's four.
+   *
+   *  Not applied to a member's *personal* default — see
+   *  `RespawnService.saveUserPrefs`. A preference with no spawn attached has no
+   *  spawn's ceiling to be measured against, so that one stays guild-level. */
+  def maxFor(respawn: Respawn): Int =
+    respawn.maxDurationMinutes.getOrElse(maxDurationMinutes)
+}
 
 /** One member's own preferences, overriding the guild defaults for their own
  *  claims. Set through the Config button on the spawns board.

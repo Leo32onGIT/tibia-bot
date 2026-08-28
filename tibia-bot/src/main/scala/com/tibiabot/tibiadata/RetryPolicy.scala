@@ -27,6 +27,16 @@ object RetryDecision {
  *    so spending two more requests on it is exactly wrong: it consumes more
  *    quota and can extend the penalty window. The natural retry is the next
  *    poll cycle, a minute away, which is the right timescale to back off on.
+ *  - '''Nor is anything else, for a caller that polls again soon.''' The same
+ *    argument as 429 applies wherever the caller has its own retry already:
+ *    spending two extra requests to save at most a minute is a bad trade when
+ *    the caller will ask again in a minute anyway. It is a very bad one on the
+ *    character poll, which is ~99% of the traffic against this API and where
+ *    503s are both common and bursty — a 250ms retry lands inside the same
+ *    burst, fails alongside it, and triples the load arriving at an upstream
+ *    that is already failing. Callers that fetch once and have nobody behind
+ *    them keep the inline retry, since for them the next attempt is not
+ *    minutes away, it is never.
  *  - '''A `Retry-After` longer than `maxHonouredRetryAfter` means give up
  *    now,''' rather than holding the request open for it. These run inside the
  *    poll's bounded concurrency, so sleeping for a server-suggested 30s would
@@ -56,9 +66,14 @@ final class RetryPolicy(
   }
 
   /** Decide what to do with a response carrying `statusCode`, given any
-   *  `Retry-After` it asked for and how many attempts have already been made. */
-  def onResponse(statusCode: Int, retryAfter: Option[FiniteDuration], attempt: Int): RetryDecision =
+   *  `Retry-After` it asked for and how many attempts have already been made.
+   *
+   *  `callerRetriesSoon` says the caller is on its own schedule and will ask
+   *  again shortly, which makes an inline retry a cost with almost no benefit
+   *  — see the class doc. */
+  def onResponse(statusCode: Int, retryAfter: Option[FiniteDuration], attempt: Int, callerRetriesSoon: Boolean = false): RetryDecision =
     if (attempt >= maxRetries) RetryDecision.GiveUp
+    else if (callerRetriesSoon) RetryDecision.GiveUp
     else if (!retryableStatusCodes.contains(statusCode)) RetryDecision.GiveUp
     else
       retryAfter match {
@@ -68,9 +83,15 @@ final class RetryPolicy(
       }
 
   /** Decide what to do when the request failed below the HTTP layer (timeout,
-   *  connection reset) — there is no status or `Retry-After` to consult. */
-  def onConnectionFailure(attempt: Int): RetryDecision =
-    if (attempt >= maxRetries) RetryDecision.GiveUp else RetryDecision.RetryIn(backoff(attempt))
+   *  connection reset) — there is no status or `Retry-After` to consult.
+   *
+   *  Treated the same way as a transient status for a caller that retries soon,
+   *  and for the same reason. A timeout is the worse case of the two to retry
+   *  inline: it has already held its slot in the poll's bounded concurrency for
+   *  the full timeout before failing. */
+  def onConnectionFailure(attempt: Int, callerRetriesSoon: Boolean = false): RetryDecision =
+    if (attempt >= maxRetries || callerRetriesSoon) RetryDecision.GiveUp
+    else RetryDecision.RetryIn(backoff(attempt))
 
   /** True when this status means "you are sending too much" — logged
    *  distinctly by the client, since it is the one worth acting on. */

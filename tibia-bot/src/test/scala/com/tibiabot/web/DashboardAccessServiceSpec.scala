@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import com.tibiabot.discord.{DiscordGateway, MemberAccess}
+import com.tibiabot.discord.{DiscordGateway, MemberAccess, MemberLookup}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -33,8 +33,15 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     var members: Map[(String, String), MemberAccess]
   ) extends DiscordGateway {
     /** Which channel-visibility questions were actually asked, so a test can
-     *  show the REST call was skipped rather than merely ignored. */
+     *  show the REST call was skipped rather than merely ignored.
+     *
+     *  Appended under a lock because a visitor's guilds are now resolved at the
+     *  same time as each other, so this is written from several threads at
+     *  once. For the same reason the *order* here means nothing beyond one
+     *  guild: assert on what was asked, not on the sequence. */
     var lookups: List[String] = Nil
+    private def noteLookup(guildId: String): Unit =
+      synchronized { lookups = lookups :+ guildId }
 
     /** Set to give every stub guild an icon, for the one test that cares. */
     var iconUrl: String = null
@@ -42,10 +49,22 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     def guilds: List[Guild] = botGuilds.map { case (id, name) => guildStub(id, name, iconUrl) }
     def guildById(id: String): Guild = botGuilds.find(_._1 == id).map { case (i, n) => guildStub(i, n, iconUrl) }.orNull
     def retrieveUser(id: String): User = null
+    /** Guilds whose lookup fails outright rather than answering. A Discord rate
+     *  limit, in other words — which is not a statement about the visitor and
+     *  must not read as one. */
+    var unreachable: Set[String] = Set.empty
+
     def memberAccess(guildId: String, userId: String, channelIds: List[String]): Option[MemberAccess] = {
-      lookups = lookups :+ guildId
+      noteLookup(guildId)
       members.get((guildId, userId))
     }
+
+    override def memberLookup(guildId: String, userId: String,
+                              channelIds: List[String]): MemberLookup =
+      if (unreachable.contains(guildId)) {
+        noteLookup(guildId)
+        MemberLookup.Unreachable("rate limited")
+      } else super.memberLookup(guildId, userId, channelIds)
     def selfUserId: String = "self"
     def selfUserName: String = "ViolentBot"
     def selfUserAvatarUrl: String = "https://example.com/avatar.png"
@@ -64,17 +83,114 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
   private def service(
     botGuilds: List[(String, String)] = List("g1" -> "Violent"),
     members: Map[(String, String), MemberAccess] = Map(("g1", "u1") -> member()),
-    configured: Set[String] = Set("g1"),
+    /** Guilds with a respawn forum that is actually there — a settings row
+     *  naming a channel that still resolves on Discord. A guild outside this
+     *  set has one or the other missing, which the service treats alike. */
+    withForum: Set[String] = Set("g1"),
     worlds: Map[String, List[WorldChannel]] = Map("g1" -> List(WorldChannel("Antica", AnticaCategory))),
     moderatorRoles: Map[String, String] = Map.empty
   ) = {
     val gateway = new FakeGateway(botGuilds, members)
     (gateway, new DashboardAccessService(
       gateway,
-      respawnConfigured = configured.contains,
+      respawnForumExists = guild => withForum.contains(guild.getId),
       worldsOf = guildId => worlds.getOrElse(guildId, Nil),
       moderatorRoleOf = guildId => moderatorRoles.getOrElse(guildId, "0")
     ))
+  }
+
+  /** A gateway whose every lookup takes real time, so serial and concurrent
+   *  resolution can be told apart by the clock. */
+  private class SlowGateway(botGuilds: List[(String, String)], perLookup: Long)
+      extends FakeGateway(botGuilds, botGuilds.map { case (id, _) => (id, "u1") -> member() }.toMap) {
+    override def memberAccess(guildId: String, userId: String,
+                              channelIds: List[String]): Option[MemberAccess] = {
+      Thread.sleep(perLookup)
+      super.memberAccess(guildId, userId, channelIds)
+    }
+  }
+
+  private def slowService(guilds: List[(String, String)], perLookup: Long,
+                          on: scala.concurrent.ExecutionContext) = {
+    val gateway = new SlowGateway(guilds, perLookup)
+    (gateway, new DashboardAccessService(
+      gateway,
+      respawnForumExists = _ => true,
+      worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+      moderatorRoleOf = _ => "0",
+      lookupOn = on))
+  }
+
+  "localAccessFor" should {
+
+    // Each guild is a blocking round trip to Discord and no guild's answer
+    // bears on any other's, so somebody in three of them should wait for the
+    // slowest rather than for the sum. This is what decides how many visitors
+    // one small refresh pool can keep up with.
+    "ask about a visitor's guilds at the same time, not one after another" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        val (gateway, svc) = slowService(
+          List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"), perLookup = 200, on = pool)
+        val started = System.nanoTime()
+        val granted = svc.accessFor("u1", Set("g1", "g2", "g3"))
+        val took = (System.nanoTime() - started) / 1000000L
+
+        granted.map(_.guildId).sorted shouldBe List("g1", "g2", "g3")
+        gateway.lookups should contain theSameElementsAs List("g1", "g2", "g3")
+        // Serially this is 600ms and cannot be less; concurrently it is one
+        // lookup plus overhead. Halfway between is a wide enough gate to be
+        // stable on a loaded machine and still fail if the fan-out is lost.
+        took should be < 450L
+      } finally pool.shutdown()
+    }
+
+    // Order used to come from folding over the guilds in turn, and several
+    // things downstream read the first element — so it has to survive the
+    // change from a fold to a fan-out.
+    "keep the visitor's guilds in the order the gateway lists them" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        // Slowest first, so anything ordering by completion would invert it.
+        val (_, svc) = slowService(List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"),
+                                   perLookup = 50, on = pool)
+        svc.accessFor("u1", Set("g1", "g2", "g3")).map(_.guildId) shouldBe List("g1", "g2", "g3")
+      } finally pool.shutdown()
+    }
+
+    // Much the commonest case, and it should cost nothing extra: handing a
+    // single lookup to another pool and waiting for it back is a thread hop
+    // that buys nothing. Proved with a pool that refuses everything — if the
+    // one-guild path touched it, this could not resolve at all.
+    "resolve a single guild without going near the lookup pool" in {
+      val refusing = new scala.concurrent.ExecutionContext {
+        def execute(runnable: Runnable): Unit = throw new java.util.concurrent.RejectedExecutionException("nope")
+        def reportFailure(cause: Throwable): Unit = ()
+      }
+      val (_, svc) = slowService(List("g1" -> "One"), perLookup = 0, on = refusing)
+      svc.accessFor("u1", Set("g1")).map(_.guildId) shouldBe List("g1")
+    }
+
+    // A wedged Discord call has no timeout of its own, so before the backstop
+    // it held the request until akka gave up. Reported as unreachable rather
+    // than as a visitor with fewer servers than they have.
+    "report guilds as unanswered rather than hanging on a lookup that never returns" in {
+      val pool = scala.concurrent.ExecutionContext.fromExecutorService(
+        java.util.concurrent.Executors.newFixedThreadPool(4))
+      try {
+        val gateway = new SlowGateway(List("g1" -> "One", "g2" -> "Two"), perLookup = 5000)
+        val svc = new DashboardAccessService(
+          gateway, respawnForumExists = _ => true,
+          worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
+          moderatorRoleOf = _ => "0",
+          lookupOn = pool, lookupWait = java.time.Duration.ofMillis(300))
+        val report = svc.accessReportFor("u1", Set("g1", "g2"))
+        report.granted shouldBe Nil
+        report.unreachable.map(_.guildId) should contain theSameElementsAs List("g1", "g2")
+      } finally pool.shutdown()
+    }
   }
 
   "accessIn" should {
@@ -87,7 +203,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       val gateway = new FakeGateway(List("g1" -> "Violent"), Map(("g1", "u1") -> member()))
       val svc = new DashboardAccessService(
         gateway,
-        respawnConfigured = Set("g1").contains,
+        respawnForumExists = guild => guild.getId == "g1",
         worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
         moderatorRoleOf = _ => "0",
         remote = Some(new RemoteGuildAccess(
@@ -151,14 +267,25 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     }
 
     "refuse a guild that never set the respawn system up" in {
-      val (_, svc) = service(configured = Set.empty)
+      val (_, svc) = service(withForum = Set.empty)
       svc.accessFor("u1", Set("g1")) shouldBe empty
     }
 
     // Cheap local read first, so an unconfigured guild costs no REST call.
     "not ask Discord about a guild it can rule out locally" in {
-      val (gateway, svc) = service(configured = Set.empty)
+      val (gateway, svc) = service(withForum = Set.empty)
       svc.accessFor("u1", Set("g1"))
+      gateway.lookups shouldBe empty
+    }
+
+    // The settings row is written before the forum is built, and survives the
+    // forum being deleted afterwards — so "has a row" was never the same
+    // question as "has a forum", and answering the first offered people a
+    // server whose dashboard had nothing behind it.
+    "refuse a guild whose respawn forum is gone" in {
+      val (gateway, svc) = service(withForum = Set.empty)
+      svc.accessFor("u1", Set("g1")) shouldBe empty
+      // Ruled out on a local channel lookup, before any REST call.
       gateway.lookups shouldBe empty
     }
 
@@ -225,7 +352,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
   "entryFor" should {
 
     "send a visitor with no usable guild to the empty state" in {
-      val (_, svc) = service(configured = Set.empty)
+      val (_, svc) = service(withForum = Set.empty)
       svc.entryFor("u1", Set("g1")) shouldBe DashboardEntry.Nowhere
     }
 
@@ -239,17 +366,60 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       val (_, svc) = service(
         botGuilds = List("g1" -> "Violent", "g2" -> "Allies"),
         members = Map(("g1", "u1") -> member(), ("g2", "u1") -> member()),
-        configured = Set("g1", "g2"),
+        withForum = Set("g1", "g2"),
         worlds = Map(
           "g1" -> List(WorldChannel("Antica", AnticaCategory)),
           "g2" -> List(WorldChannel("Antica", AnticaCategory)))
       )
       svc.entryFor("u1", Set("g1", "g2")) match {
-        case DashboardEntry.Choose(options) => options.map(_.guildName) shouldBe List("Allies", "Violent")
+        case DashboardEntry.Choose(options, _) => options.map(_.guildName) shouldBe List("Allies", "Violent")
         case other => fail(s"expected a picker, got $other")
       }
     }
+
+    // The reported bug, end to end. A Discord lookup that fails for one of two
+    // servers used to leave a list of one, which was read as "nothing to ask"
+    // and became a redirect into the other server's board — arriving somewhere
+    // they never chose, with the switcher hidden because that list was also of
+    // length one.
+    "show the picker when a server's lookup failed, rather than jumping into the other" in {
+      val (gateway, svc) = twoGuilds
+      gateway.unreachable = Set("g2")
+      svc.entryFor("u1", Set("g1", "g2")) match {
+        case DashboardEntry.Choose(options, missing) =>
+          options.map(_.guildId) shouldBe List("g1")
+          missing.map(_.guildName) shouldBe List("Allies")
+        case other => fail(s"expected a picker, got $other")
+      }
+    }
+
+    // A refusal is still a refusal. Somebody genuinely removed from a server
+    // should see it quietly disappear, not be told the dashboard is broken.
+    "still go straight through when the second server simply is not theirs" in {
+      val (_, svc) = twoGuilds
+      svc.entryFor("u1", Set("g1")) shouldBe
+        DashboardEntry.Straight(GuildAccess("g1", "Violent", AccessTier.Member, List("Antica")))
+    }
+
+    "send somebody whose every server failed to the try-again page, not the empty one" in {
+      val (gateway, svc) = twoGuilds
+      gateway.unreachable = Set("g1", "g2")
+      svc.entryFor("u1", Set("g1", "g2")) match {
+        case DashboardEntry.Unreachable(guilds) => guilds.map(_.guildId) should contain theSameElementsAs List("g1", "g2")
+        case other => fail(s"expected the try-again page, got $other")
+      }
+    }
   }
+
+  /** Two guilds the visitor can use, both resolvable — so a test can break
+   *  exactly one of them and say what that should look like. */
+  private def twoGuilds = service(
+    botGuilds = List("g1" -> "Violent", "g2" -> "Allies"),
+    members = Map(("g1", "u1") -> member(), ("g2", "u1") -> member()),
+    withForum = Set("g1", "g2"),
+    worlds = Map(
+      "g1" -> List(WorldChannel("Antica", AnticaCategory)),
+      "g2" -> List(WorldChannel("Antica", AnticaCategory))))
 
   /** Two guilds, one of which starts out unresolvable — the shape of a guild
    *  another bot runs that has not answered yet. */
@@ -259,7 +429,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       Map(("g1", "u1") -> member()))
     (gateway, new DashboardAccessService(
       gateway,
-      respawnConfigured = Set("g1", "g2").contains,
+      respawnForumExists = guild => Set("g1", "g2").contains(guild.getId),
       worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
       moderatorRoleOf = _ => "0"))
   }
@@ -271,8 +441,10 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
       svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
       svc.rememberedAccessFor("u1", Set("g1", "g2"), Some("g1")).map(_.guildId) shouldBe List("g1")
       // One pass over the candidates, not two — this is what keeps the ten
-      // second board poll from costing a Discord call each time.
-      gateway.lookups shouldBe List("g1", "g2")
+      // second board poll from costing a Discord call each time. The two are
+      // asked concurrently, so which arrives first is not a fact about the
+      // code: what matters is that each was asked exactly once.
+      gateway.lookups should contain theSameElementsAs List("g1", "g2")
     }
 
     // The bug this exists for: one page load that lost its race with the bot

@@ -12,15 +12,17 @@ object WorldManager extends StrictLogging {
 
   implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
 
-  // WorldManager only calls getWorlds(), which never touches the character-freshness
-  // cache, so it gets its own isolated (and never populated) StreamState rather than
-  // sharing BotApp's.
   private val tibiaDataClient: tibiadata.TibiaApi =
-    new tibiadata.CachingTibiaApi(new TibiaDataClient(new state.StreamState), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
+    new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)
 
-  // The world list changes only at major game updates, so cache it (default 1h)
-  // instead of making a blocking API call on every getWorldList(). Falls back to
-  // the last good value, then the static list.
+  // Cached so getWorldList() is not a blocking API call every time. Falls back
+  // to the last good value, then the static list.
+  //
+  // The 1h default is our own policy and nothing to do with the endpoint: Kong
+  // holds /v4/worlds and /v4/world/:name for only ~60s, and a self-hosted
+  // TibiaData instance does not cache them at all. So this TTL — not anything
+  // upstream — is what decides how long a newly released world stays invisible
+  // to /setup.
   // TTL is centralised with the other cache TTLs in Config.Cache (discord.conf cache {}).
   private val cacheTtl = Duration.ofMillis(Config.Cache.worldListTtl.toMillis)
 
@@ -52,11 +54,11 @@ object WorldManager extends StrictLogging {
   /** One blocking fetch of the sorted regular-world names, as an Either so the
    *  cache can decide whether to keep the previous value on failure. */
   private def fetchWorldNames(): Either[String, List[String]] = {
-    logger.info("Fetching world list from TibiaData API...")
+    logger.debug("Fetching world list from TibiaData API...")
     Try(Await.result(tibiaDataClient.getWorlds(), 30.seconds)) match {
       case Success(Right(response)) =>
         val worldNames = response.worlds.regular_worlds.map(_.name).sorted
-        logger.info(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
+        logger.debug(s"Successfully fetched ${worldNames.length} worlds from TibiaData API")
         Right(worldNames)
       case Success(Left(error)) =>
         logger.warn(s"Failed to fetch worlds from API: $error, using last good / fallback list")

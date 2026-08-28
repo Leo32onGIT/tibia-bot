@@ -126,9 +126,10 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} stays yours — " +
                   "I've let them know you're hunting it.")
                 clearOfferButtons(event)
-              case SlotAnswer.Passed(respawn, toUserName) =>
+              case SlotAnswer.Passed(respawn, toUserName, toNickname) =>
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} has gone to " +
-                  s"${Names.user(toUserName)} for that slot. Your booking still stands for the days after.")
+                  s"${Names.user(toNickname, toUserName)} for that slot. " +
+                  "Your booking still stands for the days after.")
                 clearOfferButtons(event)
               case SlotAnswer.PassedUnclaimed(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've given up that slot on " +
@@ -419,38 +420,41 @@ object RespawnButtons extends StrictLogging {
                   // and the panel's own embed says whether anybody is on it.
                   val queueSize = service.status(guildId, respawn)._2.size
                   deferredRespond.embed(
-                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize),
+                    RespawnEmbeds.spawnModeratorPanel(respawn, holder, queueSize,
+                      service.settings(guildId)),
                     Some(RespawnThreads.spawnModeratorButtons(respawn.id, holder.isDefined, ownClaim)))
                 }
 
               case "schedule" =>
                 // One panel for everybody — same title, same state, same list of
-                // who has what. A moderator looking at a spawn is asking the same
-                // question as anybody else; only the buttons under it differ.
+                // who has what, same two buttons. A moderator looking at a spawn
+                // is asking the same question as anybody else, and so is somebody
+                // with nothing booked here: what is already spoken for, before
+                // deciding what to ask for.
                 //
-                // Not deferred only in the one case that opens a modal: a member
-                // with nothing booked here, who wants the form rather than a
-                // panel telling them so.
+                // Book used to open the form outright for that last case. It
+                // saved a press at the cost of the answer — you were typing a
+                // start time with no idea which ones were taken, which is what
+                // this panel exists to tell you. The form is one press away, and
+                // now it is one press away from knowing.
+                event.deferReply(true).queue()
+                val deferredRespond = new Responder(event, deferred = true)
+                val now = java.time.ZonedDateTime.now()
                 val mine = service.schedulesForUser(guildId, user.getId).filter(_.respawnId == respawn.id)
-                val moderator = RespawnModals.moderates(guild, event.getMember)
-                if (mine.isEmpty && !moderator) {
-                  event.replyModal(RespawnModals.scheduleModal(guildId, respawn)).queue()
-                } else {
-                  event.deferReply(true).queue()
-                  val deferredRespond = new Responder(event, deferred = true)
-                  val now = java.time.ZonedDateTime.now()
-                  val buttons =
-                    if (moderator)
-                      RespawnThreads.moderatorSpawnBookingButtons(respawn.id,
-                        service.schedulesForRespawn(guildId, respawn.id).size)
-                    else RespawnThreads.scheduleButtons(mine, respawn.id)
-                  deferredRespond.embed(
-                    RespawnEmbeds.bookingPanel(respawn, mine, user.getId,
-                      service.reservationsFor(guildId, respawn.id, now),
-                      service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
-                      service.daysGivenUp(guildId, now, respawnId = Some(respawn.id))),
-                    Some(buttons))
-                }
+                val reservations = service.reservationsFor(guildId, respawn.id, now)
+                // The rules with no slot written yet, exactly as the claim card
+                // derives them — a repeating booking whose next evening is
+                // already a row is on the panel through that row, and adding
+                // its rule as well would list the one booking twice.
+                val written = reservations.flatMap(_.scheduleId).toSet
+                val upcoming = service.schedulesForRespawn(guildId, respawn.id)
+                  .filterNot(rule => written.contains(rule.id))
+                deferredRespond.embed(
+                  RespawnEmbeds.bookingPanel(respawn, mine, user.getId, reservations,
+                    service.holderOf(guildId, respawn.id), now, service.imageFor(respawn),
+                    service.daysGivenUp(guildId, now, respawnId = Some(respawn.id)), upcoming,
+                    Config.yesEmoji, Config.noEmoji),
+                  Some(RespawnThreads.spawnBookingButtons(guildId, respawn.id, respawn.code, mine.size)))
 
               case "booknew" =>
                 // Straight to the form: they are looking at the panel that
@@ -461,6 +465,14 @@ object RespawnButtons extends StrictLogging {
               case "holdercfg" =>
                 if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
                 else event.replyModal(RespawnModals.holderDurationModal(guildId, respawn)).queue()
+
+              // Only reachable from the moderator panel, but checked here as
+              // well: a panel can sit open long after the role that opened it
+              // was taken away, and the id is guessable by anybody who has seen
+              // one.
+              case "spawnmax" =>
+                if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+                else event.replyModal(RespawnModals.spawnMaxModal(guildId, respawn)).queue()
 
               case "selfcfg" =>
                 event.replyModal(RespawnModals.durationModal(guildId, user.getId, respawn)).queue()

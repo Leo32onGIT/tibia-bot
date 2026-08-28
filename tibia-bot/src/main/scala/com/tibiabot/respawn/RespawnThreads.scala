@@ -15,7 +15,7 @@ import net.dv8tion.jda.api.utils.FileUpload
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageEditBuilder}
 
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /** Everything the respawn system does to Discord: the forum channel, the board
  *  post, and the one reused post per spawn.
@@ -76,7 +76,7 @@ object RespawnThreads extends StrictLogging {
       // making the member pick the right word for their own state was needless.
       List(
         Button.primary(RespawnButtonId.next(respawnId), "Next").withEmoji(Emoji.fromUnicode("⏭️")),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Bookings").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️")),
         Button.danger(RespawnButtonId.leave(respawnId), "Leave")
       )
@@ -87,7 +87,7 @@ object RespawnThreads extends StrictLogging {
       // nobody is on.
       List(
         Button.success(RespawnButtonId.claim(respawnId), "Claim").withEmoji(claimEmoji),
-        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Book").withEmoji(Emoji.fromUnicode("📅")),
+        Button.secondary(RespawnButtonId.spawnSchedule(respawnId), "Bookings").withEmoji(Emoji.fromUnicode("📅")),
         Button.secondary(RespawnButtonId.spawnConfig(respawnId), "Config").withEmoji(Emoji.fromUnicode("⚙️"))
       )
 
@@ -117,16 +117,23 @@ object RespawnThreads extends StrictLogging {
    *  when they have one, since the moderator actions target whoever holds the
    *  spawn — which may not be them.
    *
-   *  Never empty: Log is offered whatever state the spawn is in, so a moderator
-   *  opening this on a spawn nobody holds still has the one thing worth asking
-   *  about an idle spawn. */
+   *  Never empty: Log and Max Claim are offered whatever state the spawn is in,
+   *  so a moderator opening this on a spawn nobody holds still has the two
+   *  things worth doing about an idle spawn — reading its history and setting
+   *  how long anybody may hold it.
+   *
+   *  Five is Discord's limit for one action row, and with a holder and a claim
+   *  of the moderator's own this is now exactly five. There is no sixth slot: a
+   *  further spawn-level moderator action needs a second row or a menu. */
   def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): ActionRow = {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
       if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
       Some(Button.secondary(RespawnButtonId.logPage(LogScope.Spawn(respawnId), 0), "Log")
-        .withEmoji(Emoji.fromUnicode("📜")))
+        .withEmoji(Emoji.fromUnicode("📜"))),
+      Some(Button.secondary(RespawnButtonId.spawnMax(respawnId), "Max Claim")
+        .withEmoji(Emoji.fromUnicode("⏳")))
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -173,19 +180,44 @@ object RespawnThreads extends StrictLogging {
       Button.danger(RespawnButtonId.passSlot(guildId, claimId), "Not tonight")
     )
 
-  /** What somebody with bookings on a spawn can do: add another slot, or drop
-   *  the ones they have.
+  /** What anybody can do about their bookings on a spawn: add one, or drop the
+   *  ones they have.
+   *
+   *  One panel for everybody, moderator or not. Somebody pressing Book is asking
+   *  what is already spoken for here, which is the same question whoever asks
+   *  it, and two layouts for one question is one to learn twice. The moderator
+   *  variant this replaces differed only in that its cancel cleared the whole
+   *  spawn — a blunt instrument sitting exactly where a member's own cancel sits,
+   *  which is the last place a button that touches everybody's bookings should
+   *  be. Cancel here is always and only the presser's own.
    *
    *  One cancel, not one per booking. A member's bookings on a single spawn are
    *  one decision to them, and a button each turned the panel into a row of
-   *  near-identical red buttons that had to be read to tell apart. */
-  def scheduleButtons(schedules: List[RespawnSchedule], respawnId: Long): ActionRow =
-    ActionRow.of(
-      Button.success(RespawnButtonId.bookAnother(respawnId), "Book Another")
-        .withEmoji(Emoji.fromUnicode("📅")),
-      Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
-        if (schedules.size == 1) "Cancel Booking" else s"Cancel All ${schedules.size} Bookings")
-    )
+   *  near-identical red buttons that had to be read to tell apart. Dropped
+   *  entirely when they have nothing here, since a cancel with nothing to cancel
+   *  is a button whose only answer is "you have no bookings".
+   *
+   *  Dashboard last, and a link button like the board's — Discord opens the URL
+   *  itself and the press never reaches the bot, so it needs no id and no
+   *  handler. It is the way out of what this panel cannot do: a modal asks for
+   *  one start time in a box, where the week on the dashboard shows what is
+   *  already taken and lets somebody point at a gap. Which is why it opens on
+   *  *this* spawn rather than on the dashboard's front page. */
+  def spawnBookingButtons(guildId: String, respawnId: Long, code: String, mine: Int): ActionRow = {
+    val cancel =
+      if (mine <= 0) Nil
+      else List(Button.danger(RespawnButtonId.cancelSpawnBookings(respawnId),
+        if (mine == 1) "Cancel Booking" else s"Cancel All $mine Bookings"))
+    // The two ways to make a booking first, then the one way to undo one. Cancel
+    // last also keeps the destructive button away from the one somebody reaches
+    // for most, rather than between the pair that belong together.
+    val buttons =
+      Button.success(RespawnButtonId.bookAnother(respawnId), "Book")
+        .withEmoji(Emoji.fromUnicode(BookEmoji)) ::
+        Button.link(spawnDashboardLink(guildId, code), "Dashboard")
+          .withEmoji(Emoji.fromUnicode(DashboardEmoji)) :: cancel
+    ActionRow.of(buttons.asJava)
+  }
 
   /** Under a moderator's /stamina. Everybody sees their own tank; a moderator
    *  also gets the one thing they might want to do about somebody else's. */
@@ -205,23 +237,6 @@ object RespawnThreads extends StrictLogging {
   def moderatorBookingsButtons: ActionRow =
     ActionRow.of(Button.secondary(RespawnButtonId.myBookings, "My bookings")
       .withEmoji(Emoji.fromUnicode("📅")))
-
-  /** What a moderator gets under the same panel: a way to book for themselves,
-   *  and a way to clear the spawn.
-   *
-   *  The panel itself is identical to a member's — same title, same state, same
-   *  list of who has what — because a moderator looking at a spawn is asking the
-   *  same question as anybody else, and two layouts for one question is one to
-   *  learn twice. Only the buttons differ, which is the only part that actually
-   *  does differ. */
-  def moderatorSpawnBookingButtons(respawnId: Long, bookings: Int): ActionRow = {
-    val clear =
-      if (bookings <= 0) Nil
-      else List(Button.danger(RespawnButtonId.cancelSpawnAll(respawnId),
-        if (bookings == 1) "Cancel Booking" else s"Cancel All $bookings Bookings"))
-    ActionRow.of((Button.success(RespawnButtonId.bookAnother(respawnId), "Book Yourself")
-      .withEmoji(Emoji.fromUnicode("📆")) :: clear).asJava)
-  }
 
   /** The single button on a booking's confirmation DMs.
    *
@@ -278,14 +293,119 @@ object RespawnThreads extends StrictLogging {
    *  Best effort, and says so in the log rather than to the caller: the spawn is
    *  gone from the catalogue either way, and a post that outlives it is untidy
    *  rather than broken. */
-  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit =
-    if (threadId.nonEmpty) {
-      findForum(guild, settings).flatMap(forum => resolveThread(guild, forum, threadId)).foreach { thread =>
-        Try(thread.delete().complete()).failed.foreach { error =>
-          logger.warn(s"Could not delete the post for a removed spawn in guild '${guild.getId}'", error)
-        }
+  def deleteThread(guild: Guild, settings: RespawnSettings, threadId: String): Unit = {
+    deleteThreads(guild, settings, List(threadId))
+    ()
+  }
+
+  /** The same for a batch of removed spawns, returning how many posts actually
+   *  went.
+   *
+   *  Not a loop over [[deleteThread]]. A spawn's post is archived for most of
+   *  its life, and finding an archived post means paging the forum's archive —
+   *  so a loop pays for that paging once per code retired, which for a seed file
+   *  that has just split a dozen codes is a dozen times over the same pages.
+   *  This reads the forum once and matches every id against it. */
+  def deleteThreads(guild: Guild, settings: RespawnSettings, threadIds: List[String]): Int = {
+    val wanted = threadIds.filter(_.nonEmpty).toSet
+    if (wanted.isEmpty) 0
+    else findForum(guild, settings).fold(0) { forum =>
+      val live = forum.getThreadChannels.asScala.toList.filter(thread => wanted.contains(thread.getId))
+      // The archive is only paged for what the cache could not answer. Most of a
+      // batch of retired codes will be in there, but the single-post caller — a
+      // moderator removing a spawn from the dashboard — is usually deleting one
+      // somebody was just looking at, and that one is awake.
+      val missing = wanted -- live.map(_.getId).toSet
+      val archived =
+        if (missing.isEmpty) Nil
+        else archivedThreads(forum).filter(thread => missing.contains(thread.getId))
+      (live ++ archived).count(deleteOne)
+    }
+  }
+
+  /** Delete this bot's posts in the respawn forum that `keep` does not name,
+   *  returning how many went.
+   *
+   *  The backstop under [[deleteThreads]], and the only way to reach a post
+   *  whose catalogue row is already gone: nothing else records that the post
+   *  exists, so a delete that failed — or a retirement from before it deleted
+   *  posts at all — leaves a card in the forum that no id in the database
+   *  points at. It is found by not being pointed at.
+   *
+   *  Three guards, because "delete what I don't recognise" is how a forum gets
+   *  emptied by a bad read:
+   *
+   *   - the board post is kept whatever the caller passed, since losing it
+   *     costs the guild the one place its codes are written down;
+   *   - only posts this bot created are touched, so the posts members open in
+   *     the forum themselves are not ours to tidy;
+   *   - `limit` caps a pass, so a mistake takes a handful of posts and shows up
+   *     in the log rather than clearing the channel in one boot.
+   *
+   *  A spawn whose post exists but whose row lost its `threadId` is deleted
+   *  here too. That is the right outcome rather than a missed guard: the row can
+   *  no longer find that post, so it would open a second one on the next claim
+   *  and leave the first sitting there for ever. */
+  def deleteUnknownThreads(guild: Guild, settings: RespawnSettings,
+                           keep: Set[String], limit: Int): Int =
+    findForum(guild, settings).fold(0) { forum =>
+      val threads = allThreads(forum)
+      val doomed = orphanIds(
+        threads.map(thread => thread.getId -> thread.getOwnerId),
+        keep + settings.boardThread,
+        guild.getSelfMember.getId,
+        limit).toSet
+      threads.filter(thread => doomed.contains(thread.getId)).count { thread =>
+        val gone = deleteOne(thread)
+        if (gone) logger.info(s"Deleted the orphaned respawn post '${thread.getName}' " +
+          s"in guild '${guild.getId}' — no catalogue row points at it")
+        gone
       }
     }
+
+  /** Which of a forum's posts, as `(id, ownerId)` pairs, are ours to delete.
+   *
+   *  Pure, and separate from the call that acts on it, because this is the part
+   *  that can be wrong in a way nobody can undo: what the guards actually spare
+   *  is checkable here without a Discord to point at.
+   *
+   *  An owner Discord did not give us reads as somebody else's, which spares the
+   *  post. That is the direction to be wrong in — a post we skipped comes back
+   *  round on the next sweep, and one we should not have deleted does not. */
+  private[respawn] def orphanIds(threads: List[(String, String)], keep: Set[String],
+                                 selfId: String, limit: Int): List[String] =
+    threads.iterator
+      .filterNot { case (id, _) => keep.contains(id) }
+      .filter { case (_, ownerId) => ownerId != null && ownerId == selfId }
+      .map { case (id, _) => id }
+      .take(limit)
+      .toList
+
+  private def deleteOne(thread: ThreadChannel): Boolean =
+    Try(thread.delete().complete()) match {
+      case Success(_) => true
+      case Failure(error) =>
+        logger.warn(s"Could not delete the post for a removed spawn in guild " +
+          s"'${thread.getGuild.getId}'", error)
+        false
+    }
+
+  /** Every post the forum holds, archived ones included and deduplicated.
+   *
+   *  `getThreadChannels` is cache-only and lists the un-archived posts; a
+   *  spawn's post spends most of its life on the other side of that, so the
+   *  archive has to be paged as well. Bounded by [[ArchiveSearchLimit]], the
+   *  same bound [[resolveThread]] works to — a post further back than that is
+   *  old enough that leaving it one more boot costs nothing. */
+  private def allThreads(forum: ForumChannel): List[ThreadChannel] =
+    (forum.getThreadChannels.asScala.toList ++ archivedThreads(forum)).distinctBy(_.getId)
+
+  /** The forum's archived posts, bounded by [[ArchiveSearchLimit]] and empty
+   *  rather than fatal when Discord refuses — a sweep that could not read the
+   *  archive should do less, not fail the boot it is running on. */
+  private def archivedThreads(forum: ForumChannel): List[ThreadChannel] =
+    Try(forum.retrieveArchivedPublicThreadChannels()
+      .takeAsync(ArchiveSearchLimit).get().asScala.toList).toOption.getOrElse(Nil)
 
   /** Give the guild's moderator role a working set of powers over the spawns
    *  forum: see it, talk in a claim, and manage or delete posts when a thread
@@ -360,6 +480,21 @@ object RespawnThreads extends StrictLogging {
    *  of its own, and posting the board is not something only the bot with a
    *  dashboard does. See `Config.Web.dashboardOrigin`. */
   def dashboardLink: String = s"${com.tibiabot.Config.Web.dashboardOrigin}/dashboard"
+
+  /** The same dashboard, opened on one spawn's card with its week already drawn.
+   *
+   *  The guild is named in the path so the link skips the server picker, which
+   *  otherwise asks somebody in two guilds a question their own link already
+   *  answered. The spawn rides in the query, by code: the page is keyed on codes
+   *  throughout, a code is unique and nothing ever rewrites one, and it is the
+   *  same word the panel this button sits on is titled with.
+   *
+   *  Encoded even though a code is only ever letters, digits and hyphens (see
+   *  RespawnService.spawnFault) — the rule lives over there, and a link that
+   *  quietly depends on it would break somewhere far from wherever it changed.
+   */
+  def spawnDashboardLink(guildId: String, code: String): String =
+    s"$dashboardLink/g/$guildId?spawn=${java.net.URLEncoder.encode(code, "UTF-8")}"
 
   /** The text above the board, inside the card.
    *
@@ -579,6 +714,20 @@ object RespawnThreads extends StrictLogging {
   /** How far back through a forum's archived posts [[resolveThread]] will look. */
   private val ArchiveSearchLimit = 500
 
+  /** What a spawn's post is called: its display name, cut to what Discord will
+   *  accept as a channel name.
+   *
+   *  Cut here rather than refused, so the comparison in [[openThread]] is against
+   *  the title that would actually be set. A name Discord would shorten — or
+   *  reject outright — is one the post could never match, and the rename would
+   *  then fire again on every claim, for ever, one REST call at a time. Seed
+   *  names are not length-checked the way a guild's own are (see
+   *  `RespawnService.spawnFault`), so this is the guard for a long one arriving
+   *  through respawns.json. */
+  private val MaxThreadName = 100
+  private[respawn] def threadTitle(respawn: Respawn): String =
+    respawn.displayName.take(MaxThreadName)
+
   /** Get the spawn's post ready to show `card`, creating it on first claim and
    *  un-archiving it if the spawn has been idle. Returns the thread, or None if
    *  Discord refused (missing permission, deleted channel) — the caller keeps
@@ -587,15 +736,34 @@ object RespawnThreads extends StrictLogging {
    *
    *  `onCreated` reports a freshly created thread's id so the caller can store
    *  it on the catalogue row; it isn't called when an existing post is reused.
+   *
+   *  A reused post is also brought back into line with its spawn's name. The
+   *  post is titled once, when it is created, and `respawns.json` renaming a
+   *  spawn afterwards reaches the catalogue and the board picture on the next
+   *  boot but never the title — so a renamed spawn kept the old name in the
+   *  channel list indefinitely. Corrected here rather than by a pass of its own
+   *  because this is the moment the thread is already being edited: on a
+   *  sleeping spawn the un-archive and the rename travel as one call, where a
+   *  sweep of its own would have to wake every renamed post to retitle it and
+   *  then wait for the reconciler to put them all back to sleep.
+   *
+   *  A spawn nobody touches keeps its old title until somebody claims or books
+   *  it. That is the trade for not waking the whole forum over a rename, and
+   *  the board picture — which is where anybody actually reads a code — is
+   *  right immediately either way.
    */
   def openThread(guild: Guild, forum: ForumChannel, respawn: Respawn, card: MessageEmbed,
                  buttons: ActionRow, onCreated: String => Unit): Option[OpenedThread] = {
     val existing = resolveThread(guild, forum, respawn.threadId)
     existing match {
       case Some(thread) =>
-        if (thread.isArchived) {
-          Try(thread.getManager.setArchived(false).complete()).failed.foreach { error =>
-            logger.warn(s"Could not un-archive respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
+        val renaming = thread.getName != threadTitle(respawn)
+        if (thread.isArchived || renaming) {
+          val manager = thread.getManager
+          val unarchived = if (thread.isArchived) manager.setArchived(false) else manager
+          val edit = if (renaming) unarchived.setName(threadTitle(respawn)) else unarchived
+          Try(edit.complete()).failed.foreach { error =>
+            logger.warn(s"Could not open respawn thread '${respawn.code}' in guild '${guild.getId}'", error)
           }
         }
         Some(OpenedThread(thread, created = false))
@@ -603,7 +771,7 @@ object RespawnThreads extends StrictLogging {
       case None =>
         Try {
           val message = new MessageCreateBuilder().setEmbeds(card).setComponents(buttons).build()
-          val post = forum.createForumPost(respawn.displayName, message).complete()
+          val post = forum.createForumPost(threadTitle(respawn), message).complete()
           val thread = post.getThreadChannel
           onCreated(thread.getId)
           OpenedThread(thread, created = true)
@@ -685,6 +853,41 @@ object RespawnThreads extends StrictLogging {
       Some(if (sleep) tagged.setArchived(true) else tagged)
     }
   }
+
+  /** Put a spawn's post back to sleep on its own, without touching its card or
+   *  its tag. Returns whether an archive was actually sent.
+   *
+   *  This is the debounced close — see [[RespawnSleep]] — so unlike [[settle]]
+   *  it is waited on rather than handed over: it runs on the respawn sweep,
+   *  where blocking is the established style and where the result is what says
+   *  whether the post really did go to sleep. Nothing is redrawn, because
+   *  nothing changed; the post is the same one the last press left behind, and
+   *  the only thing wrong with it is that it is awake.
+   *
+   *  An already-archived post is not an error and costs no request — a post can
+   *  reach its due time having been closed in the meantime by the spawn going
+   *  free, or by Discord's own auto-archive. */
+  def closeThread(thread: ThreadChannel): Boolean =
+    if (thread.isArchived) false
+    else Try {
+      thread.getManager.setArchived(true).complete()
+      true
+    }.recover { case error =>
+      logger.warn(s"Could not put respawn thread '${thread.getId}' back to sleep " +
+        s"in guild '${thread.getGuild.getId}'", error)
+      false
+    }.getOrElse(false)
+
+  /** The same, for a post known only by id.
+   *
+   *  Cache-only on purpose, where [[resolveThread]] would page the forum's
+   *  archived posts to find one that is missing. Every post this is asked about
+   *  is one somebody was clicking on moments ago, so an open one is certainly
+   *  cached — and a miss means it is already archived or has been deleted,
+   *  which is the outcome this wanted either way. Paging 500 archived posts to
+   *  confirm that would be the whole cost of the feature. */
+  def closeThread(guild: Guild, threadId: String): Boolean =
+    Option(guild.getThreadChannelById(threadId)).exists(closeThread)
 
   /** The status tag a spawn should be showing right now. Deliberately binary —
    *  a spawn is either taken or available, and whether anyone happens to be
@@ -830,20 +1033,28 @@ object RespawnButtonId {
 
   /** Book, or cancel, a repeating slot on this spawn. */
   def spawnSchedule(respawnId: Long): String = s"${Prefix}schedule:$respawnId"
-  /** Book a *further* slot on a spawn you already have one on. A separate id
-   *  from `schedule` because that one now opens the panel — pressing it again
-   *  would only reopen what you are looking at. */
+  /** Open the booking form itself — the panel's Book Yourself. A separate id
+   *  from `schedule` because that one opens the panel — pressing it again would
+   *  only reopen what you are looking at. */
   def bookAnother(respawnId: Long): String = s"${Prefix}booknew:$respawnId"
   def cancelSchedule(scheduleId: Long): String = s"${Prefix}unschedule:$scheduleId"
   /** Drop every booking the presser has on one spawn — so this one carries the
    *  *respawn* id, unlike `cancelSchedule` above. */
   def cancelSpawnBookings(respawnId: Long): String = s"${Prefix}unschedules:$respawnId"
   /** Clear *everybody's* bookings on one spawn — a moderator action, so it is a
-   *  different id from the one that clears only the presser's. */
+   *  different id from the one that clears only the presser's.
+   *
+   *  Nothing draws this any more: the Book panel is one panel for everybody now
+   *  (see [[RespawnThreads.spawnBookingButtons]]) and its cancel is always the
+   *  presser's own. Kept, with its handler, so a panel still sitting in somebody's
+   *  scrollback from before that answers rather than erroring — and because a
+   *  moderator wanting to clear a spawn outright has nowhere else to press. */
   def cancelSpawnAll(respawnId: Long): String = s"${Prefix}unschedulesall:$respawnId"
 
   /** Moderator actions reached from a spawn's Config panel. */
   def holderConfig(respawnId: Long): String = s"${Prefix}holdercfg:$respawnId"
+  /** This spawn's own ceiling on claim length, rather than the guild's. */
+  def spawnMax(respawnId: Long): String = s"${Prefix}spawnmax:$respawnId"
   def forceLeave(respawnId: Long): String = s"${Prefix}forceleave:$respawnId"
   /** The caller's own duration, offered alongside the moderator actions when they
    *  have a claim of their own on the spawn. */
@@ -872,6 +1083,7 @@ object RespawnButtonId {
    *  the form itself, so it cannot be known when the modal is built. */
   val modalBoardSchedule: String = s"${ModalPrefix}boardschedule"
   def modalHolderDuration(respawnId: Long): String = s"${ModalPrefix}holder:$respawnId"
+  def modalSpawnMax(respawnId: Long): String = s"${ModalPrefix}spawnmax:$respawnId"
 
   /** Every guild-wide setting, in one modal — exactly the five Discord allows. */
   val modalClaimRules: String = s"${ModalPrefix}claimrules"
@@ -937,7 +1149,7 @@ object RespawnButtonId {
    *  the presser is a moderator, so they decide after a single role lookup. */
   private val ModalActions: Set[String] =
     Set("claim", "book", "mysettings", "claimrules", "selfcfg", "holdercfg", "schedule",
-        "booknew", "givestamina")
+        "booknew", "givestamina", "spawnmax")
 
   /** Whether this press has to answer with a modal, and so cannot be
    *  acknowledged up front — `replyModal` must be an interaction's first

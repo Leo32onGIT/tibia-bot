@@ -92,6 +92,39 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.findByCode(g, "415") shouldBe None
   }
 
+  // A nullable numeric column is where "no override" and "zero minutes" get
+  // confused: JDBC's getInt answers 0 for SQL NULL, so a read that does not ask
+  // wasNull() turns every ordinary spawn into one nobody may claim.
+  test("catalogue: a spawn's own claim ceiling round-trips, including its absence") {
+    val (repo, g) = freshRepo()
+    val added = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+
+    // Nothing set yet: absent, not zero.
+    added.maxDurationMinutes shouldBe None
+    repo.findByCode(g, "415").flatMap(_.maxDurationMinutes) shouldBe None
+
+    repo.setRespawnMaxDuration(g, added.id, Some(90))
+    repo.findByCode(g, "415").flatMap(_.maxDurationMinutes) shouldBe Some(90)
+
+    // Above the server's own ceiling is allowed — the column stores what it was
+    // given and the reconciliation happens in RespawnSettings.maxFor.
+    repo.setRespawnMaxDuration(g, added.id, Some(600))
+    repo.findById(g, added.id).flatMap(_.maxDurationMinutes) shouldBe Some(600)
+
+    // Clearing has to be a real operation, not "leave it alone" — which is why
+    // this is its own statement rather than another COALESCE argument.
+    repo.setRespawnMaxDuration(g, added.id, None)
+    repo.findById(g, added.id).flatMap(_.maxDurationMinutes) shouldBe None
+
+    // And an edit of something else must not disturb it.
+    repo.setRespawnMaxDuration(g, added.id, Some(45))
+    repo.updateRespawn(g, added.id, name = Some("Cult Orc Cave"), creature = None,
+      world = None, mapperLink = None)
+    val edited = repo.findById(g, added.id)
+    edited.map(_.name) shouldBe Some("Cult Orc Cave")
+    edited.flatMap(_.maxDurationMinutes) shouldBe Some(45)
+  }
+
   test("codes are matched case-insensitively") {
     val (repo, g) = freshRepo()
     repo.addRespawn(g, "1415a", "Fury dungeon", "Fury", "Rathleton", "", "", Respawn.SourceSeed, "seed")
@@ -101,7 +134,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
   test("re-adding an existing code returns the stored row without overwriting it") {
     val (repo, g) = freshRepo()
     val first = repo.addRespawn(g, "806", "Hydra Mountain", "Hydra", "Port Hope", "", "", Respawn.SourceSeed, "seed")
-    // This is what makes `/respawn admin seed` safe to re-run over a guild's
+    // This is what makes re-importing the bundled seed safe over a guild's
     // own edits.
     val second = repo.addRespawn(g, "806", "SOMETHING ELSE", "Wrong", "Nowhere", "", "", Respawn.SourceCustom, "x")
     second.id shouldBe first.id
@@ -137,8 +170,9 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     sync.added shouldBe 1
     sync.updated shouldBe 1
-    sync.retired shouldBe 1
-    sync.inUse shouldBe 0
+    // The rows themselves, not a count: the caller needs their threadIds to take
+    // the forum posts down, and by the time it is handed them the rows are gone.
+    sync.retired.map(_.code) shouldBe List("999")
 
     repo.findByCode(g, "806").map(_.name) shouldBe Some("Hydra Cave")
     repo.findByCode(g, "806").map(_.region) shouldBe Some("Liberty Bay")
@@ -158,43 +192,60 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val sync = repo.syncSeed(g, List(("415", "Edron", "Cult Orcs", "")))
 
     sync.updated shouldBe 0
-    sync.retired shouldBe 0
+    sync.retired shouldBe empty
     repo.findByCode(g, "415").map(_.name) shouldBe Some("My Own Name")
     // Not in the bundled file at all, and still here — the file only speaks for
     // the rows that came from it.
     repo.findByCode(g, "7777") should not be empty
   }
 
-  test("syncSeed leaves a dropped code alone while somebody is on it") {
+  test("syncSeed retires a dropped code out from under an active claim") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
-    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120, RespawnClaim.KindAdHoc).get
+    repo.insertActiveClaim(g, spawn.id, "u1", "One", "", "", now, now.plusHours(2), 120,
+      RespawnClaim.KindAdHoc).get
 
-    // 415 is gone from the file, but ending somebody's hunt to tidy a catalogue
-    // is the wrong trade — it is reported instead.
+    // 415 is gone from the file, so it goes — hunt included. A code the bundled
+    // list has dropped is almost always one that has been split into sub-codes,
+    // and leaving it claimable until it happened to be idle left people hunting
+    // a spawn that no longer exists beside the codes that replaced it.
     val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
-    sync.retired shouldBe 0
-    sync.inUse shouldBe 1
-    repo.findByCode(g, "415") should not be empty
-
-    // Once the hunt is over it retires on the next repair.
-    repo.finishClaim(g, repo.activeClaim(g, spawn.id).get.id, RespawnClaim.Outcome.Completed)
-    repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", ""))).retired shouldBe 1
+    sync.retired.map(_.code) shouldBe List("415")
     repo.findByCode(g, "415") shouldBe None
+    repo.activeClaim(g, spawn.id) shouldBe None
   }
 
-  test("syncSeed keeps a dropped code that is only booked for later") {
+  test("syncSeed retires a dropped code that is only booked for later") {
     val (repo, g) = freshRepo()
     repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
     val spawn = repo.findByCode(g, "415").get
     repo.reserveFor(g, spawn.id, "u2", "Two", "", now.plusHours(3), 120)
 
-    // A booking is a hunt that hasn't happened yet; removing the spawn under it
-    // would cancel somebody's evening.
     val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
-    sync.inUse shouldBe 1
-    repo.findByCode(g, "415") should not be empty
+    sync.retired.map(_.code) shouldBe List("415")
+    repo.findByCode(g, "415") shouldBe None
+    repo.reservationsFor(g, spawn.id, now) shouldBe empty
+  }
+
+  test("syncSeed retires a dropped code whose booking is still only a rule") {
+    val (repo, g) = freshRepo()
+    repo.importSeed(g, List(("415", "Edron", "Cult Orcs", "")))
+    val spawn = repo.findByCode(g, "415").get
+    // A daily booking whose next evening is far enough off that no slot row has
+    // been written for it — which is most of the day, since a slot appears only
+    // when its start comes within the look-ahead. The rule is the whole of the
+    // arrangement until then, so a retirement that only looked at slot rows
+    // would take this one without appearing to take anything.
+    val rule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusDays(2), 1440, 120)
+    repo.reservationsFor(g, spawn.id, now) shouldBe empty
+
+    val sync = repo.syncSeed(g, List(("806", "Port Hope", "Hydra Mountain", "")))
+    sync.retired.map(_.code) shouldBe List("415")
+    repo.findByCode(g, "415") shouldBe None
+    // removeRespawn takes the standing arrangement with the spawn, or the
+    // materialiser would go on writing slots against a row that is not there.
+    repo.findSchedule(g, rule.id) shouldBe None
   }
 
   test("syncSeedCreatures updates seed rows, and only what actually changed") {
@@ -368,6 +419,48 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.expiredClaims(g, now.plusMinutes(10)).map(_.id) shouldBe List(claim.id)
   }
 
+  test("handing a running hunt over moves both of the new owner's names") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "Knight", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+
+    val moved = repo.reassignClaim(g, claim.id, "u2", "Two", "Twosie").get
+
+    moved.userId shouldBe "u2"
+    moved.userName shouldBe "Two"
+    // The point of the whole thing: leaving this behind used to name the hunt
+    // as the new owner in Discord's words and the old one in the guild's.
+    moved.nickname shouldBe "Twosie"
+    // Not theirs to inherit — whoever takes the hunt brings their own.
+    moved.characterName shouldBe ""
+    // Nothing about the window moves with it.
+    moved.id shouldBe claim.id
+    moved.endsAt.map(_.toInstant) shouldBe Some(now.plusHours(2).toInstant)
+    moved.durationMinutes shouldBe 120
+
+    repo.activeClaim(g, spawn.id).map(c => (c.userId, c.nickname)) shouldBe Some(("u2", "Twosie"))
+  }
+
+  test("handing over to somebody the guild has no name for leaves no name behind") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+
+    repo.reassignClaim(g, claim.id, "u2", "Two", "").get.nickname shouldBe ""
+  }
+
+  test("a hunt that has already ended cannot be handed over") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val claim = repo.insertActiveClaim(g, spawn.id, "u1", "One", "Onesie", "", now, now.plusHours(2),
+      120, RespawnClaim.KindAdHoc).get
+    repo.finishClaim(g, claim.id, RespawnClaim.Outcome.Completed)
+
+    repo.reassignClaim(g, claim.id, "u2", "Two", "Twosie") shouldBe None
+  }
+
   test("cancelQueued clears exactly the named users, leaving the rest in order") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
@@ -516,13 +609,13 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
 
-    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60), None)
     asked.flatMap(_.requesterUserId) shouldBe Some("u2")
     asked.flatMap(_.askedAt) should not be empty
 
     // The rule: once asked, never again — and two people pressing Request at the
     // same moment cannot both get in.
-    repo.requestOccurrence(g, slot.id, "u3", "Three", now, now.plusMinutes(60), None) shouldBe None
+    repo.requestOccurrence(g, slot.id, "u3", "Three", "Threesie", now, now.plusMinutes(60), None) shouldBe None
   }
 
   test("a request raised by booking over a slot remembers the window that was booked") {
@@ -536,7 +629,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // window from the one they are asking about — so it has to be stored, not
     // inferred from the slot when the answer comes back.
     val wanted = now.plusHours(1)
-    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60),
       Some((wanted, 180))).get
 
     asked.requestedSlot.map(_._2) shouldBe Some(180)
@@ -556,7 +649,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // The owner has a few minutes past the start to say they are there, so the
     // slot cannot start on its own in the meantime — that would answer for them,
     // and would strand the request on a row the sweep no longer looks at.
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, start.plusMinutes(5), None)
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, start.plusMinutes(5), None)
     repo.dueReservations(g, start) shouldBe empty
     repo.dueReservations(g, start.plusMinutes(4)) shouldBe empty
 
@@ -571,7 +664,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60),
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60),
       Some((now.plusHours(1), 180)))
 
     val kept = repo.keepOccurrence(g, slot.id)
@@ -586,13 +679,48 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.expiredRequests(g, now.plusHours(1)) shouldBe empty
   }
 
+  test("a request carries the asker's guild name, and gives it up with the rest of the request") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    // Both names, because the DM putting the question to the owner names whoever
+    // is asking, and an account name alone is not who their server knows.
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now,
+      now.plusMinutes(60), None).get
+    asked.requesterUserName shouldBe Some("Two")
+    asked.requesterNickname shouldBe Some("Twosie")
+
+    // Settled: the name goes with the question it belonged to, rather than
+    // lingering on a slot nobody is asking about any more.
+    val kept = repo.keepOccurrence(g, slot.id).get
+    kept.requesterUserName shouldBe None
+    kept.requesterNickname shouldBe None
+    // The one part of a request that deliberately survives being answered.
+    kept.askedAt should not be empty
+  }
+
+  test("an asker the guild has no name for is stored without one, not as an empty name") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    val asked = repo.requestOccurrence(g, slot.id, "u2", "Two", "", now, now.plusMinutes(60), None).get
+    asked.requesterUserName shouldBe Some("Two")
+    asked.requesterNickname shouldBe None
+  }
+
   test("an unanswered request is picked up only once its deadline has gone by") {
     val (repo, g) = freshRepo()
     val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
     val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
     val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
       now.plusHours(2), 120).get
-    repo.requestOccurrence(g, slot.id, "u2", "Two", now, now.plusMinutes(60), None)
+    repo.requestOccurrence(g, slot.id, "u2", "Two", "Twosie", now, now.plusMinutes(60), None)
 
     repo.expiredRequests(g, now.plusMinutes(59)) shouldBe empty
     repo.expiredRequests(g, now.plusMinutes(60)).map(_.id) shouldBe List(slot.id)
@@ -750,7 +878,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // Asked first, then confirmed from the reminder rather than from the request
     // DM — the two prompts overlap, and both are ways of saying yes.
-    repo.requestOccurrence(g, slot.id, "asker", "Asker", now, now.plusMinutes(60)) should not be empty
+    repo.requestOccurrence(g, slot.id, "asker", "Asker", "Askersie", now, now.plusMinutes(60)) should not be empty
     repo.confirmClaim(g, slot.id, now.plusMinutes(30)) should not be empty
     repo.expiredRequests(g, now.plusMinutes(61)) shouldBe empty
   }

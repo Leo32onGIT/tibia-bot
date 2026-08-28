@@ -7,6 +7,7 @@ import akka.http.scaladsl.model.headers.HttpCookie
 import akka.http.scaladsl.server.{Directive, Directive0, StandardRoute}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.unmarshalling.Unmarshal
+import com.tibiabot.persistence.{NoopRedisCache, RedisCache}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 import spray.json.DefaultJsonProtocol._
@@ -54,7 +55,12 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                          *  things to whoever is shown the card, and only the
                          *  caller knows what each of them is called. None keeps
                          *  the old behaviour for every caller. */
-                        linkPreview: Option[String => String] = None)
+                        linkPreview: Option[String => String] = None,
+                        /** Where the guild list behind a session outlives this
+                         *  process — see [[UserGuildCache]]. Unset keeps it in
+                         *  memory alone, which is every test and any deployment
+                         *  without Redis. */
+                        userGuildStore: RedisCache = NoopRedisCache)
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
 
   /** Every area this session is good for. `mountPath` is where the auth routes
@@ -87,7 +93,7 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
 
   /** Guild ids from the login, kept only long enough to save asking again on
    *  every request. Not a permission — see [[UserGuildCache]]. */
-  val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl)
+  val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl, store = userGuildStore)
 
   /** Short-lived companion to the session cookie, holding the OAuth `state`
    *  nonce for exactly as long as one login round-trip: set when we send the
@@ -100,6 +106,11 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private val stateCookieName = "vb_oauth_state"
   private val stateTtl = 10.minutes
   private val secureRandom = new java.security.SecureRandom()
+
+  /** How much of a deep link may ride through the sign-in round trip. Ample for
+   *  anything the bot itself builds, and a bound on what a hand-made login link
+   *  can put into the `state` we hand Discord. */
+  private val MaxResumeLength = 512
 
   private def hmac(data: String): String = {
     val mac = Mac.getInstance("HmacSHA256")
@@ -178,22 +189,58 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
 
   /** A dead end the visitor can act on rather than a bare status line: every
    *  way a login can fail short of a server fault (they cancelled, the attempt
-   *  went stale, Discord refused) ends here, styled to match the dashboard, with
-   *  the one useful next step. `message` is ours, never echoed from the query
-   *  string — an attacker-supplied `error` would otherwise be HTML injection. */
+   *  went stale, Discord refused) ends here, with the one useful next step.
+   *  `message` is ours, never echoed from the query string — an attacker-supplied
+   *  `error` would otherwise be HTML injection.
+   *
+   *  Self-contained rather than served through the dashboard's shell, because
+   *  this class is mounted by more than one area and cannot assume the respawn
+   *  page's stylesheet is there. The card is therefore a deliberate copy of it
+   *  — same palette, same mono heading, same blurple sign-in control — so a
+   *  login that failed does not look like it belongs to a different product than
+   *  the page the visitor was heading for. Change one and change the other. */
   private def loginProblem(status: StatusCode, message: String): StandardRoute =
     complete(status, HttpEntity(ContentTypes.`text/html(UTF-8)`,
       s"""<!doctype html>
          |<html lang="en"><head><meta charset="utf-8">
          |<meta name="viewport" content="width=device-width, initial-scale=1">
-         |<title>Sign in</title></head>
-         |<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-         |             background:#0b0d12;color:#d7dce3;font-size:14px;
-         |             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
-         |  <div style="background:#12151c;border:1px solid #1f2430;border-radius:10px;padding:28px 32px;
-         |              max-width:26rem;text-align:center">
-         |    <p style="margin:0 0 18px">$message</p>
-         |    <a href="$loginPath" style="color:#5b8cff;text-decoration:none;font-weight:600">Sign in with Discord</a>
+         |<title>Violent Bot - Sign in</title>
+         |<link rel="icon" type="image/png" href="/dashboard/images/avatar.png">
+         |<style>
+         |  * { box-sizing: border-box; }
+         |  body {
+         |    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         |    padding: 24px; background: #0b0d12; color: #d7dce3; font-size: 14px;
+         |    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         |    background-image:
+         |      linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px),
+         |      linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+         |    background-size: 46px 46px;
+         |  }
+         |  .card {
+         |    background: #12151c; border: 1px solid #1f2430; border-radius: 10px;
+         |    padding: 30px 32px; width: 100%; max-width: 27rem; text-align: center;
+         |  }
+         |  .face { width: 46px; height: 46px; border-radius: 12px; margin-bottom: 20px; }
+         |  h1 {
+         |    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         |    font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: #e8ebf0; margin: 0 0 10px;
+         |  }
+         |  p { color: #7c8698; font-size: 13.5px; line-height: 1.65; margin: 0; }
+         |  a.btn {
+         |    display: flex; align-items: center; justify-content: center; gap: 9px;
+         |    margin-top: 20px; padding: 10px 18px; border-radius: 7px;
+         |    background: #5865f2; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none;
+         |  }
+         |  a.btn:hover { background: #6b77f5; }
+         |  a.btn:focus-visible { outline: 2px solid #5b8cff; outline-offset: 2px; }
+         |</style></head>
+         |<body>
+         |  <div class="card">
+         |    <img class="face" src="/dashboard/images/avatar.png" alt="">
+         |    <h1>That didn't go through</h1>
+         |    <p>$message</p>
+         |    <a class="btn" href="$loginPath">Continue with Discord</a>
          |  </div>
          |</body></html>""".stripMargin))
 
@@ -303,7 +350,17 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   val authenticatedUser: Directive[Tuple1[String]] = Directive[Tuple1[String]] { inner =>
     optionalCookie(cookieName) { cookieOpt =>
       cookieOpt.flatMap(c => verifySession(c.value)) match {
-        case Some(userId) => inner(Tuple1(userId))
+        // Their guild list is read back out of the store first, where this
+        // process has not seen them sign in — which after a restart is
+        // everybody, and used to be a bounce through Discord each. Everything
+        // downstream reads that list synchronously and unchanged; this is only
+        // the one point where it can be fetched before they do.
+        //
+        // A hit costs nothing and is every request after the first, and a miss
+        // that the store cannot answer either lands where it always did: on the
+        // sign-in below, one page later.
+        case Some(userId) if userGuilds.get(userId).isDefined => inner(Tuple1(userId))
+        case Some(userId) => onComplete(userGuilds.warm(userId))(_ => inner(Tuple1(userId)))
         case None =>
           // A link unfurler gets a page rather than the redirect. It cannot hold
           // a session, so following the bounce only lands it on discord.com,
@@ -322,9 +379,10 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                 case Some(preview) =>
                   complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, preview(matched.toString)))
                 case None =>
-                  val area = cookiePaths.find(p => matched.toString.startsWith(p))
-                  redirect(area.fold(loginPath)(p => s"$loginPath?next=${URLEncoder.encode(p, "UTF-8")}"),
-                    StatusCodes.Found)
+                  // The whole request, not just the path it matched: a link from
+                  // Discord names its spawn in the query, and the area alone
+                  // would come back having forgotten which one.
+                  extractUri(uri => redirect(loginUrlFor(uri), StatusCodes.Found))
               }
             }
           }
@@ -350,19 +408,100 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private def landingIndex(next: Option[String]): Int =
     next.map(cookiePaths.indexOf).filter(_ >= 0).getOrElse(0)
 
-  private def landingPath(state: String): String =
+  private def areaAt(index: String): String = Try(cookiePaths(index.toInt)).getOrElse(mountPath)
+
+  /** Where to land after signing in: the exact page that was asked for when the
+   *  state carries one, the area's front door otherwise.
+   *
+   *  The index above answers "which area", which is all a login needed while
+   *  every gated area had one page worth landing on. A link from Discord names a
+   *  guild and a spawn, and an area is not a useful answer to it — somebody
+   *  pressing Dashboard on a spawn's panel and being handed the server picker
+   *  has been given a chore instead of a page.
+   */
+  private[web] def landingPath(state: String): String =
     state.split('.') match {
-      case Array(_, index) => Try(cookiePaths(index.toInt)).getOrElse(mountPath)
-      case _               => mountPath
+      case Array(_, index, resume) => decodeResume(resume).getOrElse(areaAt(index))
+      case Array(_, index)         => areaAt(index)
+      case _                       => mountPath
     }
+
+  /** The sign-in to send somebody to, carrying where they were going.
+   *
+   *  Used by [[authenticatedUser]]'s own bounce, and offered to callers because
+   *  a page can find a session wanting for reasons this class cannot see. The
+   *  respawn dashboard's board page is the one that does: the guild list behind
+   *  a session lives in memory and does not survive a restart, while the cookie
+   *  it belongs to lasts a week — so a visitor can arrive perfectly signed in
+   *  and still resolve to nothing. Signing in again is the whole fix, and going
+   *  through here is what stops the spawn they were opening being the price of
+   *  it.
+   */
+  def loginUrlFor(uri: Uri): String = {
+    val area = cookiePaths.find(p => uri.path.toString.startsWith(p))
+    val params =
+      area.map(p => s"next=${URLEncoder.encode(p, "UTF-8")}").toList ++
+        resumeTarget(uri).map(target => s"to=${encodeResume(target)}")
+    if (params.isEmpty) loginPath else s"$loginPath?${params.mkString("&")}"
+  }
+
+  /** The page an unauthenticated visitor was actually asking for, when it is one
+   *  worth coming back to. Path and query, relative — never a whole URL. */
+  private def resumeTarget(uri: Uri): Option[String] = {
+    val target = uri.path.toString + uri.rawQueryString.fold("")("?" + _)
+    Some(target).filter(t => t.length <= MaxResumeLength && isOurs(t))
+  }
+
+  /** Whether a string is a relative path into one of this auth's own areas, and
+   *  so somewhere a redirect of ours may send a browser.
+   *
+   *  This is the whole of the open-redirect guard, so it is a whitelist and not
+   *  a hunt for the ways out. A login URL's query is public — anybody can hand
+   *  anybody a `?to=`, and the value rides the round trip in a cookie we set
+   *  ourselves — which makes the check on the way *back* the one that matters.
+   *  Hence [[decodeResume]] applying this again to what it decodes rather than
+   *  trusting that it was checked on the way in.
+   *
+   *  A value that passes starts with a known mount and continues at a boundary,
+   *  so `/dashboardish` is not `/dashboard`; and holds nothing that turns a
+   *  relative path into an absolute one — `//host` is a protocol-relative URL, a
+   *  backslash is read as one by some browsers, and a control character can end
+   *  the `Location` header early and start another.
+   */
+  private def isOurs(target: String): Boolean =
+    !target.contains("//") && !target.contains('\\') && !target.exists(_.isControl) &&
+      cookiePaths.exists(p => target == p || target.startsWith(s"$p/") || target.startsWith(s"$p?"))
+
+  /** Base64url, so the destination survives inside a dot-separated `state` and
+   *  needs no further escaping in a query string of its own — the alphabet is
+   *  `A-Za-z0-9-_` and carries neither a dot nor anything a URL minds. */
+  private def encodeResume(target: String): String =
+    Base64.getUrlEncoder.withoutPadding.encodeToString(target.getBytes("UTF-8"))
+
+  /** The reverse, refusing anything that is not one of ours — including
+   *  something that is not Base64 at all, which a truncated or hand-edited state
+   *  will produce. None everywhere, so the caller falls back to the area. */
+  private def decodeResume(encoded: String): Option[String] =
+    Try(new String(Base64.getUrlDecoder.decode(encoded), "UTF-8")).toOption.filter(isOurs)
+
+  /** Exposed for [[DiscordAuthSpec]]: the guard above is the security-critical
+   *  half of this class and is otherwise reachable only through a round trip
+   *  that ends at Discord. */
+  private[web] def resumableForTest(target: String): Boolean = isOurs(target)
 
   val routes: akka.http.scaladsl.server.Route =
     path("auth" / "login") {
       get {
-        parameter("next".optional) { next =>
+        parameter("next".optional, "to".optional) { (next, to) =>
           // The nonce and the destination travel together, so the comparison on
           // the way back still covers both and neither can be swapped alone.
-          val state = s"${newState()}.${landingIndex(next)}"
+          //
+          // `to` is checked here as well as on the way back, so a login link
+          // carrying somewhere it should not go is refused before it reaches
+          // Discord rather than after — the visitor is bounced to the area's
+          // front door, which is where they would have landed anyway.
+          val resume = to.flatMap(decodeResume).map(encodeResume)
+          val state = s"${newState()}.${landingIndex(next)}${resume.fold("")("." + _)}"
           setCookie(stateCookie(state)) {
             redirect(authorizeUrl(state), StatusCodes.Found)
           }
@@ -398,9 +537,11 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                   onComplete(resolveUserId(code)) {
                     case Success(Some(userId)) =>
                       val expiry = Instant.now().plusSeconds(sessionTtl.toSeconds).getEpochSecond
-                      // Back to whichever area sent them, which the state
+                      // Back to whichever page sent them, which the state
                       // carried and which has just been verified against the
-                      // cookie — so it can only ever be one of ours.
+                      // cookie — and which is checked against `isOurs` once
+                      // more as it is decoded, so it can only ever be one of
+                      // ours however it got here.
                       val landing: String = stateCookieOpt.map(c => landingPath(c.value)).getOrElse(mountPath)
                       setSession(signSession(userId, expiry)) {
                         redirect(landing, StatusCodes.Found)

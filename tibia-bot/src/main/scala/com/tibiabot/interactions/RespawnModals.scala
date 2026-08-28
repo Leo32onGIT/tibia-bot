@@ -77,8 +77,8 @@ object RespawnModals extends StrictLogging {
 
   /** Prompt for a spawn to claim. Free text rather than a dropdown because a
    *  catalogue runs to several hundred entries and Discord caps a select menu at
-   *  25 options — and the same resolver behind `/respawn claim` already accepts
-   *  a code or a name. */
+   *  25 options — and the resolver behind it already accepts a code, a name or a
+   *  unique fragment. */
   def claimModal: Modal =
     Modal.create(RespawnButtonId.modalClaim, "Claim a respawn")
       .addComponents(
@@ -96,28 +96,23 @@ object RespawnModals extends StrictLogging {
   def configModal(guildId: String, userId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     val prefs = BotApp.respawnService.userPrefs(guildId, userId)
-    val currentDuration = prefs.defaultDurationMinutes
-      .orElse(settings.map(_.defaultDurationMinutes)).map(_.toString).getOrElse("")
-    val currentWarn = prefs.warnMinutes
-      .orElse(settings.map(_.warnMinutes)).map(_.toString).getOrElse("")
+    // Left as Options rather than flattened to strings, so the blank never
+    // reaches JDA — see numberInput. Both are empty only on a server with no
+    // respawn settings, which is a state this modal is not reachable from, but
+    // the file has now been bitten once by exactly this and guessing at
+    // reachability is what made it a bug rather than a near miss.
+    val currentDuration = prefs.defaultDurationMinutes.orElse(settings.map(_.defaultDurationMinutes))
+    val currentWarn = prefs.warnMinutes.orElse(settings.map(_.warnMinutes))
     val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
 
     Modal.create(RespawnButtonId.modalConfig, "Your respawn settings")
       .addComponents(
         label("Default claim length (minutes)",
           s"How long your claims run when you don't say. 5–$maxDuration.",
-          TextInput.create(DurationField, TextInputStyle.SHORT)
-            .setValue(currentDuration)
-            .setRequired(true)
-            .setMaxLength(4)
-            .build()),
+          numberInput(DurationField, currentDuration)),
         label("Remind me this many minutes before the end",
           "0 turns reminders off. Up to 720 (12 hours).",
-          TextInput.create(WarnField, TextInputStyle.SHORT)
-            .setValue(currentWarn)
-            .setRequired(true)
-            .setMaxLength(4)
-            .build())
+          numberInput(WarnField, currentWarn))
       )
       .build()
   }
@@ -129,7 +124,10 @@ object RespawnModals extends StrictLogging {
     val current = BotApp.respawnService.openClaimsForUser(guildId, userId)
       .find(_._2.respawnId == respawn.id)
       .map(_._2.durationMinutes.toString)
-    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+    // The spawn's ceiling rather than the server's, because that is what a
+    // submission here will actually be measured against.
+    val maxDuration = BotApp.respawnService.settings(guildId)
+      .map(_.maxFor(respawn)).getOrElse(240)
 
     val duration = TextInput.create(DurationField, TextInputStyle.SHORT)
       .setRequired(true)
@@ -158,20 +156,21 @@ object RespawnModals extends StrictLogging {
    *  be re-answered every time would make the usual case the fiddly one. */
   def holderDurationModal(guildId: String, respawn: Respawn): Modal = {
     val holder = BotApp.respawnService.holderOf(guildId, respawn.id)
-    val maxDuration = BotApp.respawnService.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+    val maxDuration = BotApp.respawnService.settings(guildId)
+      .map(_.maxFor(respawn)).getOrElse(240)
 
     Modal.create(RespawnButtonId.modalHolderDuration(respawn.id), "Edit claim")
       .addComponents(
         // Whose hunt it is goes in the description, not the label: a Discord
         // username can be 32 characters on its own and the label allows 45 in
         // total, so interpolating one there fails the interaction outright.
+        // Through numberInput for the blank-value reason above: the Edit Claim
+        // button is only drawn when somebody holds the spawn, but a sweep can end
+        // that claim between the panel opening and the button being pressed — and
+        // then this was an exception rather than an empty box.
         label("Total hunt length (minutes)",
           s"${respawn.displayName}, choose a new duration. 5 to $maxDuration",
-          TextInput.create(DurationField, TextInputStyle.SHORT)
-            .setValue(holder.map(_.durationMinutes.toString).getOrElse(""))
-            .setRequired(true)
-            .setMaxLength(4)
-            .build()),
+          numberInput(DurationField, holder.map(_.durationMinutes))),
         label("Give the hunt to somebody else",
           "Leave empty to keep whoever is on it now.",
           EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
@@ -182,6 +181,46 @@ object RespawnModals extends StrictLogging {
             // whoever is on it), but picking nobody is not a handover.
             .setRequired(false)
             .build())
+      )
+      .build()
+  }
+
+  /** One spawn's own ceiling on how long a claim there may run.
+   *
+   *  Deliberately not in `claimRulesModal` with the server-wide numbers, and not
+   *  only because that modal is full at Discord's five components. This is a fact
+   *  about one respawn, and it belongs where a moderator is already looking at
+   *  that respawn.
+   *
+   *  Empty means "follow the server", which is why the field is optional and why
+   *  the description says so: clearing an override has to be as easy as setting
+   *  one, and the alternative — a separate Clear button — would spend the row's
+   *  last free slot on something a blank box already says.
+   */
+  def spawnMaxModal(guildId: String, respawn: Respawn): Modal = {
+    val service = BotApp.respawnService
+    val serverMax = service.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
+
+    val field = TextInput.create(DurationField, TextInputStyle.SHORT)
+      .setRequired(false)
+      .setMaxLength(4)
+    // Set only when there is something to set, exactly as durationModal does and
+    // for the same reason: `setValue("")` throws `Value may not be blank` and the
+    // whole modal fails to open. A spawn following the server has no value, which
+    // is the *common* case here rather than an edge one — so this shipped broken
+    // for every spawn until the first override was set.
+    respawn.maxDurationMinutes.foreach(minutes => field.setValue(minutes.toString))
+
+    Modal.create(RespawnButtonId.modalSpawnMax(respawn.id), "Max claim for this spawn")
+      .addComponents(
+        // The spawn's name goes in the description rather than the label for the
+        // same reason as holderDurationModal: a label allows 45 characters in
+        // total and a spawn name can eat all of them, which fails the
+        // interaction outright rather than merely looking cramped.
+        label("Maximum claim length (minutes)",
+          s"${respawn.displayName}. Empty follows the server ($serverMax). " +
+            s"${service.MinimumClaimMinutes} to ${service.MaxSpawnCeilingMinutes}.",
+          field.build())
       )
       .build()
   }
@@ -274,12 +313,21 @@ object RespawnModals extends StrictLogging {
       )
       .build()
 
-  private def numberInput(id: String, current: Option[Int]): TextInput =
-    TextInput.create(id, TextInputStyle.SHORT)
-      .setValue(current.map(_.toString).getOrElse(""))
+  /** A short numeric field, pre-filled only when there is something to pre-fill
+   *  with.
+   *
+   *  `setValue("")` is not an empty box — JDA throws `Value may not be blank` and
+   *  the whole modal fails to open, which surfaces as an unhandled exception on
+   *  the press rather than as anything the presser can read. Every caller here
+   *  passes an Option, so the trap is closed once, here, instead of each of them
+   *  remembering to write `.getOrElse("")` and being wrong. */
+  private def numberInput(id: String, current: Option[Int]): TextInput = {
+    val input = TextInput.create(id, TextInputStyle.SHORT)
       .setRequired(true)
       .setMaxLength(4)
-      .build()
+    current.foreach(value => input.setValue(value.toString))
+    input.build()
+  }
 
   /** Book a slot, repeating or not.
    *
@@ -291,7 +339,8 @@ object RespawnModals extends StrictLogging {
    *  timestamp, so each person sees the booking in their own zone. */
   def scheduleModal(guildId: String, respawn: Respawn): Modal =
     Modal.create(RespawnButtonId.modalSchedule(respawn.id), "Book a slot")
-      .addComponents(scheduleFields(guildId, s"${respawn.displayName} — $StartHelpSuffix"): _*)
+      .addComponents(scheduleFields(guildId, s"${respawn.displayName} — $StartHelpSuffix",
+        Some(respawn)): _*)
       .build()
 
   /** The board's Book button: the same form, with the spawn asked for rather
@@ -324,10 +373,17 @@ object RespawnModals extends StrictLogging {
 
   /** Everything a booking form asks apart from which spawn it is for — shared
    *  so the board's form and a spawn's own cannot drift apart. */
-  private def scheduleFields(guildId: String, startHelp: String): Seq[Label] = {
+  private def scheduleFields(guildId: String, startHelp: String,
+                             respawn: Option[Respawn] = None): Seq[Label] = {
     val settings = BotApp.respawnService.settings(guildId)
     val zone = com.tibiabot.domain.time.Clock.Berlin
-    val maxDuration = settings.map(_.maxDurationMinutes).getOrElse(240)
+    // A spawn's own form can name the ceiling that will actually apply; the
+    // board's form cannot, because which spawn is a field inside it and is not
+    // known until it comes back. The board therefore quotes the server's number
+    // and a submission against a spawn with a lower one is refused by
+    // `addSchedule` with the real figure — which is the same shape of answer the
+    // board's form has always given for a spawn that turns out not to exist.
+    val maxDuration = settings.map(s => respawn.fold(s.maxDurationMinutes)(s.maxFor)).getOrElse(240)
     val now = java.time.ZonedDateTime.now()
 
     // Half hours in server time. Each option's *value* is an absolute instant,
@@ -420,6 +476,7 @@ object RespawnModals extends StrictLogging {
       case Some(("duration", respawnId)) => submitDuration(event, respawnId, forHolder = false)
       case Some(("holder", respawnId))   => submitDuration(event, respawnId, forHolder = true)
       case Some(("schedule", respawnId))  => submitSchedule(event, respawnId)
+      case Some(("spawnmax", respawnId))  => submitSpawnMax(event, respawnId)
       case _ => modalId match {
         case RespawnButtonId.modalBoardSchedule => submitBoardSchedule(event)
         case RespawnButtonId.modalClaim      => submitClaim(event)
@@ -434,6 +491,46 @@ object RespawnModals extends StrictLogging {
     }
   }
 
+  /** A moderator setting or clearing one spawn's claim ceiling.
+   *
+   *  An empty box clears the override rather than failing validation, so the two
+   *  directions are one form. Anything that is not a number is refused, because
+   *  reading "2h" or "two" as a clear would silently do the opposite of what was
+   *  typed.
+   */
+  private def submitSpawnMax(event: ModalInteractionEvent, respawnId: Long): Unit = {
+    // The same reader the dashboard's field uses, so `2h` means two hours in
+    // both places and neither has its own idea of what a number is.
+    val parsed = com.tibiabot.domain.ClaimDuration.parse(value(event, DurationField))
+    // Re-checked on submit rather than trusted from when the panel opened: a
+    // modal can sit open long after somebody's role was taken away.
+    if (!moderates(event.getGuild, event.getMember))
+      reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
+        s"or the **${Permissions.ModeratorRoleName}** role.")
+    else parsed match {
+      case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+      case Right(minutes) =>
+        val service = BotApp.respawnService
+        service.listRespawns(event.getGuild.getId).find(_.id == respawnId) match {
+          case None => reply(event, s"${Config.noEmoji} That respawn is no longer in the catalogue.")
+          case Some(respawn) => service.setSpawnMaxDuration(event.getGuild, respawn, minutes) match {
+            case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+            case Right(updated) =>
+              val serverMax = service.settings(event.getGuild.getId).map(_.maxDurationMinutes).getOrElse(0)
+              reply(event, updated.maxDurationMinutes match {
+                case None =>
+                  s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(updated)} follows the server again " +
+                    s"— claims there can run up to ${RespawnEmbeds.humanDuration(serverMax)}."
+                case Some(value) =>
+                  s"${Config.yesEmoji} Claims on ${RespawnEmbeds.spawnLink(updated)} can now run up to " +
+                    s"${RespawnEmbeds.humanDuration(value)}. Anything already running keeps the length " +
+                    "it was given."
+              })
+          }
+        }
+    }
+  }
+
   /** A spawn's own booking form, which knows which spawn it is for. */
   private def submitSchedule(event: ModalInteractionEvent, respawnId: Long): Unit =
     BotApp.respawnService.listRespawns(event.getGuild.getId).find(_.id == respawnId) match {
@@ -441,10 +538,10 @@ object RespawnModals extends StrictLogging {
       case Some(respawn) => submitSchedule(event, respawn)
     }
 
-  /** The board's booking form, which asks. Resolved through the same resolver
-   *  `/respawn claim` and the board's own Claim button use, so a code, a name
-   *  or a unique fragment all work — and, like those, an unknown code and an
-   *  ambiguous one are indistinguishable from here, so the reply covers both. */
+  /** The board's booking form, which asks. Resolved through the same resolver the
+   *  board's own Claim button uses, so a code, a name or a unique fragment all
+   *  work — and, like it, an unknown code and an ambiguous one are
+   *  indistinguishable from here, so the reply covers both. */
   private def submitBoardSchedule(event: ModalInteractionEvent): Unit = {
     val query = value(event, SpawnField)
     BotApp.respawnService.resolve(event.getGuild.getId, query) match {
@@ -603,8 +700,15 @@ object RespawnModals extends StrictLogging {
 
         val reassigned = giveTo match {
           case None       => Right(None)
-          case Some(user) => service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName)
-                               .map(_ => Some(user.getId -> user.getName))
+          case Some(user) =>
+            // A mention resolves to an account rather than a member, so the
+            // guild name is looked up beside it — and falls back to the
+            // account's own display name, which everybody has. Without it the
+            // hunt would carry on under the previous holder's nickname.
+            val toNickname = Option(event.getGuild.getMemberById(user.getId))
+              .map(_.getEffectiveName).getOrElse(user.getEffectiveName)
+            service.reassignClaim(event.getGuild, respawnId, user.getId, user.getName, toNickname)
+              .map(_ => Some(user.getId -> user.getName))
         }
 
         reassigned match {

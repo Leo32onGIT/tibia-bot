@@ -114,6 +114,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
       // deferEdit; everything else answers with an ephemeral of its own.
       if (interactions.RespawnModals.editsOriginal(event.getModalId)) event.deferEdit().queue()
       else event.deferReply(true).queue()
+      // A form submitted from a spawn's post counts as touching it, exactly as
+      // the press that opened the form did — see the button branch below.
+      if (Config.Respawn.enabled) respawn.RespawnSleep.touched(event.getGuild, event.getChannel)
       interactionExecutor.execute(() => {
         try interactions.RespawnModals.handle(event)
         catch {
@@ -159,6 +162,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
         case respawn.RespawnButtonId.Ack.EditsMessage => event.deferEdit().queue()
         case respawn.RespawnButtonId.Ack.Replies      => event.deferReply(true).queue()
       }
+      // Pressing anything inside an archived post re-opens it, and most of what
+      // a free spawn's card offers changes no claim state — so nothing further
+      // down would ever ask for the post to be closed again. Noted here, above
+      // the handlers, precisely because that is where the presses that do
+      // nothing else still pass through. Map write only; see RespawnSleep.
+      if (Config.Respawn.enabled) respawn.RespawnSleep.touched(event.getGuild, event.getChannel)
       interactionExecutor.execute(() => {
         try interactions.RespawnButtons.handle(event)
         catch {

@@ -16,6 +16,5 @@ trait TibiaApi {
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)]
   def getCharacter(name: String): Future[Either[String, CharacterResponse]]
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]]
-  def getCharacterV2(input: (String, Int)): Future[Either[String, CharacterResponse]]
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)]
 }

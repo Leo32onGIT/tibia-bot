@@ -5,10 +5,10 @@ import com.tibiabot.domain.Stamina
 /** Everything the board page needs that isn't a spawn: what the viewer has left
  *  to spend and the limits their claims are bounded by.
  *
- *  `remainingMinutes` is already floored at zero by [[Stamina]], and is
- *  `None` when the guild has stamina turned off entirely — which the page reads
- *  as "no tank to show" rather than as zero, since the two mean opposite
- *  things.
+ *  `remainingMinutes` is already floored at zero by
+ *  [[com.tibiabot.domain.Stamina]], and is `None` when the guild has stamina
+ *  turned off entirely — which the page reads as "no tank to show" rather than
+ *  as zero, since the two mean opposite things.
  */
 final case class BoardLimits(
   remainingMinutes: Option[Int],

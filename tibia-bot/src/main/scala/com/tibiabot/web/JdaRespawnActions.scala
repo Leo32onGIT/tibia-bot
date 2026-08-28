@@ -3,14 +3,14 @@ package com.tibiabot.web
 import com.tibiabot.discord.DiscordGateway
 import com.tibiabot.respawn.{RespawnOwnership, RespawnService}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.entities.Guild
+import net.dv8tion.jda.api.entities.{Guild, User}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 /** [[RespawnActionPort]] against the real service.
  *
- *  Everything here funnels through [[withActableGuild]], which is the one place
+ *  Everything here funnels through `withActableGuild`, which is the one place
  *  the two preconditions a write has beyond permission are checked: this bot has
  *  to be *in* the guild to resolve it at all, and it has to be the identity that
  *  runs that guild's respawns. Several bot identities can share a guild and only
@@ -54,35 +54,58 @@ final class JdaRespawnActions(
     }(blocking)
 
   /** Whether this bot is the one that runs `guildId`'s respawns — the same
-   *  question [[withActableGuild]] asks, exposed so the router and the command
+   *  question `withActableGuild` asks, exposed so the router and the command
    *  consumer decide it exactly the same way rather than each reimplementing it. */
   def ownsGuild(guildId: String): Boolean =
     Option(discordGateway.guildById(guildId)).exists { guild =>
       respawnService.settings(guildId).exists(ownership.ownsRespawns(guild, _))
     }
 
-  /** The name to record against a claim. Resolved here rather than taken from
-   *  the request, so it cannot be spoofed by whoever is posting — the audit log
-   *  and the thread both show it. Falls back to the id, which is always true
-   *  even if unfriendly, rather than to a blank. */
+  /** The account name to record against a claim. Resolved here rather than
+   *  taken from the request, so it cannot be spoofed by whoever is posting —
+   *  the audit log and the thread both show it. Falls back to the id, which is
+   *  always true even if unfriendly, rather than to a blank. */
   private def displayName(userId: String): String =
-    try Option(discordGateway.retrieveUser(userId)).map(_.getName).filter(_.nonEmpty).getOrElse(userId)
+    try Option(discordGateway.retrieveUser(userId)).map(accountName).getOrElse(userId)
     catch { case NonFatal(_) => userId }
 
-  /** What this person is called in the guild, from its own member cache — free,
-   *  where retrieving them would be a REST call per claim. Empty when they are
-   *  not cached or have left, which the row renders as the account name. */
-  private def nicknameIn(guild: Guild, userId: String): String =
-    try Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse("")
-    catch { case NonFatal(_) => "" }
+  private def accountName(user: User): String =
+    Option(user.getName).filter(_.nonEmpty).getOrElse(user.getId)
+
+  /** Both names a claim row is written with: the account, and what to call this
+   *  person on top of it.
+   *
+   *  The guild's nickname where it has the member cached, and otherwise the
+   *  account's own display name — which every user has, so unlike the member
+   *  cache this cannot come back blank. That fallback is the whole point: the
+   *  bot builds its JDA with `createDefault` and no GUILD_MEMBERS intent, so the
+   *  member cache is a miss for nearly everybody, and every claim and booking
+   *  made from the dashboard was being written with no second name at all —
+   *  landing on the card as a bare account name while the same person booking
+   *  through Discord, where the interaction carries their member, got both.
+   *
+   *  It costs nothing: `retrieveUser` is the call [[displayName]] already made.
+   *  Retrieving the *member* instead would let the server's own nickname win
+   *  every time rather than only when cached, but at a REST round trip per
+   *  write for a name many guilds do not set.
+   */
+  private def namesFor(guild: Guild, userId: String): (String, String) =
+    try {
+      Option(discordGateway.retrieveUser(userId)) match {
+        case None => (userId, "")
+        case Some(user) =>
+          (accountName(user),
+            Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(user.getEffectiveName))
+      }
+    } catch { case NonFatal(_) => (userId, "") }
 
 
   def claim(guildId: String, userId: String, characterName: String,
             code: String, minutes: Option[Int]): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
+      val (name, nickname) = namesFor(guild, userId)
       RespawnActions.describe(
-        respawnService.claim(guild, userId, displayName(userId), nicknameIn(guild, userId),
-          characterName, code, minutes))
+        respawnService.claim(guild, userId, name, nickname, characterName, code, minutes))
     }
 
   def release(guildId: String, userId: String, code: Option[String]): Future[ActionResult] =
@@ -105,8 +128,8 @@ final class JdaRespawnActions(
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.addSchedule(guild, respawn, userId, displayName(userId),
-            nicknameIn(guild, userId), characterName,
+          val (name, nickname) = namesFor(guild, userId)
+          respawnService.addSchedule(guild, respawn, userId, name, nickname, characterName,
             firstStart, durationMinutes, daysOfWeek) match {
             case Right(com.tibiabot.respawn.ScheduleResult.Booked(schedule)) =>
               ActionResult(ok = true,
@@ -219,7 +242,8 @@ final class JdaRespawnActions(
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.reassignClaim(guild, respawn.id, toUserId, displayName(toUserId)) match {
+          val (toName, toNickname) = namesFor(guild, toUserId)
+          respawnService.reassignClaim(guild, respawn.id, toUserId, toName, toNickname) match {
             case Right((spawn, claim)) =>
               logger.info(s"Dashboard: '$actorId' reassigned ${spawn.code} to '$toUserId' in guild '$guildId'")
               ActionResult(ok = true, s"${spawn.displayName} now belongs to ${claim.userName}.")
@@ -260,6 +284,25 @@ final class JdaRespawnActions(
       }
     }
 
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, "That respawn isn't in the catalogue.")
+        case Some(respawn) => respawnService.setSpawnMaxDuration(guild, respawn, minutes) match {
+          case Left(reason) => ActionResult(ok = false, reason)
+          case Right(updated) => updated.maxDurationMinutes match {
+            case None =>
+              ActionResult(ok = true, s"${updated.displayName} follows the server's maximum again.")
+            case Some(value) =>
+              ActionResult(ok = true,
+                s"Claims on ${updated.displayName} can now run up to " +
+                  s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(value)}.")
+          }
+        }
+      }
+    }
+
   def extendHolder(guildId: String, actorId: String, code: String, extraMinutes: Int): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.resolve(guildId, code) match {
@@ -286,7 +329,7 @@ final class JdaRespawnActions(
             case Right(owner) =>
               logger.info(s"Dashboard: '$actorId' took $owner's ${respawn.code} slot at " +
                 s"${startsAt.toInstant} off the calendar in guild '$guildId'")
-              ActionResult(ok = true, s"$owner's slot on ${respawn.displayName} has been removed.")
+              ActionResult(ok = true, s"The booking for ${respawn.displayName} has been removed.")
           }
       }
     }
@@ -297,14 +340,47 @@ final class JdaRespawnActions(
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.reassignSlot(guild, respawn, startsAt, toUserId,
-            displayName(toUserId), nicknameIn(guild, toUserId)) match {
+          val (toName, toNickname) = namesFor(guild, toUserId)
+          respawnService.reassignSlot(guild, respawn, startsAt, toUserId, toName, toNickname) match {
             case Left(reason) => ActionResult(ok = false, reason)
             case Right(from) =>
               logger.info(s"Dashboard: '$actorId' moved $from's ${respawn.code} slot at " +
                 s"${startsAt.toInstant} to '$toUserId' in guild '$guildId'")
               ActionResult(ok = true,
-                s"That slot on ${respawn.displayName} is now ${displayName(toUserId)}'s.")
+                s"That slot on ${respawn.displayName} is now $toName's.")
+          }
+      }
+    }
+
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+    withActableGuild(guildId) { guild =>
+      respawnService.resolve(guildId, code) match {
+        case None => ActionResult(ok = false, s"No spawn matches '$code'.")
+        case Some(respawn) =>
+          respawnService.editSlot(guild, respawn, startsAt, minutes) match {
+            case Left(reason) => ActionResult(ok = false, reason)
+            case Right(edit) =>
+              logger.info(s"Dashboard: '$actorId' set ${edit.owner}'s ${respawn.code} " +
+                s"${if (edit.live) "hunt" else "slot"} at ${startsAt.toInstant} to ${edit.minutes}m " +
+                s"in guild '$guildId'")
+              // That it now reaches into the next booking is said on the way
+              // past rather than left to be discovered: the write has happened,
+              // and this is the one moment somebody is looking at the answer.
+              //
+              // Whose booking is not. The panel answers about the slot that was
+              // selected, and the grid beside the message already says whose
+              // every block on it is.
+              val overrun = edit.cutInto
+                .map(_ => " It now runs into the next booking, which will be cut short.")
+                .getOrElse("")
+              // Which of the two it was, because the panel acts on both and
+              // "the booking" and "the claim" are the words the grid and the
+              // card already use for them.
+              val what = if (edit.live) "claim" else "booking"
+              ActionResult(ok = true,
+                s"The $what for ${respawn.displayName} now runs for " +
+                  s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(edit.minutes)}.$overrun")
           }
       }
     }

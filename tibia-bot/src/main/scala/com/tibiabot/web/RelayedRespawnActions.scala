@@ -112,6 +112,14 @@ final class RelayedRespawnActions(
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.RemoveSpawn, Map("code" -> code))
 
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult] =
+    // An absent "minutes" is what clears the override, so this carries the field
+    // only when there is one — the same way an absent duration means "their
+    // default" on a relayed claim.
+    send(guildId, actorId, RespawnCommand.SetSpawnMax,
+      Map("code" -> code) ++ minutes.map(m => "minutes" -> m.toString))
+
   def dropSlot(guildId: String, actorId: String, code: String,
                startsAt: java.time.ZonedDateTime): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.DropSlot,
@@ -121,6 +129,11 @@ final class RelayedRespawnActions(
                    startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] =
     send(guildId, actorId, RespawnCommand.ReassignSlot,
       Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "toUserId" -> toUserId))
+
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.EditSlot,
+      Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "minutes" -> minutes.toString))
 
   /** Reads never relay — every bot shares the guild's database, so this
    *  implementation is only ever used for writes and these are unreachable. */

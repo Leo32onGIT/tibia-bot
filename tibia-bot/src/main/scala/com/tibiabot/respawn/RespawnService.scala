@@ -10,14 +10,15 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.{ForumChannel, ThreadChannel}
 
 import java.time.ZonedDateTime
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
 
 /** What a claim attempt did, for the command/button layer to render. Modelled
  *  as a result type rather than the handler poking at the repository itself, so
- *  the rules live in one place and `/respawn claim` and the Claim button can't
- *  drift apart. */
+ *  the rules live in one place and the Claim button, the board's claim form and
+ *  the dashboard can't drift apart. */
 sealed trait ClaimOutcome
 object ClaimOutcome {
   /** The caller now holds the spawn. */
@@ -39,7 +40,7 @@ object ClaimOutcome {
   final case class NoStamina(respawn: Respawn, needed: Int, stamina: Stamina, resetsAt: ZonedDateTime) extends ClaimOutcome
   final case class UnknownSpawn(query: String) extends ClaimOutcome
   final case class BadDuration(requested: Int, max: Int) extends ClaimOutcome
-  /** `/respawn` has never been set up in this guild. */
+  /** The respawn system has never been set up in this guild. */
   case object NotConfigured extends ClaimOutcome
 }
 
@@ -72,6 +73,27 @@ object ScheduleResult {
   final case class Requested(respawn: Respawn, slot: RespawnClaim, deadline: ZonedDateTime)
     extends ScheduleResult
 }
+
+/** What changing one window's length did, in the words the surfaces need.
+ *
+ *  `live` separates the two things this can be: a hunt somebody is on now,
+ *  whose deadline just moved under them, and an evening still to come. Only the
+ *  first is worth telling anybody about immediately, which is why the caller
+ *  needs to know which it was rather than reading it back off the row.
+ *
+ *  `cutInto` names whoever the new window now runs into. Present only where the
+ *  window was allowed to run into them at all — a live hunt, which overruns
+ *  what follows exactly as a member's own extend always has — so it is a
+ *  warning attached to a success, never a refusal wearing one.
+ */
+final case class SlotEdit(
+  owner: String,
+  ownerId: String,
+  minutes: Int,
+  endsAt: ZonedDateTime,
+  live: Boolean,
+  cutInto: Option[String]
+)
 
 /** One page of the moderator claim log, and whether there is more behind it.
  *
@@ -191,11 +213,22 @@ final case class RespawnBoardEntry(
     }
 
   /** Whoever the card should name: the holder if it is being hunted, otherwise
-   *  whoever booked it next. Their Tibia character when they gave one, since
-   *  that is who the team recognises. */
+   *  whoever booked it next. The one Discord name everybody calls them by —
+   *  the guild's name for them, or their account name where the guild has none.
+   *
+   *  Their Tibia character led this once, on the reasoning that a character is
+   *  who the team recognises. A card names one person for one purpose, though,
+   *  and that purpose is going and asking them about the spawn — which is done
+   *  in Discord, under the name they answer to there. The character is still on
+   *  the calendar block and in the thread, where there is room for both names.
+   *
+   *  Falls back to the character only when there is no Discord name at all,
+   *  which no live row has: better a name of some kind than a blank card.
+   */
   def holderLabel: Option[String] =
     active.orElse(nextReservation).map { claim =>
-      if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+      val called = Names.calledPlain(claim.nickname, claim.userName)
+      if (called.nonEmpty) called else claim.characterName
     }
 }
 
@@ -218,10 +251,11 @@ sealed trait SlotAnswer
 object SlotAnswer {
   /** They are hunting it, so the request is refused and the slot stays theirs. */
   final case class Kept(respawn: Respawn) extends SlotAnswer
-  /** They are not, so it passes to whoever asked. Carries the asker's name
-   *  rather than their id: the only thing done with it is naming them in the
-   *  reply, and the row already knows what they are called. */
-  final case class Passed(respawn: Respawn, toUserName: String) extends SlotAnswer
+  /** They are not, so it passes to whoever asked. Carries the asker's names
+   *  rather than their id: the only thing done with them is naming them in the
+   *  reply, and the row already knows what they are called. Both, so the person
+   *  who just gave a slot up is told who has it in the words their server uses. */
+  final case class Passed(respawn: Respawn, toUserName: String, toNickname: String) extends SlotAnswer
   /** They are not — but the asker had booked a longer window than the slot they
    *  asked about, and the rest of it is somebody else's now. The slot is given up
    *  all the same; it simply goes back to being free rather than to them. */
@@ -289,7 +323,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   // --- settings -----------------------------------------------------------
 
-  /** The guild's settings, or None when `/respawn` was never set up here. */
+  /** The guild's settings, or None when the respawn system was never set up here. */
   def settings(guildId: String): Option[RespawnSettings] = repository.settings(guildId)
 
   /** The settings a guild gets on first setup — the bot's configured defaults,
@@ -311,15 +345,53 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 
   /** Apply a partial change to the guild's rules, validated.
    *
-   *  Shared by `/respawn admin config` and the board's moderator panel so the two
-   *  can't drift on what counts as a legal combination — a default claim longer
-   *  than the maximum being the one that actually bites, since every later claim
-   *  would be refused for exceeding a ceiling nobody set deliberately. */
+   *  Validated here rather than in the board's moderator panel — its only caller
+   *  today — so a second one can't drift on what counts as a legal combination,
+   *  a default claim longer than the maximum being the one that actually bites,
+   *  since every later claim would be refused for exceeding a ceiling nobody set
+   *  deliberately. */
   /** `warnMinutes` is deliberately absent: it is the fallback reminder for
    *  members who have not set their own, and there is no longer anywhere to
    *  change it per guild — it sits at `Config.Respawn.warnMinutes` for everybody.
    *  Members set their own in Config, which is the setting that was ever
    *  actually used. */
+  /** Give one spawn its own ceiling on claim length, or take it away.
+   *
+   *  `None` clears the override and puts the spawn back on the guild's number.
+   *  The value replaces that number rather than capping it, so a spawn worth a
+   *  long session can be set above the server's ceiling as well as below — see
+   *  [[com.tibiabot.domain.RespawnSettings.maxFor]].
+   *
+   *  Nothing already running is touched. A claim under way keeps the end time it
+   *  was granted and a repeating booking keeps firing at its stored length; the
+   *  new ceiling binds the next claim, the next extension and the next booking.
+   *  Shortening somebody mid-hunt because a moderator retuned a spawn would take
+   *  time off a hunt that was legitimate when it started, and the stamina for it
+   *  is already reserved.
+   */
+  def setSpawnMaxDuration(guild: Guild, respawn: Respawn,
+                          minutes: Option[Int]): Either[String, Respawn] =
+    settings(guild.getId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        val guildId = guild.getId
+        minutes match {
+          case Some(value) if value < MinimumClaimMinutes =>
+            Left(s"A claim ceiling has to be at least " +
+              s"${RespawnEmbeds.humanDuration(MinimumClaimMinutes)}.")
+          case Some(value) if value > MaxSpawnCeilingMinutes =>
+            Left(s"A claim ceiling can be at most " +
+              s"${RespawnEmbeds.humanDuration(MaxSpawnCeilingMinutes)}.")
+          case _ =>
+            repository.setRespawnMaxDuration(guildId, respawn.id, minutes)
+            val updated = respawn.copy(maxDurationMinutes = minutes)
+            // The card carries the ceiling in its footer, so it is stale the
+            // moment this is written.
+            refreshThread(guild, updated, config)
+            Right(updated)
+        }
+    }
+
   def updateSettings(guildId: String, defaultDuration: Option[Int], maxDuration: Option[Int],
                      queueLimit: Option[Int], stamina: Option[Int],
                      handover: Option[Int]): Either[String, RespawnSettings] =
@@ -417,9 +489,52 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  names and cities that have changed, and codes the file has dropped.
    *
    *  What `/repair` runs, and — with no catalogue commands left — the only way an
-   *  edit to respawns.json reaches a guild that was set up before it. */
+   *  edit to respawns.json reaches a guild that was set up before it.
+   *
+   *  Only half the job on its own: hand the rows it returns to
+   *  [[deleteRetiredThreads]], or every dropped code stays in Discord as a card
+   *  offering Claim, Book and Config on a spawn nothing can resolve. */
   def syncSeed(guildId: String): SeedSync =
     repository.syncSeed(guildId, RespawnCatalogue.seed.map(s => (s.code, s.region, s.name, s.creature)))
+
+  /** Take down the forum posts of codes [[syncSeed]] has just retired, and say
+   *  how many went.
+   *
+   *  Its other half, split off only because the repository has no Discord to
+   *  delete with. To a member the row and the post are one thing: a code that
+   *  has been retired but whose card is still in the forum is a spawn they can
+   *  still find, still open and still press Claim on, and all they get for it is
+   *  a refusal. This is the same call `/repair`'s Remove button already makes
+   *  when a moderator deletes a spawn by hand. */
+  def deleteRetiredThreads(guild: Guild, config: RespawnSettings, retired: List[Respawn]): Int =
+    RespawnThreads.deleteThreads(guild, config, retired.map(_.threadId))
+
+  /** Delete respawn-forum posts that no catalogue row points at, and say how
+   *  many went.
+   *
+   *  What [[deleteRetiredThreads]] cannot reach. A post is found from the
+   *  `threadId` on its spawn's row, so the moment a row goes without its post
+   *  going too there is nothing left that knows the post exists — which is the
+   *  state every code retired before this existed is in. Those are found from
+   *  the other side: by being a post of ours that nothing claims.
+   *
+   *  Cheap to be wrong about in one direction and expensive in the other, so an
+   *  empty catalogue is treated as a failed read rather than as a guild with no
+   *  spawns. The two are indistinguishable from here, and acting on the first
+   *  would delete the whole forum. [[RespawnThreads.deleteUnknownThreads]]
+   *  carries the rest of the guards. */
+  def deleteOrphanedThreads(guild: Guild, config: RespawnSettings,
+                            limit: Int = OrphanSweepLimit): Int = {
+    val known = repository.listRespawns(guild.getId)
+    if (known.isEmpty) 0
+    else RespawnThreads.deleteUnknownThreads(guild, config,
+      known.map(_.threadId).filter(_.nonEmpty).toSet, limit)
+  }
+
+  /** How many orphaned posts one sweep will take. Generous next to the handful
+   *  a seed edit can strand, and small enough that a sweep gone wrong is a log
+   *  line somebody reads rather than an empty forum. */
+  private val OrphanSweepLimit = 25
 
   /** Put the pinned board post back in step with the catalogue, if it isn't.
    *
@@ -483,8 +598,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Refused, too, while anybody is holding, waiting for or has booked it.
    *  `removeRespawn` deletes those rows along with the spawn, and somebody's
    *  evening disappearing because a moderator was tidying up is not a trade
-   *  worth making silently — the same guard `syncSeed` applies to a retired
-   *  code. Free it first and the removal goes through.
+   *  worth making silently. Free it first and the removal goes through.
+   *
+   *  `syncSeed` retires a dropped code without asking this, and the difference
+   *  is what the two are for: the file dropping a code says that spawn is not a
+   *  thing any more, where a moderator pressing Remove is tidying and can be
+   *  told to come back in an hour.
    */
   def removeCustomSpawn(guildId: String, code: String): Either[String, Respawn] =
     resolve(guildId, code) match {
@@ -597,6 +716,24 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  the claim is refused with an explanation instead. */
   val MinimumClaimMinutes: Int = 5
 
+  /** The longest a moderator may drag a window out to.
+   *
+   *  Not the guild's maximum claim length, which deliberately does not apply
+   *  here (see [[editSlot]]) — this is only a guard against a number that
+   *  could not be a hunt. Half a day is already longer than anything the grid
+   *  is used to draw, and beyond it a window stops being an evening and starts
+   *  overwriting the rest of the week. */
+  val MaxModeratorSlotMinutes: Int = 12 * 60
+
+  /** The longest ceiling a single spawn may be given.
+   *
+   *  A day, matching `RespawnSchedule.Daily`. Not because anything breaks above
+   *  it, but because a claim longer than a day cannot be booked as a repeating
+   *  slot (`addSchedule` refuses it), so a ceiling above this would be usable
+   *  from one door and not the other — and a moderator who typed 10000 into the
+   *  box meant something other than a week-long hold on a respawn. */
+  val MaxSpawnCeilingMinutes: Int = RespawnSchedule.Daily
+
 
   /** When the next booked slot on a spawn starts, if there is one. */
   def nextReservationStart(guildId: String, respawnId: Long,
@@ -625,8 +762,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // whatever the member set through Config.
             val minutes = requestedMinutes.getOrElse(
               repository.userPrefs(guild.getId, userId).defaultDurationOr(config.defaultDurationMinutes))
-            if (minutes <= 0 || minutes > config.maxDurationMinutes)
-              ClaimOutcome.BadDuration(minutes, config.maxDurationMinutes)
+            val ceiling = config.maxFor(respawn)
+            if (minutes <= 0 || minutes > ceiling)
+              ClaimOutcome.BadDuration(minutes, ceiling)
             else {
               val guildId = guild.getId
               val alreadyHeld = repository.openClaimsForUser(guildId, userId).find(_.respawnId == respawn.id)
@@ -825,8 +963,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private def handingOverHolder(guildId: String, respawnId: Long): Option[RespawnClaim] =
     repository.activeClaim(guildId, respawnId).filter(_.eligibleForHandover)
 
-  /** Add time to the caller's active claim, within the guild's ceiling and
-   *  their remaining stamina. Returns the new end time on success. */
+  /** Add time to the caller's active claim, within the ceiling that applies to
+   *  the spawn it is on and their remaining stamina. Returns the new end time on
+   *  success. */
   def extend(guild: Guild, userId: String, extraMinutes: Int,
              now: ZonedDateTime = ZonedDateTime.now()): Either[ClaimOutcome, (Respawn, ZonedDateTime)] =
     settings(guild.getId) match {
@@ -838,12 +977,18 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         repository.openClaimsForUser(guildId, userId).find(c => c.isActive && c.limboUntil.isEmpty) match {
           case None => Left(ClaimOutcome.UnknownSpawn(""))
           case Some(claim) =>
+            // Read before the bound is checked rather than after, because the
+            // bound now depends on which spawn this is — see
+            // `RespawnSettings.maxFor`. A spawn that has gone from the catalogue
+            // under a live claim falls back to the guild's number, which is the
+            // same answer this gave before there were per-spawn ceilings.
+            val respawn = repository.findById(guildId, claim.respawnId)
             val newTotal = claim.durationMinutes + extraMinutes
-            if (extraMinutes <= 0 || newTotal > config.maxDurationMinutes)
-              Left(ClaimOutcome.BadDuration(newTotal, config.maxDurationMinutes))
+            val ceiling = respawn.fold(config.maxDurationMinutes)(config.maxFor)
+            if (extraMinutes <= 0 || newTotal > ceiling)
+              Left(ClaimOutcome.BadDuration(newTotal, ceiling))
             else {
               val boundary = resetBoundary(now)
-              val respawn = repository.findById(guildId, claim.respawnId)
               if (!repository.reserveStamina(guildId, userId, extraMinutes, config.staminaMinutes, boundary)) {
                 val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
                 Left(respawn
@@ -878,13 +1023,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
         val guildId = guild.getId
-        if (newTotalMinutes < 5 || newTotalMinutes > config.maxDurationMinutes)
-          Left(s"A claim has to be between 5 minutes and " +
-            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+        val respawn = repository.findById(guildId, respawnId)
+        val ceiling = respawn.fold(config.maxDurationMinutes)(config.maxFor)
+        if (newTotalMinutes < MinimumClaimMinutes || newTotalMinutes > ceiling)
+          Left(s"A claim has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
+            s"${RespawnEmbeds.humanDuration(ceiling)}" +
+            s"${if (respawn.exists(_.maxDurationMinutes.isDefined)) " on this spawn." else " on this server."}")
         else repository.openClaimsForUser(guildId, userId).find(_.respawnId == respawnId) match {
           case None => Left("You aren't holding or waiting for that respawn.")
           case Some(claim) =>
-            val respawn = repository.findById(guildId, respawnId)
             if (!claim.isActive) {
               // Queued and offered claims have reserved nothing yet, so this is
               // just a stored number until they start.
@@ -998,6 +1145,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Both are told. The one losing it especially: their hunt ending is not
    *  something they should have to notice from the card. */
   def reassignClaim(guild: Guild, respawnId: Long, toUserId: String, toUserName: String,
+                    toNickname: String,
                     now: ZonedDateTime = ZonedDateTime.now()): Either[String, (Respawn, RespawnClaim)] =
     settings(guild.getId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
@@ -1014,10 +1162,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             if (remaining > 0 &&
                 !repository.reserveStamina(guildId, toUserId, remaining, config.staminaMinutes, boundary)) {
               val tank = repository.stamina(guildId, toUserId, config.staminaMinutes, boundary)
-              Left(s"${Names.user(toUserName)} has **${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
+              Left(s"${Names.user(toNickname, toUserName)} has " +
+                s"**${RespawnEmbeds.humanDuration(tank.remainingMinutes)}** of " +
                 s"stamina left, and the rest of this hunt needs " +
                 s"**${RespawnEmbeds.humanDuration(remaining)}**.")
-            } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName) match {
+            } else repository.reassignClaim(guildId, claim.id, toUserId, toUserName, toNickname) match {
               case None => Left("That hunt has already ended.")
               case Some(moved) =>
                 if (remaining > 0) repository.refundStamina(guildId, claim.userId, remaining, boundary)
@@ -1103,16 +1252,23 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
         val guildId = guild.getId
-        if (durationMinutes < MinimumClaimMinutes || durationMinutes > config.maxDurationMinutes)
+        val ceiling = config.maxFor(respawn)
+        if (durationMinutes < MinimumClaimMinutes || durationMinutes > ceiling)
           Left(s"A slot has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
-            s"${RespawnEmbeds.humanDuration(config.maxDurationMinutes)} on this server.")
+            s"${RespawnEmbeds.humanDuration(ceiling)}" +
+            s"${if (respawn.maxDurationMinutes.isDefined) " on this spawn." else " on this server."}")
         else if (!firstStart.isAfter(now))
           Left("The first slot has to start in the future.")
         else if (durationMinutes >= RespawnSchedule.Daily)
           Left("A slot has to be shorter than a day.")
         else {
+          // The nickname belongs on the candidate as much as on the saved rule:
+          // a booking that clashes never becomes a row of its own, so this
+          // stand-in is the only record of who is asking, and the request it
+          // turns into is named from it.
           val candidate = RespawnSchedule(0L, respawn.id, userId, userName, characterName,
-            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek)
+            firstStart, RespawnSchedule.Daily, durationMinutes, active = true, now, daysOfWeek,
+            nickname = nickname)
           // Checking for a clash and then writing the booking is two decisions
           // on one picture, and without the lock two people booking the same
           // evening at the same moment each got the picture from before the
@@ -1191,7 +1347,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         val theirs = Some((candidate.anchorAt, candidate.durationMinutes))
 
         repository.requestOccurrence(guildId, slot.id, candidate.userId, candidate.userName,
-          now, deadline, theirs) match {
+          candidate.nickname, now, deadline, theirs) match {
           case None => refuse(" Somebody else asked about it first.")
           case Some(asked) =>
             RespawnThreads.dm(guild, asked.userId,
@@ -1421,12 +1577,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             // longer an occurrence of anybody's standing rule, and the audit trail
             // keeps both halves of what happened.
             repository.reserveFor(guildId, respawn.id, requester,
-              slot.requesterUserName.getOrElse(""), "", start, minutes)
+              slot.requesterUserName.getOrElse(""), slot.requesterNickname.getOrElse(""),
+              start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
                 RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
-            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""))
+            SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""),
+              slot.requesterNickname.getOrElse(""))
           }
       }
     }
@@ -2043,6 +2201,80 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
+  // --- putting posts back to sleep ------------------------------------------
+
+  /** Archive the posts somebody has been clicking on that have since gone quiet.
+   *  Returns how many were closed.
+   *
+   *  The other half of [[RespawnSleep]]: presses are written down on JDA's event
+   *  thread, and this — on the sweep, where blocking is fine — is what acts on
+   *  them once they are due. A post is only closed if the spawn it belongs to
+   *  still has nobody on it, which is re-read here rather than trusted from
+   *  whenever the press happened: five minutes is long enough for somebody to
+   *  have claimed it, and closing a held spawn's post would take the Leave
+   *  button away from its holder.
+   */
+  def closeIdleThreads(guild: Guild, config: RespawnSettings,
+                       now: java.time.Instant = java.time.Instant.now()): Int = {
+    val guildId = guild.getId
+    val ready = RespawnSleep.due(guildId, now)
+    if (ready.isEmpty) 0
+    else RespawnThreads.findForum(guild, config).fold(0) { _ =>
+      // One catalogue read for the batch, keyed by thread so a due entry that
+      // belongs to no spawn — the board post, or a thread in some other forum
+      // that `RespawnSleep.touched` could not rule out without this lookup — is
+      // simply dropped.
+      val byThread = repository.listRespawns(guildId)
+        .filter(_.threadId.nonEmpty).map(respawn => respawn.threadId -> respawn).toMap
+      ready.count { entry =>
+        entry.threadId != config.boardThread &&
+          byThread.get(entry.threadId).exists { respawn =>
+            repository.activeClaim(guildId, respawn.id).isEmpty &&
+              RespawnThreads.closeThread(guild, entry.threadId)
+          }
+      }
+    }
+  }
+
+  /** Close any post that is awake with nobody on the spawn, whatever left it
+   *  that way. Returns how many were closed.
+   *
+   *  The backstop under [[RespawnSleep]], which is in memory: a restart forgets
+   *  every pending close, and a post left open by a press just before one would
+   *  otherwise stay open until somebody claimed and left that spawn. It also
+   *  catches the posts already stuck open from before any of this existed.
+   *
+   *  `getThreadChannels` is cache-only and by definition lists the forum's
+   *  *un*-archived posts, which is exactly the candidate set — so the scan
+   *  itself costs nothing and only the spawns it turns up cost a query. Posts
+   *  the debounce is already about to handle are skipped, so this never closes
+   *  one out from under somebody mid-visit.
+   *
+   *  `limit` caps the archives per pass. The lookups ahead of it are lazy, so a
+   *  forum full of held spawns costs its queries and stops at no requests rather
+   *  than spending the cap on posts that turn out to be fine.
+   */
+  def reconcileThreads(guild: Guild, config: RespawnSettings, limit: Int = 10): Int = {
+    val guildId = guild.getId
+    RespawnThreads.findForum(guild, config).fold(0) { forum =>
+      val open = forum.getThreadChannels.asScala.iterator
+        .filterNot(_.isArchived)
+        .filterNot(thread => thread.getId == config.boardThread)
+        .filterNot(thread => RespawnSleep.isPending(thread.getId))
+        .toList
+      if (open.isEmpty) 0
+      else {
+        val byThread = repository.listRespawns(guildId)
+          .filter(_.threadId.nonEmpty).map(respawn => respawn.threadId -> respawn).toMap
+        open.iterator
+          .flatMap(thread => byThread.get(thread.getId).map(thread -> _))
+          .filter { case (_, respawn) => repository.activeClaim(guildId, respawn.id).isEmpty }
+          .take(limit)
+          .count { case (thread, _) => RespawnThreads.closeThread(thread) }
+      }
+    }
+  }
+
   /** Booked slots on a spawn that haven't started yet. */
   def reservationsFor(guildId: String, respawnId: Long,
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
@@ -2090,7 +2322,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               Left("That one is being hunted now. Use Remove Claim on the board to end a running hunt.")
             case Some(slot) =>
               repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotRemoved)
-              Right(Names.user(slot.nickname, slot.userName))
+              Right(Names.plain(slot.nickname, slot.userName))
             case None =>
               predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
                 case None => Left("Nothing is booked at that time.")
@@ -2098,7 +2330,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
                     schedule.userName, schedule.nickname, schedule.characterName, startsAt,
                     schedule.durationMinutes, RespawnClaim.Outcome.SlotRemoved)
-                  Right(Names.user(schedule.nickname, schedule.userName))
+                  Right(Names.plain(schedule.nickname, schedule.userName))
               }
           }
         }
@@ -2133,7 +2365,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
             case Some(slot) if slot.isActive =>
               Left("That one is being hunted now. Use Hand To on the board to move a running claim.")
             case Some(slot) if slot.userId == toUserId =>
-              Left(s"That slot is already ${Names.user(slot.nickname, slot.userName)}'s.")
+              Left(s"That slot is already ${Names.plain(slot.nickname, slot.userName)}'s.")
             case Some(slot) =>
               // An occurrence of a rule is settled and replaced, so the rule
               // stops speaking for the day; a booking that belongs to nobody's
@@ -2143,7 +2375,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotMoved)
                 repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
                   startsAt, slot.durationMinutes)
-                Right(Names.user(slot.nickname, slot.userName))
+                Right(Names.plain(slot.nickname, slot.userName))
               } else
                 repository.reassignReservation(guildId, slot.id, toUserId, toUserName, toNickname)
                   .map(_ => Names.user(slot.nickname, slot.userName))
@@ -2152,14 +2384,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
                 case None => Left("Nothing is booked at that time.")
                 case Some(schedule) if schedule.userId == toUserId =>
-                  Left(s"That slot is already ${Names.user(schedule.nickname, schedule.userName)}'s.")
+                  Left(s"That slot is already ${Names.plain(schedule.nickname, schedule.userName)}'s.")
                 case Some(schedule) =>
                   repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
                     schedule.userName, schedule.nickname, schedule.characterName, startsAt,
                     schedule.durationMinutes, RespawnClaim.Outcome.SlotMoved)
                   repository.reserveFor(guildId, respawn.id, toUserId, toUserName, toNickname,
                     startsAt, schedule.durationMinutes)
-                  Right(Names.user(schedule.nickname, schedule.userName))
+                  Right(Names.plain(schedule.nickname, schedule.userName))
               }
           }
         }
@@ -2167,6 +2399,192 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         outcome
     }
   }
+
+  /** Change how long one window on the calendar runs, for a moderator.
+   *
+   *  The third of the calendar tools, and aimed the same way as the other two:
+   *  at whatever is selected on the grid, named by the instant it starts on,
+   *  whether or not it has a row behind it yet. What it does with that depends
+   *  on which of the three things it turns out to be.
+   *
+   *  ==A hunt somebody is on now==
+   *  Its deadline moves. Nobody's stamina is charged for a longer one, for the
+   *  same reason [[extendHolder]] charges nobody: the holder asked for the
+   *  window they paid for, and a moderator's decision is not theirs to fund. A
+   *  shorter one hands back what they will now never hunt, which is the same
+   *  reasoning read the other way round — leaving them billed for time a
+   *  moderator took off them would be the punishment neither of us meant.
+   *
+   *  It cannot go below what has already elapsed; those minutes are spent
+   *  whatever anybody now says. Setting it to exactly that ends the hunt at the
+   *  next sweep, which is as close to "stop now" as this tool goes — Remove
+   *  claim is the one that ends a hunt outright, with the queue behind it
+   *  served properly.
+   *
+   *  ==An evening already booked==
+   *  Its row is rewritten in place. A day of a repeating booking keeps its
+   *  place in the rule and the rule keeps its own length, so one evening runs
+   *  longer and next week does not — which is what a moderator putting one
+   *  evening right is asking for, and the same narrowness [[dropSlot]] has.
+   *
+   *  ==An evening a rule has not written down yet==
+   *  The day is settled and a booking in the same person's name is written
+   *  beside it at the new length, exactly as [[reassignSlot]] does for a day
+   *  that changes hands. There is nowhere else to record "this day, but longer"
+   *  about a rule.
+   *
+   *  ==What it will not do==
+   *  The guild's maximum claim length does not apply — it is a rule about what
+   *  members may ask for, and enforcing it here would refuse exactly the
+   *  repairs most worth making. [[MaxModeratorSlotMinutes]]
+   *  still does, as a guard against a number that could not be a hunt.
+   *
+   *  A future window is refused if it would run into the next thing on the
+   *  spawn, because booking one over somebody else is refused too and a
+   *  moderator's ruler should not be the way around that. A live hunt is not:
+   *  it overruns what follows, which is what a member's own extend and the
+   *  +30m button have always done, and the answer says whose evening it now
+   *  reaches into.
+   */
+  def editSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime, minutes: Int,
+               now: ZonedDateTime = ZonedDateTime.now()): Either[String, SlotEdit] = {
+    val guildId = guild.getId
+    if (minutes < MinimumClaimMinutes)
+      Left(s"A window has to be at least ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} long.")
+    else if (minutes > MaxModeratorSlotMinutes)
+      Left(s"${RespawnEmbeds.humanDuration(minutes)} is longer than the " +
+        s"${RespawnEmbeds.humanDuration(MaxModeratorSlotMinutes)} a single window can run.")
+    else settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        // Read and write on one picture of the spawn, like every other decision
+        // about a slot. What follows the window is part of that picture: without
+        // the lock, a booking made in between would be refused against on one
+        // path and quietly run into on the other.
+        val outcome = repository.withRespawnLock(guildId, respawn.id) {
+          repository.slotAt(guildId, respawn.id, startsAt) match {
+            case Some(slot) if slot.isActive => resizeRunning(guildId, respawn, slot, minutes, now)
+            case Some(slot)                  => resizeReserved(guildId, respawn, slot, startsAt, minutes, now)
+            case None                        => resizePredicted(guildId, respawn, startsAt, minutes, now)
+          }
+        }
+        // Both outside the lock: the card is a Discord round trip, and holding
+        // a spawn's row across one would stall every other claim on it for as
+        // long as Discord felt like taking.
+        outcome.foreach { edit =>
+          refreshThread(guild, respawn, config)
+          if (edit.live) tellHolderOfResize(guild, respawn, edit)
+        }
+        outcome
+    }
+  }
+
+  /** The running-hunt case of [[editSlot]]. */
+  private def resizeRunning(guildId: String, respawn: Respawn, slot: RespawnClaim,
+                            minutes: Int, now: ZonedDateTime): Either[String, SlotEdit] =
+    // A claim in limbo has already been offered on to the next person. Moving
+    // its deadline would extend a hunt on its way out of somebody's hands, and
+    // the offer would still be standing.
+    if (slot.limboUntil.isDefined)
+      Left("That hunt is already being handed to the next person.")
+    else {
+      val start = slot.startsAt.getOrElse(slot.claimedAt)
+      val elapsed = math.max(0L, java.time.Duration.between(start, now).toMinutes).toInt
+      if (minutes < elapsed)
+        Left(s"That hunt has already run ${RespawnEmbeds.humanDuration(elapsed)}. Use Remove claim to " +
+          "end it now — those minutes are spent either way.")
+      else {
+        val newEnd = start.plusMinutes(minutes.toLong)
+        val delta = minutes - slot.durationMinutes
+        // Only ever downwards. Growing one is the moderator's gift and costs the
+        // holder nothing; shrinking it hands back minutes they will never use.
+        if (delta < 0) repository.refundStamina(guildId, slot.userId, -delta, resetBoundary(now))
+        repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
+        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
+          live = true, cutInto = nextUpOn(guildId, respawn.id, start, newEnd, now)))
+      }
+    }
+
+  /** The booked-evening case of [[editSlot]]. */
+  private def resizeReserved(guildId: String, respawn: Respawn, slot: RespawnClaim,
+                             startsAt: ZonedDateTime, minutes: Int,
+                             now: ZonedDateTime): Either[String, SlotEdit] = {
+    val newEnd = startsAt.plusMinutes(minutes.toLong)
+    nextUpOn(guildId, respawn.id, startsAt, newEnd, now) match {
+      case Some(who) => Left(clashRefusal(who))
+      case None =>
+        // Nothing to settle with stamina: a booking reserves none until it
+        // starts, so its length is a stored number until then.
+        repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
+        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
+          live = false, cutInto = None))
+    }
+  }
+
+  /** The not-yet-written-down case of [[editSlot]]. */
+  private def resizePredicted(guildId: String, respawn: Respawn, startsAt: ZonedDateTime,
+                              minutes: Int, now: ZonedDateTime): Either[String, SlotEdit] =
+    predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
+      case None => Left("Nothing is booked at that time.")
+      case Some(schedule) =>
+        val newEnd = startsAt.plusMinutes(minutes.toLong)
+        nextUpOn(guildId, respawn.id, startsAt, newEnd, now) match {
+          case Some(who) => Left(clashRefusal(who))
+          case None =>
+            repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+              schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+              schedule.durationMinutes, RespawnClaim.Outcome.SlotResized)
+            repository.reserveFor(guildId, respawn.id, schedule.userId, schedule.userName,
+              schedule.nickname, startsAt, minutes)
+            Right(SlotEdit(Names.plain(schedule.nickname, schedule.userName), schedule.userId,
+              minutes, newEnd, live = false, cutInto = None))
+        }
+    }
+
+  private def clashRefusal(who: String): String =
+    s"That would run into $who's slot on this respawn. Move or remove theirs first."
+
+  /** Whoever is on this spawn next, if a window ending at `until` reaches them.
+   *
+   *  Both a booking that has been written down and a day a rule has not got to
+   *  yet, for the reason `clashingReservations` gives: the two see different
+   *  things, and a window dragged out over an evening beyond the look-ahead
+   *  would find nothing to collide with if only the rows were consulted.
+   *
+   *  Strictly after `after`, so the window being edited never finds itself.
+   */
+  private def nextUpOn(guildId: String, respawnId: Long, after: ZonedDateTime,
+                       until: ZonedDateTime, now: ZonedDateTime): Option[String] = {
+    val booked = repository.reservationsFor(guildId, respawnId, after)
+      .filter(_.startsAt.exists(_.isBefore(until)))
+      .map(slot => Names.plain(slot.nickname, slot.userName))
+    if (booked.nonEmpty) booked.headOption
+    else {
+      // A day already settled is in nobody's way, which is what stops an evening
+      // a moderator has just taken off the calendar from blocking the edit to
+      // the one before it.
+      val settled = daysGivenUp(guildId, after, Some(until), Some(respawnId))
+      repository.schedulesForRespawn(guildId, respawnId).iterator.flatMap { schedule =>
+        schedule.occurrencesBetween(after.plusMinutes(1), until)
+          .filterNot(start => settled.getOrElse(schedule.id, Set.empty).contains(start.toInstant))
+          .map(_ => Names.plain(schedule.nickname, schedule.userName))
+      }.toList.headOption
+    }
+  }
+
+  /** Telling somebody their hunt just got longer or shorter under them.
+   *
+   *  Worth a message for the same reason [[forceLeave]] is: a deadline that
+   *  moves with no explanation is indistinguishable from the bot getting it
+   *  wrong. Only a live hunt earns one — an evening next week is read off the
+   *  calendar rather than remembered as a countdown. */
+  private def tellHolderOfResize(guild: Guild, respawn: Respawn, edit: SlotEdit): Unit =
+    RespawnThreads.dm(guild, edit.ownerId,
+      RespawnEmbeds.dmEmbed("Your hunt was re-timed",
+        s"A moderator has set your claim on ${RespawnEmbeds.spawnLink(respawn)} to " +
+          s"**${RespawnEmbeds.humanDuration(edit.minutes)}**, so it now runs until " +
+          s"<t:${edit.endsAt.toEpochSecond}:t>. It hasn't cost you any stamina.",
+        imageFor(respawn), RespawnEmbeds.FreeColor))
 
   /** The rule that would put somebody on this spawn at this exact time, for a
    *  day the sweep has not written down yet. None when no rule names it — which
@@ -2177,7 +2595,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
       .filter(_.startsAt(startsAt))
       .find(_ => !startsAt.isBefore(now))
 
-  /** `/respawn status <spawn>` — one spawn's current state. */
+  /** One spawn's current state, for its card and for the dashboard. */
   def status(guildId: String, respawn: Respawn): (Option[RespawnClaim], List[RespawnClaim]) =
     (repository.activeClaim(guildId, respawn.id), repository.queueFor(guildId, respawn.id))
 

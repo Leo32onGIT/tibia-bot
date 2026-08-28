@@ -4,8 +4,8 @@ package com.tibiabot.web
  *
  *  Its own object rather than a private helper on `Config` because that one
  *  cannot be loaded without a deployment's environment behind it, and the rule
- *  this encodes is worth pinning by a test: a blank setting interpolated into
- *  `https://$domain` produces a string that still looks like a URL, and a link
+ *  this encodes is worth pinning by a test: a blank setting interpolated after
+ *  `https://` produces a string that still looks like a URL, and a link
  *  built that way is wrong in a way nothing rejects. It is how `https://dashboard`
  *  came to be pinned in every guild run by a bot that serves no dashboard.
  */

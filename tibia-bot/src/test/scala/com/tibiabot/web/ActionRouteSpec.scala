@@ -98,6 +98,13 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"remove:$code"; result
     }
+    def setSpawnMax(guildId: String, actorId: String, code: String,
+                    minutes: Option[Int]): Future[ActionResult] = {
+      // "clear" rather than an empty string, so a test can tell an override being
+      // removed from one being set to nothing — which the endpoint refuses.
+      moderatorCalls = moderatorCalls :+ s"spawnmax:$code:${minutes.fold("clear")(_.toString)}"
+      result
+    }
     def extendHolder(guildId: String, actorId: String, code: String,
                      extraMinutes: Int): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"extend:$code:$extraMinutes"; result
@@ -109,6 +116,10 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def reassignSlot(guildId: String, actorId: String, code: String,
                      startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult] = {
       moderatorCalls = moderatorCalls :+ s"move:$code:${startsAt.toInstant}:$toUserId"; result
+    }
+    def editSlot(guildId: String, actorId: String, code: String,
+                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+ s"edit:$code:${startsAt.toInstant}:$minutes"; result
     }
   }
 
@@ -130,13 +141,18 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   private def routes(actions: RespawnActionPort,
                      member: Option[MemberAccess] = Some(MemberAccess(false, Set.empty, Set(CategoryId))),
                      moderatorRole: String = "0",
-                     theirGuilds: Set[String] = Set("g1")) = {
+                     theirGuilds: Set[String] = Set("g1"),
+                     /** No entry at all, as opposed to an empty one: what a
+                      *  restart leaves behind, since the cache is in memory and
+                      *  only a login writes to it. The two are different answers
+                      *  — see the board page's guard. */
+                     forgotten: Boolean = false) = {
     val a = auth
     // The guild list is seeded directly; a real one arrives at login.
-    a.userGuilds.put("user-1", theirGuilds)
+    if (!forgotten) a.userGuilds.put("user-1", theirGuilds)
     val access = new DashboardAccessService(
       new FakeGateway(member),
-      respawnConfigured = _ => true,
+      respawnForumExists = _ => true,
       worldsOf = _ => List(WorldChannel("Antica", CategoryId)),
       moderatorRoleOf = _ => moderatorRole)
     val cache = new CreatureSpriteCache(Files.createTempDirectory("action-route"), _ => Future.successful(None))(sameThread)
@@ -220,6 +236,49 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       status shouldBe StatusCodes.Forbidden
     }
     actions.claims shouldBe empty
+  }
+
+  // The board *page*, not a payload. It is a link in Discord now, so somebody
+  // arriving on a guild that resolves to nothing needs a page to go on with
+  // rather than the word "Forbidden" — and the commonest reason to arrive that
+  // way is a session that outlived the memory of which servers it belongs to,
+  // which is really "sign in again".
+  // The case a restart creates, and the one that was reported: the cookie is
+  // good for a week, the guild list behind it lives in memory and does not
+  // survive the process. The visitor is signed in as far as the session goes,
+  // resolves to nothing, and needs to sign in again — which must not cost them
+  // the spawn they were opening.
+  test("a session that outlived its guild list signs in again, keeping the page") {
+    Get("/dashboard/g/g1?spawn=415") ~> signedIn ~>
+      routes(new RecordingActions, forgotten = true) ~> check {
+      status shouldBe StatusCodes.Found
+      val location = header("Location").get.value()
+      location should startWith("/dashboard/auth/login?")
+      val to = akka.http.scaladsl.model.Uri(location).query().get("to").get
+      new String(java.util.Base64.getUrlDecoder.decode(to), "UTF-8") shouldBe "/dashboard/g/g1?spawn=415"
+    }
+  }
+
+  // And the other half of that branch, which is what stops it looping: a login
+  // records whatever Discord said, so somebody whose list we *do* hold and who
+  // simply cannot see this guild gets the front door instead of a second login.
+  test("a guild that is known not to be theirs goes to the front door, not back to login") {
+    // Including when the list we hold is empty — that is still a list, written
+    // by a login, so a second one would say the same thing.
+    Get("/dashboard/g/g-other?spawn=415") ~> signedIn ~>
+      routes(new RecordingActions, theirGuilds = Set.empty) ~> check {
+      status shouldBe StatusCodes.Found
+      header("Location").get.value() shouldBe "/dashboard"
+    }
+  }
+
+  // The page redirects; its data does not. A poll reads 403 as "no longer have
+  // access" and says so in the header, where a redirect would be answered with
+  // the sign-in HTML and parsed as JSON.
+  test("the board's own data still answers a caller it cannot admit with 403") {
+    Get("/dashboard/g/g-other/board") ~> signedIn ~> routes(new RecordingActions) ~> check {
+      status shouldBe StatusCodes.Forbidden
+    }
   }
 
   // Knowing a guild id must get you nothing — the check is the authorization.
@@ -376,10 +435,13 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/grant-stamina", """{"userId":"u9","minutes":60}"""),
       ("/dashboard/g/g1/spawns", """{"code":"999","name":"Somewhere"}"""),
       ("/dashboard/g/g1/remove-spawn", """{"code":"999"}"""),
+      ("/dashboard/g/g1/spawn-max", """{"code":"415","minutes":60}"""),
       ("/dashboard/g/g1/extend-holder", """{"code":"415","minutes":30}"""),
       ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
       ("/dashboard/g/g1/reassign-slot",
-        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":120}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path: ")(status shouldBe StatusCodes.Forbidden)
@@ -405,6 +467,8 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/remove-spawn", body("""{"code":"999"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":60}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/extend-holder", body("""{"code":"415","minutes":30}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     Post("/dashboard/g/g1/drop-slot",
@@ -413,10 +477,56 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Post("/dashboard/g/g1/reassign-slot",
       body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","toUserId":"u9"}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/edit-slot",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":120}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
-      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "extend:415:30",
-      "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9")
+      "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "spawnmax:415:60", "extend:415:30",
+      "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9",
+      "edit:415:2026-08-13T11:00:00Z:120")
+  }
+
+  test("an empty max claim clears the spawn's own ceiling rather than failing") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    // Both spellings of "no value", because a page that clears a field sends the
+    // empty string and one that drops it sends nothing at all.
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":""}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe List("spawnmax:415:clear", "spawnmax:415:clear")
+  }
+
+  // The endpoint reads what was typed through ClaimDuration, so the dashboard and
+  // the Discord form agree about what "2h" is. Its own table is in
+  // ClaimDurationSpec; this only pins down that the route goes through it.
+  test("a max claim is read the way it was typed") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2h"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"1h30"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    // A bare 2 is two hours, not two minutes — nobody caps a spawn at two
+    // minutes, and the suffix is there for whoever means the short one.
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.moderatorCalls shouldBe
+      List("spawnmax:415:120", "spawnmax:415:90", "spawnmax:415:120")
+  }
+
+  // Refused rather than guessed at: reading "2 days" as two of anything is how a
+  // ceiling ends up somewhere nobody chose.
+  test("a max claim that cannot be read never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions, member = moderator, moderatorRole = ModRole)
+    Post("/dashboard/g/g1/spawn-max", body("""{"code":"415","minutes":"2 days"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }
+    Post("/dashboard/g/g1/spawn-max", body("""{"minutes":"60"}""")) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.BadRequest }
+    actions.moderatorCalls shouldBe empty
   }
 
   // A slot is named by the moment it starts on, and getting that wrong means
@@ -430,7 +540,15 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       ("/dashboard/g/g1/drop-slot", """{"code":"415","startsAt":"tuesday evening"}"""),
       ("/dashboard/g/g1/drop-slot", """{"startsAt":"2026-08-13T11:00:00Z"}"""),
       ("/dashboard/g/g1/reassign-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
-      ("/dashboard/g/g1/reassign-slot", """{"code":"415","toUserId":"u9"}""")
+      ("/dashboard/g/g1/reassign-slot", """{"code":"415","toUserId":"u9"}"""),
+      // A length is as load-bearing as the day: an edit that lost it would
+      // otherwise be a slot silently set to nothing.
+      ("/dashboard/g/g1/edit-slot", """{"code":"415","startsAt":"2026-08-13T11:00:00Z"}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":0}"""),
+      ("/dashboard/g/g1/edit-slot",
+        """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":"soon"}"""),
+      ("/dashboard/g/g1/edit-slot", """{"code":"415","minutes":120}""")
     ).foreach { case (path, payload) =>
       Post(path, body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$path $payload: ")(status shouldBe StatusCodes.BadRequest)

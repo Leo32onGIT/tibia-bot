@@ -36,7 +36,11 @@ final class BoardSnapshotCache(
   now: () => Instant = () => Instant.now()
 ) {
 
-  private final case class Entry(board: List[RespawnBoardEntry], expiresAt: Instant)
+  // From the companion rather than from here: a case class nested in a class
+  // carries a reference to its enclosing instance, which the compiler cannot
+  // check when matching on it, and warns about every time this cache reads an
+  // entry back out.
+  import BoardSnapshotCache.Entry
 
   private val entries = new ConcurrentHashMap[String, Entry]()
 
@@ -76,6 +80,8 @@ final class BoardSnapshotCache(
 }
 
 object BoardSnapshotCache {
+  private final case class Entry(board: List[RespawnBoardEntry], expiresAt: Instant)
+
   /** Short enough to be invisible against a ten-second poll, long enough that
    *  every tab watching one guild is answered from a single read. */
   val DefaultTtl: Duration = Duration.ofSeconds(3)

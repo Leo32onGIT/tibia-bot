@@ -88,4 +88,27 @@ class RetryPolicySpec extends AnyFunSuite with Matchers {
     noJitter.isRateLimited(429) shouldBe true
     List(200, 500, 503).foreach(noJitter.isRateLimited(_) shouldBe false)
   }
+
+  test("a caller that polls again soon gets no inline retry, whatever the transient status") {
+    List(500, 502, 503, 504).foreach { status =>
+      withClue(s"status $status: ") {
+        noJitter.onResponse(status, None, attempt = 0, callerRetriesSoon = true) shouldBe RetryDecision.GiveUp
+      }
+    }
+  }
+
+  test("a caller that polls again soon gets no inline retry on a connection failure either") {
+    noJitter.onConnectionFailure(attempt = 0, callerRetriesSoon = true) shouldBe RetryDecision.GiveUp
+  }
+
+  test("a short Retry-After does not buy a retry back for a caller that polls again soon") {
+    // The server asking for 1s is still not worth spending two more requests
+    // on when the caller is going to ask again on its own in a minute.
+    noJitter.onResponse(503, Some(1.second), attempt = 0, callerRetriesSoon = true) shouldBe RetryDecision.GiveUp
+  }
+
+  test("a one-shot caller keeps the inline retry, since for it there is no next attempt") {
+    noJitter.onResponse(503, None, attempt = 0) shouldBe a[RetryDecision.RetryIn]
+    noJitter.onConnectionFailure(attempt = 0) shouldBe a[RetryDecision.RetryIn]
+  }
 }

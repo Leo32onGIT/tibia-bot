@@ -69,6 +69,38 @@ final case class GuildAccess(
   iconUrl: Option[String] = None
 )
 
+/** A guild that could not be resolved this time round.
+ *
+ *  Not the same as one the visitor may not use — that one is simply absent.
+ *  This is a guild whose answer never arrived: a rate-limited Discord lookup,
+ *  or another bot in the fleet that did not reply inside its second. The name
+ *  is whatever was known without asking, which is the guild's own name locally
+ *  and the roster's copy of it for a guild run elsewhere.
+ */
+final case class UnreachableGuild(guildId: String, guildName: String)
+
+/** Everything one resolution pass found out, including what it failed to find
+ *  out.
+ *
+ *  Resolution used to yield a bare list, which made "you belong to one server"
+ *  and "we could only reach one of your servers" the same value. They are not
+ *  remotely the same thing to act on: the first is a reason to skip the picker,
+ *  the second is a reason to show it and say what went wrong. Everything that
+ *  decides where a visitor lands now reads this rather than a list.
+ */
+final case class AccessReport(granted: List[GuildAccess], unreachable: List[UnreachableGuild]) {
+  def ++(other: AccessReport): AccessReport =
+    AccessReport(granted ++ other.granted, unreachable ++ other.unreachable)
+
+  /** Whether this pass got a straight answer about everything it asked about. */
+  def complete: Boolean = unreachable.isEmpty
+}
+
+object AccessReport {
+  val Empty: AccessReport = AccessReport(Nil, Nil)
+  def of(granted: List[GuildAccess]): AccessReport = AccessReport(granted, Nil)
+}
+
 /** Where a visitor lands after signing in. */
 sealed trait DashboardEntry
 object DashboardEntry {
@@ -81,8 +113,17 @@ object DashboardEntry {
   /** Exactly one guild, so there is nothing to ask. */
   final case class Straight(access: GuildAccess) extends DashboardEntry
 
-  /** Several, so they pick. */
-  final case class Choose(options: List[GuildAccess]) extends DashboardEntry
+  /** Several, so they pick. `unreachable` names servers that belong on this
+   *  list but did not answer — normally empty, and shown as a note when it is
+   *  not, so a short list explains itself instead of looking authoritative. */
+  final case class Choose(options: List[GuildAccess],
+                          unreachable: List[UnreachableGuild] = Nil) extends DashboardEntry
+
+  /** Nothing resolved, and not because there is nothing: every candidate failed
+   *  to answer. Distinct from [[Nowhere]] because "you have no servers here"
+   *  and "we could not reach your servers" are opposite advice — the first says
+   *  set the bot up, the second says try again in a moment. */
+  final case class Unreachable(guilds: List[UnreachableGuild]) extends DashboardEntry
 }
 
 /** The access decisions, kept free of JDA so the whole table can be checked
@@ -119,17 +160,37 @@ object DashboardAccess {
    *  was already resolved against the live guild — so this only decides where a
    *  visitor lands, and the support server stays reachable by its own URL either
    *  way. */
-  def entryFor(accesses: List[GuildAccess], demoGuildId: String = ""): DashboardEntry = {
-    val sorted = accesses.sortBy(_.guildName.toLowerCase)
+  def entryFor(report: AccessReport, demoGuildId: String = ""): DashboardEntry = {
+    val sorted = report.granted.sortBy(_.guildName.toLowerCase)
     val theirs = if (demoGuildId.isEmpty) sorted else sorted.filterNot(_.guildId == demoGuildId)
-    theirs match {
+    val missing = report.unreachable.sortBy(_.guildName.toLowerCase)
+
+    // Split on whether the answer is complete before anything else, because
+    // every shortcut below is only safe when it is. The two halves used to be
+    // one, on the reasoning that a guild we could not resolve and a guild the
+    // visitor may not use amount to the same absence — which is true of the
+    // list and false of what to do about it.
+    if (missing.isEmpty) theirs match {
       case Nil =>
         // Only the demo left, if anything.
         sorted.headOption.fold[DashboardEntry](DashboardEntry.Nowhere)(DashboardEntry.Straight)
       case single :: Nil => DashboardEntry.Straight(single)
-      case many          => DashboardEntry.Choose(many)
+      case many          => DashboardEntry.Choose(many, Nil)
+    }
+    // Incomplete, so never straight through. A single guild is only "nothing to
+    // ask" when it is the whole truth; when something failed to answer, that
+    // same single guild is a list we already know to be short, and skipping the
+    // picker would drop somebody into a board they never chose without ever
+    // mentioning the one they came for. The demo is not a consolation prize
+    // here either — being sent into the support server because your own did not
+    // answer is the same silent misdirection wearing a friendlier face.
+    else theirs match {
+      case Nil if sorted.isEmpty => DashboardEntry.Unreachable(missing)
+      case Nil                   => DashboardEntry.Choose(sorted, missing)
+      case some                  => DashboardEntry.Choose(some, missing)
     }
   }
+
 
   /** Whether a request for `guildId` may proceed at `required` or better.
    *

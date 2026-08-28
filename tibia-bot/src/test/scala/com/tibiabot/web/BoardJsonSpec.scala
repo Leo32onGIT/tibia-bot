@@ -52,7 +52,9 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
         startsAt = Some(now.minusMinutes(30)), endsAt = Some(now.plusMinutes(90)), character = "Bubble")
       val fields = firstSpawn(json(RespawnBoardEntry(spawn(), Some(held), Nil, Nil, None))).fields
       fields("state") shouldBe JsString("claimed")
-      fields("holder") shouldBe JsString("Bubble")
+      // The Discord name, not the character "Bubble" this claim also carries —
+      // see RespawnBoardEntry.holderLabel.
+      fields("holder") shouldBe JsString("Nubbz")
       fields("startsAt") shouldBe JsString("2026-08-07T11:30:00Z")
       fields("endsAt") shouldBe JsString("2026-08-07T13:30:00Z")
     }
@@ -155,7 +157,11 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
   "catalogueJson" should {
 
     def catalogue(entries: com.tibiabot.respawn.RespawnBoardEntry*) =
-      RespawnDashboardRoute.catalogueJson(entries.toList)
+      RespawnDashboardRoute.catalogueJson(entries.toList, _ => None)
+
+    /** The same, for a creature whose art the cache has measured as off centre. */
+    def catalogueNudging(nudge: SpriteNudge, entries: com.tibiabot.respawn.RespawnBoardEntry*) =
+      RespawnDashboardRoute.catalogueJson(entries.toList, _ => Some(nudge))
 
     def firstEntry(o: JsObject) =
       o.fields("spawns").asInstanceOf[JsArray].elements.head.asJsObject
@@ -185,6 +191,33 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
     "omit the sprite rather than emit an unsafe name" in {
       firstEntry(catalogue(RespawnBoardEntry(spawn("../../etc/passwd"), None, Nil, Nil, None)))
         .fields.contains("sprite") shouldBe false
+    }
+
+    // A creature drawn in the lower half of its own canvas: object-fit centres
+    // the canvas, so the page is told how far to move the picture instead.
+    "carry the sprite's nudge when its creature is off centre in its canvas" in {
+      val fields = firstEntry(catalogueNudging(SpriteNudge(0.0, -0.1563),
+        RespawnBoardEntry(spawn("Misguided_Bully"), None, Nil, Nil, None))).fields
+      fields("nudgeY") shouldBe JsNumber(BigDecimal("-0.1563"))
+      // The sideways half is nearly always nothing, and nothing is not sent.
+      fields.contains("nudgeX") shouldBe false
+    }
+
+    // The Mitmah Seer, drawn into the corner of its canvas rather than the
+    // middle of it — the one shape that moves on both axes.
+    "carry both axes for a creature off centre in both" in {
+      val fields = firstEntry(catalogueNudging(SpriteNudge(-0.1797, -0.2109),
+        RespawnBoardEntry(spawn("Mitmah_Seer"), None, Nil, Nil, None))).fields
+      fields("nudgeX") shouldBe JsNumber(BigDecimal("-0.1797"))
+      fields("nudgeY") shouldBe JsNumber(BigDecimal("-0.2109"))
+    }
+
+    // Which is most of them, and the reason absence rather than zero: a number
+    // in every row to say "leave this one alone" is a payload nobody needs.
+    "omit the nudge for a sprite that wants no shifting" in {
+      val fields = firstEntry(catalogue(RespawnBoardEntry(spawn("Orc_Warlord"), None, Nil, Nil, None))).fields
+      fields.contains("nudgeX") shouldBe false
+      fields.contains("nudgeY") shouldBe false
     }
 
     "keep the catalogue in the order the board is in" in {

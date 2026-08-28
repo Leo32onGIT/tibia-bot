@@ -19,16 +19,20 @@ class ServerChipSpec extends AnyWordSpec with Matchers {
   private val here = access("1", "Violent")
   private val other = access("2", "Refugia Social")
 
+  /** A complete answer, which is what every case below assumes unless it says
+   *  otherwise. */
+  private def among(gs: GuildAccess*) = AccessReport.of(gs.toList)
+
   "the server chip" should {
 
     "name the page after the server, and say which page it is" in {
-      val html = RespawnDashboardRoute.serverChip(here, List(here))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here)))
       html should include("Violent")
       html should include("""<span class="brand-suffix">/dashboard</span>""")
     }
 
     "offer nothing to press when there is only one server" in {
-      val html = RespawnDashboardRoute.serverChip(here, List(here))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here)))
       // A chevron here would promise a choice that does not exist.
       html should not include "chev"
       html should not include "sw-menu"
@@ -37,7 +41,7 @@ class ServerChipSpec extends AnyWordSpec with Matchers {
     }
 
     "become a menu once there is somewhere to go" in {
-      val html = RespawnDashboardRoute.serverChip(here, List(here, other))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here, other)))
       html should include("""id="server-switch"""")
       html should include("""id="server-switch-btn"""")
       html should include("sw-menu")
@@ -45,14 +49,14 @@ class ServerChipSpec extends AnyWordSpec with Matchers {
     }
 
     "list every server the viewer can reach, each as a real link" in {
-      val html = RespawnDashboardRoute.serverChip(here, List(here, other))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here, other)))
       html should include("""href="/dashboard/g/1"""")
       html should include("""href="/dashboard/g/2"""")
       html should include("Refugia Social")
     }
 
     "mark the one being looked at, and only that one" in {
-      val html = RespawnDashboardRoute.serverChip(here, List(here, other))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here, other)))
       html should include("""<a class="sw-item on" href="/dashboard/g/1"""")
       html should include("""<a class="sw-item" href="/dashboard/g/2"""")
       // One tick, against the current server.
@@ -63,7 +67,7 @@ class ServerChipSpec extends AnyWordSpec with Matchers {
       // A board you moderate and a board you are a member of are different
       // places, and finding out which by landing on it costs a page load.
       val admin = access("1", "Violent", AccessTier.Admin)
-      val html = RespawnDashboardRoute.serverChip(admin, List(admin, other))
+      val html = RespawnDashboardRoute.serverChip(admin, AccessReport.of(List(admin, other)))
       html should include("""<span class="tier tier-admin">admin</span>""")
       html should include("""<span class="tier tier-member">member</span>""")
     }
@@ -71,34 +75,73 @@ class ServerChipSpec extends AnyWordSpec with Matchers {
     "keep saying nothing about worlds" in {
       // Which worlds a guild tracks is what tells two entries apart on the full
       // picker, where there is room for it. Here it is noise on every row.
-      RespawnDashboardRoute.serverChip(here, List(here, other)) should not include "Antica"
+      RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here, other))) should not include "Antica"
     }
 
     "wear each server's own face when it has one" in {
       val withIcon = access("1", "Violent", icon = Some("https://cdn.discordapp.com/icons/1/abc.png"))
-      val html = RespawnDashboardRoute.serverChip(withIcon, List(withIcon, other))
+      val html = RespawnDashboardRoute.serverChip(withIcon, AccessReport.of(List(withIcon, other)))
       html should include("""<img class="sw-icon" src="https://cdn.discordapp.com/icons/1/abc.png"""")
     }
 
     "fall back to the glyph for a server that never set an icon" in {
       // Not a broken image, and not a gap that unaligns the names beside it.
-      val html = RespawnDashboardRoute.serverChip(here, List(here, other))
+      val html = RespawnDashboardRoute.serverChip(here, AccessReport.of(List(here, other)))
       html should include("sw-glyph")
       html should not include "<img"
     }
 
     "escape an icon url rather than letting it break out of the attribute" in {
       val nasty = access("9", "Odd", icon = Some("""x" onerror="alert(1)"""))
-      val html = RespawnDashboardRoute.serverChip(nasty, List(nasty, other))
+      val html = RespawnDashboardRoute.serverChip(nasty, AccessReport.of(List(nasty, other)))
       html should not include """onerror="alert(1)""""
       html should include("&quot;")
     }
 
     "escape a server name rather than letting it write markup" in {
       val nasty = access("3", """<img src=x onerror="alert(1)">""")
-      val html = RespawnDashboardRoute.serverChip(nasty, List(nasty, other))
+      val html = RespawnDashboardRoute.serverChip(nasty, AccessReport.of(List(nasty, other)))
       html should not include "<img"
       html should include("&lt;img")
     }
+
+    // The dead end this fixes. Landing on a board because the picker collapsed
+    // to one entry used to hide the switcher as well, since it counted the same
+    // list — so the one page a visitor most needed a way off was the one page
+    // with no way off.
+    "keep the menu when a server is missing rather than absent" in {
+      val html = RespawnDashboardRoute.serverChip(
+        here, AccessReport(List(here), List(UnreachableGuild("2", "Refugia Social"))))
+      html should include("sw-menu")
+      html should include("chev")
+      html should include("Refugia Social")
+    }
+
+    // Named so it is visibly missing, but not offered as a destination: we never
+    // found out whether it is theirs to open, so a link would be a link to a 403.
+    "name a server that did not answer without linking to it" in {
+      val html = RespawnDashboardRoute.serverChip(
+        here, AccessReport(List(here), List(UnreachableGuild("2", "Refugia Social"))))
+      html should include("""<span class="sw-item off"""")
+      html should not include """href="/dashboard/g/2""""
+      html should include("no answer")
+    }
+
+    // One reliable way back to the whole list, whatever this menu managed to
+    // resolve.
+    "always offer the full picker from inside the menu" in {
+      val html = RespawnDashboardRoute.serverChip(here, among(here, other))
+      html should include("""href="/dashboard/choose"""")
+      html should include("All servers")
+    }
+
+    // The plain label is still the answer for the ordinary single-server case:
+    // one server, nothing missing, nothing to choose between.
+    "stay a plain label when one server is the whole truth" in {
+      val html = RespawnDashboardRoute.serverChip(here, among(here))
+      html should not include "sw-menu"
+      html should not include "/dashboard/choose"
+    }
+
   }
 }

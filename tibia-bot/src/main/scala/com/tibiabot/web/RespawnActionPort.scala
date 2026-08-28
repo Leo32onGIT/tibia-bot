@@ -13,11 +13,12 @@ import scala.concurrent.Future
  *  lifecycle (see `respawn.RespawnOwnership`). Putting that check behind this
  *  interface means a route cannot forget it.
  *
- *  [[Unavailable]] is that refusal, and it is deliberately distinct from a
- *  permission failure: the visitor did nothing wrong and retrying will not
- *  help, so the page says so rather than implying they lack access. It is also
- *  the seam a Redis relay to the owning bot slots into later, at which point
- *  the case stops being reachable for guilds another bot owns.
+ *  [[RespawnActionPort.Unavailable]] is that refusal, and it is deliberately
+ *  distinct from a permission failure: the visitor did nothing wrong and
+ *  retrying will not help, so the page says so rather than implying they lack
+ *  access. It is also the seam a Redis relay to the owning bot slots into
+ *  later, at which point the case stops being reachable for guilds another bot
+ *  owns.
  */
 trait RespawnActionPort {
 
@@ -39,7 +40,7 @@ trait RespawnActionPort {
             code: String, minutes: Option[Int]): Future[ActionResult]
 
   /** Give up a held spawn, or leave its queue. `code` empty releases whatever
-   *  the caller holds, matching `/respawn release` with no argument. */
+   *  the caller holds, rather than naming a spawn. */
   def release(guildId: String, userId: String, code: Option[String]): Future[ActionResult]
 
   /** Add time to the claim the caller is currently holding. */
@@ -113,6 +114,15 @@ trait RespawnActionPort {
   def addSpawn(guildId: String, actorId: String, code: String, region: String,
                name: String, creature: String): Future[ActionResult]
 
+  /** Set or clear one spawn's own ceiling on claim length.
+   *
+   *  `minutes` empty clears the override, putting the spawn back on the guild's
+   *  number. Relayed like the other catalogue writes because the spawn's forum
+   *  post has to be redrawn afterwards, and only the bot that owns the forum can
+   *  touch it. */
+  def setSpawnMax(guildId: String, actorId: String, code: String,
+                  minutes: Option[Int]): Future[ActionResult]
+
   /** Take one day off the calendar, leaving the booking rule behind it alone.
    *
    *  The day is named by the instant it starts on, which is what the grid
@@ -130,6 +140,20 @@ trait RespawnActionPort {
    */
   def reassignSlot(guildId: String, actorId: String, code: String,
                    startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult]
+
+  /** Change how long one window on the calendar runs.
+   *
+   *  Named by the instant it starts on for the same reason [[dropSlot]] is: the
+   *  grid draws days a rule has not written down yet, and those have no id to
+   *  send. The window it names may equally be the hunt in progress, which is
+   *  what lets one button on the panel serve whatever is selected.
+   *
+   *  A moderator override throughout — no stamina is charged for a longer
+   *  window and the guild's maximum claim length does not apply. See
+   *  `RespawnService.editSlot` for what it will still refuse.
+   */
+  def editSlot(guildId: String, actorId: String, code: String,
+               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult]
 
   /** Take a spawn the guild added back out of its catalogue.
    *

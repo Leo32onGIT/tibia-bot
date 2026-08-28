@@ -74,24 +74,43 @@ object RespawnEmbeds {
     else s"${remainder}m"
   }
 
-  /** How a claimant is named: their Tibia character when they gave one, followed
-   *  by the Discord name the claim was made under. Both are plain text — see
-   *  [[Names.user]] for why none of these read as a mention. */
+  /** How somebody is named on the surfaces the people hunting beside them read:
+   *  their Tibia character when they gave one, then the single Discord name
+   *  everybody calls them by.
+   *
+   *  One Discord name rather than the account/nickname pair [[accountLabel]]
+   *  writes. What a card or a Book panel is opened for is who to go and ask, and
+   *  the name they'd be called in chat answers that on its own — the account
+   *  name beside it made every row half again as long to say a word nobody uses.
+   *  Somebody wearing a nickname to be taken for somebody else is a moderator's
+   *  problem, and [[spawnModeratorPanel]] still names the account.
+   *
+   *  Plain text either way — see [[Names.user]] for why none of these read as a
+   *  mention.
+   */
+  private def personLabel(character: String, nickname: String, username: String): String =
+    if (character.nonEmpty && username.nonEmpty) s"**$character** (${Names.called(nickname, username)})"
+    else if (character.nonEmpty) s"**$character**"
+    // No character given, so the guild name is what identifies them.
+    else Names.called(nickname, username)
+
   private def claimantLabel(claim: RespawnClaim): String =
+    personLabel(claim.characterName, claim.nickname, claim.userName)
+
+  /** The same, for a booking that has not produced a slot row yet — the rule
+   *  carries the same three names, so it names its owner identically. */
+  private def scheduleLabel(schedule: RespawnSchedule): String =
+    personLabel(schedule.characterName, schedule.nickname, schedule.userName)
+
+  /** How a claimant is named to a moderator: the account as well as the name
+   *  they go by, since the account is the half that is unique, searchable, and
+   *  the same tomorrow — which is what somebody about to end another person's
+   *  hunt is checking they have the right person by. */
+  private def accountLabel(claim: RespawnClaim): String =
     (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
       case (true, true)  => s"**${claim.characterName}** (${Names.user(claim.userName)})"
       case (true, false) => s"**${claim.characterName}**"
-      // No character given, so the guild name is what identifies them.
       case _             => Names.user(claim.nickname, claim.userName)
-    }
-
-  /** The same, for a booking that has not produced a slot row yet — the rule
-   *  carries the character too, so it names its owner identically. */
-  private def scheduleLabel(schedule: RespawnSchedule): String =
-    (schedule.characterName.nonEmpty, schedule.userName.nonEmpty) match {
-      case (true, true)  => s"**${schedule.characterName}** (${Names.user(schedule.userName)})"
-      case (true, false) => s"**${schedule.characterName}**"
-      case _             => Names.user(schedule.nickname, schedule.userName)
     }
 
   /** One line of the Booked field. The hollow marker is the one the Book panel
@@ -99,6 +118,96 @@ object RespawnEmbeds {
    *  to somebody, so it has no reader whose rows could be filled in. */
   private def bookedRow(when: ZonedDateTime, minutes: Int, who: String, note: String): String =
     s"▹ ${dateTime(when)} **(${relative(when)})** **·** ${humanDuration(minutes)} **·** $who$note"
+
+  /** One booking as the Booked list needs it before it becomes a line: what to
+   *  sort by, what to group the hand-made repeats by, and what to render. */
+  private final case class BookedEntry(start: ZonedDateTime, minutes: Int, who: String,
+                                       userId: String, note: String)
+
+  /** The Booked rows, with a person's identical bookings folded into one line.
+   *
+   *  A recurring rule is already one row — it is listed as the next evening it
+   *  holds rather than as every evening it will ever hold. What this collapses is
+   *  the same booking made by hand: one person taking 7pm for two and a half
+   *  hours on seven separate days is seven rules, and so was seven rows, and a
+   *  card is not made more useful by saying one thing seven times. It is the same
+   *  fact a repeat label states, so it is stated the same way, on the soonest of
+   *  them, and the rest become a count.
+   *
+   *  Same person, same hour, same length is the whole test. Grouping by person
+   *  alone would fold a Tuesday evening in with a Saturday morning, which are two
+   *  different things to anybody reading the list to find a free evening.
+   *
+   *  A row that already carries a note of its own — a repeat label, or the marker
+   *  saying somebody has asked for the slot — stands alone. Both say something
+   *  true only of that one row, which a count behind it would attach to the
+   *  others.
+   *
+   *  `zone` is the guild's, and the hour is compared in it: the rendered times
+   *  are Discord timestamps drawn in each reader's own clock, so the hour a
+   *  grouping is named for has to be one fixed clock's rather than nobody's. Any
+   *  fixed zone agrees with any other on which bookings share an hour, so every
+   *  reader sees the same rows collapsed — at their own time of day.
+   */
+  /** The two sources a booked list has, as one list of entries.
+   *
+   *  A booking exists before its slot does: a slot row is only written once its
+   *  start comes within the look-ahead, so one made for later in the week has
+   *  nothing but the rule behind it for days, and a list of rows alone would
+   *  answer "nothing booked" to somebody who had just booked it. `upcoming` is
+   *  the rules with no row yet, and the caller is what decides that, since only
+   *  it can see both.
+   *
+   *  Shared by the spawn's card and the Book panel because they list the same
+   *  bookings and differ only in how a row is drawn — which is what
+   *  [[collapseBooked]] takes a renderer for. */
+  private def bookedEntries(reservations: List[RespawnClaim], upcoming: List[RespawnSchedule],
+                            now: ZonedDateTime,
+                            givenUp: Map[Long, Set[java.time.Instant]]): List[BookedEntry] =
+    reservations.flatMap { slot =>
+      slot.startsAt.map { start =>
+        // Somebody is waiting on an answer — worth showing, since until it is
+        // given the slot may or may not still belong to the name beside it.
+        val pending = if (slot.requestPending) " · *asked*" else ""
+        BookedEntry(start, slot.durationMinutes, claimantLabel(slot), slot.userId, pending)
+      }
+    } ++ upcoming.flatMap { schedule =>
+      // Only the next evening each rule still holds. A weekly booking has
+      // occurrences forever, and listing them would be one booking said ten
+      // times where ten spawns' worth of evenings was the question.
+      //
+      // The next one it still holds, at that: a rule that gave tonight away
+      // offers tomorrow, rather than standing beside the booking that took it
+      // and naming the same hour.
+      schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
+        val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
+        BookedEntry(start, schedule.durationMinutes, scheduleLabel(schedule), schedule.userId, repeat)
+      }
+    }
+
+  private def collapseBooked(entries: List[BookedEntry], zone: java.time.ZoneId)
+                            (render: (BookedEntry, String) => String): List[String] =
+    entries
+      .sortBy(_.start.toInstant)
+      .groupBy(entry =>
+        if (entry.note.nonEmpty) Left(entry.start.toInstant)
+        else Right((entry.userId, entry.start.withZoneSameInstant(zone).toLocalTime, entry.minutes)))
+      .values.toList
+      // groupBy keeps each group in the order it met them, so the head of every
+      // group is its soonest — which is both the row to show and the one the
+      // groups themselves are ordered by.
+      .sortBy(_.head.start.toInstant)
+      .map { group =>
+        val more = group.size - 1
+        val repeats =
+          if (more <= 0) ""
+          // The plain separator the repeat label uses, not the bold one between
+          // a row's own fields: this is a note in the same slot, and the two
+          // never appear together to be told apart anyway.
+          else if (more == 1) " · +1 repeat"
+          else s" · +$more repeats"
+        render(group.head, repeats)
+      }
 
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
    *  redirect, reusing the same URL builder and name mappings the boosted
@@ -150,7 +259,7 @@ object RespawnEmbeds {
     }
 
     if (queue.nonEmpty) {
-      val shown = queue.take(RowsPerField).zipWithIndex.map { case (entry, index) =>
+      val shown = queue.take(RowsPerList).zipWithIndex.map { case (entry, index) =>
         s"`${index + 1}.` ${claimantLabel(entry)} — ${humanDuration(entry.durationMinutes)}"
       }
       embed.addField(s"Queue (${queue.size}/${settings.queueLimit})", cappedField(shown, queue.size), false)
@@ -159,49 +268,25 @@ object RespawnEmbeds {
     // Booked windows that haven't started. Shown whether or not the spawn is free
     // right now, because the point of booking ahead is that people can plan
     // around it.
-    //
-    // Two sources, because a booking exists before its slot does. A slot row is
-    // only written once its start comes within the look-ahead, so a booking made
-    // for Thursday has nothing but the rule behind it for days — and a card that
-    // showed only rows would answer "nothing booked" to somebody who had just
-    // booked it. `upcoming` is the rules with no row yet, and the caller is what
-    // decides that, since only it can see both.
-    val booked =
-      reservations.flatMap { slot =>
-        slot.startsAt.map { start =>
-          // Somebody is waiting on an answer — worth showing, since until it is
-          // given the slot may or may not still belong to the name beside it.
-          val pending = if (slot.requestPending) " · *asked*" else ""
-          start -> bookedRow(start, slot.durationMinutes, claimantLabel(slot), pending)
-        }
-      } ++ upcoming.flatMap { schedule =>
-        // Only the next one. A weekly booking has occurrences forever, and a card
-        // listing every Tuesday from now on would say the same thing ten times.
-        //
-        // The next one it still holds, at that: a rule that gave tonight away
-        // offers tomorrow, rather than standing beside the booking that took it
-        // and naming the same hour.
-        schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map { start =>
-          val repeat = if (schedule.repeats) s" · ${schedule.repeatLabel}" else ""
-          start -> bookedRow(start, schedule.durationMinutes, scheduleLabel(schedule), repeat)
-        }
-      }
+    val booked = bookedEntries(reservations, upcoming, now, givenUp)
 
     if (booked.nonEmpty) {
-      val ordered = booked.sortBy(_._1.toInstant).map(_._2)
-      embed.addField("Booked", cappedField(ordered.take(RowsPerField), ordered.size), false)
+      val ordered = collapseBooked(booked, now.getZone) { (entry, repeats) =>
+        bookedRow(entry.start, entry.minutes, entry.who, entry.note + repeats)
+      }
+      embed.addField("Booked", cappedField(ordered.take(RowsPerList), ordered.size), false)
     }
 
     if (respawn.region.nonEmpty) embed.setFooter(respawn.region)
     embed.build()
   }
 
-  /** What somebody already holding a booking on a spawn sees when they press
-   *  Book on it.
+  /** What anybody sees when they press Bookings on a spawn — moderator or not,
+   *  with something booked here or nothing.
    *
-   *  The whole spawn rather than just their own rows: they are deciding whether
-   *  to book another time, and what decides that is which times are already
-   *  spoken for. Their own lines are marked rather than filtered out, so the
+   *  The whole spawn rather than just their own rows: they are deciding when to
+   *  book, and what decides that is which times are already spoken for. Their
+   *  own lines are marked rather than filtered out of the list below, so its
    *  ordering still reads as the evening it is.
    *
    *  `mine` is the schedules behind their bookings, which is what carries the
@@ -210,60 +295,122 @@ object RespawnEmbeds {
   def bookingPanel(respawn: Respawn, mine: List[RespawnSchedule], viewerId: String,
                    reservations: List[RespawnClaim], holder: Option[RespawnClaim],
                    now: ZonedDateTime, imageUrl: String,
-                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty): MessageEmbed = {
+                   givenUp: Map[Long, Set[java.time.Instant]] = Map.empty,
+                   /** Bookings that exist only as a rule so far, as
+                    *  [[claimCard]] takes them and for the same reason. */
+                   upcoming: List[RespawnSchedule] = Nil,
+                   /** `Config.yesEmoji` and `Config.noEmoji`, for the line
+                    *  saying whether the spawn is free. Passed in rather than
+                    *  read here, for the reason [[imageFor]] takes its mappings:
+                    *  this object loads no configuration, which is what lets the
+                    *  presentation layer be tested without a populated
+                    *  environment. The circles are only a fallback. */
+                   yesEmoji: String = "🟢",
+                   noEmoji: String = "🔴"): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     if (imageUrl.nonEmpty) embed.setThumbnail(imageUrl)
 
+    // Free is a heading and held is not: only one of the two answers is short
+    // enough to be read at a glance, and a holder's name, character and hour at
+    // heading size is a paragraph shouting the one state nobody can act on.
     val state = holder match {
       case Some(active) =>
         val until = active.endsAt.map(end => s" until ${clockTime(end)}").getOrElse("")
-        s"Being hunted by ${claimantLabel(active)}$until."
-      case None => "Free right now."
+        s"$noEmoji Being hunted by ${claimantLabel(active)}$until."
+      case None => s"### $yesEmoji **Free** right now."
     }
-    val booked = mine.flatMap(schedule =>
+    // The reader's own bookings, as the next evening each of their rules holds.
+    val mineNext = mine.flatMap(schedule =>
       schedule.nextStartAtOrAfter(now, givenUp.getOrElse(schedule.id, Set.empty)).map(schedule -> _))
-    val yours =
-      // A moderator opens this panel with nothing of their own booked here, so
-      // "your booking has been and gone" would be a lie rather than an absence.
-      if (mine.isEmpty) "You have nothing booked here."
-      else if (booked.isEmpty) "Your booking on this respawn has been and gone."
-      else if (booked.size == 1) {
-        val (schedule, start) = booked.head
-        s"Your booking is ${schedule.repeatLabel} at ${clockTime(start)} " +
-          s"for ${humanDuration(schedule.durationMinutes)}."
+    val yours: List[String] =
+      // Nothing at all where there is nothing booked — no title, no line under
+      // it. Most people open this panel with none of their own here (it is where
+      // booking starts, not only where it is reviewed), and a heading followed by
+      // a sentence saying the heading is empty spends two lines saying less than
+      // the blank space does.
+      //
+      // Rows are marked, and the absence that remains is quoted, so it reads as
+      // a note rather than as a booking. It remains because it answers a
+      // question somebody actually has: they booked this spawn, and they are
+      // looking for the row — where somebody who never booked was being told
+      // about a thing they had not done.
+      if (mine.isEmpty) Nil
+      else if (mineNext.isEmpty) List("> Your booking on this respawn has been and gone.")
+      else if (mineNext.size == 1) {
+        val (schedule, start) = mineNext.head
+        // Marked like a row because it is one, and emphasising the two things
+        // somebody checks a booking for: which days it runs on, and how long for.
+        // The time between them is a Discord timestamp, already set apart by
+        // being drawn in the reader's own clock.
+        List(s"▸ Your booking is **${schedule.repeatLabel}** at ${clockTime(start)} " +
+          s"for **${humanDuration(schedule.durationMinutes)}**.")
       } else {
-        // One per line rather than semicolons: four bookings run to a paragraph
-        // that has to be read to be counted, where a list is counted at a glance.
-        val each = booked.sortBy(_._2.toInstant).map { case (schedule, start) =>
-          s"▸ ${clockTime(start)} ${schedule.repeatLabel} for ${humanDuration(schedule.durationMinutes)}"
+        // Rows and nothing else. They used to be introduced by "You have 2
+        // bookings here:", written when nothing above them said whose they were
+        // — the title does that now, and counting two lines is not a job anybody
+        // needed help with.
+        mineNext.sortBy(_._2.toInstant).map { case (schedule, start) =>
+          s"▸ ${clockTime(start)} **${schedule.repeatLabel}** for **${humanDuration(schedule.durationMinutes)}**"
         }
-        s"You have ${booked.size} bookings here:\n${each.mkString("\n")}"
       }
-    // The spawn's state and the reader's own bookings are two different facts,
-    // so they get a line each rather than running together as one sentence.
-    embed.setDescription(s"$state\n$yours")
+    // The next ten bookings on this spawn, soonest first — what somebody
+    // deciding when to book needs.
+    //
+    // A marker rather than a highlight — an embed has no way to shade a line,
+    // and bolding alone doesn't survive a list where every name is bold. Filled
+    // for yours, hollow for everybody else's: one glyph pair from one Unicode
+    // block, so both rows are the same width and the dates line up with no
+    // spacing to tune. Padding a mismatched pair does not work here — Discord
+    // collapses a run of ordinary spaces to one. The small triangles rather than
+    // U+25B6/7, which some clients render as the emoji.
+    def marker(userId: String): String = if (userId == viewerId) "▸ " else "▹ "
+    // The same pair the claim card merges, and built the same way — but every
+    // booking, one row each, where the card folds a person's identical ones into
+    // a count.
+    //
+    // Deliberately the two surfaces disagreeing. The card is the summary nobody
+    // opened: it is already in the thread, it has a field's 1024 characters to
+    // live in, and what it owes a passing reader is the shape of the week. This
+    // panel is what somebody pressed Bookings to see, and the question that
+    // press asks is which particular evenings are spoken for — a folded row
+    // names an hour and a count, which is exactly the specific booking it was
+    // opened to find.
+    val ahead = bookedEntries(reservations, upcoming, now, givenUp)
 
-    if (reservations.nonEmpty) {
-      // No cap: this is somebody looking at one spawn's evening on purpose, so
-      // the three-line summary the claim card uses would hide the very slots they
-      // are trying to book around. truncateLines keeps it inside the field limit.
-      val lines = reservations.map { slot =>
-        val when = slot.startsAt.map(dateTime).getOrElse("?")
-        val pending = if (slot.requestPending) " · *asked*" else ""
-        // A marker rather than a highlight — an embed has no way to shade a line,
-        // and bolding alone doesn't survive a list where every name is bold.
-        // Filled for yours, hollow for everybody else's: one glyph pair from one
-        // Unicode block, so both rows are the same width and the dates line up
-        // with no spacing to tune. Padding a mismatched pair does not work here —
-        // Discord collapses a run of ordinary spaces to one. The small triangles
-        // rather than U+25B6/7, which some clients render as the emoji.
-        val marker = if (slot.userId == viewerId) "▸ " else "▹ "
-        s"$marker$when · ${humanDuration(slot.durationMinutes)} — ${claimantLabel(slot)}$pending"
-      }
-      embed.addField("Booked", truncateLines(lines, 1000), false)
+    // Sections of the description, and no fields at all. A field name is
+    // Discord's own section break, but it is drawn small and flat where a bold
+    // line of its own reads as a title — and the description holds four times
+    // what a field does, which is what lets the panel be one column of text
+    // rather than a paragraph followed by a boxed list.
+    //
+    // Both lists are titled the same way, and named as a pair so it is plain
+    // which is the subset of which. The spawn's own card still titles its list
+    // "Booked"; that surface has no second list to pair with.
+    val ordered = ahead.sortBy(_.start.toInstant).map { entry =>
+      s"${marker(entry.userId)}${dateTime(entry.start)} · ${humanDuration(entry.minutes)} — " +
+        s"${entry.who}${entry.note}"
     }
+    val hidden = math.max(0, ordered.size - RowsPerList)
+    val allBookings =
+      if (ordered.isEmpty) Nil
+      else ("**All Bookings**" :: ordered.take(RowsPerList)) ++
+        (if (hidden > 0) List(s"…and $hidden more") else Nil)
 
-    embed.setFooter("Book another time for a slot that doesn't overlap one already here.")
+    // Built as lines, with an empty one wherever a break belongs, so the shape
+    // of the panel is the shape of this list. truncateLines then drops whole
+    // rows off the end rather than cutting one mid-mention at the description's
+    // own limit.
+    val yourBookings = if (yours.isEmpty) Nil else "**Your Bookings**" :: yours
+    val lines =
+      (state :: Nil) ++
+        (if (yourBookings.isEmpty) Nil else "" :: yourBookings) ++
+        (if (allBookings.isEmpty) Nil else "" :: allBookings)
+    embed.setDescription(truncateLines(lines))
+
+    // The button names are bare because a footer is drawn as plain text, where
+    // emphasis would show as the asterisks around it.
+    embed.setFooter("Book a time that doesn't overlap with someone else's using " +
+      "the Book or Dashboard buttons below.")
     embed.build()
   }
 
@@ -284,10 +431,16 @@ object RespawnEmbeds {
     // way to ask; the plainer opening survives for a request that was already in
     // flight when the Request button was removed, and for nothing else.
     //
-    // The name recorded on the request rather than a mention — see Names.user.
-    // "Someone" is the fallback for a row written before the name was kept.
+    // The names recorded on the request rather than a mention — see Names.user.
+    // "Someone" is the fallback for a row written before they were kept.
     // Already emphasised, so the sentences below interpolate it bare.
-    val asker = slot.requesterUserName.filter(_.nonEmpty).map(Names.user).getOrElse("**Someone**")
+    //
+    // Worth both names here more than anywhere else in the feature: this is the
+    // message asking somebody to give a slot up, and they can only weigh that if
+    // they recognise who is asking.
+    val asker = slot.requesterUserName.filter(_.nonEmpty)
+      .map(name => Names.user(slot.requesterNickname.getOrElse(""), name))
+      .getOrElse("**Someone**")
     val opening = wanted match {
       case Some((start, minutes)) =>
         s"$asker wants to book ${spawnLink(respawn)} from ${clockTime(start)} " +
@@ -391,7 +544,7 @@ object RespawnEmbeds {
       s"**${humanDuration(stamina.remainingMinutes)}** of stamina left, so it was skipped.\n" +
       s"Your stamina refills at server save ${relative(resetsAt)}."
 
-  /** Standing bookings, for the Schedule panel and `/respawn schedules`.
+  /** Standing bookings, for the Schedule panel and `/bookings`.
    *
    *  `everyones` switches from "yours" to the whole server, which is what a
    *  moderator sees — and names the owner, since otherwise the list is a wall of
@@ -465,17 +618,29 @@ object RespawnEmbeds {
   /** The moderator panel for one spawn: who holds it, and what can be done to
    *  them. Rendered instead of going straight to a duration form, because the
    *  actions here affect somebody else's hunt. */
-  def spawnModeratorPanel(respawn: Respawn, holder: Option[RespawnClaim], queueSize: Int): MessageEmbed = {
+  def spawnModeratorPanel(respawn: Respawn, holder: Option[RespawnClaim], queueSize: Int,
+                          settings: Option[RespawnSettings] = None): MessageEmbed = {
     val embed = new EmbedBuilder().setColor(Embeds.BrandColor).setTitle(respawn.displayName)
     holder match {
       case Some(claim) =>
         val ends = claim.endsAt.map(relative).getOrElse("unknown")
-        embed.setDescription(s"Held by ${claimantLabel(claim)}, ending $ends.")
+        embed.setDescription(s"Held by ${accountLabel(claim)}, ending $ends.")
         embed.addField("Hunt length", humanDuration(claim.durationMinutes), true)
         if (queueSize > 0) embed.addField("Waiting", queueSize.toString, true)
         embed.setFooter("Force leave hands it to whoever is next, and refunds their unused stamina.")
       case None =>
         embed.setDescription("Nobody is on this respawn right now.")
+    }
+    // Shown because Max Claim is one of the buttons under this, and a control
+    // whose current value is not on screen is a control you have to press to
+    // read. Says which of the two numbers is in force, since "2h" alone does not
+    // tell a moderator whether this spawn has been singled out or is simply
+    // following the server.
+    settings.foreach { config =>
+      val effective = humanDuration(config.maxFor(respawn))
+      embed.addField("Max claim",
+        if (respawn.maxDurationMinutes.isDefined) s"$effective · this spawn"
+        else s"$effective · server default", true)
     }
     embed.build()
   }
@@ -681,7 +846,7 @@ object RespawnEmbeds {
   /** The "your time is nearly up" nudge, sent by DM rather than posted in the
    *  spawn's thread — it is aimed at one person, and a thread ping turns a
    *  shared card into a stream of notices nobody else needs. */
-  /** Deliberately says nothing about `/respawn extend`: stretching a claim is the
+  /** Deliberately says nothing about extending: stretching a claim is the
    *  exception, not the expected reply to this, and offering it up invites people
    *  to hold spawns longer than they need. Leaving early is the useful action, so
    *  that is the one that gets a button. */
@@ -760,7 +925,7 @@ object RespawnEmbeds {
   /** How many rows a card's list shows before it says "and N more". Ten rather
    *  than three: a spawn's evening is what people open the card to read, and
    *  three lines hid most of it. */
-  private val RowsPerField: Int = 10
+  private val RowsPerList: Int = 10
 
   /** A field value holding as many of `lines` as fit, with a single note for
    *  everything not shown.

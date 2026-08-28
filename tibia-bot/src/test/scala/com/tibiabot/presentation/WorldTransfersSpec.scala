@@ -1,9 +1,16 @@
 package com.tibiabot.presentation
 
+import com.tibiabot.domain.WorldTransfer
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import java.time.ZonedDateTime
+
 class WorldTransfersSpec extends AnyFunSuite with Matchers {
+
+  private val t = ZonedDateTime.parse("2026-05-30T10:00:00Z")
+  private def record(name: String, worlds: List[String], at: ZonedDateTime = t) =
+    WorldTransfer(name.toLowerCase, worlds, at)
 
   test("sources: a former world on the world we are polling is an arrival") {
     WorldTransfers.sources("Antica", "Antica", List("Nefera")) shouldBe List("Nefera")
@@ -67,5 +74,80 @@ class WorldTransfersSpec extends AnyFunSuite with Matchers {
 
   test("somebody on both lists arrives as hunted, as they read everywhere else") {
     WorldTransfers.side(hunted = true, allied = true) shouldBe WorldTransfers.Side.Hunted
+  }
+
+  test("postedFor finds the record a character was announced under before renaming") {
+    val records = List(record("Rodzeraah", List("Unebra")))
+    WorldTransfers.postedFor(records, "Chris Rpbombita", List("Rodzeraah")).map(_.formerWorlds) shouldBe
+      Some(List("Unebra"))
+  }
+
+  test("a renamed character's already-announced transfer is not posted a second time") {
+    // The bug this pairing exists for: the sheet still lists Unebra for months after
+    // the move, so the arrival is re-detected under every name the character takes.
+    val records = List(record("Rodzeraah", List("Unebra")))
+    val posted = WorldTransfers.postedFor(records, "Chris Rpbombita", List("Rodzeraah"))
+    WorldTransfers.unreported("Antica", "Antica", List("Unebra"), posted.map(_.formerWorlds)) shouldBe None
+  }
+
+  test("a renamed character's *new* transfer is still announced") {
+    val records = List(record("Rodzeraah", List("Unebra")))
+    val posted = WorldTransfers.postedFor(records, "Chris Rpbombita", List("Rodzeraah"))
+    WorldTransfers.unreported("Antica", "Antica", List("Unebra", "Bona"), posted.map(_.formerWorlds)) shouldBe
+      Some(List("Unebra", "Bona"))
+  }
+
+  test("postedFor prefers the record under the live name over one under a former name") {
+    val records = List(record("Rodzeraah", List("Unebra")), record("Chris Rpbombita", List("Unebra", "Bona")))
+    WorldTransfers.postedFor(records, "Chris Rpbombita", List("Rodzeraah")).map(_.formerWorlds) shouldBe
+      Some(List("Unebra", "Bona"))
+  }
+
+  test("postedFor takes the most recent when two former names both have records") {
+    val records = List(
+      record("Rodzeraah", List("Unebra"), t),
+      record("Middlename", List("Unebra", "Bona"), t.plusDays(30))
+    )
+    WorldTransfers.postedFor(records, "Chris Rpbombita", List("Rodzeraah", "Middlename")).map(_.formerWorlds) shouldBe
+      Some(List("Unebra", "Bona"))
+  }
+
+  test("postedFor finds nothing for a character who has never been announced") {
+    WorldTransfers.postedFor(List(record("Someoneelse", List("Unebra"))), "Chris Rpbombita", List("Rodzeraah")) shouldBe None
+    WorldTransfers.postedFor(Nil, "Chris Rpbombita", Nil) shouldBe None
+  }
+
+  test("staleKeys names only the dropped keys, ignoring case, blanks and a name taken back") {
+    val records = List(record("Rodzeraah", List("Unebra")), record("Chris Rpbombita", List("Unebra")))
+    WorldTransfers.staleKeys(records, "Chris Rpbombita", List("rodzeraah", "", "  ", "CHRIS RPBOMBITA")) shouldBe
+      List("rodzeraah")
+    // Nothing to move when the record is already under the live name.
+    WorldTransfers.staleKeys(records, "Chris Rpbombita", Nil) shouldBe Nil
+  }
+
+  test("applyRename moves the record onto the live name, carrying worlds and time across") {
+    val moved = WorldTransfers.applyRename(
+      List(record("Rodzeraah", List("Unebra"))), "Chris Rpbombita", List("Rodzeraah"))
+    moved shouldBe List(WorldTransfer("chris rpbombita", List("Unebra"), t))
+  }
+
+  test("applyRename collapses several stale rows and keeps the live one when there is one") {
+    val records = List(
+      record("Rodzeraah", List("Unebra"), t),
+      record("Middlename", List("Unebra"), t.plusDays(30)),
+      record("Chris Rpbombita", List("Unebra", "Bona"), t.plusDays(60)),
+      record("Unrelated", List("Nefera"))
+    )
+    val moved = WorldTransfers.applyRename(records, "Chris Rpbombita", List("Rodzeraah", "Middlename"))
+    moved should contain theSameElementsAs List(
+      WorldTransfer("chris rpbombita", List("Unebra", "Bona"), t.plusDays(60)),
+      record("Unrelated", List("Nefera"))
+    )
+  }
+
+  test("applyRename leaves an untouched list alone when nothing is stale") {
+    val records = List(record("Chris Rpbombita", List("Unebra")), record("Unrelated", List("Nefera")))
+    WorldTransfers.applyRename(records, "Chris Rpbombita", Nil) shouldBe records
+    WorldTransfers.applyRename(records, "Chris Rpbombita", List("Chris Rpbombita")) shouldBe records
   }
 }
