@@ -4571,6 +4571,19 @@ function button(label, className, onClick, icon) {
  */
 const PULL_WAIT = 60, PULL_TIME = 300, PULL_CURVE = 4;
 let pullRaf = 0, pullTimer = 0, pulling = false, panning = false, touching = false;
+/** Whether the strip was last moved by a finger.
+ *
+ *  A swipe is the one gesture that already ends by itself: the browser's own
+ *  momentum carries it and comes to rest where the thumb aimed. Pulling after
+ *  that is a second movement for one gesture — the grid goes still, then goes
+ *  again — which is the difference between a magnet and a twitch, and it is
+ *  only ever felt on touch. A drag or a wheel has no momentum of its own, so
+ *  there the pull is the end of the same motion rather than a new one.
+ *
+ *  By what moved it, not by how wide the screen is: a phone with a keyboard and
+ *  a tablet with a mouse both exist, and each gesture should behave the way that
+ *  gesture behaves everywhere else. */
+let touchDriven = false;
 /** Whether the reader has moved the strip themselves. The difference between
  *  sitting at the first column because that is where it opened and sitting
  *  there because they scrolled back to it — only the second is a request for
@@ -4580,7 +4593,7 @@ let userMoved = false;
 function stopPull() { cancelAnimationFrame(pullRaf); pulling = false; }
 
 function pullToDay() {
-  if (!gridEl || panning || touching) return;
+  if (!gridEl || panning || touching || touchDriven) return;
   const w = colWidth();
   const from = gridEl.scrollLeft;
   const target = Math.max(0, Math.min(Math.round(from / w) * w,
@@ -4653,6 +4666,10 @@ function scrollDays(days) {
   if (!gridEl) return;
   stopPull();
   userMoved = true;
+  // An arrow is a deliberate "a week that way" and lands square whatever the
+  // scroll was resting on — which on a phone, where nothing else straightens
+  // the strip any more, is the only thing that does.
+  touchDriven = false;
   // Walking off the front lengthens the strip rather than stopping against it:
   // the arrows are how a mouse with no sideways gesture reaches last week, and
   // clamping at column zero would leave them dead exactly where they are most
@@ -4660,7 +4677,8 @@ function scrollDays(days) {
   // stretchRange grows it from there.
   if (gridEl.scrollLeft + days * colWidth() < 0) growBack();
   gridEl.style.scrollBehavior = 'smooth';
-  gridEl.scrollLeft += days * colWidth();
+  const w = colWidth();
+  gridEl.scrollLeft = (Math.round(gridEl.scrollLeft / w) + days) * w;
 }
 
 function wireGrid(box) {
@@ -4683,7 +4701,12 @@ function wireGrid(box) {
   }, { passive: true });
   ['pointerdown', 'wheel', 'touchstart', 'keydown'].forEach(ev =>
     box.addEventListener(ev, () => { userMoved = true; stopPull(); }, { passive: true }));
-  box.addEventListener('touchstart', () => { touching = true; }, { passive: true });
+  // Which kind of gesture is moving it. A touch pointerdown arrives before its
+  // own touchstart, so the order below settles on the truth either way.
+  box.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') touchDriven = false; }, { passive: true });
+  box.addEventListener('wheel', () => { touchDriven = false; }, { passive: true });
+  box.addEventListener('keydown', () => { touchDriven = false; }, { passive: true });
+  box.addEventListener('touchstart', () => { touching = true; touchDriven = true; }, { passive: true });
   box.addEventListener('touchend', () => { touching = false; }, { passive: true });
   dragPan(box);
 }
