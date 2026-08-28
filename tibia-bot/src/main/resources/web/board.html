@@ -910,6 +910,14 @@
        reflows the grid and nothing is redrawn by us at all. */
     --zoom: 1;
     --daycol: calc(150px * var(--ui-scale) * var(--zoom));
+    /* An hour, in pixels, at the size the grid is currently being read at.
+       Everything placed against the clock is written as a multiple of this and
+       is laid out by the browser, so changing the zoom reflows the whole grid
+       and redraws nothing: at 28px an hour a day is 672px, which no phone has,
+       and pinching down to a third of that is how the evening and the small
+       hours get onto one screen together. */
+    --row: calc(var(--row-base) * var(--ui-scale) * var(--zoom));
+    --min-block: calc(13px * var(--ui-scale));
     width: max-content;
     /* One finger still scrolls the way the browser scrolls, momentum and all.
        Two are ours: leaving pinch-zoom out of this list is what stops the page
@@ -924,7 +932,7 @@
      background for that, or the columns show through the hour labels. */
   .wk-hours { border-right: 1px solid var(--panel-border); position: sticky; left: 0; z-index: 5; background: var(--panel); }
   .wk-hour {
-    height: calc(var(--row-base) * var(--ui-scale)); font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--muted);
+    height: var(--row); font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); color: var(--muted);
     text-align: right; padding-right: 7px; position: relative; top: -5px; font-variant-numeric: tabular-nums;
   }
   /* The server-time echo, so a Berlin-anchored rule can be read off a local axis
@@ -943,6 +951,11 @@
   .wk-block {
     position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; overflow: hidden;
     font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); line-height: 1.25; cursor: pointer; border: 1px solid;
+    /* Placed against the hour rather than in pixels, so a zoom is a reflow and
+       not a redraw. `--at` is hours from the top of the column and `--len` is
+       how many it runs for; a block being dragged writes over these with a
+       plain pixel top, which is what an inline style is for. */
+    top: calc(var(--row) * var(--at, 0)); height: max(var(--min-block), calc(var(--row) * var(--len, 1) - 2px));
   }
   .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* What a block gives up as its column narrows, in the order it can afford to.
@@ -955,6 +968,13 @@
   .wk-grid.z-notime .wk-block .tm { display: none; }
   .wk-grid.z-bars .wk-block { padding: 0; }
   .wk-grid.z-bars .wk-block .who { display: none; }
+  /* The same bargain down the other axis. A squeezed hour cannot hold two lines,
+     and below about a centimetre it cannot hold twelve labels in a row without
+     them touching — so the server echo goes first, then every other hour's
+     number, which still leaves an axis anybody can count along. */
+  .wk-grid.z-srv .wk-hour .srv { display: none; }
+  .wk-grid.z-srv .wk-hour { top: -3px; }
+  .wk-grid.z-halfhours .wk-hour:nth-child(even) { color: transparent; }
   /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
      half on the next is not a shorter label, it is a wrong-looking one. */
   .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; display: block; white-space: nowrap; }
@@ -1029,14 +1049,16 @@
      you go looking for it. */
   .wk-block .fate { display: block; font-size: calc(8px * var(--ui-scale)); color: #59617a; font-style: italic; }
 
-  .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
-  .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
+  .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2;
+             top: calc(var(--row) * var(--at, 0)); }
+  .ss-label { position: absolute; right: 3px; top: calc(var(--row) * var(--at, 0)); transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
   /* The width of the whole grid, not of today's column. It marks a height on
      the hour axis, and the axis is shared by every column — which is also why
      the red flag that labels it lives in the gutter, stuck to the left and on
      screen whatever the strip has been scrolled to. Drawn in today's column
      alone it left that flag pointing at nothing the moment anybody scrolled. */
-  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none;
+              top: calc(var(--row) * var(--at, 0)); }
   /* Carried by the hour gutter rather than by the grid, so that on a phone — where
      the gutter is stuck to the left edge and the days slide past it — the time
      stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
@@ -1260,7 +1282,9 @@ function refreshScale() {
   const scale = num(windowEl, '--ui-scale', 1);
   const base = num(document.documentElement, '--row-base', 28);
   const was = ROW_H;
-  ROW_H = base * scale;
+  // Times the zoom, because ROW_H is this file's copy of `--row` and the two
+  // disagreeing is how a drag would land somewhere other than where it looked.
+  ROW_H = base * scale * (view.zoom || 1);
   MIN_BLOCK_H = 13 * scale;
   ACCT_MIN_H = 40 * scale;
   return ROW_H !== was;
@@ -3247,8 +3271,8 @@ function calendar() {
       // time would read as a rendering fault rather than as information.
       const height = Math.max(MIN_BLOCK_H, ((to - from) / 3600000) * ROW_H - 2);
       const account = accountLine(b);
-      block.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
-      block.style.height = height + 'px';
+      block.style.setProperty('--at', (from - colStart) / 3600000);
+      block.style.setProperty('--len', (to - from) / 3600000);
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
         <span class="tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
         // On a block that is over, what became of it earns the third line ahead
@@ -3296,8 +3320,8 @@ function calendar() {
         const sel = el('div', 'wk-block b-pick' + (p.echo ? ' b-echo' : '')
           + (p.at.getTime() < colStart ? ' clip-top' : '')
           + (pEnd.getTime() > colEnd ? ' clip-bottom' : ''));
-        sel.style.top = ((from - colStart) / 3600000) * ROW_H + 'px';
-        sel.style.height = Math.max(MIN_BLOCK_H, ((to - from) / 3600000) * ROW_H - 2) + 'px';
+        sel.style.setProperty('--at', (from - colStart) / 3600000);
+        sel.style.setProperty('--len', (to - from) / 3600000);
         sel.innerHTML = `<span class="who">${p.label}</span>
           <span class="tm">${fmtLocal(p.at)}–${fmtLocal(pEnd)}</span>`;
         // Taking a selection back. Every piece of it answers, echoes included:
@@ -3325,9 +3349,9 @@ function calendar() {
     const anchor = dayStart(start, day);
     const ss = serverToInstant(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), SS_SERVER_HOUR, 0);
     if (ss.getTime() >= colStart && ss.getTime() < colEnd) {
-      const y = ((ss.getTime() - colStart) / 3600000) * ROW_H;
-      const line = el('div', 'ss-line'); line.style.top = y + 'px'; col.appendChild(line);
-      const lbl = el('div', 'ss-label', `SS ${fmtLocal(ss)}`); lbl.style.top = y + 'px'; col.appendChild(lbl);
+      const at = (ss.getTime() - colStart) / 3600000;
+      const line = el('div', 'ss-line'); line.style.setProperty('--at', at); col.appendChild(line);
+      const lbl = el('div', 'ss-label', `SS ${fmtLocal(ss)}`); lbl.style.setProperty('--at', at); col.appendChild(lbl);
     }
     rows.appendChild(col);
   }
@@ -3336,9 +3360,11 @@ function calendar() {
   // what keeps it on screen when the days have been slid sideways.
   const nowDay = Math.round((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
   if (nowDay >= 0 && nowDay < days) {
-    const y = (localMinutes(now) / 60) * ROW_H;
-    const line = el('div', 'now-line'); line.style.top = y + 'px';
-    const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
+    const at = localMinutes(now) / 60;
+    const line = el('div', 'now-line'); line.style.setProperty('--at', at);
+    // The flag hangs off the hour gutter, which is not on the clock grid — it
+    // is placed in pixels against the same axis.
+    const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = at * ROW_H + 'px';
     rows.appendChild(line); hours.appendChild(flag);
   }
 
@@ -4693,10 +4719,17 @@ function backToNow() {
   scrollToNow(true);
 }
 
-/** How wide a day may be got to. The floor is a bar of colour — about eleven
- *  days on a phone, which is the fortnight-at-a-glance a pinch is for — and the
- *  ceiling is one evening filling the panel. */
-const MIN_COL = 30, MAX_COL = 300;
+/** How far the two sides of the grid may be taken.
+ *
+ *  A day's width sets what a block can say — the floor is a bar of colour, about
+ *  eleven days on a phone, and the ceiling is one evening filling the panel. An
+ *  hour's height sets how much of a day is on screen at once: at eleven pixels a
+ *  whole twenty-four hours is about the height of a phone's grid, which is the
+ *  thing zooming out is for, and below that the hour numbers have nowhere to go.
+ *
+ *  Both are honoured at once — one pinch moves one number, and the tighter of
+ *  the two limits is the one that stops it. */
+const MIN_COL = 30, MAX_COL = 300, MIN_ROW = 11, MAX_ROW = 90;
 
 /** What a block can afford to say at the width the columns actually are.
  *
@@ -4716,6 +4749,9 @@ function fitBlocks() {
   grid.classList.toggle('z-noacct', w < 70);
   grid.classList.toggle('z-notime', w < 50);
   grid.classList.toggle('z-bars', w < 38);
+  // And the same for the hour axis, which the same pinch compresses.
+  grid.classList.toggle('z-srv', ROW_H < 20);
+  grid.classList.toggle('z-halfhours', ROW_H < 15);
 }
 
 /** Pinching the strip: two fingers make a day wider or narrower.
@@ -4751,13 +4787,20 @@ function pinchZoom() {
   if (pinchInstalled) return;
   pinchInstalled = true;
 
-  let from = 0, base = 1, focal = 0, screenX = 0, active = false;
+  let from = 0, base = 1, focal = 0, focalHour = 0, screenX = 0, screenY = 0, active = false;
 
   const gap = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   const mid = t => (t[0].clientX + t[1].clientX) / 2;
+  const midY = t => (t[0].clientY + t[1].clientY) / 2;
   const gutter = () => {
     const hours = gridEl && gridEl.querySelector('.wk-hours');
     return hours ? hours.getBoundingClientRect().width : 0;
+  };
+  /** The day headings are stuck to the top of the same scroller, so the hours
+   *  begin that far down the content rather than at nothing. */
+  const headHeight = () => {
+    const rows = gridEl && gridEl.querySelector('.wk-rows');
+    return rows ? rows.offsetTop : 0;
   };
   /** Both fingers on the grid. By where they are rather than by what they
    *  landed on: two fingers land on two different elements, and a pinch that
@@ -4780,10 +4823,14 @@ function pinchZoom() {
     active = true;
     from = gap(e.touches) || 1;
     base = view.zoom;
-    screenX = mid(e.touches) - gridEl.getBoundingClientRect().left;
-    // Where between the fingers is, said as a distance along the strip in days
-    // — the one measurement that survives the columns changing width.
+    const box = gridEl.getBoundingClientRect();
+    screenX = mid(e.touches) - box.left;
+    screenY = midY(e.touches) - box.top;
+    // Where between the fingers is, on both axes: a distance along the strip in
+    // days and a distance down it in hours. Neither is a pixel, which is what
+    // makes them survive the grid changing size.
     focal = (gridEl.scrollLeft + screenX - gutter()) / colWidth();
+    focalHour = (gridEl.scrollTop + screenY - headHeight()) / ROW_H;
   }, { capture: true, passive: true });
 
   document.addEventListener('touchmove', e => {
@@ -4793,15 +4840,22 @@ function pinchZoom() {
     e.preventDefault();
     const grid = gridEl && gridEl.querySelector('.wk-grid');
     if (!grid) return;
-    // The width one column would be at zoom 1, so the clamp can be written in
-    // the units the limits are actually about.
-    const unit = colWidth() / view.zoom;
-    if (unit < 4) return;
+    // What a column and an hour would each be at zoom 1, so the limits can be
+    // written in the units they are actually about.
+    const unitCol = colWidth() / view.zoom, unitRow = ROW_H / view.zoom;
+    if (unitCol < 4 || unitRow < 4) return;
     const wanted = base * (gap(e.touches) / from);
-    view.zoom = Math.min(MAX_COL / unit, Math.max(MIN_COL / unit, wanted));
+    // Whichever side runs out first is the one that stops the pinch.
+    const low = Math.max(MIN_COL / unitCol, MIN_ROW / unitRow);
+    const high = Math.min(MAX_COL / unitCol, MAX_ROW / unitRow);
+    view.zoom = Math.min(high, Math.max(low, wanted));
     grid.style.setProperty('--zoom', view.zoom);
-    // Put the same day back under the same finger.
+    // ROW_H is this file's copy of the hour the CSS is now drawing at, and the
+    // scroll below is measured in it.
+    refreshScale();
+    // Put the same day, and the same time of day, back under the same fingers.
     gridEl.scrollLeft = focal * colWidth() + gutter() - screenX;
+    gridEl.scrollTop = focalHour * ROW_H + headHeight() - screenY;
     fitBlocks();
     gridScrolled();
   }, { capture: true, passive: false });
