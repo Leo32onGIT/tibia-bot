@@ -897,9 +897,19 @@
        every size. It used to be a seventh of the panel, which is what made the
        week a page: seven columns, exactly one screenful, nothing either side to
        scroll to. A fixed column turns the same grid into a strip that runs on
-       as far as there are days, and a wide panel simply shows more of it. */
-    --daycol: calc(150px * var(--ui-scale));
+       as far as there are days, and a wide panel simply shows more of it.
+
+       Times the zoom, which a pinch moves — see pinchZoom. Everything about the
+       strip that depends on how wide a day is measures a real column when it is
+       asked, so changing this one number is the whole of zooming: the browser
+       reflows the grid and nothing is redrawn by us at all. */
+    --zoom: 1;
+    --daycol: calc(150px * var(--ui-scale) * var(--zoom));
     width: max-content;
+    /* One finger still scrolls the way the browser scrolls, momentum and all.
+       Two are ours: leaving pinch-zoom out of this list is what stops the page
+       zooming underneath the gesture. */
+    touch-action: pan-x pan-y;
   }
   .wk-rows { position: relative; }
   /* Relative only so the now flag can hang off it; it earns a background and a
@@ -930,6 +940,16 @@
     font-family: var(--mono); font-size: calc(9.5px * var(--ui-scale)); line-height: 1.25; cursor: pointer; border: 1px solid;
   }
   .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* What a block gives up as its column narrows, in the order it can afford to.
+     A pinched-out fortnight is worth having and half a clipped word is not, so
+     the account goes first, then the time, and at the far end a block is a bar
+     of colour saying only that the evening is taken. Set from the measured
+     width rather than from the zoom, because the two bases differ: a phone's
+     column starts at a quarter of the screen and a desktop's at 150px. */
+  .wk-grid.z-noacct .wk-block .acct, .wk-grid.z-noacct .wk-block .fate { display: none; }
+  .wk-grid.z-notime .wk-block .tm { display: none; }
+  .wk-grid.z-bars .wk-block { padding: 0; }
+  .wk-grid.z-bars .wk-block .who { display: none; }
   /* A time never breaks across two lines. Half of "19:00–21:00" on one line and
      half on the next is not a shorter label, it is a wrong-looking one. */
   .wk-block .tm { opacity: 0.75; font-variant-numeric: tabular-nums; display: block; white-space: nowrap; }
@@ -1098,7 +1118,7 @@
       --gutter: 44px;
       /* The four that fit: the body's own width (the window, less its margins)
          less the gutter, split four ways. */
-      --daycol: calc((100vw - 20px - var(--gutter)) / 4);
+      --daycol: calc((100vw - 20px - var(--gutter)) / 4 * var(--zoom));
     }
     /* Every pixel of a narrow column goes to the label, so a whole time fits on
        one line and the name has somewhere to be above it. The size follows the
@@ -1534,6 +1554,11 @@ const view = {
   // at — see stretchRange — so further ahead is a scroll rather than a page.
   from: -1,
   to: 27,
+  // How wide a day is, as a multiple of the size it would otherwise be. Moved
+  // by pinching and by nothing else, and deliberately not remembered: it is a
+  // way of looking at one spawn for a moment, not a setting, so every panel
+  // opens at the size the screen chose for it.
+  zoom: 1,
   duration: null,
   // The length the reader themselves chose, which is not always the one on
   // screen: selecting somebody's booking shows that booking's length, and their
@@ -2467,6 +2492,7 @@ function openWindow(code) {
   view.code = code;
   view.from = -1;
   view.to = 27;
+  view.zoom = 1;
   userMoved = false;
   view.pick = null;
   view.answer = null;
@@ -2821,10 +2847,11 @@ function renderWindow() {
     gridEl.scrollTop = keepScroll.top;
     gridEl.scrollLeft = keepScroll.left;
   } else if (!scrolledOnce && gridEl) { scrolledOnce = true; scrollToNow(false); }
-  // Now that the grid is in the page and can be measured. What the week button
-  // says is a question about how many columns actually fit, which nothing knows
-  // while the panel is still being built — see rangeLabel.
-  if (gridEl) gridScrolled();
+  // Now that the grid is in the page and can be measured. Both of these are
+  // questions about how wide a column actually turned out to be, which nothing
+  // knows while the panel is still being built — what the week button says, and
+  // how much a block can afford to say. See rangeLabel and fitBlocks.
+  if (gridEl) { gridScrolled(); fitBlocks(); }
 }
 
 /** Already holding it, or already standing in its queue, means there is nothing
@@ -3137,6 +3164,7 @@ function calendar() {
   // stylesheet because the strip's length is a thing that changes while the
   // panel is open — see stretchRange.
   grid.style.setProperty('--days', days);
+  grid.style.setProperty('--zoom', view.zoom);
 
   // --- day headings, inside the scroller so they slide with their own columns
   const heads = [];
@@ -4660,6 +4688,103 @@ function backToNow() {
   scrollToNow(true);
 }
 
+/** How wide a day may be got to. The floor is a bar of colour — about eleven
+ *  days on a phone, which is the fortnight-at-a-glance a pinch is for — and the
+ *  ceiling is one evening filling the panel. */
+const MIN_COL = 30, MAX_COL = 300;
+
+/** What a block can afford to say at the width the columns actually are.
+ *
+ *  Read off a real column rather than off `view.zoom`: a phone's day starts at a
+ *  quarter of the screen and a desktop's at 150px, so the same zoom means two
+ *  different widths and it is the width that decides whether a name fits.
+ */
+function fitBlocks() {
+  if (!gridEl) return;
+  const grid = gridEl.querySelector('.wk-grid');
+  if (!grid) return;
+  const w = colWidth();
+  // An unmeasurable grid is not a narrow one. Without this a panel drawn while
+  // it cannot be measured would strip every block back to a bar and stay that
+  // way until something else moved.
+  if (w < 4) return;
+  grid.classList.toggle('z-noacct', w < 70);
+  grid.classList.toggle('z-notime', w < 50);
+  grid.classList.toggle('z-bars', w < 38);
+}
+
+/** Pinching the strip: two fingers make a day wider or narrower.
+ *
+ *  Days only. Hours stay the size they are, because a block's height is worked
+ *  out in pixels by us and a column's width is worked out by the browser from
+ *  one variable — so this costs a reflow and nothing else, where zooming time
+ *  would cost a redraw of every column on every frame of the gesture.
+ *
+ *  The instant under the fingers stays under the fingers. The midpoint is turned
+ *  into a position along the strip before the change and put back after it,
+ *  which is what makes the gesture feel like moving a picture around rather than
+ *  like the picture being replaced.
+ *
+ *  One finger is left alone throughout — `touch-action: pan-x pan-y` on the grid
+ *  keeps the browser's own scrolling, momentum and all, and only withholds
+ *  pinch-zoom. Two fingers are taken from it, which is why the move is
+ *  cancelled: without that the page zooms underneath the gesture.
+ */
+function pinchZoom(box) {
+  let from = 0, base = 1, focal = 0, screenX = 0, active = false;
+
+  const gap = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = t => (t[0].clientX + t[1].clientX) / 2;
+  const gutter = () => {
+    const hours = box.querySelector('.wk-hours');
+    return hours ? hours.getBoundingClientRect().width : 0;
+  };
+
+  box.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2) return;
+    // Nothing to measure against, so nothing to scale: colWidth falls back to a
+    // single pixel when the grid has not been laid out, and a zoom worked out
+    // against that would be a factor of hundreds.
+    if (colWidth() < 4) return;
+    stopPull();
+    active = true;
+    from = gap(e.touches) || 1;
+    base = view.zoom;
+    screenX = mid(e.touches) - box.getBoundingClientRect().left;
+    // Where between the fingers is, said as a distance along the strip in days
+    // — the one measurement that survives the columns changing width.
+    focal = (box.scrollLeft + screenX - gutter()) / colWidth();
+  }, { passive: true });
+
+  box.addEventListener('touchmove', e => {
+    if (!active || e.touches.length !== 2) return;
+    e.preventDefault();
+    const grid = box.querySelector('.wk-grid');
+    if (!grid) return;
+    // The width one column would be at zoom 1, so the clamp can be written in
+    // the units the limits are actually about.
+    const unit = colWidth() / view.zoom;
+    if (unit < 4) return;
+    const wanted = base * (gap(e.touches) / from);
+    view.zoom = Math.min(MAX_COL / unit, Math.max(MIN_COL / unit, wanted));
+    grid.style.setProperty('--zoom', view.zoom);
+    // Put the same day back under the same finger.
+    box.scrollLeft = focal * colWidth() + gutter() - screenX;
+    fitBlocks();
+    if (typeof gridScrolled === 'function') gridScrolled();
+  }, { passive: false });
+
+  const stop = () => { active = false; };
+  box.addEventListener('touchend', stop, { passive: true });
+  box.addEventListener('touchcancel', stop, { passive: true });
+
+  // Safari fires its own gesture events beside the touches above. They are not
+  // acted on — the pinch is already handled — but they are refused, or the page
+  // zooms as well as the grid.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
+    box.addEventListener(ev, e => e.preventDefault()));
+}
+
 /** A week's worth of columns, for the arrows — which is what a plain mouse and
  *  a keyboard have, and the distance the panel has always moved by. */
 function scrollDays(days) {
@@ -4709,6 +4834,7 @@ function wireGrid(box) {
   box.addEventListener('touchstart', () => { touching = true; touchDriven = true; }, { passive: true });
   box.addEventListener('touchend', () => { touching = false; }, { passive: true });
   dragPan(box);
+  pinchZoom(box);
 }
 
 /** Booking the hour that was clicked. Lifted out of the cell it used to be
