@@ -406,8 +406,15 @@
      line, the strip at the top of an open panel, the "up next" list and its
      one-line summary. A state line is mostly punctuation and clock times, and
      the one word in it worth finding at a glance is the person — so it is the
-     one word set in bold. */
-  .at-name { font-weight: 700; }
+     one word set apart.
+
+     Weight and colour, not weight alone. A card's state line is eleven pixels
+     of monospace in the muted grey, and at that size bold on its own is a
+     difference you have to be told about before you can see it; lifting the
+     name out of the grey is what actually makes it the thing the eye lands on.
+     The rows under "up next" are already drawn in this colour, so there it is
+     the weight doing the work. */
+  .at-name { font-weight: 700; color: var(--text); }
   .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
   .queue { font-family: var(--mono); font-size: 10px; color: var(--muted); flex-shrink: 0; }
   .card-state .queue { margin-left: auto; }
