@@ -1027,8 +1027,16 @@ object RespawnDashboardRoute {
     "id" -> JsString(claim.userId),
     "name" -> JsString(if (claim.characterName.nonEmpty) claim.characterName else claim.userName))
 
-  private def personName(claim: com.tibiabot.domain.RespawnClaim): String =
-    if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+  /** How a row of "up next" names somebody: the one Discord name everybody
+   *  calls them by, the same choice the card above the list makes — see
+   *  [[com.tibiabot.respawn.RespawnBoardEntry.holderLabel]] for why that is the
+   *  name and not their Tibia character. Without the `@`, which the page writes
+   *  itself; a row of the reader's own is labelled "You" and wears none.
+   */
+  private def personName(claim: com.tibiabot.domain.RespawnClaim): String = {
+    val called = com.tibiabot.presentation.Names.calledPlain(claim.nickname, claim.userName)
+    if (called.nonEmpty) called else claim.characterName
+  }
 
   private def instant(when: java.time.ZonedDateTime): JsValue = JsString(when.toInstant.toString)
 

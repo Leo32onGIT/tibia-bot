@@ -60,6 +60,22 @@ class NamesSpec extends AnyFunSuite with Matchers {
     Names.called("", "vio`lent") shouldBe "**@violent**"
   }
 
+  test("the plain one name makes the same choice, without the markdown") {
+    Names.calledPlain("Beams", "violentbeams") shouldBe "Beams"
+    Names.calledPlain("", "violentbeams") shouldBe "violentbeams"
+    Names.calledPlain("   ", "violentbeams") shouldBe "violentbeams"
+  }
+
+  test("the plain one name wears no @ either — the page writes its own") {
+    Names.calledPlain("Beams", "violentbeams") should not include "@"
+    Names.calledPlain("Beams", "violentbeams") should not include "*"
+  }
+
+  test("the plain one name is empty when there is neither, rather than a stand-in") {
+    // The dashboard says "someone" in its own markup, and only it knows where.
+    Names.calledPlain("", "") shouldBe ""
+  }
+
   test("a user with neither name still reads as somebody") {
     Names.user("", "") shouldBe "**`someone`**"
   }

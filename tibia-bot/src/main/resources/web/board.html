@@ -1264,7 +1264,7 @@ function relTime(at) {
   if (mins <= 0) return 'now';
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60), rest = mins % 60;
-  if (hours < 24) return rest ? `${hours}h${pad(rest)}` : `${hours}h`;
+  if (hours < 24) return rest ? `${hours}h${pad(rest)}m` : `${hours}h`;
   return `${Math.round(hours / 24)}d`;
 }
 
@@ -1313,11 +1313,33 @@ function stateText(spawn) {
   return text ? text(spawn) : spawn.state;
 }
 
+/** Somebody as this page names them: the one Discord name they answer to,
+ *  written `@name` — the same shape the bot uses on the spawn card in the
+ *  thread (`Names.called`), so one person reads the same way in both places.
+ *
+ *  Which name that is, is the server's choice (`Names.calledPlain`); the `@` is
+ *  written here, so a name travels as a name and the punctuation around it
+ *  stays the page's business. Nobody to name reads as "someone", which is what
+ *  a card says when it has not been told — never a bare `@`.
+ */
+function called(name) {
+  return name ? '@' + name : 'someone';
+}
+
+/** Whoever a card is about. A hunt the reader has just started has no name on
+ *  it yet — it is on screen for the moment between claiming and the poll that
+ *  says who holds it — and "you" is both shorter and truer than their own name
+ *  would be there. */
+function holderText(spawn) {
+  if (!spawn.holder && spawn.mine) return 'you';
+  return called(spawn.holder);
+}
+
 const STATE_TEXT = {
   free: () => 'free',
-  claimed: s => `${s.holder || 'someone'}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
-  booked: s => `${s.holder || 'someone'} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
-  confirmed: s => `${s.holder || 'someone'} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  claimed: s => `${holderText(s)}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  booked: s => `${holderText(s)} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  confirmed: s => `${holderText(s)} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
 };
 
 // ---- Timezone -------------------------------------------------------------
@@ -2642,7 +2664,9 @@ function primaryAction(spawn) {
         // a tank the server knows more about, which the answer corrects.
         s.state = 'claimed';
         s.mine = true;
-        s.holder = 'you';
+        // Not a name: the reader's own is not on this page to write, and the
+        // card says "you" of a claim it knows is theirs — see holderText.
+        delete s.holder;
         s.startsAt = new Date().toISOString();
         s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
         s.lastActivity = s.startsAt;
@@ -2708,11 +2732,11 @@ function nowStrip(spawn) {
  */
 function upNextRows(spawn) {
   const waiting = (spawn.waiting || []).map(w => ({
-    at: w.startsAt, minutes: w.minutes, who: w.mine ? 'You' : w.name,
+    at: w.startsAt, minutes: w.minutes, who: w.mine ? 'You' : called(w.name),
     kind: 'queued', tag: 'queue', projected: true
   }));
   const booked = (spawn.booked || []).map(b => ({
-    at: b.startsAt, minutes: b.minutes, who: b.mine ? 'You' : b.name,
+    at: b.startsAt, minutes: b.minutes, who: b.mine ? 'You' : called(b.name),
     kind: b.asked ? 'asked' : b.mine ? 'mine' : 'booked',
     tag: b.asked ? 'asked' : b.mine ? 'you' : ''
   }));

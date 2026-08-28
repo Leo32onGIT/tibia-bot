@@ -52,7 +52,9 @@ class BoardJsonSpec extends AnyWordSpec with Matchers {
         startsAt = Some(now.minusMinutes(30)), endsAt = Some(now.plusMinutes(90)), character = "Bubble")
       val fields = firstSpawn(json(RespawnBoardEntry(spawn(), Some(held), Nil, Nil, None))).fields
       fields("state") shouldBe JsString("claimed")
-      fields("holder") shouldBe JsString("Bubble")
+      // The Discord name, not the character "Bubble" this claim also carries —
+      // see RespawnBoardEntry.holderLabel.
+      fields("holder") shouldBe JsString("Nubbz")
       fields("startsAt") shouldBe JsString("2026-08-07T11:30:00Z")
       fields("endsAt") shouldBe JsString("2026-08-07T13:30:00Z")
     }

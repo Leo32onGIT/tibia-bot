@@ -91,4 +91,21 @@ object Names {
     val name = if (nick.nonEmpty) nick else clean(username)
     if (name.isEmpty) user("") else s"**@$name**"
   }
+
+  /** The same one name, for a surface with no markdown in it.
+   *
+   *  [[called(nickname:String,username:String)*]] writes Discord's own bold and
+   *  its `@`, which is right in an embed and is literal punctuation everywhere
+   *  else — the same reason [[plain]] exists beside
+   *  [[user(nickname:String,username:String)*]]. What the web dashboard wants
+   *  from here is only the choice of *which* name, made the same way; the page
+   *  writes the `@` itself, in its own markup.
+   *
+   *  Empty when there is neither name, rather than a stand-in: only the caller
+   *  knows what its own surface says about somebody it cannot name.
+   */
+  def calledPlain(nickname: String, username: String): String = {
+    val nick = nickname.trim
+    if (nick.nonEmpty) nick else username.trim
+  }
 }

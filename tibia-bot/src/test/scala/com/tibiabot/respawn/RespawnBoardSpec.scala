@@ -175,14 +175,22 @@ class RespawnBoardSpec extends AnyWordSpec with Matchers {
   }
 
   "holderLabel" should {
-    "name the holder's character when they gave one" in {
-      val held = claim(1, 1, RespawnClaim.StatusActive, "u1").copy(characterName = "Bubble")
-      RespawnBoardEntry(spawn(1, "415"), Some(held), Nil, Nil, None).holderLabel shouldBe Some("Bubble")
+    "name the holder as the guild calls them, not by their character" in {
+      val held = claim(1, 1, RespawnClaim.StatusActive, "nubbz").copy(characterName = "Bubble", nickname = "Nubz")
+      RespawnBoardEntry(spawn(1, "415"), Some(held), Nil, Nil, None).holderLabel shouldBe Some("Nubz")
     }
 
-    "fall back to the Discord name when no character was given" in {
-      val held = claim(1, 1, RespawnClaim.StatusActive, "Nubbz")
+    // Every row written before nicknames were kept, which is most of the history.
+    "fall back to the account name when the guild has no name for them" in {
+      val held = claim(1, 1, RespawnClaim.StatusActive, "Nubbz").copy(characterName = "Bubble")
       RespawnBoardEntry(spawn(1, "415"), Some(held), Nil, Nil, None).holderLabel shouldBe Some("Nubbz")
+    }
+
+    // Nothing live looks like this; a card with a blank where a name goes would
+    // be worse than one naming the character.
+    "fall back to the character when there is no Discord name at all" in {
+      val held = claim(1, 1, RespawnClaim.StatusActive, "").copy(characterName = "Bubble")
+      RespawnBoardEntry(spawn(1, "415"), Some(held), Nil, Nil, None).holderLabel shouldBe Some("Bubble")
     }
 
     "name whoever booked it next when nobody is on it" in {

@@ -213,11 +213,22 @@ final case class RespawnBoardEntry(
     }
 
   /** Whoever the card should name: the holder if it is being hunted, otherwise
-   *  whoever booked it next. Their Tibia character when they gave one, since
-   *  that is who the team recognises. */
+   *  whoever booked it next. The one Discord name everybody calls them by —
+   *  the guild's name for them, or their account name where the guild has none.
+   *
+   *  Their Tibia character led this once, on the reasoning that a character is
+   *  who the team recognises. A card names one person for one purpose, though,
+   *  and that purpose is going and asking them about the spawn — which is done
+   *  in Discord, under the name they answer to there. The character is still on
+   *  the calendar block and in the thread, where there is room for both names.
+   *
+   *  Falls back to the character only when there is no Discord name at all,
+   *  which no live row has: better a name of some kind than a blank card.
+   */
   def holderLabel: Option[String] =
     active.orElse(nextReservation).map { claim =>
-      if (claim.characterName.nonEmpty) claim.characterName else claim.userName
+      val called = Names.calledPlain(claim.nickname, claim.userName)
+      if (called.nonEmpty) called else claim.characterName
     }
 }
 
