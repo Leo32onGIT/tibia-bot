@@ -972,10 +972,15 @@
 
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
   .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
-  /* Inside today's column rather than across the grid. Drawn over a week it
-     read as "now" for the week; drawn over two months of strip it would be a
-     line through sixty days that are not now. */
-  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
+  /* Two pieces, because "now" is two facts: a time of day, which the whole
+     grid is measured against, and an instant, which falls in exactly one
+     column. The faint rule runs the width of the strip — the red flag lives in
+     the hour gutter, which is stuck to the left and therefore always on screen,
+     and a flag pointing at nothing is what a line drawn only in today's column
+     left behind the moment anybody scrolled. The solid piece marks the day it
+     actually is. */
+  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dotted rgba(224,86,62,0.42); z-index: 3; pointer-events: none; }
+  .now-line.today { border-top: 1px solid var(--bad); z-index: 4; }
   /* Carried by the hour gutter rather than by the grid, so that on a phone — where
      the gutter is stuck to the left edge and the days slide past it — the time
      stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
@@ -3225,14 +3230,16 @@ function calendar() {
     rows.appendChild(col);
   }
 
-  // Now line, in today's own column — the time on the hour axis, which is what
-  // keeps it on screen when the days have been slid sideways.
+  // Now: the height across the whole strip, the solid mark in today's column,
+  // and the time on the hour axis — which is what keeps it on screen when the
+  // days have been slid sideways.
   const nowDay = Math.round((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
   if (nowDay >= 0 && nowDay < days) {
     const y = (localMinutes(now) / 60) * ROW_H;
-    const line = el('div', 'now-line'); line.style.top = y + 'px';
+    const rule = el('div', 'now-line'); rule.style.top = y + 'px';
+    const here = el('div', 'now-line today'); here.style.top = y + 'px';
     const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
-    columns[nowDay].appendChild(line); hours.appendChild(flag);
+    rows.appendChild(rule); columns[nowDay].appendChild(here); hours.appendChild(flag);
   }
 
   grid.appendChild(rows);
