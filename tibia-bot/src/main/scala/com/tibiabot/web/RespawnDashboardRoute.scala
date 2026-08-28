@@ -1081,6 +1081,13 @@ object RespawnDashboardRoute {
       // cancel yet, only the rule that will make one.
       "predicted" -> JsBoolean(slot.predicted)
     ) ++ slot.scheduleId.map(id => "scheduleId" -> (JsNumber(id): JsValue))
+      // Only on the rows that are over. Absence is the ordinary case — most of
+      // any window is still to come — and three fields on every block of every
+      // week would be paid for on the far commoner half.
+      ++ (if (!slot.past) Nil else List[(String, JsValue)](
+        "past" -> JsBoolean(true),
+        "hunted" -> JsBoolean(slot.hunted)) ++
+        (if (slot.note.isEmpty) Nil else List("note" -> (JsString(slot.note): JsValue))))
   )
 
   /** One booking for the calendar. `mine` decides whether it is drawn as the

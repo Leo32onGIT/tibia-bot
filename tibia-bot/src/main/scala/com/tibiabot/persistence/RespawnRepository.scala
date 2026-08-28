@@ -260,6 +260,24 @@ trait RespawnRepository {
   def claimHistory(guildId: String, respawnId: Option[Long], userId: Option[String],
                    limit: Int, offset: Int): List[RespawnClaim]
 
+  /** One spawn's finished business over a window, for drawing the past on the
+   *  calendar.
+   *
+   *  The same rows [[claimHistory]] reads and a different question of them: not
+   *  "what happened here lately" in pages, but "what happened here between these
+   *  two instants" — which is what a grid showing a week of last month needs.
+   *
+   *  Rows with no start are left out. A claim that only ever sat in a queue —
+   *  left it, declined the offer, ran out of stamina — has no window and belongs
+   *  to nobody's evening; the calendar draws time, and those never occupied any.
+   *
+   *  Overlap is measured against when a claim *actually* ended rather than when
+   *  it was due to: a hunt given up after twenty minutes of a two-hour window is
+   *  twenty minutes of history, and drawing it to its deadline would be drawing
+   *  something that did not happen. */
+  def claimsBetween(guildId: String, respawnId: Long,
+                    from: ZonedDateTime, to: ZonedDateTime): List[RespawnClaim]
+
   /** Close a claim that ran to its end. `outcome` records why, for the audit log
    *  (see RespawnClaim.Outcome); `ended_at` is stamped by the database. */
   def finishClaim(guildId: String, claimId: Long, outcome: String): Unit

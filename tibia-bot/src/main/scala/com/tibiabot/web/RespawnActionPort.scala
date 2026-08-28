@@ -214,7 +214,20 @@ final case class CalendarSlot(
   state: String,
   repeats: Boolean,
   daysOfWeek: Int,
-  predicted: Boolean
+  predicted: Boolean,
+  /** Over and done with. Drawn in grey rather than in the state's colour, and
+   *  never in anybody's way: the past cannot be booked, asked about or given
+   *  up. */
+  past: Boolean = false,
+  /** Whether anybody was actually on the spawn. The two halves of a calendar's
+   *  history look the same in the database and mean opposite things to a reader
+   *  — an evening somebody hunted, and an evening somebody booked and did not
+   *  turn up for — so which it was travels rather than being guessed at from
+   *  the outcome at the far end. */
+  hunted: Boolean = false,
+  /** What became of it, in words a member would use. Empty where the plain
+   *  reading is right: a hunt that simply ran its time needs no note. */
+  note: String = ""
 )
 
 object RespawnActionPort {

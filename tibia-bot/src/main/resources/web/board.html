@@ -983,6 +983,27 @@
   .clip-top { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
   .clip-bottom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: dashed; }
 
+  /* What has already happened here, and cannot be booked, asked about or given
+     up. Grey rather than a turned-down version of its own state colour: the
+     split worth seeing at a glance on a grid that now scrolls through weeks is
+     between what is over and what is coming, and leaving colour on the past
+     made a fortnight of history read as a fortnight of bookings seen through
+     fog. Which it was is still on the block, in words.
+
+     A booking nobody turned up for is hollow. It is the one distinction inside
+     the past that anybody asks about — did they actually hunt it — so it is the
+     one the shape carries. */
+  .wk-block.b-past {
+    background: rgba(255,255,255,0.035); border-color: rgba(255,255,255,0.1);
+    color: var(--muted); cursor: default;
+  }
+  .wk-block.b-past .tm, .wk-block.b-past .acct { color: #59617a; }
+  .wk-block.b-past.b-unhunted { background: transparent; border-style: dashed; }
+  /* Said on the block itself where there is room for it, since the alternative
+     is a tooltip, and a tooltip is a thing you have to already suspect before
+     you go looking for it. */
+  .wk-block .fate { display: block; font-size: calc(8px * var(--ui-scale)); color: #59617a; font-style: italic; }
+
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
   .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
   /* The width of the whole grid, not of today's column. It marks a height on
@@ -2281,13 +2302,20 @@ function bright(text) {
   return `<span class="verdict-who">${esc(text)}</span>`;
 }
 
-/** Whatever is actually happening at an instant — the block covering it, if any.
- *
- *  A hunt in progress rather than a window overlapping one, which is why it asks
- *  about a moment instead of a range. */
-function runningAt(at) {
+/** The block covering an instant, whether it has happened yet or not. A moment
+ *  rather than a range, because the question is "what is drawn here". */
+function blockAt(at) {
   const t = at.getTime();
   return slots.find(b => b.start.getTime() <= t && t < b.end.getTime() && !b.predicted);
+}
+
+/** Whatever is actually happening at an instant, which is a narrower thing: an
+ *  evening that is over is drawn at that height and is not happening. Keeping
+ *  the distinction here rather than at each caller is what stops a click on your
+ *  own hunt from last Tuesday offering to give it back. */
+function runningAt(at) {
+  const block = blockAt(at);
+  return block && !block.past ? block : undefined;
 }
 
 function judge(start) {
@@ -2299,6 +2327,18 @@ function judge(start) {
     // hunt, and what they wanted to know is whose. Named the way the bot names
     // people in Discord, so the person on the card and the person in the thread
     // are recognisably the same one.
+    // What happened here, for a click on a block that is over. It is the only
+    // question such a click can be asking: the time cannot be booked, and "that
+    // start time has already passed" is a true answer to something nobody
+    // wanted to know.
+    const drawn = blockAt(start);
+    if (drawn && drawn.past) {
+      return {
+        type: 'info',
+        html: `${bright(calledOf(drawn))} ${drawn.hunted ? 'hunted' : 'had'} this until `
+          + `${bright(fmtClock12(drawn.end))}${drawn.note ? ` — ${esc(drawn.note)}` : ''}.`
+      };
+    }
     const live = runningAt(start);
     if (live) {
       const who = live.mine ? 'You are' : `${bright(calledOf(live))} is`;
@@ -3165,6 +3205,7 @@ function calendar() {
       const ends = shownEnd(b);
       const from = Math.max(b.start.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
+        + (b.past ? ' b-past' + (b.hunted ? '' : ' b-unhunted') : '')
         + (resizing(b) ? ' b-editing' : '')
         + (b.start.getTime() < colStart ? ' clip-top' : '')
         + (ends.getTime() > colEnd ? ' clip-bottom' : ''));
@@ -3177,15 +3218,23 @@ function calendar() {
       block.style.height = height + 'px';
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
         <span class="tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
-        + (account && height >= ACCT_MIN_H ? `<span class="acct">${esc(account)}</span>` : '');
+        // On a block that is over, what became of it earns the third line ahead
+        // of the account: the account answers "who do I ask", which is a
+        // question about an evening somebody can still do something with.
+        + (b.past && b.note && height >= ACCT_MIN_H ? `<span class="fate">${esc(b.note)}</span>`
+          : account && height >= ACCT_MIN_H ? `<span class="acct">${esc(account)}</span>` : '');
       // The tooltip carries it whatever the block's height, so a half-hour
       // booking is not the one block you cannot find out who owns.
       block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(ends)} your time`
-        + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '');
+        + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '')
+        + (b.past ? ` · ${b.hunted ? 'hunted' : 'never hunted'}${b.note ? ` · ${b.note}` : ''}` : '');
       block.addEventListener('click', e => {
         e.stopPropagation();
         view.pick = b.start;
         view.answer = null;
+        // Nothing to borrow from an evening that is over — see judge, which
+        // answers a click on one by saying what became of it.
+        if (b.past) { renderWindow(); return; }
         // Borrowed, not chosen: the selection takes the block's own window
         // while the block is what is selected, and hands it back on the next
         // empty slot.

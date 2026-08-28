@@ -187,7 +187,12 @@ final class JdaRespawnActions(
         respawnService.reservationsFor(guildId, respawn.id, from),
         respawnService.schedulesForRespawn(guildId, respawn.id),
         respawnService.daysGivenUp(guildId, from, Some(to), Some(respawn.id)),
-        from, to)
+        from, to,
+        // Only where there is a past to read. A week nobody has reached yet
+        // holds no finished claims, and asking the database to confirm that
+        // once per week per spawn visited is a query bought for nothing.
+        if (from.isBefore(java.time.ZonedDateTime.now())) respawnService.historyFor(guildId, respawn.id, from, to)
+        else Nil)
     }
 
   /** A schedule as the calendar draws it.
@@ -432,7 +437,9 @@ object JdaRespawnActions {
                        /** Days each rule has given up, keyed by schedule. */
                        givenUp: Map[Long, Set[java.time.Instant]],
                        from: java.time.ZonedDateTime,
-                       to: java.time.ZonedDateTime): CalendarView = {
+                       to: java.time.ZonedDateTime,
+                       /** Claims that have already finished in this window. */
+                       history: List[RespawnClaim] = Nil): CalendarView = {
     val hunting = active.toList.flatMap { claim =>
       for { start <- claim.startsAt; end <- claim.endsAt if start.isBefore(to) && end.isAfter(from) }
         yield CalendarSlot(None, claim.userId, label(claim.userName, claim.characterName),
@@ -495,8 +502,78 @@ object JdaRespawnActions {
           schedule.repeats, schedule.daysOfWeek, predicted = true))
     }
 
+    // What has already happened here. Drawn to when each claim actually ended
+    // rather than to when it was due to: a hunt given up after twenty minutes
+    // was twenty minutes, and a block drawn to its deadline would be drawing an
+    // evening that nobody had.
+    val finished = history.flatMap { claim =>
+      claim.startsAt.filter(start => start.isBefore(to)).map { start =>
+        val ended = claim.endedAt
+          .orElse(claim.endsAt)
+          .getOrElse(start.plusMinutes(claim.durationMinutes.toLong))
+        CalendarSlot(
+          scheduleId = claim.scheduleId,
+          ownerId = claim.userId,
+          owner = label(claim.userName, claim.characterName),
+          account = claim.userName,
+          nickname = claim.nickname,
+          startsAt = start,
+          // Never a block of no height: a slot removed the instant it began has
+          // the same two timestamps, and a zero-length one would be invisible
+          // rather than absent, which is worse.
+          endsAt = if (ended.isAfter(start)) ended else start.plusMinutes(1),
+          state = if (wasHunted(claim)) RespawnBoardEntry.Claimed else RespawnBoardEntry.Booked,
+          repeats = false,
+          daysOfWeek = RespawnSchedule.OneOff,
+          predicted = false,
+          past = true,
+          hunted = wasHunted(claim),
+          note = historyNote(claim))
+      }
+    }
+
     CalendarView(respawn.code, respawn.name, respawn.creature,
-      (hunting ++ booked ++ predicted).sortBy(_.startsAt.toInstant))
+      (finished ++ hunting ++ booked ++ predicted).sortBy(_.startsAt.toInstant))
+  }
+
+  /** Whether anybody was actually on the spawn.
+   *
+   *  Read off the outcome rather than off the status, because both kinds of row
+   *  finish the same way: an evening hunted to its end and an evening nobody
+   *  turned up for are both closed rows with a window on them. The outcomes
+   *  below are the ones that can only be reached from a hunt in progress —
+   *  everything else closed a booking that never started.
+   *
+   *  A row from before outcomes were recorded has none. Those are read as
+   *  hunted: an old row with a start and an end is a hunt that happened, and
+   *  calling it a no-show would be inventing an accusation. */
+  private[web] def wasHunted(claim: RespawnClaim): Boolean = claim.outcome match {
+    case None => true
+    case Some(outcome) => outcome == RespawnClaim.Outcome.Completed ||
+      outcome == RespawnClaim.Outcome.Released ||
+      outcome == RespawnClaim.Outcome.Forced ||
+      outcome == RespawnClaim.Outcome.Cleared ||
+      outcome == RespawnClaim.Outcome.TakenOver ||
+      outcome == RespawnClaim.Outcome.Unconfirmed
+  }
+
+  /** What became of an evening, said the way somebody who was not there would
+   *  ask about it. Empty for the ordinary case — a hunt that ran its time needs
+   *  no explaining, and a note on every block would be noise on all of them. */
+  private[web] def historyNote(claim: RespawnClaim): String = claim.outcome match {
+    case Some(RespawnClaim.Outcome.Released)     => "given up early"
+    case Some(RespawnClaim.Outcome.Forced)       => "ended by a moderator"
+    case Some(RespawnClaim.Outcome.Cleared)      => "spawn was cleared"
+    case Some(RespawnClaim.Outcome.TakenOver)    => "handed over"
+    case Some(RespawnClaim.Outcome.Unconfirmed)  => "never confirmed"
+    case Some(RespawnClaim.Outcome.Missed)       => "never started"
+    case Some(RespawnClaim.Outcome.GivenUp)      => "given up when asked"
+    case Some(RespawnClaim.Outcome.NoAnswer)     => "no answer, passed on"
+    case Some(RespawnClaim.Outcome.Merged)       => "folded into a hunt already running"
+    case Some(RespawnClaim.Outcome.ScheduleCancelled) => "booking cancelled"
+    case Some(RespawnClaim.Outcome.SlotRemoved)  => "taken off the day"
+    case Some(RespawnClaim.Outcome.SlotMoved)    => "given to somebody else"
+    case _                                       => ""
   }
 
   /** Who a block belongs to, as a person would say it: the character when there
