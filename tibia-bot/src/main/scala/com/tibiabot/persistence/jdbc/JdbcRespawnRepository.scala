@@ -1114,6 +1114,28 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
+  def claimsBetween(guildId: String, respawnId: Long,
+                    from: ZonedDateTime, to: ZonedDateTime): List[RespawnClaim] =
+    withGuild(guildId) { conn =>
+      // COALESCE, because a claim that was given up, taken over or force-ended
+      // stopped before its deadline and it is the real end that decides whether
+      // it falls in the window — and, in the caller, how long the block is.
+      val statement = conn.prepareStatement(
+        """SELECT * FROM respawn_claims
+           |WHERE respawn_id = ?
+           |  AND status IN ('finished', 'cancelled')
+           |  AND starts_at IS NOT NULL
+           |  AND starts_at < ?
+           |  AND COALESCE(ended_at, ends_at, starts_at) > ?
+           |ORDER BY starts_at;""".stripMargin)
+      try {
+        statement.setLong(1, respawnId)
+        statement.setTimestamp(2, Timestamp.from(to.toInstant))
+        statement.setTimestamp(3, Timestamp.from(from.toInstant))
+        collectClaims(statement.executeQuery())
+      } finally statement.close()
+    }
+
   def reassignClaim(guildId: String, claimId: Long, userId: String, userName: String,
                     nickname: String): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
     // The nickname moves with the account name. Leaving it behind — which this

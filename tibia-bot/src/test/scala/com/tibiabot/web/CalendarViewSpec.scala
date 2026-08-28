@@ -35,6 +35,16 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
     RespawnSchedule(id, spawn.id, who, s"name-$who", character, anchor,
       RespawnSchedule.Daily, minutes, active = true, monday, days)
 
+  /** A claim that is over: a window it held, when it really stopped, and why. */
+  private def finished(id: Long, start: ZonedDateTime, minutes: Int = 120,
+                       who: String = "u9", outcome: Option[String] = Some(RespawnClaim.Outcome.Completed),
+                       endedAt: Option[ZonedDateTime] = None,
+                       status: String = RespawnClaim.StatusFinished) =
+    RespawnClaim(id, spawn.id, who, s"name-$who", "", status, 0,
+      monday, Some(start), Some(start.plusMinutes(minutes.toLong)), minutes,
+      warned = false, RespawnClaim.KindAdHoc, None, None,
+      outcome = outcome, endedAt = endedAt)
+
   private def givenUp(scheduleId: Long, days: ZonedDateTime*) =
     Map(scheduleId -> days.map(_.toInstant).toSet)
 
@@ -42,10 +52,86 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
                        reservations: List[RespawnClaim] = Nil,
                        schedules: List[RespawnSchedule] = Nil,
                        givenUp: Map[Long, Set[java.time.Instant]] = Map.empty,
-                       from: ZonedDateTime = monday, to: ZonedDateTime = weekEnd) =
-    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules, givenUp, from, to)
+                       from: ZonedDateTime = monday, to: ZonedDateTime = weekEnd,
+                       history: List[RespawnClaim] = Nil) =
+    JdaRespawnActions.assembleCalendar(spawn, active, reservations, schedules, givenUp, from, to, history)
 
   "the calendar" should {
+
+    "draw what has already happened, marked as over" in {
+      val view = assemble(history = List(finished(1, at(1, 20), minutes = 120)))
+      val slot = view.slots.loneElement
+      slot.past shouldBe true
+      slot.hunted shouldBe true
+      slot.startsAt shouldBe at(1, 20)
+      slot.endsAt shouldBe at(1, 22)
+      // A hunt that simply ran its time explains itself.
+      slot.note shouldBe ""
+    }
+
+    // The honest length of a hunt is how long somebody was on it, not how long
+    // they were entitled to be. Drawing it to its deadline would draw an
+    // evening nobody had.
+    "draw a hunt given up early to when it actually ended" in {
+      val slot = assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.Released),
+        endedAt = Some(at(1, 20, 25))))).slots.loneElement
+      slot.endsAt shouldBe at(1, 20, 25)
+      slot.hunted shouldBe true
+      slot.note shouldBe "given up early"
+    }
+
+    "tell an evening nobody turned up for from one that was hunted" in {
+      val missed = assemble(history = List(finished(1, at(2, 20),
+        outcome = Some(RespawnClaim.Outcome.NoAnswer),
+        status = RespawnClaim.StatusCancelled))).slots.loneElement
+      missed.past shouldBe true
+      missed.hunted shouldBe false
+      missed.note shouldBe "no answer, passed on"
+    }
+
+    // Every outcome that can only be reached from a hunt already running.
+    "count as hunted exactly the outcomes a hunt can end with" in {
+      val hunted = List(RespawnClaim.Outcome.Completed, RespawnClaim.Outcome.Released,
+        RespawnClaim.Outcome.Forced, RespawnClaim.Outcome.Cleared,
+        RespawnClaim.Outcome.TakenOver, RespawnClaim.Outcome.Unconfirmed)
+      val never = List(RespawnClaim.Outcome.Missed, RespawnClaim.Outcome.GivenUp,
+        RespawnClaim.Outcome.NoAnswer, RespawnClaim.Outcome.Merged,
+        RespawnClaim.Outcome.ScheduleCancelled, RespawnClaim.Outcome.SlotRemoved,
+        RespawnClaim.Outcome.SlotMoved)
+      hunted.foreach(o => JdaRespawnActions.wasHunted(finished(1, at(1, 20), outcome = Some(o))) shouldBe true)
+      never.foreach(o => JdaRespawnActions.wasHunted(finished(1, at(1, 20), outcome = Some(o))) shouldBe false)
+    }
+
+    // Rows written before outcomes were recorded. A window with nothing said
+    // about it is a hunt that happened; reading it as a no-show would be
+    // inventing an accusation against somebody who probably turned up.
+    "read a row with no outcome as a hunt that happened" in {
+      val slot = assemble(history = List(finished(1, at(1, 20), outcome = None))).slots.loneElement
+      slot.hunted shouldBe true
+      slot.note shouldBe ""
+    }
+
+    // A day taken off the calendar the instant it began has both timestamps
+    // equal. Zero height is invisible rather than absent, which reads as the
+    // grid having lost something.
+    "give a row that ended where it started something to draw" in {
+      val slot = assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.SlotRemoved),
+        endedAt = Some(at(1, 20))))).slots.loneElement
+      slot.endsAt.isAfter(slot.startsAt) shouldBe true
+    }
+
+    "leave the past out of a window that ends before it" in {
+      assemble(history = List(finished(1, at(9, 20))), to = monday.plusDays(2)).slots shouldBe empty
+    }
+
+    "draw the past beside what is still to come, in time order" in {
+      val view = assemble(
+        history = List(finished(1, at(1, 20))),
+        reservations = List(reservation(2, at(3, 20))))
+      view.slots.map(_.past) shouldBe List(true, false)
+    }
 
     "carry the spawn through, so the page need not look it up separately" in {
       val view = assemble()

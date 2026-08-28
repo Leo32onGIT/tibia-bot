@@ -2280,6 +2280,12 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
+  /** What has already finished on one spawn between two instants — see
+   *  [[com.tibiabot.persistence.RespawnRepository.claimsBetween]]. */
+  def historyFor(guildId: String, respawnId: Long,
+                 from: ZonedDateTime, to: ZonedDateTime): List[RespawnClaim] =
+    repository.claimsBetween(guildId, respawnId, from, to)
+
   /** Days each rule has given up, as the surfaces that draw rules need them:
    *  keyed by schedule, so asking "when is this one next" costs a lookup rather
    *  than a scan. See [[com.tibiabot.persistence.ScheduleOccurrence]].
