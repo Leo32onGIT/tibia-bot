@@ -916,7 +916,8 @@
        and redraws nothing: at 28px an hour a day is 672px, which no phone has,
        and pinching down to a third of that is how the evening and the small
        hours get onto one screen together. */
-    --row: calc(var(--row-base) * var(--ui-scale) * var(--zoom));
+    --vzoom: 1;
+    --row: calc(var(--row-base) * var(--ui-scale) * var(--vzoom));
     --min-block: calc(13px * var(--ui-scale));
     width: max-content;
     /* One finger still scrolls the way the browser scrolls, momentum and all.
@@ -1128,18 +1129,35 @@
        height again here, not a ceiling — this is the one case where filling
        the screen is the point rather than fitting the contents. */
     .window { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
-    .wk-body { margin: 0 10px; }
+    /* Barely a margin. The grid is the thing the panel is for and the panel is
+       the whole screen; ten pixels either side of it was a border drawn in
+       nothing. */
+    .wk-body { margin: 0 3px; }
     /* Nothing outside the week scrolls: it is the part that is too big for a
        phone, and everything else earns its place by being small enough. */
     .win-body { overflow-y: hidden; }
-    /* Tighter, so the grid keeps as much of a short screen as it can. */
-    .win-head { padding: 11px 14px 9px; }
-    .strip { padding: 8px 14px; }
-    .readout { padding: 9px 14px; gap: 10px; }
-    .foot-msg { padding: 8px 14px; }
-    .up-head { padding: 8px 14px; }
-    .up-list { padding: 5px 14px 8px; max-height: 168px; }
+    /* Tighter, so the grid keeps as much of a short screen as it can. Every
+       one of these is padding: the rows still say everything they said, they
+       simply stop holding it at arm's length. Between them they are worth about
+       a fifth of the panel, which the grid takes. */
+    .win-head { padding: 7px 12px 6px; }
+    .strip { padding: 6px 12px; }
+    .readout { padding: 6px 12px; gap: 10px; }
+    .foot-msg { padding: 5px 12px; }
+    .up-head { padding: 6px 12px; }
+    .up-list { padding: 4px 12px 6px; max-height: 168px; }
     .cal-legend { display: none; }
+
+    /* "Book a time", which on a phone is a heading over a row of controls that
+       already say what they are for. The count it carried goes with it — see
+       the note where it is built. */
+    .cal-head { display: none; }
+
+    /* The day and its number on one line. Two lines of heading over four
+       columns is a row of the grid spent saying what the row below already
+       shows. */
+    .wk-head { padding: 3px 0 2px; letter-spacing: 0.06em; }
+    .wk-head .dnum { display: inline; margin: 0 0 0 4px; font-size: calc(11.5px * var(--ui-scale)); }
 
     /* ---- Four days, not seven -------------------------------------------
        A seventh of a phone is about forty pixels, which is not enough to say
@@ -1149,10 +1167,14 @@
        planning are already in view. The hour gutter and the day headings stay
        put while it does, which is what the sticky rules above are for. */
     .wk-grid {
-      --gutter: 44px;
+      /* Sized to what it holds, which is less than it looks: the widest thing
+         in the gutter is the server echo at 22px and the twelve-hour label is
+         21px behind it, so forty-four pixels carried fifteen of empty space to
+         the left of every label. Both still say everything they said. */
+      --gutter: 30px;
       /* The four that fit: the body's own width (the window, less its margins)
          less the gutter, split four ways. */
-      --daycol: calc((100vw - 20px - var(--gutter)) / 4 * var(--zoom));
+      --daycol: calc((100vw - 6px - var(--gutter)) / 4 * var(--zoom));
     }
     /* Every pixel of a narrow column goes to the label, so a whole time fits on
        one line and the name has somewhere to be above it. The size follows the
@@ -1160,6 +1182,8 @@
        and "19:00–21:00" has to survive both — clamped at the top so a big phone
        gets the desktop size rather than an inflated one. */
     .wk-block { padding: 2px 4px; font-size: clamp(8px, 2.4vw, 9.5px); }
+    /* The label sits closer to its own edge, the gutter having no room to spare. */
+    .wk-hour { padding-right: 5px; }
 
     /* ---- Booking controls, on one row -----------------------------------
        Stacked and centred, these took four rows of a short screen. "Book" goes,
@@ -1291,7 +1315,7 @@ function refreshScale() {
   const was = ROW_H;
   // Times the zoom, because ROW_H is this file's copy of `--row` and the two
   // disagreeing is how a drag would land somewhere other than where it looked.
-  ROW_H = base * scale * (view.zoom || 1);
+  ROW_H = base * scale * (view.vzoom || 1);
   MIN_BLOCK_H = 13 * scale;
   ACCT_MIN_H = 40 * scale;
   return ROW_H !== was;
@@ -1590,11 +1614,25 @@ const view = {
   // at — see stretchRange — so further ahead is a scroll rather than a page.
   from: -1,
   to: 27,
-  // How wide a day is, as a multiple of the size it would otherwise be. Moved
-  // by pinching and by nothing else, and deliberately not remembered: it is a
-  // way of looking at one spawn for a moment, not a setting, so every panel
-  // opens at the size the screen chose for it.
+  // How wide a day is, and how tall an hour is, each as a multiple of the size
+  // it would otherwise be. Moved by pinching and by nothing else, and
+  // deliberately not remembered: it is a way of looking at one spawn for a
+  // moment, not a setting, so every panel opens at the size the screen chose.
+  //
+  // Two numbers rather than one, because they run out at different points. A
+  // single pinch moves both, but a whole day fills the frame long before a
+  // fortnight of columns does, and past that the hours have nowhere left to go
+  // while the days still have plenty — so tying them together would trade the
+  // fortnight view for an empty foot of grid.
   zoom: 1,
+  vzoom: 1,
+  // What the fingers asked for, before either side's frame had its say. Both of
+  // the numbers above are this one clamped, which is what keeps them equal
+  // wherever neither limit is binding — so a block holds its shape through the
+  // ordinary middle of the range, and the two only part company at a floor,
+  // where one axis has run out and the other has not. Coming back off the
+  // floor brings them together again, because they are both still this.
+  intent: 1,
   duration: null,
   // The length the reader themselves chose, which is not always the one on
   // screen: selecting somebody's booking shows that booking's length, and their
@@ -2529,6 +2567,8 @@ function openWindow(code) {
   view.from = -1;
   view.to = 27;
   view.zoom = 1;
+  view.vzoom = 1;
+  view.intent = 1;
   userMoved = false;
   view.pick = null;
   view.answer = null;
@@ -2878,7 +2918,11 @@ function renderWindow() {
   foot.hidden = !foot.firstChild;
 
   wireWindow();
-  if (keepScroll !== null && gridEl) {
+  if (gridEl && homingUntil > Date.now()) {
+    // Somebody pressed Now and we are between here and there. Where the scroll
+    // happens to be is not where they asked to be.
+    scrollToNow(true);
+  } else if (keepScroll !== null && gridEl) {
     gridEl.style.scrollBehavior = 'auto';
     gridEl.scrollTop = keepScroll.top;
     gridEl.scrollLeft = keepScroll.left;
@@ -3139,7 +3183,7 @@ function calendarSection() {
     : booked === 0 ? 'nothing booked ahead'
     : `${booked} booked ahead`;
 
-  wrap.appendChild(el('div', 'strip', `
+  wrap.appendChild(el('div', 'strip cal-head', `
     <i class="ti ti-calendar-month" aria-hidden="true"></i>
     <span class="fold-title">Book a time</span>
     <span class="muted">${summary}</span>`));
@@ -3201,6 +3245,7 @@ function calendar() {
   // panel is open — see stretchRange.
   grid.style.setProperty('--days', days);
   grid.style.setProperty('--zoom', view.zoom);
+  grid.style.setProperty('--vzoom', view.vzoom);
 
   // --- day headings, inside the scroller so they slide with their own columns
   const heads = [];
@@ -4637,6 +4682,14 @@ function button(label, className, onClick, icon) {
  */
 const PULL_WAIT = 60, PULL_TIME = 300, PULL_CURVE = 4;
 let pullRaf = 0, pullTimer = 0, pulling = false, panning = false, touching = false;
+/** Until when a press of Now is still on its way home.
+ *
+ *  The scroll it starts is a smooth one, and a render landing while it travels
+ *  would put the reader back wherever the animation had got to — the panel
+ *  rebuilds on every poll and restores the scroll it found, which is the right
+ *  thing to do for every scroll except this one. Inside this window a render
+ *  aims at today instead of at whatever it measured. */
+let homingUntil = 0;
 /** Whether the strip was last moved by a finger.
  *
  *  A swipe is the one gesture that already ends by itself: the browser's own
@@ -4718,11 +4771,28 @@ function gridScrolled() {
  *  this on its own.
  */
 function backToNow() {
+  // The size comes back with the place. Now is the way out of wherever a panel
+  // has been taken — a fortnight out, an evening filled, three weeks along — and
+  // leaving it at whatever zoom it had would answer half the question.
+  //
+  // Ahead of the scroll below, which works in the hour the grid is currently
+  // drawn at: reset afterwards and it would aim at the old one.
+  if (view.zoom !== 1 || view.vzoom !== 1) {
+    view.zoom = view.vzoom = view.intent = 1;
+    const grid = gridEl && gridEl.querySelector('.wk-grid');
+    if (grid) {
+      grid.style.setProperty('--zoom', 1);
+      grid.style.setProperty('--vzoom', 1);
+    }
+    refreshScale();
+    fitBlocks();
+  }
   if (view.from > -1 || view.to < 0) {
     view.from = -1;
     view.to = 27;
     showRange();
   }
+  homingUntil = Date.now() + 900;
   scrollToNow(true);
 }
 
@@ -4737,6 +4807,35 @@ function backToNow() {
  *  Both are honoured at once — one pinch moves one number, and the tighter of
  *  the two limits is the one that stops it. */
 const MIN_COL = 30, MAX_COL = 300, MIN_ROW = 11, MAX_ROW = 90;
+
+/** The real floors, which are not the numbers above.
+ *
+ *  A pinch should stop when the thing being looked at fills the frame. Zooming
+ *  out past that does not show more of anything — a day is already all there —
+ *  it only leaves the foot of the grid empty, which on a tall phone is most of
+ *  it and reads as the calendar having come apart.
+ *
+ *  So the floor is whatever it takes to fill the frame, and the fixed numbers
+ *  above are only the far end for a frame small enough to want them. Capped at
+ *  the size the grid starts at, so that a frame taller than a whole day at rest
+ *  — a landscape tablet, say — cannot end up with a pinch that refuses to zoom
+ *  out at all, or worse, forces it in.
+ */
+function rowFloor() {
+  const unzoomed = ROW_H / (view.vzoom || 1);
+  if (!gridEl) return Math.min(unzoomed, MIN_ROW);
+  const rows = gridEl.querySelector('.wk-rows');
+  const visible = gridEl.clientHeight - (rows ? rows.offsetTop : 0);
+  return Math.min(unzoomed, Math.max(MIN_ROW, visible / 24));
+}
+
+function colFloor() {
+  const unzoomed = colWidth() / (view.zoom || 1);
+  if (!gridEl) return Math.min(unzoomed, MIN_COL);
+  const hours = gridEl.querySelector('.wk-hours');
+  const visible = gridEl.clientWidth - (hours ? hours.getBoundingClientRect().width : 0);
+  return Math.min(unzoomed, Math.max(MIN_COL, visible / gridDays()));
+}
 
 /** What a block can afford to say at the width the columns actually are.
  *
@@ -4829,7 +4928,7 @@ function pinchZoom() {
     stopPull();
     active = true;
     from = gap(e.touches) || 1;
-    base = view.zoom;
+    base = view.intent;
     const box = gridEl.getBoundingClientRect();
     screenX = mid(e.touches) - box.left;
     screenY = midY(e.touches) - box.top;
@@ -4849,14 +4948,24 @@ function pinchZoom() {
     if (!grid) return;
     // What a column and an hour would each be at zoom 1, so the limits can be
     // written in the units they are actually about.
-    const unitCol = colWidth() / view.zoom, unitRow = ROW_H / view.zoom;
+    const unitCol = colWidth() / view.zoom, unitRow = ROW_H / view.vzoom;
     if (unitCol < 4 || unitRow < 4) return;
-    const wanted = base * (gap(e.touches) / from);
-    // Whichever side runs out first is the one that stops the pinch.
-    const low = Math.max(MIN_COL / unitCol, MIN_ROW / unitRow);
-    const high = Math.min(MAX_COL / unitCol, MAX_ROW / unitRow);
-    view.zoom = Math.min(high, Math.max(low, wanted));
+    // One gesture, one intent, clamped twice: the fingers say how much, and
+    // each side stops where its own frame says it should. Past the point where a
+    // whole day fills the grid the hours stay where they are while the days
+    // carry on getting narrower — and because both are still readings of the
+    // same number, coming back off that floor puts them in step again.
+    const lowCol = colFloor() / unitCol, highCol = MAX_COL / unitCol;
+    const lowRow = rowFloor() / unitRow, highRow = MAX_ROW / unitRow;
+    // Bounded by whichever side still has room, so a long pinch against one
+    // limit cannot run the intent off somewhere it takes a second gesture to
+    // come back from.
+    view.intent = Math.min(Math.max(highCol, highRow),
+      Math.max(Math.min(lowCol, lowRow), base * (gap(e.touches) / from)));
+    view.zoom = Math.min(highCol, Math.max(lowCol, view.intent));
+    view.vzoom = Math.min(highRow, Math.max(lowRow, view.intent));
     grid.style.setProperty('--zoom', view.zoom);
+    grid.style.setProperty('--vzoom', view.vzoom);
     // ROW_H is this file's copy of the hour the CSS is now drawing at, and the
     // scroll below is measured in it.
     refreshScale();
