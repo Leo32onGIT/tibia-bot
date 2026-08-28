@@ -866,7 +866,12 @@
      this used to do — which had to be re-guessed whenever anything around it
      changed height, and was wrong on a phone. */
   .wk-body { position: relative; flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain;
-             margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent; }
+             margin: 0 20px; scrollbar-width: thin; scrollbar-color: #2a3140 transparent;
+             /* One finger scrolls the way the browser scrolls, momentum and all;
+                two are ours. On the scroller as well as on the grid inside it,
+                because which of the two a touch is measured against is not the
+                same question in every engine. */
+             touch-action: pan-x pan-y; }
   .wk-body::-webkit-scrollbar { width: 10px; }
   .wk-body::-webkit-scrollbar-track { background: transparent; }
   .wk-body::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 5px; border: 3px solid var(--panel); background-clip: padding-box; }
@@ -4725,23 +4730,48 @@ function fitBlocks() {
  *  which is what makes the gesture feel like moving a picture around rather than
  *  like the picture being replaced.
  *
- *  One finger is left alone throughout — `touch-action: pan-x pan-y` on the grid
- *  keeps the browser's own scrolling, momentum and all, and only withholds
- *  pinch-zoom. Two fingers are taken from it, which is why the move is
- *  cancelled: without that the page zooms underneath the gesture.
+ *  Listened for on the document rather than on the grid, and refused there.
+ *  `touch-action` was not enough on its own: it governs what an element's own
+ *  scrolling does with a gesture, and zooming the page is not that — it belongs
+ *  to the browser, which is why the first version zoomed the whole dashboard,
+ *  frame and all. Taking it needs the gesture refused before the browser has
+ *  claimed it, which means the document, in the capture phase, and not passive.
+ *
+ *  Refused only when both fingers are inside the grid. Pinching anywhere else on
+ *  the panel still zooms the page the way it always did, which is somebody's way
+ *  of reading small text and not ours to take away.
+ *
+ *  Safari fires its own `gesture*` events beside the touches, and those are the
+ *  only thing that stops it zooming; Chrome answers to the touches. Both are
+ *  handled, and only one of them ever drives the zoom, so a browser that fires
+ *  both does not scale twice.
  */
-function pinchZoom(box) {
+let pinchInstalled = false;
+function pinchZoom() {
+  if (pinchInstalled) return;
+  pinchInstalled = true;
+
   let from = 0, base = 1, focal = 0, screenX = 0, active = false;
 
   const gap = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   const mid = t => (t[0].clientX + t[1].clientX) / 2;
   const gutter = () => {
-    const hours = box.querySelector('.wk-hours');
+    const hours = gridEl && gridEl.querySelector('.wk-hours');
     return hours ? hours.getBoundingClientRect().width : 0;
   };
+  /** Both fingers on the grid. By where they are rather than by what they
+   *  landed on: two fingers land on two different elements, and a pinch that
+   *  began on a block is still a pinch on the grid. */
+  const onGrid = touches => {
+    if (!gridEl) return false;
+    const r = gridEl.getBoundingClientRect();
+    const inside = t => t.clientX >= r.left && t.clientX <= r.right &&
+                        t.clientY >= r.top && t.clientY <= r.bottom;
+    return inside(touches[0]) && inside(touches[1]);
+  };
 
-  box.addEventListener('touchstart', e => {
-    if (e.touches.length !== 2) return;
+  document.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2 || !onGrid(e.touches)) return;
     // Nothing to measure against, so nothing to scale: colWidth falls back to a
     // single pixel when the grid has not been laid out, and a zoom worked out
     // against that would be a factor of hundreds.
@@ -4750,16 +4780,18 @@ function pinchZoom(box) {
     active = true;
     from = gap(e.touches) || 1;
     base = view.zoom;
-    screenX = mid(e.touches) - box.getBoundingClientRect().left;
+    screenX = mid(e.touches) - gridEl.getBoundingClientRect().left;
     // Where between the fingers is, said as a distance along the strip in days
     // — the one measurement that survives the columns changing width.
-    focal = (box.scrollLeft + screenX - gutter()) / colWidth();
-  }, { passive: true });
+    focal = (gridEl.scrollLeft + screenX - gutter()) / colWidth();
+  }, { capture: true, passive: true });
 
-  box.addEventListener('touchmove', e => {
+  document.addEventListener('touchmove', e => {
     if (!active || e.touches.length !== 2) return;
+    // Before anything else: whatever happens below, this gesture is not the
+    // browser's to zoom the page with.
     e.preventDefault();
-    const grid = box.querySelector('.wk-grid');
+    const grid = gridEl && gridEl.querySelector('.wk-grid');
     if (!grid) return;
     // The width one column would be at zoom 1, so the clamp can be written in
     // the units the limits are actually about.
@@ -4769,20 +4801,27 @@ function pinchZoom(box) {
     view.zoom = Math.min(MAX_COL / unit, Math.max(MIN_COL / unit, wanted));
     grid.style.setProperty('--zoom', view.zoom);
     // Put the same day back under the same finger.
-    box.scrollLeft = focal * colWidth() + gutter() - screenX;
+    gridEl.scrollLeft = focal * colWidth() + gutter() - screenX;
     fitBlocks();
-    if (typeof gridScrolled === 'function') gridScrolled();
-  }, { passive: false });
+    gridScrolled();
+  }, { capture: true, passive: false });
 
   const stop = () => { active = false; };
-  box.addEventListener('touchend', stop, { passive: true });
-  box.addEventListener('touchcancel', stop, { passive: true });
+  document.addEventListener('touchend', stop, { capture: true, passive: true });
+  document.addEventListener('touchcancel', stop, { capture: true, passive: true });
 
-  // Safari fires its own gesture events beside the touches above. They are not
-  // acted on — the pinch is already handled — but they are refused, or the page
-  // zooms as well as the grid.
+  // Safari's own. `gesturestart` is the one that has to be refused — it is what
+  // the page zoom actually begins from — and it carries no touch list, so where
+  // it happened is read off the event itself.
+  const onGridPoint = e => {
+    if (!gridEl) return false;
+    const r = gridEl.getBoundingClientRect();
+    return e.clientX >= r.left && e.clientX <= r.right &&
+           e.clientY >= r.top && e.clientY <= r.bottom;
+  };
   ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
-    box.addEventListener(ev, e => e.preventDefault()));
+    document.addEventListener(ev, e => { if (onGridPoint(e)) e.preventDefault(); },
+      { capture: true, passive: false }));
 }
 
 /** A week's worth of columns, for the arrows — which is what a plain mouse and
@@ -4834,7 +4873,9 @@ function wireGrid(box) {
   box.addEventListener('touchstart', () => { touching = true; touchDriven = true; }, { passive: true });
   box.addEventListener('touchend', () => { touching = false; }, { passive: true });
   dragPan(box);
-  pinchZoom(box);
+  // Installs once, on the document, and finds the current grid for itself — the
+  // panel is rebuilt on every poll and document listeners do not come with it.
+  pinchZoom();
 }
 
 /** Booking the hour that was clicked. Lifted out of the cell it used to be
