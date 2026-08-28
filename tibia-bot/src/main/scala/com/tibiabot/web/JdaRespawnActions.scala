@@ -21,8 +21,15 @@ import scala.util.control.NonFatal
 final class JdaRespawnActions(
   discordGateway: DiscordGateway,
   respawnService: RespawnService,
-  ownership: RespawnOwnership
+  ownership: RespawnOwnership,
+  /** Where a calendar's rows come from. Defaults to reading them per request;
+   *  the dashboard passes a cache that reads a guild's rows once and answers
+   *  every spawn and every week from them — see CalendarSnapshotCache. */
+  calendarRowsOf: (String, java.time.ZonedDateTime, java.time.ZonedDateTime) => CalendarRows = null
 )(implicit blocking: ExecutionContext) extends RespawnActionPort with StrictLogging {
+
+  private val rowsOf: (String, java.time.ZonedDateTime, java.time.ZonedDateTime) => CalendarRows =
+    if (calendarRowsOf ne null) calendarRowsOf else respawnService.calendarRows
 
   /** Runs `act` only if this bot can legitimately act on the guild. Anything
    *  else answers [[RespawnActionPort.Unavailable]] — not a permission failure,
@@ -179,18 +186,28 @@ final class JdaRespawnActions(
   def calendar(guildId: String, code: String,
                from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] =
     respawnService.resolve(guildId, code).map { respawn =>
+      // One read of the guild, sliced to this spawn. Every panel open on this
+      // guild in the next few seconds is answered from the same rows.
+      val rows = rowsOf(guildId, from, to)
+      val schedules = rows.schedules.getOrElse(respawn.id, Nil)
+      val scheduleIds = schedules.map(_.id).toSet
       JdaRespawnActions.assembleCalendar(
         respawn,
-        respawnService.status(guildId, respawn)._1,
+        rows.active.get(respawn.id),
         // Anchored at the window's own start rather than at `now`, so a grid
-        // showing earlier in the week still draws what was booked then.
-        respawnService.reservationsFor(guildId, respawn.id, from),
-        respawnService.schedulesForRespawn(guildId, respawn.id),
-        respawnService.daysGivenUp(guildId, from, Some(to), Some(respawn.id)),
+        // showing earlier in the week still draws what was booked then — the
+        // rows may reach further back than this window does.
+        rows.reservations.getOrElse(respawn.id, Nil)
+          .filter(_.startsAt.exists(!_.isBefore(from)))
+          .sortBy(_.startsAt.map(_.toInstant).getOrElse(java.time.Instant.MIN)),
+        schedules,
+        rows.givenUp.filter { case (id, _) => scheduleIds.contains(id) },
         from, to,
         // Only where there is a past to read. A week nobody has reached yet
         // holds no finished claims, and asking the database to confirm that
-        // once per week per spawn visited is a query bought for nothing.
+        // once per week per spawn visited is a query bought for nothing. Left
+        // out of the snapshot deliberately: it is the one part of a calendar
+        // that cannot go stale, and the one no other reader wants.
         if (from.isBefore(java.time.ZonedDateTime.now())) respawnService.historyFor(guildId, respawn.id, from, to)
         else Nil)
     }

@@ -1860,6 +1860,14 @@ function cardFor(spawn) {
   card.title = `${spawn.code} — ${spawn.name}${spawn.region ? ' · ' + spawn.region : ''}`;
 
   card.addEventListener('click', () => openWindow(spawn.code));
+  // The panel takes a moment to build, and the week it will want is knowable
+  // the instant a finger lands on the card. Asking for it now overlaps the
+  // request with the layout instead of following it. Failures are ignored: this
+  // is a head start, and showRange asks properly either way.
+  card.addEventListener('pointerdown', () => {
+    if (view.code === spawn.code) return;
+    [0, 1].forEach(w => fetchWeek(spawn.code, w).catch(() => {}));
+  }, { passive: true });
   cardParts.set(spawn.code, parts);
   paintCard(spawn);
   return card;
@@ -2121,6 +2129,42 @@ async function loadSlots() {
  *  week boundary comes back in both weeks either side of it, hence the dedup:
  *  the same booking twice is two blocks fighting over the same pixels.
  */
+/** The bookings the board already told us about, as blocks.
+ *
+ *  The board's ten-second poll carries the next few bookings on every spawn,
+ *  because the "Up next" list under the calendar needs them: who, when, how
+ *  long, whether it is yours, whether it has been asked about. Those are the
+ *  same blocks the grid draws, and they are in the browser before the panel is
+ *  opened — so the grid can be drawn from them at once and corrected when the
+ *  week itself lands, instead of opening empty on a request that has not come
+ *  back yet.
+ *
+ *  Not the whole answer, and not pretending to be: it is the next few on one
+ *  spawn, with no repeat previews and no history, so the loading thread stays
+ *  up until the real week arrives. What it buys is that the first thing the
+ *  reader sees is their own bookings rather than an empty grid.
+ */
+function knownSlots() {
+  const spawn = openSpawn();
+  if (!spawn) return [];
+  const out = [];
+  // The hunt in progress, which the card is already showing at the top of the
+  // panel — the same block, in the same place, a moment sooner.
+  if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
+    out.push({ owner: spawn.holder || 'someone', account: '', nickname: '',
+      mine: !!spawn.mine, start: new Date(spawn.startsAt), end: new Date(spawn.endsAt),
+      state: 'claimed', repeats: false, days: 0, predicted: false, provisional: true });
+  }
+  (spawn.booked || []).forEach(b => {
+    const start = new Date(b.startsAt);
+    out.push({ owner: b.name, account: '', nickname: '', mine: !!b.mine,
+      start, end: new Date(start.getTime() + b.minutes * 60000),
+      state: b.asked ? 'asked' : 'booked', repeats: false, days: 0,
+      predicted: false, provisional: true });
+  });
+  return out;
+}
+
 function gatherSlots() {
   const seen = new Set(), out = [];
   for (let w = weekOf(view.from); w <= weekOf(view.to); w++) {
@@ -2133,7 +2177,9 @@ function gatherSlots() {
       out.push(b);
     });
   }
-  return out;
+  // Nothing read yet for any of it. Rather than an empty grid under a loading
+  // thread, draw what the board already handed us — see knownSlots.
+  return out.length ? out : knownSlots();
 }
 
 /** Which weeks the reader can see, padded by `pad` weeks either side.

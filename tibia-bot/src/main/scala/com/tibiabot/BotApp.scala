@@ -416,8 +416,14 @@ object BotApp extends App with StrictLogging {
       thread.setDaemon(true)
       thread
     }))
+  // A board is one question per tab; a calendar was one per spawn per week per
+  // tab, all of them asking for rows the others had just been given. One read
+  // of the guild now answers the lot — see CalendarSnapshotCache.
+  private val calendarSnapshots =
+    new web.CalendarSnapshotCache((guildId, from, to) => respawnService.calendarRows(guildId, from, to))
   private val localRespawnActions =
-    new web.JdaRespawnActions(discordGateway, respawnService, respawnOwnership)(respawnActionPool)
+    new web.JdaRespawnActions(discordGateway, respawnService, respawnOwnership,
+      calendarSnapshots.rows)(respawnActionPool)
   // A guild whose respawns another bot runs has its writes handed to that
   // process through Redis; reads never relay, since every bot shares the
   // guild's database.
@@ -574,7 +580,10 @@ object BotApp extends App with StrictLogging {
       actions = respawnActions,
       // The route's own pool is the one its *reads* run on; every write it
       // makes goes through `respawnActions`, which carries the action pool.
-      boardChanged = boardSnapshots.invalidate)(dashboardReadPool)
+      // One door for both: everything that changes a board changes the calendar
+      // it is a summary of, and a booking made through the dashboard has to be
+      // on screen for whoever made it before they have finished looking.
+      boardChanged = guildId => { boardSnapshots.invalidate(guildId); calendarSnapshots.invalidate(guildId) })(dashboardReadPool)
   // A shared-world-cycle secondary doesn't run its own dashboard at all —
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.

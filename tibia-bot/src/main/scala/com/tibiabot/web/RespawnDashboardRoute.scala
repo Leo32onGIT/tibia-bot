@@ -514,7 +514,10 @@ final class RespawnDashboardRoute(
               case Some((start, end)) =>
                 read(actions.calendar(guildId, code, start, end)) {
                   case None       => badRequest(s"No spawn matches '$code'.")
-                  case Some(view) => json(RespawnDashboardRoute.calendarJson(view, userId))
+                  // Tagged, like the board: a week already in hand comes back as
+                  // "still the same" rather than as itself again. The poll and
+                  // scrolling back over a week already seen are both this.
+                  case Some(view) => cachedJson(RespawnDashboardRoute.calendarJson(view, userId), 0L)
                 }
             }
           }

@@ -2280,6 +2280,26 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
+  /** Every row a guild's calendars are drawn from, over one window, in four
+   *  reads rather than five per spawn per week.
+   *
+   *  The same rows the per-spawn calls return, asked for guild-wide and grouped
+   *  here — see [[com.tibiabot.web.CalendarRows]], which is what holds them.
+   *  Nothing is decided at this level: the deciding is still
+   *  `JdaRespawnActions.assembleCalendar`, which now takes its rows from here
+   *  instead of asking for its own.
+   */
+  def calendarRows(guildId: String, from: ZonedDateTime,
+                   to: ZonedDateTime): com.tibiabot.web.CalendarRows =
+    com.tibiabot.web.CalendarRows(
+      active = repository.allActiveClaims(guildId).map(claim => claim.respawnId -> claim).toMap,
+      // Anchored at the window's own start rather than at now, so a grid showing
+      // earlier in the week still draws what was booked then.
+      reservations = repository.allReservations(guildId, from).groupBy(_.respawnId),
+      schedules = repository.allSchedules(guildId).groupBy(_.respawnId),
+      givenUp = daysGivenUp(guildId, from, Some(to)),
+      from = from, to = to)
+
   /** What has already finished on one spawn between two instants — see
    *  [[com.tibiabot.persistence.RespawnRepository.claimsBetween]]. */
   def historyFor(guildId: String, respawnId: Long,
