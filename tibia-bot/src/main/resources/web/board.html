@@ -976,6 +976,24 @@
   .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .readout i { font-size: calc(15px * var(--ui-scale)); }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
+  /* The two things a booking-over verdict turns on, picked out of a sentence
+     that is now three clauses long: what pressing the button does, and what
+     would defeat it. Coloured in the board's own words for those states rather
+     than in a highlight of their own — amber is a slot that has been asked
+     about, blue is one whose owner has confirmed — so the sentence and the
+     block on the grid it is about are saying the same thing in the same hue. */
+  .verdict-em { font-weight: 600; }
+  .verdict-em.ask { color: var(--st-asked); }
+  .verdict-em.yes { color: var(--st-confirmed); }
+  .verdict-em.live { color: var(--st-claimed); }
+  /* The name of a button, where a line says which one to press. No colour of
+     its own: it names a control rather than one of the board's states, and
+     spending a state's hue on it would say something untrue about the slot. */
+  .verdict-em.act { color: var(--text-strong); }
+  /* Whose slot it is, and when — the two things somebody scans a verdict for.
+     Weight and brightness rather than colour, for the same reason: an identity
+     is not a state. */
+  .verdict-who { color: var(--text-strong); font-weight: 600; }
   /* Neither a yes nor a no: somebody clicked a hunt in progress and is being
      told whose it is. */
   .verdict-info { color: var(--muted); }
@@ -2068,22 +2086,35 @@ function overlapping(start, minutes) {
   return slots.filter(b => start < b.end && b.start < end);
 }
 
-/** Who a block belongs to, said in full, for a sentence rather than for a label.
+/** The one Discord name a block's owner answers to, as the card says it.
  *
- *  Built on [[accountLine]] so the grid and the message under it name the same
- *  person the same way: the character the team recognises, then the account and
- *  the nickname behind it. Never a mention — see `Names.user`, which is the same
- *  convention on the Discord side.
+ *  A verdict used to introduce somebody in full — the character on the block,
+ *  then the account and the nickname behind it, three names for one person. The
+ *  block being described is a finger's width above, already labelled with the
+ *  character and carrying [[accountLine]] underneath it; what the sentence is
+ *  for is naming somebody to go and ask, and that is the one name they answer
+ *  to in Discord. The card at the top of the panel names them the same way, so
+ *  the two agree instead of reading as two people.
+ *
+ *  The character is the last resort rather than the first: a block written
+ *  before nicknames were kept has only its account, and one from before accounts
+ *  travelled has only what it is labelled with.
  */
-function nameOf(b) {
-  const account = accountLine(b);
-  const shown = (b.owner || '').trim();
-  if (!account) return shown || 'somebody';
-  // A leading @ means the line is a nickname alone, which happens when the block
-  // is already labelled with the account — so it goes in brackets after it
-  // rather than being introduced as a second, separate name.
-  if (account.startsWith('@')) return shown ? `${shown} (${account})` : account;
-  return shown ? `${shown} — ${account}` : account;
+function calledOf(b) {
+  const nick = (b.nickname || '').trim();
+  const acct = (b.account || '').trim();
+  return called(nick || acct || (b.owner || '').trim());
+}
+
+/** A name or a time, in the weight the eye goes looking for.
+ *
+ *  These are the pieces of a verdict that come off the wire rather than out of
+ *  this file, so this is also where they are escaped — a verdict carrying markup
+ *  has to escape what it interpolates, and doing it in the same breath as the
+ *  wrapping is what stops the two coming apart later.
+ */
+function bright(text) {
+  return `<span class="verdict-who">${esc(text)}</span>`;
 }
 
 /** Whatever is actually happening at an instant — the block covering it, if any.
@@ -2106,16 +2137,22 @@ function judge(start) {
     // are recognisably the same one.
     const live = runningAt(start);
     if (live) {
-      const who = live.mine ? 'You are' : `${nameOf(live)} is`;
-      const verb = live.state === 'claimed' ? 'hunting' : 'booked for';
+      const who = live.mine ? 'You are' : `${bright(calledOf(live))} is`;
+      // What the grid is painting under the pointer, in the grid's own colour
+      // for it: a hunt running is the claimed pink, a booking that has started
+      // is the booked blue.
+      const verb = live.state === 'claimed'
+        ? '<b class="verdict-em live">hunting</b>'
+        : '<b class="verdict-em yes">booked for</b>';
       // The advice names whatever the button is currently offering, which for
-      // your own hunt is giving it back rather than booking anything.
+      // your own hunt is giving it back rather than booking anything — so the
+      // word is set as the button name it is.
       const next = live.mine && live.state === 'claimed'
-        ? 'Leave to give it back, or pick a later time to book it.'
+        ? '<b class="verdict-em act">Leave</b> to give it back, or pick a later time to book it.'
         : 'Pick a later time to book it.';
       return {
         type: 'info',
-        text: `${who} ${verb} this until ${fmtClock12(live.end)}. ${next}`
+        html: `${who} ${verb} this until ${bright(fmtClock12(live.end))}. ${next}`
       };
     }
     return { type: 'no', text: 'That start time has already passed.' };
@@ -2123,12 +2160,34 @@ function judge(start) {
   const hit = overlapping(start, view.duration);
   if (!hit.length) return { type: 'ok', text: `Free — ${fmtLocal(start)}–${fmtLocal(end)}, ${fmtDur(view.duration)}` };
   if (hit.some(b => b.mine)) return { type: 'no', text: 'That runs over a booking of your own.' };
-  if (hit.some(b => b.state === 'claimed')) return { type: 'no', text: 'Somebody is hunting that right now.' };
+  // "Somebody" was the page declining to say something it knew: the block is on
+  // the grid under the selection, with a name on it.
+  const running = hit.find(b => b.state === 'claimed');
+  if (running) return {
+    type: 'no',
+    html: `${bright(calledOf(running))} is <b class="verdict-em live">hunting</b> that right now.`
+  };
   if (view.repeat === 'week') return { type: 'no', text: 'A repeating booking cannot be settled by asking about one evening.' };
   if (hit.length > 1) return { type: 'no', text: 'That runs over more than one booking — nobody single to ask.' };
-  if (hit[0].state === 'asked') return { type: 'no', text: `${hit[0].owner} has already been asked about that slot.` };
-  if (hit[0].predicted) return { type: 'no', text: `${hit[0].owner} books that every week — too far ahead to ask about yet.` };
-  return { type: 'ask', text: `Taken by ${hit[0].owner}. Booking asks whether they are actually hunting it.` };
+  // "asked" is a state the grid paints — the amber block with the dashed edge —
+  // so the word naming it is set in the same amber.
+  if (hit[0].state === 'asked') return {
+    type: 'no',
+    html: `${bright(calledOf(hit[0]))} has already been <b class="verdict-em ask">asked</b> about that slot.`
+  };
+  if (hit[0].predicted) return {
+    type: 'no',
+    html: `${bright(calledOf(hit[0]))} books that every week — too far ahead to ask about yet.`
+  };
+  // The one verdict that says what pressing the button will actually set off,
+  // rather than why it cannot be pressed — so it is the one that spells out both
+  // halves of what happens next, and picks each of them out.
+  return {
+    type: 'ask',
+    html: `Taken by ${bright(calledOf(hit[0]))}. You can try to Book over their slot, Violent Bot will `
+      + `<b class="verdict-em ask">ask</b> them to confirm their plans to hunt, you will be denied if they `
+      + `<b class="verdict-em yes">confirm their booking</b>.`
+  };
 }
 
 function canBook() {
@@ -3283,8 +3342,10 @@ function footMessage() {
     ? `<span class="srv-note">· repeats on ${[...view.days].sort().map(d => DAY_NAMES[d]).join(', ')}, so the first slot is not this ${srv.weekday}</span>`
     : '';
 
+  // A verdict is plain text unless it says otherwise: `html` is written here,
+  // by us, with anything from the wire escaped as it goes in — see judge().
   return el('div', 'foot-msg', `<i class="ti ${icon} ${cls}" aria-hidden="true"></i>
-    <span class="${cls}">${esc(v.text)}</span>${offMask}`);
+    <span class="${cls}">${v.html || esc(v.text)}</span>${offMask}`);
 }
 
 /** The panel's action row: how long, and the thing that acts on it.
