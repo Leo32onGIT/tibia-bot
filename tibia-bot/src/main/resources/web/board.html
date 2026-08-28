@@ -1129,18 +1129,35 @@
        height again here, not a ceiling — this is the one case where filling
        the screen is the point rather than fitting the contents. */
     .window { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
-    .wk-body { margin: 0 10px; }
+    /* Barely a margin. The grid is the thing the panel is for and the panel is
+       the whole screen; ten pixels either side of it was a border drawn in
+       nothing. */
+    .wk-body { margin: 0 3px; }
     /* Nothing outside the week scrolls: it is the part that is too big for a
        phone, and everything else earns its place by being small enough. */
     .win-body { overflow-y: hidden; }
-    /* Tighter, so the grid keeps as much of a short screen as it can. */
-    .win-head { padding: 11px 14px 9px; }
-    .strip { padding: 8px 14px; }
-    .readout { padding: 9px 14px; gap: 10px; }
-    .foot-msg { padding: 8px 14px; }
-    .up-head { padding: 8px 14px; }
-    .up-list { padding: 5px 14px 8px; max-height: 168px; }
+    /* Tighter, so the grid keeps as much of a short screen as it can. Every
+       one of these is padding: the rows still say everything they said, they
+       simply stop holding it at arm's length. Between them they are worth about
+       a fifth of the panel, which the grid takes. */
+    .win-head { padding: 7px 12px 6px; }
+    .strip { padding: 6px 12px; }
+    .readout { padding: 6px 12px; gap: 10px; }
+    .foot-msg { padding: 5px 12px; }
+    .up-head { padding: 6px 12px; }
+    .up-list { padding: 4px 12px 6px; max-height: 168px; }
     .cal-legend { display: none; }
+
+    /* "Book a time", which on a phone is a heading over a row of controls that
+       already say what they are for. The count it carried goes with it — see
+       the note where it is built. */
+    .cal-head { display: none; }
+
+    /* The day and its number on one line. Two lines of heading over four
+       columns is a row of the grid spent saying what the row below already
+       shows. */
+    .wk-head { padding: 3px 0 2px; letter-spacing: 0.06em; }
+    .wk-head .dnum { display: inline; margin: 0 0 0 4px; font-size: calc(11.5px * var(--ui-scale)); }
 
     /* ---- Four days, not seven -------------------------------------------
        A seventh of a phone is about forty pixels, which is not enough to say
@@ -1150,10 +1167,14 @@
        planning are already in view. The hour gutter and the day headings stay
        put while it does, which is what the sticky rules above are for. */
     .wk-grid {
-      --gutter: 44px;
+      /* Sized to what it holds, which is less than it looks: the widest thing
+         in the gutter is the server echo at 22px and the twelve-hour label is
+         21px behind it, so forty-four pixels carried fifteen of empty space to
+         the left of every label. Both still say everything they said. */
+      --gutter: 30px;
       /* The four that fit: the body's own width (the window, less its margins)
          less the gutter, split four ways. */
-      --daycol: calc((100vw - 20px - var(--gutter)) / 4 * var(--zoom));
+      --daycol: calc((100vw - 6px - var(--gutter)) / 4 * var(--zoom));
     }
     /* Every pixel of a narrow column goes to the label, so a whole time fits on
        one line and the name has somewhere to be above it. The size follows the
@@ -1161,6 +1182,8 @@
        and "19:00–21:00" has to survive both — clamped at the top so a big phone
        gets the desktop size rather than an inflated one. */
     .wk-block { padding: 2px 4px; font-size: clamp(8px, 2.4vw, 9.5px); }
+    /* The label sits closer to its own edge, the gutter having no room to spare. */
+    .wk-hour { padding-right: 5px; }
 
     /* ---- Booking controls, on one row -----------------------------------
        Stacked and centred, these took four rows of a short screen. "Book" goes,
@@ -3160,7 +3183,7 @@ function calendarSection() {
     : booked === 0 ? 'nothing booked ahead'
     : `${booked} booked ahead`;
 
-  wrap.appendChild(el('div', 'strip', `
+  wrap.appendChild(el('div', 'strip cal-head', `
     <i class="ti ti-calendar-month" aria-hidden="true"></i>
     <span class="fold-title">Book a time</span>
     <span class="muted">${summary}</span>`));
