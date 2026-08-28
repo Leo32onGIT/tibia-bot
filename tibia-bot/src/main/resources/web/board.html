@@ -944,7 +944,14 @@
   .wk-body { cursor: grab; }
   .wk-body.panning { cursor: grabbing; user-select: none; }
   .wk-body.panning .wk-cell { cursor: grabbing; }
-  .wk-cell { height: calc(var(--row-base) * var(--ui-scale)); border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
+  /* The same hour the gutter and the blocks are drawn against. It was left on
+     the unzoomed one, so a pinch moved the labels and the bookings and left the
+     lines behind them where they were: the column stayed its full height, the
+     blocks bunched into the top of it, and the scroll had a different idea of
+     how tall a day was than the layout did — which is why zooming out and back
+     never came home. The cells are what give a column its height, so this one
+     length has to be the same length as everything measured against it. */
+  .wk-cell { height: var(--row); border-bottom: 1px solid rgba(31,36,48,0.55); cursor: pointer; }
   .wk-cell:hover { background: rgba(91,140,255,0.07); }
   .wk-cell.past { cursor: not-allowed; background: rgba(0,0,0,0.3); }
   .wk-cell.past:hover { background: rgba(0,0,0,0.3); }
