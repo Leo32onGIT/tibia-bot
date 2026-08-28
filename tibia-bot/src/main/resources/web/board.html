@@ -402,6 +402,12 @@
   .dot.confirmed { border-color: var(--st-confirmed); background: var(--st-confirmed); }
   .who { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who.free { color: var(--st-free); }
+  /* Whoever the row is about, wherever a row names somebody: the card's state
+     line, the strip at the top of an open panel, the "up next" list and its
+     one-line summary. A state line is mostly punctuation and clock times, and
+     the one word in it worth finding at a glance is the person — so it is the
+     one word set in bold. */
+  .at-name { font-weight: 700; }
   .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
   .queue { font-family: var(--mono); font-size: 10px; color: var(--muted); flex-shrink: 0; }
   .card-state .queue { margin-left: auto; }
@@ -972,15 +978,12 @@
 
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2; }
   .ss-label { position: absolute; right: 3px; transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
-  /* Two pieces, because "now" is two facts: a time of day, which the whole
-     grid is measured against, and an instant, which falls in exactly one
-     column. The faint rule runs the width of the strip — the red flag lives in
-     the hour gutter, which is stuck to the left and therefore always on screen,
-     and a flag pointing at nothing is what a line drawn only in today's column
-     left behind the moment anybody scrolled. The solid piece marks the day it
-     actually is. */
-  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dotted rgba(224,86,62,0.42); z-index: 3; pointer-events: none; }
-  .now-line.today { border-top: 1px solid var(--bad); z-index: 4; }
+  /* The width of the whole grid, not of today's column. It marks a height on
+     the hour axis, and the axis is shared by every column — which is also why
+     the red flag that labels it lives in the gutter, stuck to the left and on
+     screen whatever the strip has been scrolled to. Drawn in today's column
+     alone it left that flag pointing at nothing the moment anybody scrolled. */
+  .now-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bad); z-index: 4; pointer-events: none; }
   /* Carried by the hour gutter rather than by the grid, so that on a phone — where
      the gutter is stuck to the left edge and the days slide past it — the time
      stays where the axis it belongs to is, instead of scrolling off with Tuesday. */
@@ -1347,7 +1350,7 @@ function accountLine(b) {
  *  know. A missing branch here took the whole render down once before, and a
  *  board that has just learnt a new word should degrade to that word rather
  *  than to a blank page. */
-function stateText(spawn) {
+function stateHtml(spawn) {
   const text = STATE_TEXT[spawn.state];
   return text ? text(spawn) : spawn.state;
 }
@@ -1374,11 +1377,17 @@ function holderText(spawn) {
   return called(spawn.holder);
 }
 
+/** The same name, set apart from the sentence around it. Escaped as it is
+ *  wrapped, since it is the half of the line that comes off the wire. */
+function atName(spawn) {
+  return `<b class="at-name">${esc(holderText(spawn))}</b>`;
+}
+
 const STATE_TEXT = {
   free: () => 'free',
-  claimed: s => `${holderText(s)}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
-  booked: s => `${holderText(s)} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
-  confirmed: s => `${holderText(s)} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  claimed: s => `${atName(s)}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  booked: s => `${atName(s)} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
+  confirmed: s => `${atName(s)} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
 };
 
 // ---- Timezone -------------------------------------------------------------
@@ -1763,7 +1772,11 @@ function paintCard(spawn) {
 
   const whoClass = 'who' + (state === 'free' ? ' free' : '');
   if (p.who.className !== whoClass) p.who.className = whoClass;
-  p.who.textContent = stateText(spawn);
+  // Guarded, unlike the textContent it replaces. Writing the same string to
+  // textContent costs nothing; writing the same markup to innerHTML reparses it,
+  // and this runs once a second for every card on the board.
+  const whoHtml = stateHtml(spawn);
+  if (p.whoHtml !== whoHtml) { p.whoHtml = whoHtml; p.who.innerHTML = whoHtml; }
   p.queue.textContent = spawn.queueLength > 0 ? `+${spawn.queueLength} queued` : '';
 
   if (state === 'claimed' && spawn.startsAt && spawn.endsAt) {
@@ -2899,7 +2912,7 @@ function nowStrip(spawn) {
   // whole story; once it is open the question has moved on to who and when, and
   // the section below answers that with the rows themselves.
   strip.innerHTML = `<span class="dot ${spawn.state}"></span>${tick}
-    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${esc(stateText(spawn))}</span>`;
+    <span class="who ${spawn.state === 'free' ? 'free' : ''}">${stateHtml(spawn)}</span>`;
 
   if (spawn.state === 'claimed' && spawn.startsAt && spawn.endsAt) {
     const start = new Date(spawn.startsAt).getTime(), end = new Date(spawn.endsAt).getTime();
@@ -2965,7 +2978,7 @@ function upNextSection(spawn) {
   const head = el('div', 'up-head' + (view.upNextOpen ? ' open' : ''), `
     <i class="ti ti-clock-hour-4" aria-hidden="true"></i>
     <span class="fold-title">Up next</span>
-    <span class="up-peek">next in <b>${esc(relTime(soonest.at))}</b> — ${esc(soonest.who)}</span>
+    <span class="up-peek">next in <b>${esc(relTime(soonest.at))}</b> — <b class="at-name">${esc(soonest.who)}</b></span>
     <span class="up-count">${total}</span>
     <i class="ti ti-chevron-down fold-chevron" aria-hidden="true"></i>`);
   head.setAttribute('role', 'button');
@@ -2981,7 +2994,7 @@ function upNextSection(spawn) {
         <span class="up-when">${r.projected ? '≈' : ''}${fmtClock12(new Date(r.at))}<small>${esc(dayLabel(r.at))}</small></span>
         <span class="up-rail"><span class="up-pip"></span></span>
         <span class="up-body">
-          <span class="up-who">${esc(r.who)}</span>
+          <span class="up-who at-name">${esc(r.who)}</span>
           <span class="up-sub">in <span class="up-rel">${esc(relTime(r.at))}</span> · ${fmtDur(r.minutes)}</span>
         </span>
         ${r.tag ? `<span class="up-tag ${r.tag}">${r.tag}</span>` : '<span></span>'}
@@ -3230,16 +3243,14 @@ function calendar() {
     rows.appendChild(col);
   }
 
-  // Now: the height across the whole strip, the solid mark in today's column,
-  // and the time on the hour axis — which is what keeps it on screen when the
-  // days have been slid sideways.
+  // Now: the height across the grid, and the time on the hour axis — which is
+  // what keeps it on screen when the days have been slid sideways.
   const nowDay = Math.round((new Date(now).setHours(0,0,0,0) - start.getTime()) / DAY_MS);
   if (nowDay >= 0 && nowDay < days) {
     const y = (localMinutes(now) / 60) * ROW_H;
-    const rule = el('div', 'now-line'); rule.style.top = y + 'px';
-    const here = el('div', 'now-line today'); here.style.top = y + 'px';
+    const line = el('div', 'now-line'); line.style.top = y + 'px';
     const flag = el('div', 'now-flag', fmtLocal(now)); flag.style.top = y + 'px';
-    rows.appendChild(rule); columns[nowDay].appendChild(here); hours.appendChild(flag);
+    rows.appendChild(line); hours.appendChild(flag);
   }
 
   grid.appendChild(rows);
