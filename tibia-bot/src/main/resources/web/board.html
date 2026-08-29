@@ -2482,7 +2482,14 @@ function rangeLabel() {
 // guess, not to duplicate ClashVerdict.
 function overlapping(start, minutes) {
   const end = new Date(start.getTime() + minutes * 60000);
-  return slots.filter(b => start < b.end && b.start < end);
+  // What is over is not in the way — the same rule the `past` flag is defined
+  // by. It has to be said here because a history row is not always in the past:
+  // a booking cancelled before it began keeps the future start it was made for,
+  // so the row for it sits ahead of now with `past` set. Counting those as
+  // conflicts made a slot somebody gave up permanently unbookable, by them and
+  // by everybody else — the verdict read "that runs over a booking of your own"
+  // and named the booking they had just cancelled.
+  return slots.filter(b => !b.past && start < b.end && b.start < end);
 }
 
 /** The one Discord name a block's owner answers to, as the card says it.
@@ -4010,7 +4017,11 @@ function readout() {
 
   // Cancelling is offered on the slot itself: picking a block of your own is how
   // you reach it, which is the same gesture as picking a time.
-  const mine = slots.find(b => b.mine && b.scheduleId != null && b.start.getTime() === view.pick.getTime());
+  // `!b.past` for the same reason as in overlapping: a booking cancelled before
+  // its start leaves a history row at a time still ahead of now, and offering to
+  // cancel it again is offering to undo something already undone.
+  const mine = slots.find(b => b.mine && !b.past && b.scheduleId != null
+    && b.start.getTime() === view.pick.getTime());
   if (mine) {
     actions.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
       () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
