@@ -351,7 +351,7 @@ object RespawnButtons extends StrictLogging {
           BotApp.respawnService.settings(guild.getId) match {
             case None => deferredRespond.text(s"${Config.noEmoji} The respawn claim system isn't set up here.")
             case Some(settings) => deferredRespond.embed(
-              RespawnEmbeds.serverSettingsEmbed(settings, Config.Respawn.slotConfirmMinutes),
+              RespawnEmbeds.serverSettingsEmbed(settings),
               Some(RespawnThreads.boardModeratorButtons(settings.autoClaim)))
           }
         }
@@ -377,7 +377,7 @@ object RespawnButtons extends StrictLogging {
           service.setAutoClaim(guild.getId, wanted) match {
             case Left(problem) => respond.text(s"${Config.noEmoji} $problem")
             case Right(updated) => respond.embed(
-              RespawnEmbeds.serverSettingsEmbed(updated, Config.Respawn.slotConfirmMinutes),
+              RespawnEmbeds.serverSettingsEmbed(updated),
               Some(RespawnThreads.boardModeratorButtons(updated.autoClaim)))
           }
         }

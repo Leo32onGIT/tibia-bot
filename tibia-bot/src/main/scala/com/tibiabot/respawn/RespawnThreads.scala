@@ -140,8 +140,8 @@ object RespawnThreads extends StrictLogging {
     ActionRow.of(buttons.asJava)
   }
 
-  /** The Config panel a moderator gets from the board: their own settings, or the
-   *  server's rules.
+  /** The Config panel a moderator gets from the board: the server's rules, or
+   *  their own settings.
    *
    *  Timers used to sit between them. Everything it held is under Claim rules
    *  now — see [[com.tibiabot.interactions.RespawnModals.claimRulesModal]].
@@ -155,11 +155,11 @@ object RespawnThreads extends StrictLogging {
    *  embed's matching field both settle on the new value. */
   def boardModeratorButtons(autoClaim: Boolean): ActionRow =
     ActionRow.of(
-      Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
       Button.secondary(RespawnButtonId.boardAutoClaim,
         if (autoClaim) "Autoclaim: On" else "Autoclaim: Off").withEmoji(Emoji.fromUnicode("🎯")),
-      Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
+      Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜")),
+      Button.secondary(RespawnButtonId.boardMySettings, "My settings")
     )
 
   /** Previous/Next under a page of the claim log, and Find beside them.

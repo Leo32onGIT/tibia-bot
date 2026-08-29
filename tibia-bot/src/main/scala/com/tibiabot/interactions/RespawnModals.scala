@@ -673,7 +673,7 @@ object RespawnModals extends StrictLogging {
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
-            replyEmbed(event, RespawnEmbeds.serverSettingsEmbed(updated, Config.Respawn.slotConfirmMinutes))
+            replyEmbed(event, RespawnEmbeds.serverSettingsEmbed(updated))
         }
       }
     }

@@ -615,15 +615,8 @@ object RespawnEmbeds {
   }
 
   /** The server's rules, shown to a moderator opening Config from the board and
-   *  again after they change something.
-   *
-   *  `confirmMinutes` is `Config.Respawn.slotConfirmMinutes`, passed in rather
-   *  than read here for the same reason [[imageFor]] takes its mappings: it
-   *  keeps this object free of config loading, which is what lets the whole
-   *  presentation layer be unit-tested without a populated environment. It is
-   *  only needed to describe autoclaim being *off*, which is the state that has
-   *  a deadline in it. */
-  def serverSettingsEmbed(settings: RespawnSettings, confirmMinutes: Int): MessageEmbed =
+   *  again after they change something. */
+  def serverSettingsEmbed(settings: RespawnSettings): MessageEmbed =
     new EmbedBuilder()
       .setColor(Embeds.BrandColor)
       .setTitle("Server respawn settings")
@@ -637,16 +630,10 @@ object RespawnEmbeds {
       // The reminder default is not here: it is no longer a per-guild setting, so
       // showing it would be showing a number nobody in this panel can change.
       .addField("Handover window", humanDuration(settings.handoverMinutes), true)
-      // Says what the setting *does* rather than repeating the button's on/off,
-      // because "autoclaim" is a word this panel is where somebody first meets.
-      // The contested case is named in both, since it is the one thing autoclaim
-      // does not silence and the thing people are surprised by otherwise.
-      .addField("Autoclaim",
-        if (settings.autoClaim) "**On** — booked slots claim themselves. Only a slot somebody " +
-          "asks to book over still needs an answer."
-        else "**Off** — a booked slot has to be taken within " +
-          s"${humanDuration(confirmMinutes)} of starting or it's given up.",
-        false)
+      // Inline and bare, like every other value here: this panel is a reading of
+      // the settings, and the one that happens to be a toggle is not a different
+      // kind of thing from the one that happens to be a duration.
+      .addField("Autoclaim", if (settings.autoClaim) "On" else "Off", true)
       .build()
 
   /** The moderator panel for one spawn: who holds it, and what can be done to
