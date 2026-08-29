@@ -77,6 +77,9 @@ libraryDependencies += "net.dv8tion" % "JDA" % "6.5.0"
 libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.10.0"
 libraryDependencies += "org.postgresql" % "postgresql" % "42.5.4"
+// Connection pooling in front of that driver — see PooledConnectionProvider.
+// 4.x rather than 5.x: 5 needs Java 11 and the image is `eclipse-temurin:8-jre`.
+libraryDependencies += "com.zaxxer" % "HikariCP" % "4.0.3"
 libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
 libraryDependencies += "io.lettuce" % "lettuce-core" % "6.2.6.RELEASE"
 

@@ -58,6 +58,16 @@
     <appender-ref ref="DASHBOARD" />
   </logger>
 
+  <!-- Hikari announces every pool it starts and every one it shuts down, at
+       INFO. There is a pool per guild database (see PooledConnectionProvider),
+       so at INFO that is two lines per guild the bot is asked about and two
+       more whenever an idle one is swept — a steady trickle saying nothing.
+       A pool that cannot be filled still says so, at WARN. -->
+  <logger name="com.zaxxer.hikari" level="WARN" additivity="false">
+    <appender-ref ref="CONSOLE" />
+    <appender-ref ref="DASHBOARD" />
+  </logger>
+
   <root level="INFO">
     <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
     <appender-ref ref="CONSOLE" />

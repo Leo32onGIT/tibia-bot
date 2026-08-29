@@ -116,8 +116,11 @@ object BotApp extends App with StrictLogging {
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl)(scala.concurrent.ExecutionContext.global)
+  // Pooled, so a small query is not nine parts greeting — see
+  // PooledConnectionProvider. Every repository below is handed this one seam,
+  // so nothing else in the bot has to know.
   private val connectionProvider: persistence.ConnectionProvider =
-    new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
+    new persistence.PooledConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)

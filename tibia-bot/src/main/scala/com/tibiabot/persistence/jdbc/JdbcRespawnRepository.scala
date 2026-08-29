@@ -71,6 +71,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     JdbcSupport.withTransaction(connect(guildId))(use)
   }
 
+  /** As [[withGuildTransaction]], on a connection that is nobody else's — see
+   *  [[withRespawnLock]], its only caller. */
+  private def withExclusiveTransaction[A](guildId: String)(use: Connection => A): A = {
+    ensureSchema(guildId)
+    JdbcSupport.withTransaction(() => connectionProvider.guildUnpooled(guildId))(use)
+  }
+
   private def ensureTables(conn: Connection): Unit = {
     val statement = conn.createStatement()
     try {
@@ -1506,14 +1513,18 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     }
 
   def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A =
-    withGuildTransaction(guildId) { conn =>
+    withExclusiveTransaction(guildId) { conn =>
       lockRespawn(conn, respawnId)
       // `body` opens connections of its own rather than joining this
       // transaction, which is enough: whoever else wants this spawn is stopped
       // at the lock above until this commits, so the reads inside cannot be
-      // interleaved with another decision about the same spawn. The provider
-      // hands out fresh connections rather than drawing on a pool, so holding
-      // one while opening more cannot starve anybody.
+      // interleaved with another decision about the same spawn.
+      //
+      // This one connection comes from outside the pool — see
+      // ConnectionProvider.guildUnpooled. It is held for the whole of `body`
+      // while `body` asks for more, and enough claims landing together would
+      // otherwise have every pooled connection held by a lock holder waiting
+      // for a pooled connection.
       body
     }
 
