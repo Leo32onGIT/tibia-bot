@@ -1617,7 +1617,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
-                RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
+                RespawnEmbeds.slotRequestGranted(respawn, start, minutes, config.autoClaim,
+                  Config.Respawn.slotConfirmMinutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
             SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""),
               slot.requesterNickname.getOrElse(""))

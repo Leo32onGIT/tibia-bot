@@ -840,7 +840,8 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("a granted slot is the window that was asked for, not the one given up") {
-    val granted = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180)
+    val granted = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180,
+      autoClaim = true, confirmMinutes = 15)
     granted should include("3h")
     granted should include("no need to claim it")
 
@@ -849,5 +850,25 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     val blocked = RespawnEmbeds.slotRequestBlocked(cultOrcs, now.plusHours(1), 180)
     blocked should include("given up")
     blocked should include("hasn't been booked for you")
+  }
+
+  test("what a granted slot promises about claiming follows the guild's autoclaim") {
+    // The slot handed over is an ordinary booking, so it starts however every
+    // other booking on this guild starts. Promising "no need to claim it" with
+    // autoclaim off is the one wording that can cost somebody the slot they were
+    // just given: nothing further is expected of them, so the DM that arrives at
+    // the start goes unread and the deadline in it takes the spawn back.
+    val on = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180,
+      autoClaim = true, confirmMinutes = 15)
+    on should include("no need to claim it")
+    on should not include "Take Claim"
+
+    val off = RespawnEmbeds.slotRequestGranted(cultOrcs, now.plusHours(1), 180,
+      autoClaim = false, confirmMinutes = 15)
+    off should include("Take Claim")
+    // Named by its own number rather than Config's, so what they are told to beat
+    // is the deadline this guild will actually hold them to.
+    off should include("15m")
+    off should not include "no need to claim it"
   }
 }

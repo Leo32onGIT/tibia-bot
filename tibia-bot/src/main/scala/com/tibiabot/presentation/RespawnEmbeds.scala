@@ -468,10 +468,27 @@ object RespawnEmbeds {
 
   /** DM'd to whoever asked, once the slot passes to them. The window is passed in
    *  rather than read off the slot: what they get is what they asked for, which
-   *  is the slot itself only when they asked for it with the Request button. */
-  def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
-    s"${spawnLink(respawn)} is yours at ${dateTime(start)} for " +
-      s"${humanDuration(minutes)} — it'll start on its own, no need to claim it."
+   *  is the slot itself only when they asked for it with the Request button.
+   *
+   *  What the last sentence can promise depends on the guild's autoclaim, because
+   *  what this creates is an ordinary booking and it starts the way every other
+   *  booking does. With autoclaim off that means a Take Claim deadline — so
+   *  telling everyone there is nothing to claim is how somebody loses the slot
+   *  they were just handed: they were promised nothing further would be asked of
+   *  them, and so let the DM that arrives at the start go unread.
+   *
+   *  `confirmMinutes` rather than the deadline itself, since the deadline does not
+   *  exist yet: the slot has not started, and how long is left of it when it does
+   *  is what decides the cap (see `startSlot`). The number is what they can act
+   *  on now. */
+  def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int,
+                         autoClaim: Boolean, confirmMinutes: Int): String = {
+    val claiming =
+      if (autoClaim) "it'll start on its own, no need to claim it."
+      else s"it'll start on its own, but you have ${humanDuration(confirmMinutes)} from then to " +
+        "press **Take Claim** on it or it's given up."
+    s"${spawnLink(respawn)} is yours at ${dateTime(start)} for ${humanDuration(minutes)} — $claiming"
+  }
 
   /** DM'd to whoever asked when the slot was given up but their own window has
    *  since been booked around them. Says what happened rather than just failing:
