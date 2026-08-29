@@ -1057,6 +1057,69 @@
      you go looking for it. */
   .wk-block .fate { display: block; font-size: calc(8px * var(--ui-scale)); color: #59617a; font-style: italic; }
 
+  /* ---- A slot holding more than one hunt -----------------------------------
+     A window claimed, given up, and claimed again is two rows over the same
+     hours, and the grid drew them one exactly on top of the other: the one
+     underneath could not be read, could not be clicked, and did not announce
+     that it was there. Nothing said the history had more in it than the block
+     on top.
+
+     So a run of overlapping blocks draws as one, with a count of what is behind
+     it. Side by side was the other way — the shape every desk calendar uses —
+     and it was wrong here: these are not two things happening at once, they are
+     one slot's history, and splitting the column would have halved the width of
+     every block on the busiest days to say so. */
+  .wk-more {
+    position: absolute; right: 3px; bottom: 3px; z-index: 3;
+    /* Big enough to hit with a thumb without being big enough to cover the
+       block it sits on — a hunt an hour long is only so tall. */
+    min-width: 22px; height: 16px; padding: 0 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(12,15,22,0.82); color: var(--text);
+    font-family: var(--mono); font-size: calc(8.5px * var(--ui-scale)); line-height: 1;
+    cursor: pointer; user-select: none;
+  }
+  .wk-more:hover, .wk-more:focus-visible { background: var(--accent); border-color: var(--accent); color: #fff; outline: none; }
+  /* On the shortest blocks the chip is the whole block, so the label goes and
+     the count stands alone. Below that there is no room for either, and the
+     block keeps a plain edge marker instead of a chip that would overhang. */
+  .wk-block.has-more { border-right-width: 3px; }
+
+  /* The picker itself. Fixed rather than absolute: it is opened from inside a
+     scroller that clips its own overflow, and an absolute panel would be cut
+     off at the column's edge on exactly the busy days it exists for. */
+  .stack-pop {
+    position: fixed; z-index: 60; width: min(260px, calc(100vw - 24px));
+    background: var(--panel); border: 1px solid #2a3142; border-radius: 10px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55); overflow: hidden;
+  }
+  .stack-pop h4 {
+    margin: 0; padding: 8px 10px 6px; font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+    border-bottom: 1px solid #232a38;
+  }
+  .stack-pop .sp-list { max-height: min(260px, 50vh); overflow-y: auto; }
+  .stack-pop button.sp-row {
+    display: flex; gap: 8px; align-items: flex-start; width: 100%;
+    padding: 7px 10px; background: none; border: 0; border-bottom: 1px solid #1d2330;
+    color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  }
+  .stack-pop button.sp-row:last-child { border-bottom: 0; }
+  .stack-pop button.sp-row:hover, .stack-pop button.sp-row:focus-visible { background: rgba(91,140,255,0.12); outline: none; }
+  .stack-pop button.sp-row.on { background: rgba(91,140,255,0.18); }
+  /* The same swatch the legend above the grid uses, so a row here and a block
+     down there are recognisably the same state. */
+  .stack-pop .sp-sw { flex: 0 0 auto; margin-top: 3px; }
+  /* A hunt that is over, in the shape the grid draws it: grey, and hollow when
+     nobody turned up — the one distinction inside the past anybody asks about. */
+  .sw-past { border-color: rgba(255,255,255,0.22); background: rgba(255,255,255,0.06); }
+  .sw-past.sw-unhunted { background: transparent; border-style: dashed; }
+  .stack-pop .sp-txt { min-width: 0; }
+  .stack-pop .sp-who { display: block; font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stack-pop .sp-tm { display: block; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .stack-pop .sp-note { display: block; font-size: 11px; color: #59617a; font-style: italic; }
+
   .ss-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(224,169,62,0.45); pointer-events: none; z-index: 2;
              top: calc(var(--row) * var(--at, 0)); }
   .ss-label { position: absolute; right: 3px; top: calc(var(--row) * var(--at, 0)); transform: translateY(-100%); font-family: var(--mono); font-size: calc(8px * var(--ui-scale)); color: var(--warn); opacity: 0.9; letter-spacing: 0.08em; pointer-events: none; }
@@ -1643,6 +1706,12 @@ const view = {
   repeat: 'once',
   days: new Set(),
   pick: null,
+  // Which of a stacked run of blocks the reader chose, when a slot holds more
+  // than one. A whole block rather than a time, because a time is exactly what
+  // cannot tell them apart: a claim taken, given up, and taken again is two
+  // rows over one window, and `pick` alone would leave the readout answering
+  // for whichever the array happened to hold first.
+  stack: null,
   answer: null,
   busy: false,
   // Shut on every open. Deliberately not remembered between spawns: it is
@@ -2451,7 +2520,12 @@ function bright(text) {
  *  rather than a range, because the question is "what is drawn here". */
 function blockAt(at) {
   const t = at.getTime();
-  return slots.find(b => b.start.getTime() <= t && t < b.end.getTime() && !b.predicted);
+  const covers = b => b.start.getTime() <= t && t < b.end.getTime() && !b.predicted;
+  // What the reader picked out of a stack wins over what the array happens to
+  // hold first. Without this, choosing the second of two hunts on one window
+  // moved the highlight and left the verdict describing the other one.
+  if (view.stack && covers(view.stack) && slots.includes(view.stack)) return view.stack;
+  return slots.find(covers);
 }
 
 /** Whatever is actually happening at an instant, which is a narrower thing: an
@@ -2617,6 +2691,7 @@ function openWindow(code) {
   view.intent = 1;
   userMoved = false;
   view.pick = null;
+  view.stack = null;
   view.answer = null;
   view.repeat = 'once';
   view.days = new Set();
@@ -2895,6 +2970,7 @@ function wireTank(root) {
  */
 function clearPick() {
   view.pick = null;
+  view.stack = null;
   // The verdict on screen is about the slot being given up, as is any refusal
   // still sitting above it, so neither outlives it.
   view.answer = null;
@@ -3242,6 +3318,154 @@ function calendarSection() {
   return wrap;
 }
 
+/** Blocks that share a column, gathered into runs that overlap on screen.
+ *
+ *  Drawn geometry, not booked times: a block is clipped to the column it is in,
+ *  so what decides whether two of them collide is the part actually on this
+ *  day. A hunt crossing midnight collides with the evening it shares, not with
+ *  the morning it does not reach.
+ *
+ *  Runs, in the interval sense — A overlapping B and B overlapping C puts all
+ *  three together even where A and C never touch. That is the right answer for
+ *  what this is for: they are one pile on the grid, and the reader wants the
+ *  pile rather than a partition of it.
+ */
+function stackRuns(here, colStart, colEnd) {
+  const clipped = here.map(b => ({
+    b,
+    from: Math.max(b.start.getTime(), colStart),
+    to: Math.min(shownEnd(b).getTime(), colEnd)
+  })).sort((x, y) => x.from - y.from || y.to - x.to);
+  const runs = [];
+  let cur = null, reach = 0;
+  clipped.forEach(c => {
+    if (cur && c.from < reach) { cur.push(c.b); reach = Math.max(reach, c.to); return; }
+    cur = [c.b];
+    reach = c.to;
+    runs.push(cur);
+  });
+  return runs;
+}
+
+/** Which of a run is the one drawn, and so the one the count sits on.
+ *
+ *  Whatever the reader last chose out of this pile, if it is still in it — the
+ *  choice has to survive the redraw that follows making it, or picking the
+ *  second hunt would show the first again a moment later.
+ *
+ *  Failing that: something still live over something finished, since a hunt
+ *  happening now is what a column is read for, and then the latest to start. A
+ *  slot claimed, given up and claimed again opens on the attempt that stuck
+ *  rather than on the one that was abandoned.
+ */
+function stackLead(run) {
+  if (view.stack && run.includes(view.stack)) return view.stack;
+  return run.slice().sort((a, b) =>
+    (a.past === b.past ? 0 : a.past ? 1 : -1)
+    || b.start.getTime() - a.start.getTime()
+    || shownEnd(b).getTime() - shownEnd(a).getTime())[0];
+}
+
+/** The count on a stacked block, and the only way to reach what is under it. */
+function moreChip(run) {
+  const chip = el('button', 'wk-more');
+  chip.type = 'button';
+  chip.textContent = '+' + (run.length - 1);
+  const label = run.length + ' hunts on this slot';
+  chip.title = label + ' — open to choose one';
+  chip.setAttribute('aria-label', label);
+  chip.setAttribute('aria-haspopup', 'true');
+  // The block underneath has a click of its own, and it is not the one being
+  // asked for here.
+  chip.addEventListener('click', e => { e.stopPropagation(); openStack(run, chip); });
+  return chip;
+}
+
+// At most one open, and it belongs to the chip that opened it rather than to
+// the page — a redraw throws that chip away, so the panel goes with it.
+let stackPop = null;
+
+function closeStack() {
+  if (!stackPop) return;
+  stackPop.remove();
+  stackPop = null;
+  document.removeEventListener('pointerdown', stackAway, true);
+  document.removeEventListener('keydown', stackKey, true);
+  window.removeEventListener('resize', closeStack);
+}
+function stackAway(e) { if (stackPop && !stackPop.contains(e.target)) closeStack(); }
+function stackKey(e) { if (e.key === 'Escape') { e.stopPropagation(); closeStack(); } }
+
+/** The picker: one row per hunt on the slot, the smallest thing that can answer
+ *  "which of these did you mean".
+ *
+ *  Deliberately not another .window. This is a choice between things already on
+ *  screen, and a second modal over the first would be a heavier gesture than the
+ *  question deserves — as well as burying the calendar the answer is about.
+ */
+function openStack(run, anchorEl) {
+  closeStack();
+  const pop = el('div', 'stack-pop');
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Hunts on this slot');
+  pop.appendChild(el('h4', '', run.length + ' on this slot'));
+  const list = el('div', 'sp-list');
+  const lead = stackLead(run);
+  // Newest first, which is the order the log and the card are read in, and the
+  // order somebody opening a history expects to find.
+  run.slice().sort((a, b) => b.start.getTime() - a.start.getTime()).forEach(b => {
+    const ends = shownEnd(b);
+    const sw = b.past ? 'sw-past' + (b.hunted ? '' : ' sw-unhunted') : 'sw-' + b.state;
+    // The fate where there is one, otherwise what the block is: no row is left
+    // as a bare name and time while the rows beside it say more.
+    const under = b.past
+      ? (b.note || (b.hunted ? 'hunted' : 'never hunted'))
+      : (b.state === 'claimed' ? 'being hunted now' : b.state);
+    const row = el('button', 'sp-row' + (b === lead ? ' on' : ''),
+      `<i class="swatch sp-sw ${sw}"></i>`
+      + `<span class="sp-txt">`
+      + `<span class="sp-who">${b.mine ? 'You' : esc(b.owner)}</span>`
+      + `<span class="sp-tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
+      + `<span class="sp-note">${esc(under)}</span>`
+      + `</span>`);
+    row.type = 'button';
+    row.addEventListener('click', () => {
+      // Shut before the redraw, not after: renderWindow throws away the chip
+      // this is anchored to, and a panel left pointing at nothing then follows
+      // the scroll around the screen.
+      closeStack();
+      view.stack = b;
+      view.pick = b.start;
+      view.answer = null;
+      if (b.past) { renderWindow(); return; }
+      borrowDuration(slotMinutes(b));
+    });
+    list.appendChild(row);
+  });
+  pop.appendChild(list);
+
+  // Measured where it will stand, then moved to fit. Fixed to the viewport
+  // because the grid clips its own overflow, and an absolutely placed panel
+  // would be cut off at the column edge on exactly the crowded days this is for.
+  pop.style.visibility = 'hidden';
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect(), box = pop.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.right - box.width), window.innerWidth - box.width - 8);
+  const below = r.bottom + 6;
+  pop.style.left = Math.max(8, left) + 'px';
+  pop.style.top = (below + box.height > window.innerHeight - 8
+    ? Math.max(8, r.top - box.height - 6) : below) + 'px';
+  pop.style.visibility = '';
+  stackPop = pop;
+  // Capture, so a press anywhere — including on the grid, which stops plenty of
+  // its own events — still shuts it.
+  document.addEventListener('pointerdown', stackAway, true);
+  document.addEventListener('keydown', stackKey, true);
+  window.addEventListener('resize', closeStack);
+  const first = pop.querySelector('.sp-row.on') || pop.querySelector('.sp-row');
+  if (first) first.focus();
+}
+
 function calendar() {
   const wrap = el('div', 'cal');
   const now = new Date();
@@ -3356,10 +3580,16 @@ function calendar() {
     // `ends` rather than `b.end` throughout, so a block being re-timed is drawn
     // — and clipped, and titled — at the length under the pointer rather than at
     // the one still in the database.
-    slots.filter(b => b.start.getTime() < colEnd && colStart < shownEnd(b).getTime()).forEach(b => {
+    // One block per pile, not one per booking. Two hunts over the same hours
+    // used to be drawn one exactly on top of the other, which left the lower of
+    // them unreadable, unclickable, and unannounced — see stackRuns.
+    const here = slots.filter(b => b.start.getTime() < colEnd && colStart < shownEnd(b).getTime());
+    stackRuns(here, colStart, colEnd).forEach(run => {
+      const b = stackLead(run);
       const ends = shownEnd(b);
       const from = Math.max(b.start.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
+        + (run.length > 1 ? ' has-more' : '')
         + (b.past ? ' b-past' + (b.hunted ? '' : ' b-unhunted') : '')
         + (resizing(b) ? ' b-editing' : '')
         + (b.start.getTime() < colStart ? ' clip-top' : '')
@@ -3386,6 +3616,10 @@ function calendar() {
       block.addEventListener('click', e => {
         e.stopPropagation();
         view.pick = b.start;
+        // Which block, not only which instant. Two hunts can share a start, and
+        // the readout used to answer for whichever of them the array held first
+        // however plainly the reader had clicked the other.
+        view.stack = b;
         view.answer = null;
         // Nothing to borrow from an evening that is over — see judge, which
         // answers a click on one by saying what became of it.
@@ -3398,6 +3632,8 @@ function calendar() {
       // Only while Edit claim is armed, and only on the piece carrying the end:
       // the half above a midnight split is not where the window finishes.
       if (resizing(b) && ends.getTime() <= colEnd) block.appendChild(lengthHandle(block, b));
+      // Last, so it sits over the block's own text rather than under it.
+      if (run.length > 1) block.appendChild(moreChip(run));
       col.appendChild(block);
     });
 
@@ -5135,7 +5371,7 @@ function dragPan(box) {
     box._panned = false;
     box._downCell = e.target.closest('.wk-cell');
     if (e.pointerType !== 'mouse' || e.button !== 0) return;
-    if (e.target.closest('.wk-block, .stretch')) return;
+    if (e.target.closest('.wk-block, .stretch, .wk-more')) return;
     id = e.pointerId; panning = true; moved = 0;
     lastX = e.clientX; lastY = e.clientY; lastT = performance.now(); vx = vy = 0;
     cancelAnimationFrame(raf);
