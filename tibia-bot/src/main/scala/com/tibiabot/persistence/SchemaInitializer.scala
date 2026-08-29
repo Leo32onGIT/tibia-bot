@@ -157,7 +157,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |userid VARCHAR(255) NOT NULL,
            |time VARCHAR(255) NOT NULL,
-           |tag VARCHAR(255)
+           |tag VARCHAR(255),
+           |bot_id VARCHAR(255) NOT NULL DEFAULT ''
            |);""".stripMargin
 
       // Which incoming world transfers have already been announced. World-scoped
