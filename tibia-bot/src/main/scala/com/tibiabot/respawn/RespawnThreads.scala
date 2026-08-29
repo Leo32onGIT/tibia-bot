@@ -515,7 +515,7 @@ object RespawnThreads extends StrictLogging {
    *  time does not have. */
   def boardIntro: String =
     s"${com.tibiabot.Config.dailyEmoji} **Claim** **·** and type a code to claim a spawn right now\n" +
-      s"$BookEmoji **Book** **·** to schedule/lock-in a hunt in the future\n" +
+      s"$BookEmoji **Book** **·** to schedule/lock-in a hunt in the future (up to 12h)\n" +
       s"$DashboardEmoji **Dashboard** **·** if you want to book further in advance (webui)\n" +
       s"$ConfigEmoji **Config** **·** to change your default claim time & reminder settings"
 
