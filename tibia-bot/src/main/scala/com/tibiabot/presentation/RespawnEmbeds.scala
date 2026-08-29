@@ -738,19 +738,6 @@ object RespawnEmbeds {
       }
       .reverse
 
-  /** One entry of a spawn's own claim log, deliberately over two lines: when on
-   *  the first, who and how it went on the second. One line per entry wrapped at
-   *  a different point on every row once a phone got hold of it; breaking it on
-   *  purpose means the break is always in the same place.
-   *
-   *  `spawnName` is set only where a line has to say which spawn it belongs to.
-   *  A spawn's own log passes None — it would be the same name ten times over,
-   *  and the board's log names it on the group header instead. */
-  private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
-    val where = spawnName.map(name => s" · **$name**").getOrElse("")
-    s"${logTime(claim)}$where\n$LogIndent${logWho(claim)}"
-  }
-
   /** Discord refuses an embed whose description runs past this, and refusing is
    *  the whole interaction failing rather than a truncated log. Ten entries come
    *  to roughly a quarter of it even with long names, so this is a backstop
@@ -782,11 +769,12 @@ object RespawnEmbeds {
    *  to keep, it turned out, by nobody: a moderator opens this with a question
    *  about one spawn or one night, and a guild-wide tally answers neither while
    *  pushing the rows that do answer them further down the card. */
-  /** `heading` names what the log is scoped to — a spawn, a member — and is
-   *  absent for the whole guild. `foldBySpawn` is separate from it rather than
-   *  derived, because the two do not move together: a member's log is scoped
-   *  *and* folded, since it runs across spawns exactly as the guild's does. */
-  def claimLog(heading: Option[String], foldBySpawn: Boolean, page: com.tibiabot.respawn.LogPage,
+  /** `heading` names what the log is scoped to when the feed cannot name it
+   *  itself — a member. A spawn's log and the guild's both leave it absent: the
+   *  spawn names itself on a group header, which for a one-spawn log is the only
+   *  header there is, and putting it in the title as well would print it twice
+   *  on a card that holds nothing else. */
+  def claimLog(heading: Option[String], page: com.tibiabot.respawn.LogPage,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
     val embed = new EmbedBuilder()
       .setColor(Embeds.BrandColor)
@@ -796,14 +784,15 @@ object RespawnEmbeds {
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")
     } else {
-      // A spawn's own log has one code and nothing to fold, so it keeps the
-      // two-line entry. Everything else is folded by spawn — that is where the
-      // same name was being repeated down the page.
-      val blocks =
-        if (foldBySpawn) collapsedRuns(page.entries).map { case (respawnId, claims) =>
-          logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
-        }
-        else page.entries.map(logEntry(_, None))
+      // Every log folds, a single spawn's included. Such a log holds one run and
+      // nothing else, so folding costs it nothing and buys it the shape the
+      // guild's log is read in: the name once, its hunts a line each beneath.
+      // The two-line entry this used to keep for that case stood twice as tall
+      // for the same words, and made one feature look like two depending on
+      // which button opened it.
+      val blocks = collapsedRuns(page.entries).map { case (respawnId, claims) =>
+        logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
+      }
       embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
       // The footer is where a page number belongs: it is what you check when you
       // have lost your place, not something to read on the way in. Absent

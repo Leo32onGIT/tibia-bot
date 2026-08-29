@@ -289,29 +289,32 @@ object RespawnButtons extends StrictLogging {
                                     page: Int): Either[String, (MessageEmbed, ActionRow)] = {
     val service = BotApp.respawnService
     val guildId = guild.getId
-    val heading: Either[String, Option[String]] = scope match {
-      case LogScope.Everything => Right(None)
+    val catalogue = service.listRespawns(guildId)
+    // Every scope now renders the same way, so every scope needs the names the
+    // group headers are written from — a spawn's log included, where the one name
+    // it needs is the one the heading used to be built from.
+    val allNames = catalogue.map(r => r.id -> r.displayName).toMap
+    val scoped: Either[String, (Option[String], Map[Long, String])] = scope match {
+      case LogScope.Everything => Right((None, allNames))
+      // No heading: this log is a single group and that group is already headed
+      // with the spawn's name. In the title as well it would be the same name
+      // twice on a card that says nothing else.
       case LogScope.Spawn(id) =>
-        service.listRespawns(guildId).find(_.id == id)
+        catalogue.find(_.id == id)
           .toRight(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-          .map(respawn => Some(respawn.displayName))
+          .map(respawn => (None, Map(respawn.id -> respawn.displayName)))
       // Cache-only, and deliberately not fetched: a name is all this is for, and
       // a REST call per page turn to decorate a title is not worth it. Somebody
       // who has left the server falls back to the plain id, which is still the
-      // right log.
+      // right log. This one keeps its heading, since the spawns on its group
+      // headers are not what it is scoped to.
       case LogScope.Member(userId) =>
-        Right(Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)))
+        Right((Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)),
+          allNames))
     }
-    heading.map { what =>
+    scoped.map { case (what, names) =>
       val logPage = service.claimLog(guildId, scope, page)
-      // A single spawn's log is the only one with nothing to fold. The names are
-      // only needed when it does fold, and only for the rows on this page — the
-      // catalogue runs to several hundred entries.
-      val foldBySpawn = !scope.isInstanceOf[LogScope.Spawn]
-      val names =
-        if (foldBySpawn) service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
-        else Map.empty[Long, String]
-      (RespawnEmbeds.claimLog(what, foldBySpawn, logPage, names, service.LogMaxPages),
+      (RespawnEmbeds.claimLog(what, logPage, names, service.LogMaxPages),
         RespawnThreads.logButtons(scope, logPage))
     }
   }
