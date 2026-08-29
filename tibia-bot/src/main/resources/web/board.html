@@ -1056,6 +1056,23 @@
      is a tooltip, and a tooltip is a thing you have to already suspect before
      you go looking for it. */
   .wk-block .fate { display: block; font-size: calc(8px * var(--ui-scale)); color: #59617a; font-style: italic; }
+  /* The hunt the reader has picked out of the past, in the selection's own
+     purple — so choosing a finished hunt reads like choosing a live one, which
+     gets the purple preview drawn over the top of it.
+
+     Not the preview's own fill, and not its dashed edge: this is a hunt that
+     happened, and an evening about to be booked is a different offer that must
+     not look the same. The ring is what carries it, since a block an hour long
+     has little enough area for a wash of colour to read on. */
+  .wk-block.b-past.b-chosen {
+    border-color: var(--purple);
+    background: rgba(167,139,250,0.16);
+    color: #ddd0ff;
+    box-shadow: 0 0 0 1px var(--purple);
+  }
+  .wk-block.b-past.b-chosen .tm,
+  .wk-block.b-past.b-chosen .acct,
+  .wk-block.b-past.b-chosen .fate { color: #b3a2e2; }
 
   /* ---- A slot holding more than one hunt -----------------------------------
      A window claimed, given up, and claimed again is two rows over the same
@@ -1707,10 +1724,13 @@ const view = {
   days: new Set(),
   pick: null,
   // Which of a stacked run of blocks the reader chose, when a slot holds more
-  // than one. A whole block rather than a time, because a time is exactly what
+  // than one. Something other than a time, because a time is exactly what
   // cannot tell them apart: a claim taken, given up, and taken again is two
   // rows over one window, and `pick` alone would leave the readout answering
   // for whichever the array happened to hold first.
+  //
+  // A slotKey rather than the block itself, so the choice survives the poll
+  // that replaces every slot object underneath it.
   stack: null,
   answer: null,
   busy: false,
@@ -2234,13 +2254,23 @@ function knownSlots() {
   return out;
 }
 
+/** What names a block across a refetch.
+ *
+ *  A poll replaces every slot object, so holding on to one by identity loses it
+ *  the moment the week is read again — and the reader's choice of which hunt in
+ *  a pile they are looking at would reset under them while they read it. These
+ *  four fields are what the wire already distinguishes rows by; gatherSlots
+ *  dedupes on exactly them.
+ */
+function slotKey(b) { return `${b.owner}|${b.startsAt}|${b.endsAt}|${b.state}`; }
+
 function gatherSlots() {
   const seen = new Set(), out = [];
   for (let w = weekOf(view.from); w <= weekOf(view.to); w++) {
     const held = weekCache.get(weekKey(view.code, w));
     if (!held) continue;
     held.slots.forEach(b => {
-      const key = `${b.owner}|${b.startsAt}|${b.endsAt}|${b.state}`;
+      const key = slotKey(b);
       if (seen.has(key)) return;
       seen.add(key);
       out.push(b);
@@ -2531,8 +2561,14 @@ function blockAt(at) {
   // What the reader picked out of a stack wins over what the array happens to
   // hold first. Without this, choosing the second of two hunts on one window
   // moved the highlight and left the verdict describing the other one.
-  if (view.stack && covers(view.stack) && slots.includes(view.stack)) return view.stack;
+  const held = chosenBlock();
+  if (held && covers(held)) return held;
   return slots.find(covers);
+}
+
+/** The block the reader chose, as it stands in the week on screen now. */
+function chosenBlock() {
+  return view.stack ? slots.find(b => slotKey(b) === view.stack) : undefined;
 }
 
 /** Whatever is actually happening at an instant, which is a narrower thing: an
@@ -3366,7 +3402,8 @@ function stackRuns(here, colStart, colEnd) {
  *  rather than on the one that was abandoned.
  */
 function stackLead(run) {
-  if (view.stack && run.includes(view.stack)) return view.stack;
+  const held = run.find(b => slotKey(b) === view.stack);
+  if (held) return held;
   return run.slice().sort((a, b) =>
     (a.past === b.past ? 0 : a.past ? 1 : -1)
     || b.start.getTime() - a.start.getTime()
@@ -3441,7 +3478,7 @@ function openStack(run, anchorEl) {
       // this is anchored to, and a panel left pointing at nothing then follows
       // the scroll around the screen.
       closeStack();
-      view.stack = b;
+      view.stack = slotKey(b);
       view.pick = b.start;
       view.answer = null;
       if (b.past) { renderWindow(); return; }
@@ -3597,6 +3634,9 @@ function calendar() {
       const from = Math.max(b.start.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
         + (run.length > 1 ? ' has-more' : '')
+        // Only shows on a hunt that is over, which is the case with no preview
+        // of its own to be highlighted by — see previews and .b-chosen.
+        + (slotKey(b) === view.stack ? ' b-chosen' : '')
         + (b.past ? ' b-past' + (b.hunted ? '' : ' b-unhunted') : '')
         + (resizing(b) ? ' b-editing' : '')
         + (b.start.getTime() < colStart ? ' clip-top' : '')
@@ -3626,7 +3666,7 @@ function calendar() {
         // Which block, not only which instant. Two hunts can share a start, and
         // the readout used to answer for whichever of them the array held first
         // however plainly the reader had clicked the other.
-        view.stack = b;
+        view.stack = slotKey(b);
         view.answer = null;
         // Nothing to borrow from an evening that is over — see judge, which
         // answers a click on one by saying what became of it.
@@ -3736,6 +3776,14 @@ function calendar() {
  */
 function previews(start, days) {
   if (!view.pick) return [];
+  // A hunt that is over is not an evening about to be booked. Picking one still
+  // moves `pick` — that is how the readout comes to answer for it — so without
+  // this the grid laid a bookable-looking selection across a slot nobody can
+  // book, and at the reader's own length rather than the hunt's, which made it
+  // disagree with the block underneath it about where the evening ended. The
+  // block carries the highlight instead; see .b-chosen.
+  const on = blockAt(view.pick);
+  if (on && on.past) return [];
   const weekly = view.repeat === 'week' && view.days.size > 0;
   const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
   const picked = new Date(view.pick).setSeconds(0, 0);
@@ -5353,6 +5401,10 @@ function pickFromCell(cell, e) {
   if (picked.getTime() <= Date.now()) return;    // nothing to book in the past
   view.pick = picked;
   view.answer = null;
+  // Whatever block was being read is not what is selected now, so it stops being
+  // highlighted and stops answering for the pick. Without this a hunt chosen out
+  // of a pile stayed lit while the reader had moved on to an empty evening.
+  view.stack = null;
   // A fresh slot is the reader's own again, whatever length the block they were
   // looking at happened to run for.
   ownDuration();
