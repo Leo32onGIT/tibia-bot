@@ -6,7 +6,12 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.ZonedDateTime
 
-/** The claim log's two-line entries, and the description budget behind them.
+/** The claim log's rows, and the description budget behind them.
+ *
+ *  One layout for every scope: a bold spawn name, then a line per hunt beneath
+ *  it. A spawn's own log is that same shape with a single group in it, which is
+ *  why these all go through [[RespawnEmbeds.logGroup]] — there is no second
+ *  renderer left to test.
  *
  *  Discord rejects an embed whose description runs past 4096 characters, and a
  *  rejected embed is the whole interaction failing rather than a shortened log
@@ -24,73 +29,78 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     endsAt = Some(now), durationMinutes = minutes, warned = false, kind = RespawnClaim.KindAdHoc,
     limboUntil = None, offerExpiresAt = None, outcome = Some(outcome), endedAt = ended)
 
-  test("an entry is two lines: when and where, then who and how it went") {
-    val lines = RespawnEmbeds.logEntry(claim(), Some("415 Cult Orcs")).split("\n")
+  // One hunt's line, as the feed draws it. Every scope reaches this same row,
+  // so these are the assertions that used to be split across two renderers.
+  private def row(c: RespawnClaim, spawn: String = "415 Cult Orcs"): String =
+    RespawnEmbeds.logGroup(spawn, List(c)).split("\n")(1)
+
+  test("a hunt is one line: when it ended, then who had it and how it went") {
+    val lines = RespawnEmbeds.logGroup("415 Cult Orcs", List(claim())).split("\n")
     lines should have size 2
-    lines(0) should include("<t:")
-    lines(0) should include("415 Cult Orcs")
+    lines(0) shouldBe "**415 Cult Orcs**"
+    lines(1) should include("<t:")
     lines(1) should include("Bobinho")
     lines(1) should include("bob")
     lines(1) should include("ran its full time")
   }
 
+  test("the spawn is named on the header, never on the hunts under it") {
+    // What the two-line entry existed to avoid, solved by the header instead:
+    // the name is written once however many hunts follow it.
+    val lines = RespawnEmbeds
+      .logGroup("415 Cult Orcs", List(claim(), claim(), claim())).split("\n")
+    lines should have size 4
+    lines.tail.foreach(line => line should not include "415 Cult Orcs")
+  }
+
   test("the person is named in plain text, not as a mention") {
     // A mention would need a REST lookup per entry to say anything a stored
     // row does not already, and renders as a pill rather than a name.
-    val second = RespawnEmbeds.logEntry(claim(), None).split("\n")(1)
-    second should include("**Bobinho (bob)**")
-    second should not include "<@"
+    row(claim()) should include("**Bobinho (bob)**")
+    row(claim()) should not include "<@"
   }
 
-  test("a spawn's own log leaves the name off, rather than repeating it every entry") {
-    val lines = RespawnEmbeds.logEntry(claim(), None).split("\n")
-    lines should have size 2
-    lines(0) should not include "·"
-    lines(1) should include("Bobinho")
-  }
-
-  test("the second line is indented with something Discord won't collapse") {
-    // Ordinary leading spaces are stripped from an embed description, which
-    // would flatten the two lines into one block.
-    val second = RespawnEmbeds.logEntry(claim(), None).split("\n")(1)
-    second.head should not be ' '
-    second should startWith(" ")
+  test("a hunt's line is indented with something Discord won't collapse") {
+    // A non-breaking space, U+00A0, asserted as the codepoint rather than by
+    // pasting one into a string where the next reader cannot tell it from an
+    // ordinary space. Ordinary leading whitespace is stripped from an embed
+    // description, which would flatten every row into the header above it.
+    row(claim()).head shouldBe ' '
+    row(claim()).head should not be ' '
   }
 
   test("someone with no character name is named by their username alone") {
-    val second = RespawnEmbeds.logEntry(claim(character = ""), None).split("\n")(1)
-    second should include("bob")
-    second should not include "()"
+    row(claim(character = "")) should include("bob")
+    row(claim(character = "")) should not include "()"
   }
 
   test("a row too old to carry a username says so rather than showing a raw id") {
     // user_name arrived with a DEFAULT '', so the earliest rows have none. This
     // used to fall back to a mention; nothing in the log is a mention any more,
     // and an id on its own tells a reader nothing, so the line owns up instead.
-    val second = RespawnEmbeds
-      .logEntry(claim(character = "").copy(userName = ""), None).split("\n")(1)
-    second should include("someone")
-    second should not include "123456789012345678"
-    second should not include "<@"
+    val line = row(claim(character = "").copy(userName = ""))
+    line should include("someone")
+    line should not include "123456789012345678"
+    line should not include "<@"
   }
 
   test("a character name survives a row with no username") {
-    val second = RespawnEmbeds
-      .logEntry(claim().copy(userName = ""), None).split("\n")(1)
-    second should include("Bobinho")
-    second should not include "("
+    val line = row(claim().copy(userName = ""))
+    line should include("Bobinho")
+    line should not include "("
   }
 
   test("a claim that never recorded an end says so rather than rendering a broken timestamp") {
-    RespawnEmbeds.logEntry(claim(ended = None), None) should include("unknown time")
+    row(claim(ended = None)) should include("unknown time")
   }
 
   test("a full page of the worst realistic entries fits the description limit with room over") {
     // Long character name, long spawn name, and the longest outcome label there
-    // is — ten of them, which is a full page.
-    val worst = RespawnEmbeds.logEntry(
-      claim(character = "Averyveryverylongcharactername", outcome = RespawnClaim.Outcome.Merged, minutes = 1439),
-      Some("1904 Asura Citadel -1 (Marapur)"))
+    // is — ten of them, which is a full page, and each in its own group so the
+    // header is paid for every time rather than shared.
+    val worst = RespawnEmbeds.logGroup("1904 Asura Citadel -1 (Marapur)", List(
+      claim(character = "Averyveryverylongcharactername",
+        outcome = RespawnClaim.Outcome.Merged, minutes = 1439)))
     val page = List.fill(10)(worst)
     val used = page.map(_.length + 1).sum
     withClue(s"a full page renders in $used characters: ")(used should be < 2000)

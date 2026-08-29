@@ -616,7 +616,22 @@ final case class RespawnSettings(
   warnMinutes: Int,
   /** How long someone has to accept a handover offer before it's assumed they
    *  walked away and the spawn moves on to the next person. */
-  handoverMinutes: Int
+  handoverMinutes: Int,
+  /** Whether a booked slot claims itself when it comes round.
+   *
+   *  On, its owner is told the hunt has started and nothing more is asked of
+   *  them: no reminder beforehand, no Take Claim deadline, no slot given up
+   *  because a DM went unread. Off, they have `slot-confirm-minutes` from the
+   *  start to say they are there or lose it.
+   *
+   *  Either way it leaves the *contested* case alone. Somebody trying to book
+   *  over a slot still puts "are you hunting tonight?" to its owner, and that is
+   *  still answered by hand — this setting is about the confirmations nobody
+   *  asked for, not the one somebody did.
+   *
+   *  Defaulted so the many places building one of these for a test say nothing
+   *  about it, and true because that is the behaviour a guild gets on setup. */
+  autoClaim: Boolean = true
 ) {
   /** The longest a single claim on `respawn` may run.
    *

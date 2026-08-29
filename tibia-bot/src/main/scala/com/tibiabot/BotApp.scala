@@ -12,6 +12,7 @@ import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
+import net.dv8tion.jda.api.entities.channel.concrete.PrivateChannel
 import net.dv8tion.jda.api.utils.TimeFormat
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
@@ -116,8 +117,11 @@ object BotApp extends App with StrictLogging {
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache,
       Config.Cache.boostedTtl)(scala.concurrent.ExecutionContext.global)
+  // Pooled, so a small query is not nine parts greeting — see
+  // PooledConnectionProvider. Every repository below is handed this one seam,
+  // so nothing else in the bot has to know.
   private val connectionProvider: persistence.ConnectionProvider =
-    new persistence.JdbcConnectionProvider(Config.postgresHost, Config.postgresPassword)
+    new persistence.PooledConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
@@ -183,7 +187,7 @@ object BotApp extends App with StrictLogging {
   private val streamSupervisor = new app.StreamSupervisor
 
   // Galthen's Satchel cooldown tracking
-  val galthenService = new galthen.GalthenService(galthenRepository, connectionProvider, discordGateway)
+  val galthenService = new galthen.GalthenService(galthenRepository, discordGateway, discordGateway.selfUserId)
 
   /** The guild's "Violent Bot Moderator" role id, or "0" if it has none.
    *
@@ -1049,19 +1053,24 @@ object BotApp extends App with StrictLogging {
             val user = discordGateway.retrieveUser(userId)
             if (user != null) {
               try {
-                user.openPrivateChannel().queue { pc =>
+                // Discord answers 50278/50007 to the channel open as readily as to
+                // the send, so one handler covers both steps. An unhandled open is
+                // what puts JDA's own "RestAction queue returned failure" ERROR in
+                // the log for what is only a closed inbox.
+                val undeliverable = new ErrorHandler().handle(
+                  List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
+                  new java.util.function.Consumer[ErrorResponseException] {
+                    def accept(ex: ErrorResponseException): Unit =
+                      logger.info(s"Could not DM paywall-lapse notice to user '$userId': no shared guild / DMs closed")
+                  }
+                )
+                user.openPrivateChannel().queue((pc: PrivateChannel) => {
                   val dmEmbed = new EmbedBuilder()
                   dmEmbed.setTitle(s":warning: Violent Bot has been paused")
                   dmEmbed.setDescription(s"Violent Bot is paused for **$world** on **${guild.getName}** because your Patreon subscription is no longer active — or your Discord account is no longer connected to Patreon, so the subscription check can't match you. If this was unintentional, [resubscribe](https://www.patreon.com/violentbot) or reconnect Discord on Patreon and run `/setup` for **$world** again to resume tracking.\n\n[Website](https://violentbot.xyz) | [Discord](https://discord.gg/SWMq9Pz8ud) | [Patreon](https://patreon.com/violentbot)")
                   dmEmbed.setColor(presentation.Embeds.NemesisPurple)
-                  pc.sendMessageEmbeds(dmEmbed.build()).queue(null, new ErrorHandler().handle(
-                    List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
-                    new java.util.function.Consumer[ErrorResponseException] {
-                      def accept(ex: ErrorResponseException): Unit =
-                        logger.info(s"Could not DM paywall-lapse notice to user '$userId': no shared guild / DMs closed")
-                    }
-                  ))
-                }
+                  pc.sendMessageEmbeds(dmEmbed.build()).queue(null, undeliverable)
+                }, undeliverable)
               } catch {
                 case ex: Exception => logger.warn(s"Failed to DM paywall-lapse notice to user: '$userId'", ex)
               }
@@ -1175,7 +1184,30 @@ object BotApp extends App with StrictLogging {
                   val user: User = discordGateway.retrieveUser(recipientId)
                   if (user != null) {
                     try {
-                      user.openPrivateChannel().queue { privateChannel =>
+                      // Hoisted so the channel open is covered too: Discord answers
+                      // 50278/50007 to the open as readily as to the send, and a
+                      // failure there used to reach neither dmFailed nor any handler
+                      // at all — JDA logged its own ERROR and the subscription could
+                      // never be given up on however many saves bounced.
+                      val undeliverable = new ErrorHandler().handle(
+                        List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
+                        new java.util.function.Consumer[ErrorResponseException] {
+                          // Can't tell "DMs closed" from "wrong bot" by error code, so this
+                          // never drops a subscription on one failure the way it used to —
+                          // with several bots on one notifications table that quietly
+                          // deleted the lists of everyone the other bot served. Only a run
+                          // of failed saves against a row this bot actually owns gives up.
+                          def accept(ex: ErrorResponseException): Unit = {
+                            try {
+                              if (boostedService.dmFailed(recipientId))
+                                logger.info(s"Removed boosted-DM subscription for user '$recipientId': undeliverable for several server saves running")
+                            } catch {
+                              case ex: Throwable => logger.warn(s"Failed to record boosted-DM failure for user: '$recipientId'", ex)
+                            }
+                          }
+                        }
+                      )
+                      user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
                         privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
                           Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
@@ -1187,26 +1219,9 @@ object BotApp extends App with StrictLogging {
                             try boostedService.dmDelivered(recipientId)
                             catch { case ex: Throwable => logger.warn(s"Failed to record boosted-DM delivery for user: '$recipientId'", ex) }
                           },
-                          new ErrorHandler().handle(
-                            List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
-                            new java.util.function.Consumer[ErrorResponseException] {
-                              // Can't tell "DMs closed" from "wrong bot" by error code, so this
-                              // never drops a subscription on one failure the way it used to —
-                              // with several bots on one notifications table that quietly
-                              // deleted the lists of everyone the other bot served. Only a run
-                              // of failed saves against a row this bot actually owns gives up.
-                              def accept(ex: ErrorResponseException): Unit = {
-                                try {
-                                  if (boostedService.dmFailed(recipientId))
-                                    logger.info(s"Removed boosted-DM subscription for user '$recipientId': undeliverable for several server saves running")
-                                } catch {
-                                  case ex: Throwable => logger.warn(s"Failed to record boosted-DM failure for user: '$recipientId'", ex)
-                                }
-                              }
-                            }
-                          )
+                          undeliverable
                         )
-                      }
+                      }, undeliverable)
                     } catch {
                       case ex: Exception => logger.warn(s"Failed to send Boosted notification to user: '$recipientId'", ex)
                     }

@@ -337,7 +337,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     queueLimit = Config.Respawn.queueLimit,
     staminaMinutes = Config.Respawn.staminaMinutes,
     warnMinutes = Config.Respawn.warnMinutes,
-    handoverMinutes = Config.Respawn.handoverMinutes
+    handoverMinutes = Config.Respawn.handoverMinutes,
+    autoClaim = Config.Respawn.autoClaim
   )
 
   def saveSettings(guildId: String, settings: RespawnSettings): Unit =
@@ -429,6 +430,41 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           }
           Right(updated)
         }
+    }
+
+  /** Turn autoclaim on or off for the guild.
+   *
+   *  Its own method rather than a sixth field on `updateSettings`, because there
+   *  is nowhere to put a sixth field: the Claim rules form is at Discord's five
+   *  components exactly. So this is a button that flips, and a button that flips
+   *  wants a call that flips — see `RespawnThreads.boardModeratorButtons`.
+   *
+   *  Switching it **on** settles the hunts already under way, in the same spirit
+   *  as switching stamina on refilling everybody: otherwise the change would only
+   *  bind the next slot, and somebody sitting on an unanswered Take Claim would
+   *  still lose their spawn to a deadline the guild had just abolished.
+   *
+   *  Switching it **off** touches nothing already running. A hunt confirmed under
+   *  the old rule stays confirmed; the new rule binds the next slot to start.
+   *  Stamping a confirmation deadline onto a hunt somebody was told they need not
+   *  answer for would take a spawn off them for not reading a DM they never got.
+   */
+  def setAutoClaim(guildId: String, enabled: Boolean,
+                   now: ZonedDateTime = ZonedDateTime.now()): Either[String, RespawnSettings] =
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(current) if current.autoClaim == enabled => Right(current)
+      case Some(current) =>
+        val updated = current.copy(autoClaim = enabled)
+        repository.saveSettings(guildId, updated)
+        if (enabled) {
+          val settled = repository.confirmPendingClaims(guildId, now)
+          if (settled > 0)
+            logger.info(s"Autoclaim switched on in guild '$guildId' — settled $settled hunt(s) " +
+              "that were still waiting to be confirmed")
+        }
+        logger.info(s"Autoclaim ${if (enabled) "enabled" else "disabled"} in guild '$guildId'")
+        Right(updated)
     }
 
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit =
@@ -1581,7 +1617,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               start, minutes)
             RespawnThreads.dm(guild, requester,
               RespawnEmbeds.dmEmbed("The hunt is yours",
-                RespawnEmbeds.slotRequestGranted(respawn, start, minutes), imageFor(respawn)))
+                RespawnEmbeds.slotRequestGranted(respawn, start, minutes, config.autoClaim,
+                  Config.Respawn.slotConfirmMinutes), imageFor(respawn)))
             refreshThread(guild, respawn, config)
             SlotAnswer.Passed(respawn, slot.requesterUserName.getOrElse(""),
               slot.requesterNickname.getOrElse(""))
@@ -1638,8 +1675,11 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
 
-      // Nudge whoever booked a slot that is about to start.
-      if (Config.Respawn.slotReminderMinutes > 0) {
+      // Nudge whoever booked a slot that is about to start. Not under autoclaim:
+      // the whole of this DM is the Confirm button and the reason to press it,
+      // and with the slot claiming itself there is neither. What is left would be
+      // a notification about a hunt that is going to start whatever they do.
+      if (!config.autoClaim && Config.Respawn.slotReminderMinutes > 0) {
         repository.slotsNeedingReminder(guildId, now, Config.Respawn.slotReminderMinutes).foreach { slot =>
           Try {
             repository.markWarned(guildId, slot.id)
@@ -1888,12 +1928,24 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // which reads as the deadline never having applied.
         val window = now.plusMinutes(Config.Respawn.slotConfirmMinutes.toLong)
         val confirmBy = if (window.isBefore(bookedEnd)) window else bookedEnd
-        repository.startReservation(guildId, slot.id, now, bookedEnd, confirmBy) match {
+        // Autoclaim answers the deadline as the slot starts, which puts every
+        // booking down the already-confirmed branch below: the hunt is theirs and
+        // nothing is asked of them. `confirm_by` is still stamped — it records
+        // that this claim began as a booking either way.
+        //
+        // A slot somebody was *asked* about never reaches here with the question
+        // still open: `dueReservations` holds it back until the request is
+        // resolved. So this claims nothing on behalf of an owner who has been
+        // asked whether they are hunting and not answered — that one still passes
+        // to whoever asked, autoclaim or not.
+        val autoConfirmed = if (config.autoClaim) Some(now) else None
+        repository.startReservation(guildId, slot.id, now, bookedEnd, confirmBy, autoConfirmed) match {
           case None =>
             // Something else already started it; hand the stamina straight back.
             repository.refundStamina(guildId, slot.userId, remaining, boundary)
           case Some(started) if started.confirmed =>
-            // Settled from the reminder, so there is nothing left to ask.
+            // Nothing left to ask: either autoclaim just settled it, or its owner
+            // pressed Confirm on the reminder before it started.
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your hunt has started",
@@ -2280,8 +2332,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
-  /** Every row a guild's calendars are drawn from, over one window, in four
-   *  reads rather than five per spawn per week.
+  /** Every row a guild's calendars are drawn from, over one window, in five
+   *  reads rather than six per spawn per week.
    *
    *  The same rows the per-spawn calls return, asked for guild-wide and grouped
    *  here — see [[com.tibiabot.web.CalendarRows]], which is what holds them.
@@ -2292,6 +2344,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def calendarRows(guildId: String, from: ZonedDateTime,
                    to: ZonedDateTime): com.tibiabot.web.CalendarRows =
     com.tibiabot.web.CalendarRows(
+      respawns = repository.listRespawns(guildId),
       active = repository.allActiveClaims(guildId).map(claim => claim.respawnId -> claim).toMap,
       // Anchored at the window's own start rather than at now, so a grid showing
       // earlier in the week still draws what was booked then.
@@ -2716,6 +2769,20 @@ object RespawnService {
    *  Pure and separated from the repository so it can be read against a handful
    *  of rows in a test rather than a database.
    */
+  /** [[RespawnService.resolve]] against rows already in hand.
+   *
+   *  The same two steps in the same order — the code first, then the ladder
+   *  below — for a caller that has the guild's catalogue already and should not
+   *  go back to the database to ask which spawn a code it is holding refers to.
+   *  The dashboard's calendar is that caller: its rows arrive guild-wide in one
+   *  read, catalogue included.
+   */
+  def resolveAmong(all: List[Respawn], query: String): Option[Respawn] = {
+    val trimmed = query.trim
+    if (trimmed.isEmpty) None
+    else all.find(_.code.equalsIgnoreCase(trimmed)).orElse(resolveIn(all, trimmed))
+  }
+
   private[respawn] def resolveIn(all: List[Respawn], query: String): Option[Respawn] = {
     val trimmed = query.trim
     if (trimmed.isEmpty) return None

@@ -289,29 +289,32 @@ object RespawnButtons extends StrictLogging {
                                     page: Int): Either[String, (MessageEmbed, ActionRow)] = {
     val service = BotApp.respawnService
     val guildId = guild.getId
-    val heading: Either[String, Option[String]] = scope match {
-      case LogScope.Everything => Right(None)
+    val catalogue = service.listRespawns(guildId)
+    // Every scope now renders the same way, so every scope needs the names the
+    // group headers are written from — a spawn's log included, where the one name
+    // it needs is the one the heading used to be built from.
+    val allNames = catalogue.map(r => r.id -> r.displayName).toMap
+    val scoped: Either[String, (Option[String], Map[Long, String])] = scope match {
+      case LogScope.Everything => Right((None, allNames))
+      // No heading: this log is a single group and that group is already headed
+      // with the spawn's name. In the title as well it would be the same name
+      // twice on a card that says nothing else.
       case LogScope.Spawn(id) =>
-        service.listRespawns(guildId).find(_.id == id)
+        catalogue.find(_.id == id)
           .toRight(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-          .map(respawn => Some(respawn.displayName))
+          .map(respawn => (None, Map(respawn.id -> respawn.displayName)))
       // Cache-only, and deliberately not fetched: a name is all this is for, and
       // a REST call per page turn to decorate a title is not worth it. Somebody
       // who has left the server falls back to the plain id, which is still the
-      // right log.
+      // right log. This one keeps its heading, since the spawns on its group
+      // headers are not what it is scoped to.
       case LogScope.Member(userId) =>
-        Right(Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)))
+        Right((Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)),
+          allNames))
     }
-    heading.map { what =>
+    scoped.map { case (what, names) =>
       val logPage = service.claimLog(guildId, scope, page)
-      // A single spawn's log is the only one with nothing to fold. The names are
-      // only needed when it does fold, and only for the rows on this page — the
-      // catalogue runs to several hundred entries.
-      val foldBySpawn = !scope.isInstanceOf[LogScope.Spawn]
-      val names =
-        if (foldBySpawn) service.listRespawns(guildId).map(r => r.id -> r.displayName).toMap
-        else Map.empty[Long, String]
-      (RespawnEmbeds.claimLog(what, foldBySpawn, logPage, names, service.LogMaxPages),
+      (RespawnEmbeds.claimLog(what, logPage, names, service.LogMaxPages),
         RespawnThreads.logButtons(scope, logPage))
     }
   }
@@ -350,9 +353,9 @@ object RespawnButtons extends StrictLogging {
           val deferredRespond = new Responder(event, deferred = true)
           BotApp.respawnService.settings(guild.getId) match {
             case None => deferredRespond.text(s"${Config.noEmoji} The respawn claim system isn't set up here.")
-            case Some(settings) =>
-              deferredRespond.embed(RespawnEmbeds.serverSettingsEmbed(settings),
-                Some(RespawnThreads.boardModeratorButtons))
+            case Some(settings) => deferredRespond.embed(
+              RespawnEmbeds.serverSettingsEmbed(settings),
+              Some(RespawnThreads.boardModeratorButtons(settings.autoClaim)))
           }
         }
 
@@ -364,6 +367,37 @@ object RespawnButtons extends StrictLogging {
         // could be clicked long after the role was taken away.
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
         else event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
+
+      // Flips rather than asks, so the whole setting is one press. Redraws the
+      // panel it was pressed on rather than sending another one: the toggle's
+      // own label and the embed's Autoclaim field both live there, and both are
+      // stale the moment this is written — see RespawnButtonId.ackFor, which is
+      // where the deferEdit that makes this an edit is decided.
+      //
+      // Only the success path edits. A refusal goes out as a follow-up through
+      // `respond`, which leaves the panel alone: somebody who has just lost the
+      // role should be told so, not have the settings they were reading replaced
+      // by the sentence saying they may not change them.
+      case "autoclaim" =>
+        if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+        else {
+          val service = BotApp.respawnService
+          val before = service.settings(guild.getId)
+          val wanted = !before.exists(_.autoClaim)
+          service.setAutoClaim(guild.getId, wanted) match {
+            case Left(problem) => respond.text(s"${Config.noEmoji} $problem")
+            case Right(updated) =>
+              // Logged like the rest of the panel's settings, because it is one:
+              // a rule binding everybody who hunts here, changed by one person.
+              // The toggle flips, so this normally always has something to say —
+              // but it goes through the same diff as the form, which keeps it
+              // quiet if the value it was pushed to was already the value.
+              RespawnModals.logSettingsChange(guild, event.getUser.getName, before, updated)
+              event.getHook.editOriginalEmbeds(RespawnEmbeds.serverSettingsEmbed(updated))
+                .setComponents(RespawnThreads.boardModeratorButtons(updated.autoClaim))
+                .queue()
+          }
+        }
 
       case other =>
         logger.warn(s"Unknown respawn board button '$other'")

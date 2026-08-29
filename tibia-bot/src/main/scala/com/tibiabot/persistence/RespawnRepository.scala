@@ -441,9 +441,15 @@ trait RespawnRepository {
    *
    *  `confirmBy` is the deadline its owner has to say they are actually there
    *  (see [[unconfirmedClaims]]). Stamped even when the slot was confirmed
-   *  ahead of time, since it also records that this claim began as a booking. */
+   *  ahead of time, since it also records that this claim began as a booking.
+   *
+   *  `confirmedAt` answers that deadline in the same breath, which is what a
+   *  guild with autoclaim on does to every slot it starts. It can only add a
+   *  confirmation, never move or remove one: a slot already confirmed from its
+   *  reminder keeps the moment its owner actually answered. */
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
-                       endsAt: ZonedDateTime, confirmBy: ZonedDateTime): Option[RespawnClaim]
+                       endsAt: ZonedDateTime, confirmBy: ZonedDateTime,
+                       confirmedAt: Option[ZonedDateTime]): Option[RespawnClaim]
 
   /** Record that a slot's owner has said they are hunting it — Confirm on the
    *  reminder while it is still reserved, or Take Claim once it has started.
@@ -456,6 +462,15 @@ trait RespawnRepository {
    *  gone by with nobody saying they were there. The caller gives these up on
    *  the owner's behalf — see RespawnService's sweep. */
   def unconfirmedClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
+
+  /** Settle every running claim still waiting on its owner to say they are
+   *  there, deadline reached or not. Returns how many were settled.
+   *
+   *  What a guild switching autoclaim on does to the hunts already under way:
+   *  without it the rule would only bind the next slot, and somebody sitting on
+   *  an unanswered Take Claim would still lose their spawn — to a deadline the
+   *  guild had just abolished. */
+  def confirmPendingClaims(guildId: String, at: ZonedDateTime): Int
 
   /** Book a slot for somebody with no schedule of their own — used when a booked
    *  slot passes to whoever asked for it. */

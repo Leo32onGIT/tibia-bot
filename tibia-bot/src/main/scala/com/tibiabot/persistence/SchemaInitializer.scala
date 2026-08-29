@@ -31,7 +31,12 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
   /** Drop a guild's database when the bot leaves it (moved verbatim from BotApp's
    *  removeConfigDatabase). No-op if it doesn't exist. */
-  def dropGuild(guildId: String): Unit =
+  def dropGuild(guildId: String): Unit = {
+    // Before the DROP, not after: Postgres refuses to drop a database anything
+    // is still connected to, and a pool holding an idle connection to the guild
+    // the bot has just left is exactly that. A provider that pools nothing has
+    // nothing to do here.
+    connectionProvider.evictGuild(guildId)
     JdbcSupport.withConnection(connectionProvider.admin) { conn =>
       val statement = conn.createStatement()
       val result = statement.executeQuery(s"SELECT datname FROM pg_database WHERE datname = '${guildDbName(guildId)}'")
@@ -44,6 +49,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       }
       statement.close()
     }
+  }
 
   /** PLANNED FEATURE — intentionally not wired yet (do not delete as "dead code").
    *  Scaffolding for the Patreon/premium tier: creates the `payments` database/
@@ -151,7 +157,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
            |userid VARCHAR(255) NOT NULL,
            |time VARCHAR(255) NOT NULL,
-           |tag VARCHAR(255)
+           |tag VARCHAR(255),
+           |bot_id VARCHAR(255) NOT NULL DEFAULT ''
            |);""".stripMargin
 
       // Which incoming world transfers have already been announced. World-scoped

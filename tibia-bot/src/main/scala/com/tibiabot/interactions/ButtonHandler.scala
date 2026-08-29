@@ -9,6 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import java.time.ZonedDateTime
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.emoji.Emoji
+import net.dv8tion.jda.api.entities.channel.concrete.PrivateChannel
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
@@ -285,7 +286,23 @@ object ButtonHandler extends StrictLogging {
             val pendingKey = s"${event.getUser.getId}_${guild.getId}"
             pendingScreenshots.put(pendingKey, PendingScreenshot(charName, deathTime, messageId, guild.getId, world, event.getUser.getId, event.getChannel.getId))
 
-            event.getUser.openPrivateChannel().queue(privateChannel => {
+            // Reached from either step of the DM. Discord can refuse the channel
+            // open itself — "no mutual guilds" (50278) arrives there as readily as
+            // on the send — and an open with no failure consumer left the click
+            // with no answer at all beyond JDA's own logged ERROR.
+            def promptInChannel(): Unit = {
+              val fallbackEmbed = new EmbedBuilder()
+                .setColor(16711680) // red
+                .setTitle(s"Upload Screenshot for ${charName}")
+                .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, Webp) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
+                              s"The screenshot will be added to the death message for **[${charName}](${BotApp.charUrl(charName)})**.")
+                .setFooter("You can also paste an image directly from your clipboard")
+                .build()
+
+              event.reply("").addEmbeds(fallbackEmbed).setEphemeral(true).queue()
+            }
+
+            event.getUser.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
               val embed = new EmbedBuilder()
                 .setColor(presentation.Embeds.BrandColor)
                 .setTitle(s"Upload Screenshot for ${charName}")
@@ -298,20 +315,9 @@ object ButtonHandler extends StrictLogging {
                 _ => {
                   event.reply(s"${Config.yesEmoji} Screenshot upload request sent to your DMs for **[${charName}](${BotApp.charUrl(charName)})**.").setEphemeral(true).queue()
                 },
-                _ => {
-                  // DM failed to send: fall back to prompting in-channel
-                  val fallbackEmbed = new EmbedBuilder()
-                    .setColor(16711680) // red
-                    .setTitle(s"Upload Screenshot for ${charName}")
-                    .setDescription(s"Could not send you a DM. Please upload an image file (PNG, JPG, GIF, Webp) in this channel within the next 5 minutes, If you wish to cancel, simply respond with the word **cancel**.\n\n" +
-                                  s"The screenshot will be added to the death message for **[${charName}](${BotApp.charUrl(charName)})**.")
-                    .setFooter("You can also paste an image directly from your clipboard")
-                    .build()
-
-                  event.reply("").addEmbeds(fallbackEmbed).setEphemeral(true).queue()
-                }
+                _ => promptInChannel()
               )
-            })
+            }, (_: Throwable) => promptInChannel())
 
             // Expire the pending request after 5 minutes
             scala.concurrent.ExecutionContext.global.execute(() => {

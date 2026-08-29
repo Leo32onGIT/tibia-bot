@@ -18,7 +18,7 @@ class CalendarSnapshotCacheSpec extends AnyWordSpec with Matchers {
   }
 
   private def rows(from: ZonedDateTime, to: ZonedDateTime) =
-    CalendarRows(Map.empty, Map.empty, Map.empty, Map.empty, from, to)
+    CalendarRows(Nil, Map.empty, Map.empty, Map.empty, Map.empty, from, to)
 
   private def cache(reads: AtomicInteger, clock: Clock,
                     seen: scala.collection.mutable.ListBuffer[(ZonedDateTime, ZonedDateTime)] = null) =

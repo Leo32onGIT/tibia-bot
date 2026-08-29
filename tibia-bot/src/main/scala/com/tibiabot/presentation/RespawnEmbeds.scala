@@ -468,10 +468,27 @@ object RespawnEmbeds {
 
   /** DM'd to whoever asked, once the slot passes to them. The window is passed in
    *  rather than read off the slot: what they get is what they asked for, which
-   *  is the slot itself only when they asked for it with the Request button. */
-  def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int): String =
-    s"${spawnLink(respawn)} is yours at ${dateTime(start)} for " +
-      s"${humanDuration(minutes)} — it'll start on its own, no need to claim it."
+   *  is the slot itself only when they asked for it with the Request button.
+   *
+   *  What the last sentence can promise depends on the guild's autoclaim, because
+   *  what this creates is an ordinary booking and it starts the way every other
+   *  booking does. With autoclaim off that means a Take Claim deadline — so
+   *  telling everyone there is nothing to claim is how somebody loses the slot
+   *  they were just handed: they were promised nothing further would be asked of
+   *  them, and so let the DM that arrives at the start go unread.
+   *
+   *  `confirmMinutes` rather than the deadline itself, since the deadline does not
+   *  exist yet: the slot has not started, and how long is left of it when it does
+   *  is what decides the cap (see `startSlot`). The number is what they can act
+   *  on now. */
+  def slotRequestGranted(respawn: Respawn, start: ZonedDateTime, minutes: Int,
+                         autoClaim: Boolean, confirmMinutes: Int): String = {
+    val claiming =
+      if (autoClaim) "it'll start on its own, no need to claim it."
+      else s"it'll start on its own, but you have ${humanDuration(confirmMinutes)} from then to " +
+        "press **Take Claim** on it or it's given up."
+    s"${spawnLink(respawn)} is yours at ${dateTime(start)} for ${humanDuration(minutes)} — $claiming"
+  }
 
   /** DM'd to whoever asked when the slot was given up but their own window has
    *  since been booked around them. Says what happened rather than just failing:
@@ -613,7 +630,57 @@ object RespawnEmbeds {
       // The reminder default is not here: it is no longer a per-guild setting, so
       // showing it would be showing a number nobody in this panel can change.
       .addField("Handover window", humanDuration(settings.handoverMinutes), true)
+      // Inline and bare, like every other value here: this panel is a reading of
+      // the settings, and the one that happens to be a toggle is not a different
+      // kind of thing from the one that happens to be a duration.
+      .addField("Autoclaim", if (settings.autoClaim) "On" else "Off", true)
       .build()
+
+  /** What a moderator actually changed about the server's rules, a line each.
+   *
+   *  For the command log, which is an audit rather than a reading: the whole
+   *  settings panel posted after every edit would say six things where one of
+   *  them moved, and leave whoever reads that channel later to work out which.
+   *  So only the fields that differ, each as what it was and what it now is.
+   *
+   *  Empty when nothing moved, which is the caller's signal not to post at all —
+   *  a form submitted unchanged, or a toggle already at the value it was pushed
+   *  to, is not something that happened.
+   *
+   *  The labels are [[serverSettingsEmbed]]'s own, and the values are written
+   *  the way it writes them, so the two cannot come to describe the same setting
+   *  differently. `warnMinutes` is not here for the same reason it is not there:
+   *  it stopped being a per-guild setting, so nothing in this panel can change
+   *  it. Nor are the forum and board ids, which are plumbing rather than rules.
+   */
+  def settingsChanges(before: RespawnSettings, after: RespawnSettings): List[String] = {
+    def line[A](label: String, was: A, now: A, show: A => String): Option[String] =
+      if (was == now) None else Some(s"$label: **${show(was)}** → **${show(now)}**")
+
+    val stamina = (minutes: Int) => if (minutes <= 0) "unlimited" else humanDuration(minutes)
+    val onOff = (on: Boolean) => if (on) "On" else "Off"
+
+    List(
+      line("Default claim", before.defaultDurationMinutes, after.defaultDurationMinutes, humanDuration),
+      line("Maximum claim", before.maxDurationMinutes, after.maxDurationMinutes, humanDuration),
+      line("Queue limit", before.queueLimit, after.queueLimit, (n: Int) => n.toString),
+      line("Daily stamina", before.staminaMinutes, after.staminaMinutes, stamina),
+      line("Handover window", before.handoverMinutes, after.handoverMinutes, humanDuration),
+      line("Autoclaim", before.autoClaim, after.autoClaim, onOff)
+    ).flatten
+  }
+
+  /** Those changes as the command log carries them: who, and then what, quoted
+   *  under it so the list reads as one block rather than as loose lines.
+   *
+   *  None when nothing changed — see [[settingsChanges]]. */
+  def settingsChangeLog(who: String, before: RespawnSettings, after: RespawnSettings): Option[String] =
+    settingsChanges(before, after) match {
+      case Nil     => None
+      case changes => Some(
+        s"$who changed the server's respawn settings:\n" +
+          changes.map(change => s"> $change").mkString("\n"))
+    }
 
   /** The moderator panel for one spawn: who holds it, and what can be done to
    *  them. Rendered instead of going straight to a duration form, because the
@@ -717,19 +784,6 @@ object RespawnEmbeds {
       }
       .reverse
 
-  /** One entry of a spawn's own claim log, deliberately over two lines: when on
-   *  the first, who and how it went on the second. One line per entry wrapped at
-   *  a different point on every row once a phone got hold of it; breaking it on
-   *  purpose means the break is always in the same place.
-   *
-   *  `spawnName` is set only where a line has to say which spawn it belongs to.
-   *  A spawn's own log passes None — it would be the same name ten times over,
-   *  and the board's log names it on the group header instead. */
-  private[presentation] def logEntry(claim: RespawnClaim, spawnName: Option[String]): String = {
-    val where = spawnName.map(name => s" · **$name**").getOrElse("")
-    s"${logTime(claim)}$where\n$LogIndent${logWho(claim)}"
-  }
-
   /** Discord refuses an embed whose description runs past this, and refusing is
    *  the whole interaction failing rather than a truncated log. Ten entries come
    *  to roughly a quarter of it even with long names, so this is a backstop
@@ -761,11 +815,12 @@ object RespawnEmbeds {
    *  to keep, it turned out, by nobody: a moderator opens this with a question
    *  about one spawn or one night, and a guild-wide tally answers neither while
    *  pushing the rows that do answer them further down the card. */
-  /** `heading` names what the log is scoped to — a spawn, a member — and is
-   *  absent for the whole guild. `foldBySpawn` is separate from it rather than
-   *  derived, because the two do not move together: a member's log is scoped
-   *  *and* folded, since it runs across spawns exactly as the guild's does. */
-  def claimLog(heading: Option[String], foldBySpawn: Boolean, page: com.tibiabot.respawn.LogPage,
+  /** `heading` names what the log is scoped to when the feed cannot name it
+   *  itself — a member. A spawn's log and the guild's both leave it absent: the
+   *  spawn names itself on a group header, which for a one-spawn log is the only
+   *  header there is, and putting it in the title as well would print it twice
+   *  on a card that holds nothing else. */
+  def claimLog(heading: Option[String], page: com.tibiabot.respawn.LogPage,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
     val embed = new EmbedBuilder()
       .setColor(Embeds.BrandColor)
@@ -775,14 +830,15 @@ object RespawnEmbeds {
     if (page.isEmpty) {
       embed.setDescription("Nothing has finished here yet.")
     } else {
-      // A spawn's own log has one code and nothing to fold, so it keeps the
-      // two-line entry. Everything else is folded by spawn — that is where the
-      // same name was being repeated down the page.
-      val blocks =
-        if (foldBySpawn) collapsedRuns(page.entries).map { case (respawnId, claims) =>
-          logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
-        }
-        else page.entries.map(logEntry(_, None))
+      // Every log folds, a single spawn's included. Such a log holds one run and
+      // nothing else, so folding costs it nothing and buys it the shape the
+      // guild's log is read in: the name once, its hunts a line each beneath.
+      // The two-line entry this used to keep for that case stood twice as tall
+      // for the same words, and made one feature look like two depending on
+      // which button opened it.
+      val blocks = collapsedRuns(page.entries).map { case (respawnId, claims) =>
+        logGroup(names.getOrElse(respawnId, "Unknown respawn"), claims)
+      }
       embed.setDescription(entriesWithinLimit(blocks, DescriptionLimit).mkString("\n"))
       // The footer is where a page number belongs: it is what you check when you
       // have lost your place, not something to read on the way in. Absent
