@@ -5,6 +5,7 @@ import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 
 import java.sql.{Connection, SQLException}
 import java.util.concurrent.{ConcurrentHashMap, Executors, ScheduledExecutorService, ThreadFactory, TimeUnit}
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 /** A [[ConnectionProvider]] that keeps its connections instead of throwing them
@@ -25,13 +26,30 @@ import scala.util.control.NonFatal
  *  one pool per guild, started the first time that guild is asked about. They
  *  are deliberately allowed to hold nothing: `minimumIdle` is zero and an idle
  *  connection is dropped after [[PooledConnectionProvider.IdleTimeout]], so a
- *  quiet guild costs an empty pool object rather than a connection. That is what
- *  keeps a bot in many guilds off Postgres' whole connection budget — the steady
- *  state is about the number of threads actually running queries, which is what
- *  it was before pooling, held for half a minute longer.
+ *  guild nobody touches costs an empty pool object rather than a connection.
  *
  *  The pools share one housekeeping thread rather than starting one each, which
  *  is the difference between a thread per guild and a thread.
+ *
+ *  ==A ceiling on how many pools may hold connections==
+ *  "A guild nobody touches" is the part that did not survive contact with the
+ *  bot, and [[PooledConnectionProvider.MaxPools]] is the answer to it. Several
+ *  things here walk the whole fleet — the guild roster republishes every thirty
+ *  seconds, the respawn sweep runs on its own thirty-second beat, and startup
+ *  reads every guild's world list — so no guild is ever idle for the thirty
+ *  seconds it would take to give its connection back. One connection per guild,
+ *  held for the life of the process, is what that adds up to; on a bot in a few
+ *  hundred guilds it is Postgres' entire default budget of a hundred, and the
+ *  first thing to notice was a second bot against the same server being unable
+ *  to open a connection at all.
+ *
+ *  So a borrow that would leave more than `MaxPools` pools alive closes the ones
+ *  nobody has asked for in longest first. What that costs a fleet walk is the
+ *  handshake it was paying before pooling existed — three milliseconds a guild,
+ *  once every thirty seconds — and what it keeps is the case pooling was for:
+ *  a guild being used right now stays at the warm end of that ordering for as
+ *  long as it is being used. Only pools with nothing checked out are closed,
+ *  since Hikari's shutdown aborts connections that are still in a query.
  *
  *  ==Pools that stop being used==
  *  A guild nobody has asked about for [[PooledConnectionProvider.PoolIdle]] has
@@ -52,6 +70,7 @@ final class PooledConnectionProvider(
   port: Int = 5432,
   maxPerDatabase: Int = PooledConnectionProvider.MaxPerDatabase,
   poolIdleMillis: Long = PooledConnectionProvider.PoolIdle,
+  maxPools: Int = PooledConnectionProvider.MaxPools,
   unpooled: ConnectionProvider = null
 ) extends ConnectionProvider with StrictLogging {
 
@@ -120,6 +139,11 @@ final class PooledConnectionProvider(
     while (connection eq null) {
       val pool = unwrapped(pools.computeIfAbsent(url, u => new Pool(new HikariDataSource(configFor(u, maxSize)))))
       pool.lastUsed = System.currentTimeMillis()
+      // Here rather than on the sweep's schedule because this is the moment the
+      // ceiling can be crossed, and a fleet walk crosses it a few hundred times
+      // in the second or so it takes to run — long before any timer would come
+      // round to notice.
+      if (pools.size > maxPools) trim(keep = pool)
       if (!pool.closed) connection = pool.dataSource.getConnection()
       else {
         // Swept between the lookup and here. Take it out of the map if it is
@@ -178,10 +202,55 @@ final class PooledConnectionProvider(
   /** Close a pool and forget it, whatever state it is in. */
   private def discard(url: String): Unit = {
     val pool = pools.remove(url)
-    if (pool ne null) {
-      pool.closed = true
-      try pool.dataSource.close()
-      catch { case NonFatal(e) => logger.warn(s"Closing the connection pool for '$url' failed: ${e.getMessage}") }
+    if (pool ne null) shutdown(url, pool)
+  }
+
+  /** As [[discard]], but only when `pool` is still the one registered under
+   *  `url` — so a pool started in the meantime is not closed in its place. */
+  private def discardIf(url: String, pool: Pool): Unit =
+    if (pools.remove(url, pool)) shutdown(url, pool)
+
+  private def shutdown(url: String, pool: Pool): Unit = {
+    pool.closed = true
+    try pool.dataSource.close()
+    catch { case NonFatal(e) => logger.warn(s"Closing the connection pool for '$url' failed: ${e.getMessage}") }
+  }
+
+  /** Whether a pool can be closed without taking a connection off somebody
+   *  mid-query: Hikari's shutdown aborts whatever is still checked out.
+   *
+   *  A pool that cannot answer — closing already, or never started — reads as
+   *  busy and is left alone, since the next borrow asks again anyway. */
+  private def nothingCheckedOut(pool: Pool): Boolean =
+    !pool.closed && (try {
+      val bean = pool.dataSource.getHikariPoolMXBean
+      (bean ne null) && bean.getActiveConnections == 0
+    } catch { case NonFatal(_) => false })
+
+  /** Bring the number of live pools back to [[maxPools]], closing the ones
+   *  nobody has asked for in longest.
+   *
+   *  `keep` is the pool the borrow that called this is about to draw from. It is
+   *  the most recently used of all of them and so sorts last, but it is also the
+   *  one case where being closed is not merely wasteful but a borrow that has to
+   *  start over — so it is excluded outright rather than by argument.
+   *
+   *  Every pool being busy is a legitimate answer to which nothing is closed:
+   *  the ceiling is on connections held for nothing, and a connection in a query
+   *  is not that. The next borrow tries again.
+   */
+  private def trim(keep: Pool): Unit = {
+    var excess = pools.size - maxPools
+    if (excess > 0) {
+      val coldest = pools.entrySet().asScala.toVector
+        .filter(entry => (entry.getValue ne keep) && nothingCheckedOut(entry.getValue))
+        .sortBy(_.getValue.lastUsed)
+      val candidates = coldest.iterator
+      while (excess > 0 && candidates.hasNext) {
+        val entry = candidates.next()
+        discardIf(entry.getKey, entry.getValue)
+        excess -= 1
+      }
     }
   }
 
@@ -231,6 +300,19 @@ object PooledConnectionProvider {
    *  one guild. Every world's poll writes into it, so what it has to cover is
    *  the world cycle's own width rather than a dashboard's. */
   val MaxForShared: Int = 32
+
+  /** How many pools may be alive at once, and so the ceiling on connections
+   *  this process holds while doing nothing with them.
+   *
+   *  Sized for the guilds actually in use at a moment rather than the guilds the
+   *  bot is in: a claim, a dashboard open, a command. Everything above that is a
+   *  fleet walk passing through, and a fleet walk gets no benefit from a warm
+   *  connection — it asks each guild one question every thirty seconds and does
+   *  not come back. Deliberately well under Postgres' default `max_connections`
+   *  of 100 even with [[MaxForShared]] alongside it and a second bot sharing the
+   *  same server, which is the configuration that found this.
+   */
+  val MaxPools: Int = 16
 
   /** How long a connection nobody wants is kept before being closed. Long
    *  enough to cover a dashboard's ten-second poll and the burst around it,
