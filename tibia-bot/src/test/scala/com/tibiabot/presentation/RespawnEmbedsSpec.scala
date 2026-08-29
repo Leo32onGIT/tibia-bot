@@ -387,7 +387,7 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the server settings panel names every rule a moderator can change") {
-    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings))
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings, 15))
     fs.keys should contain allOf ("Default claim", "Maximum claim", "Queue limit",
       "Daily stamina", "Handover window")
     fs("Default claim") shouldBe "2h"
@@ -398,11 +398,27 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     // It survives as the fallback for members who have not set their own, but
     // there is nowhere left to change it — and a panel of settings is a poor
     // place to print a number that cannot be edited from it.
-    fields(RespawnEmbeds.serverSettingsEmbed(settings)).keys should not contain "Default reminder"
+    fields(RespawnEmbeds.serverSettingsEmbed(settings, 15)).keys should not contain "Default reminder"
+  }
+
+  test("the settings panel says what autoclaim is doing, in both states") {
+    // The button beside this embed only has room for "Autoclaim: On", which is
+    // the state and not the rule — so the panel is where the rule is spelled
+    // out, including the one thing autoclaim does not silence.
+    val on = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(autoClaim = true), 15))("Autoclaim")
+    on should include("On")
+    on should include("claim themselves")
+    on should include("asks to book over")
+
+    val off = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(autoClaim = false), 15))("Autoclaim")
+    off should include("Off")
+    // The deadline is passed in rather than read from Config, so a guild reading
+    // this panel sees the number actually in force.
+    off should include("15m")
   }
 
   test("the server settings panel spells out the disabled cases rather than showing 0") {
-    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(staminaMinutes = 0)))
+    val fs = fields(RespawnEmbeds.serverSettingsEmbed(settings.copy(staminaMinutes = 0), 15))
     fs("Daily stamina") shouldBe "unlimited"
   }
 

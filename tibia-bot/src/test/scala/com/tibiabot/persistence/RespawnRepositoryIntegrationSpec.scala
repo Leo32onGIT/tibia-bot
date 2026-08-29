@@ -55,6 +55,20 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     repo.settings(g).map(_.queueLimit) shouldBe Some(5) // untouched
   }
 
+  test("autoclaim round-trips, and a settings row written without it comes back on") {
+    val (repo, g) = freshRepo()
+    // Positionally, the way every other caller of this constructor writes one —
+    // which is the shape a guild set up before autoclaim existed is saved in.
+    // It has to come back on, or upgrading a guild would silently opt it out.
+    repo.saveSettings(g, RespawnSettings("0", "0", 120, 240, 20, 240, 10, 10))
+    repo.settings(g).map(_.autoClaim) shouldBe Some(true)
+
+    repo.saveSettings(g, repo.settings(g).get.copy(autoClaim = false))
+    repo.settings(g).map(_.autoClaim) shouldBe Some(false)
+    repo.saveSettings(g, repo.settings(g).get.copy(autoClaim = true))
+    repo.settings(g).map(_.autoClaim) shouldBe Some(true)
+  }
+
   test("the board digest is remembered, and absent until something is drawn") {
     // What decides whether a restart redraws the pinned board post in Discord.
     // It has to survive the process, which is the whole reason it is in the
@@ -813,7 +827,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
     // `warned` is reused for the start nudge while reserved. Activating has to
     // clear it, or the claim-end reminder would be skipped for every booked hunt.
     val started = repo.startReservation(g, slot.id, now.plusHours(2), now.plusHours(4),
-      now.plusHours(2).plusMinutes(15))
+      now.plusHours(2).plusMinutes(15), None)
     started.map(_.warned) shouldBe Some(false)
     repo.unwarnedActiveClaims(g, now.plusHours(2)).map(_.id) shouldBe List(slot.id)
   }
@@ -828,7 +842,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
       now.plusHours(2), 120).get
 
     val start = now.plusHours(2)
-    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15)).get
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15), None).get
     started.awaitingConfirmation shouldBe true
 
     // Nothing to give up on until the deadline actually passes.
@@ -844,7 +858,7 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
       now.plusHours(2), 120).get
 
     val start = now.plusHours(2)
-    repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15))
+    repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15), None)
     repo.confirmClaim(g, slot.id, start.plusMinutes(3)).map(_.confirmed) shouldBe Some(true)
     repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
   }
@@ -863,10 +877,66 @@ class RespawnRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Po
 
     // And it carries through the start, so the hunt needs no second answer.
     val start = now.plusHours(2)
-    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15)).get
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15), None).get
     started.confirmed shouldBe true
     started.awaitingConfirmation shouldBe false
     repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
+  }
+
+  test("autoclaim starts a booking already confirmed, and the sweep never sees it") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    val start = now.plusHours(2)
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2),
+      start.plusMinutes(15), Some(start)).get
+    started.confirmed shouldBe true
+    started.awaitingConfirmation shouldBe false
+    // `confirm_by` is still stamped — it records that this began as a booking,
+    // which stays true whether or not anybody had to answer for it.
+    started.confirmBy shouldBe defined
+    repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
+  }
+
+  test("autoclaim adds a confirmation but never moves one already there") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    // Confirmed by hand an hour before it starts. What the audit should keep is
+    // that moment, not the start it happened to survive.
+    val early = now.plusHours(1)
+    repo.confirmClaim(g, slot.id, early)
+    val start = now.plusHours(2)
+    val started = repo.startReservation(g, slot.id, start, start.plusHours(2),
+      start.plusMinutes(15), Some(start)).get
+    started.confirmedAt.map(_.toInstant) shouldBe Some(early.toInstant)
+  }
+
+  test("switching autoclaim on settles hunts whose deadline has not arrived yet") {
+    val (repo, g) = freshRepo()
+    val spawn = repo.addRespawn(g, "415", "Cult Orcs", "", "Edron", "", "", Respawn.SourceSeed, "seed")
+    val schedule = repo.addSchedule(g, spawn.id, "owner", "Owner", "", "", now.plusHours(2), 1440, 120)
+    val slot = repo.reserveOccurrence(g, schedule.id, spawn.id, "owner", "Owner", "", "",
+      now.plusHours(2), 120).get
+
+    val start = now.plusHours(2)
+    repo.startReservation(g, slot.id, start, start.plusHours(2), start.plusMinutes(15), None)
+
+    // Five minutes in, with ten still to answer in — exactly the hunt that would
+    // otherwise be lost to a deadline the guild has just abolished.
+    val flipped = start.plusMinutes(5)
+    repo.confirmPendingClaims(g, flipped) shouldBe 1
+    repo.findClaimById(g, slot.id).map(_.confirmed) shouldBe Some(true)
+    repo.unconfirmedClaims(g, start.plusHours(1)) shouldBe empty
+
+    // Nothing left waiting, so a second flip settles nothing.
+    repo.confirmPendingClaims(g, flipped.plusMinutes(1)) shouldBe 0
   }
 
   test("a confirmed slot is never passed to whoever asked for it") {

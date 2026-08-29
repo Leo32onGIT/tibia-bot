@@ -29,6 +29,15 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.opensModal(RespawnButtonId.boardConfig) shouldBe true
   }
 
+  test("the autoclaim toggle replies rather than opening a modal") {
+    // It sits in the same row as Claim rules, which does open one — and the two
+    // are told apart by nothing but their id, so this is worth pinning: deferred
+    // is what lets it answer with the redrawn Config panel through the hook.
+    RespawnButtonId.opensModal(RespawnButtonId.boardAutoClaim) shouldBe false
+    RespawnButtonId.parse(RespawnButtonId.boardAutoClaim) shouldBe
+      Some(RespawnButtonId.BoardButton("autoclaim"))
+  }
+
   test("spawn buttons that open a modal are not deferred") {
     RespawnButtonId.opensModal(RespawnButtonId.claim(7L)) shouldBe true
     RespawnButtonId.opensModal(RespawnButtonId.spawnConfig(7L)) shouldBe true

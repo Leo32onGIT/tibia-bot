@@ -295,9 +295,16 @@ object Config {
      *  ahead is judged on whether they turned up rather than on whether they
      *  read a DM that afternoon. */
     val bookingRequestGraceMinutes: Int = respawn.getInt("booking-request-grace-minutes")
+    /** Whether a booked slot claims itself when it comes round instead of asking
+     *  its owner to press a button. A default for a guild's first setup only —
+     *  read the live value off [[com.tibiabot.domain.RespawnSettings.autoClaim]],
+     *  which each guild sets for itself. */
+    val autoClaim: Boolean = respawn.getBoolean("auto-claim")
     /** How long before a booked slot starts its owner is reminded. 0 turns the
-     *  reminder off. Separate from the claim-end reminder members set for
-     *  themselves: this one is about a hunt that hasn't begun. */
+     *  reminder off, and so does a guild's autoclaim: with nothing to confirm
+     *  there is nothing for the nudge to be early for. Separate from the
+     *  claim-end reminder members set for themselves: this one is about a hunt
+     *  that hasn't begun. */
     val slotReminderMinutes: Int = respawn.getInt("slot-reminder-minutes")
     /** How long after a booking starts on its own its owner has to confirm they
      *  are there, before it is given up for them and the spawn moves on as it

@@ -144,11 +144,21 @@ object RespawnThreads extends StrictLogging {
    *  server's rules.
    *
    *  Timers used to sit between them. Everything it held is under Claim rules
-   *  now — see [[com.tibiabot.interactions.RespawnModals.claimRulesModal]]. */
-  def boardModeratorButtons: ActionRow =
+   *  now — see [[com.tibiabot.interactions.RespawnModals.claimRulesModal]].
+   *
+   *  Autoclaim is a button of its own rather than a sixth field in that form,
+   *  because the form is at Discord's five-component ceiling. It is labelled with
+   *  the state it is *in*, not the one pressing it would move to: a toggle whose
+   *  label is an instruction has to be pressed to find out what it was.
+   *
+   *  Pressing it answers with this panel again, redrawn, so the label and the
+   *  embed's matching field both settle on the new value. */
+  def boardModeratorButtons(autoClaim: Boolean): ActionRow =
     ActionRow.of(
       Button.secondary(RespawnButtonId.boardMySettings, "My settings"),
       Button.primary(RespawnButtonId.boardClaimRules, "Claim rules"),
+      Button.secondary(RespawnButtonId.boardAutoClaim,
+        if (autoClaim) "Autoclaim: On" else "Autoclaim: Off").withEmoji(Emoji.fromUnicode("🎯")),
       Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜"))
     )
 
@@ -1070,6 +1080,11 @@ object RespawnButtonId {
   /** A moderator handing stamina to somebody, from /stamina. */
   val giveStamina: String = s"${Prefix}board:givestamina"
   val boardClaimRules: String = s"${Prefix}board:claimrules"
+  /** Flips the guild's autoclaim on or off. A button rather than a field in the
+   *  Claim rules form because that form is at Discord's five components exactly
+   *  and has no sixth slot — see
+   *  [[com.tibiabot.interactions.RespawnModals.claimRulesModal]]. */
+  val boardAutoClaim: String = s"${Prefix}board:autoclaim"
 
   /** Modal ids, kept next to the buttons that open them. */
   val ModalPrefix: String = s"${Prefix}modal:"

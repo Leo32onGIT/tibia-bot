@@ -84,7 +84,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
           |queue_limit INT NOT NULL DEFAULT 20,
           |stamina_minutes INT NOT NULL DEFAULT 240,
           |warn_minutes INT NOT NULL DEFAULT 10,
-          |handover_minutes INT NOT NULL DEFAULT 10
+          |handover_minutes INT NOT NULL DEFAULT 10,
+          |auto_claim BOOLEAN NOT NULL DEFAULT TRUE
           |);""".stripMargin)
 
       // What the pinned board post was last drawn from. Not a setting a guild
@@ -140,6 +141,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       // silently skip them and leave the new columns missing.
       statement.executeUpdate(
         "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS handover_minutes INT NOT NULL DEFAULT 10;")
+      // DEFAULT TRUE rather than FALSE, so a guild that has been running since
+      // before autoclaim existed gets it switched on by the migration. The
+      // confirm-or-lose rule it replaces was being answered by everybody every
+      // time, so arriving already on is the behaviour people were asking for —
+      // and Config -> Autoclaim turns it back off for a guild that wants the old
+      // rule.
+      statement.executeUpdate(
+        "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS auto_claim BOOLEAN NOT NULL DEFAULT TRUE;")
       // Added and removed inside one deploy: the bot always uses server time, so
       // a per-guild zone was surface with nothing behind it. Dropped rather than
       // left as a column nothing reads.
@@ -418,7 +427,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         queueLimit = result.getInt("queue_limit"),
         staminaMinutes = result.getInt("stamina_minutes"),
         warnMinutes = result.getInt("warn_minutes"),
-        handoverMinutes = result.getInt("handover_minutes")
+        handoverMinutes = result.getInt("handover_minutes"),
+        autoClaim = result.getBoolean("auto_claim")
       )) else None
     } finally statement.close()
   }
@@ -427,8 +437,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     val statement = conn.prepareStatement(
       """INSERT INTO respawn_settings
         |(id, forum_channel, board_thread, default_duration, max_duration, queue_limit, stamina_minutes,
-        | warn_minutes, handover_minutes)
-        |VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+        | warn_minutes, handover_minutes, auto_claim)
+        |VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         |ON CONFLICT (id) DO UPDATE SET
         |forum_channel = EXCLUDED.forum_channel,
         |board_thread = EXCLUDED.board_thread,
@@ -437,7 +447,8 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         |queue_limit = EXCLUDED.queue_limit,
         |stamina_minutes = EXCLUDED.stamina_minutes,
         |warn_minutes = EXCLUDED.warn_minutes,
-        |handover_minutes = EXCLUDED.handover_minutes;""".stripMargin)
+        |handover_minutes = EXCLUDED.handover_minutes,
+        |auto_claim = EXCLUDED.auto_claim;""".stripMargin)
     try {
       statement.setString(1, settings.forumChannel)
       statement.setString(2, settings.boardThread)
@@ -447,6 +458,7 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.setInt(6, settings.staminaMinutes)
       statement.setInt(7, settings.warnMinutes)
       statement.setInt(8, settings.handoverMinutes)
+      statement.setBoolean(9, settings.autoClaim)
       statement.executeUpdate()
     } finally statement.close()
   }
@@ -1531,26 +1543,36 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def startReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
-                       endsAt: ZonedDateTime,
-                       confirmBy: ZonedDateTime): Option[RespawnClaim] = withGuildTransaction(guildId) { conn =>
-    // `confirm_by` is stamped whether or not the slot was already confirmed —
-    // it records that this claim began as a booking, which stays true either
-    // way. What keeps a confirmed one safe from the sweep is `confirmed_at`,
-    // which this deliberately does not touch.
-    val statement = conn.prepareStatement(
-      """UPDATE respawn_claims
-        |SET status = 'active', starts_at = ?, ends_at = ?, warned = FALSE, confirm_by = ?
-        |WHERE id = ? AND status = 'reserved'
-        |RETURNING *;""".stripMargin)
-    try {
-      statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
-      statement.setTimestamp(2, Timestamp.from(endsAt.toInstant))
-      statement.setTimestamp(3, Timestamp.from(confirmBy.toInstant))
-      statement.setLong(4, claimId)
-      val result = statement.executeQuery()
-      if (result.next()) Some(readClaim(result)) else None
-    } finally statement.close()
-  }
+                       endsAt: ZonedDateTime, confirmBy: ZonedDateTime,
+                       confirmedAt: Option[ZonedDateTime]): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      // `confirm_by` is stamped whether or not the slot ends up confirmed — it
+      // records that this claim began as a booking, which stays true either way.
+      // What keeps a confirmed one safe from the sweep is `confirmed_at`.
+      //
+      // COALESCE, so `confirmedAt` can only ever *add* a confirmation: passing
+      // None leaves an existing one alone (somebody who pressed Confirm on the
+      // reminder stays confirmed), and passing a time on an already-confirmed
+      // slot keeps the moment they actually answered rather than restamping it.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET status = 'active', starts_at = ?, ends_at = ?, warned = FALSE, confirm_by = ?,
+          |    confirmed_at = COALESCE(confirmed_at, ?)
+          |WHERE id = ? AND status = 'reserved'
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
+        statement.setTimestamp(2, Timestamp.from(endsAt.toInstant))
+        statement.setTimestamp(3, Timestamp.from(confirmBy.toInstant))
+        confirmedAt match {
+          case Some(at) => statement.setTimestamp(4, Timestamp.from(at.toInstant))
+          case None     => statement.setNull(4, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+        }
+        statement.setLong(5, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
 
   def confirmClaim(guildId: String, claimId: Long, at: ZonedDateTime): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
@@ -1581,6 +1603,23 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
     try {
       statement.setTimestamp(1, Timestamp.from(now.toInstant))
       collectClaims(statement.executeQuery())
+    } finally statement.close()
+  }
+
+  def confirmPendingClaims(guildId: String, at: ZonedDateTime): Int = withGuild(guildId) { conn =>
+    // Same shape as `unconfirmedClaims` without its deadline test: the point is
+    // to catch the ones whose deadline has *not* arrived yet as well, since
+    // those are the hunts a guild switching autoclaim on is trying to save.
+    // Limbo is excluded for the same reason it is there — such a claim's time is
+    // already up and a handover is deciding it.
+    val statement = conn.prepareStatement(
+      """UPDATE respawn_claims
+        |SET confirmed_at = ?
+        |WHERE status = 'active' AND confirmed_at IS NULL AND confirm_by IS NOT NULL
+        |  AND limbo_until IS NULL;""".stripMargin)
+    try {
+      statement.setTimestamp(1, Timestamp.from(at.toInstant))
+      statement.executeUpdate()
     } finally statement.close()
   }
 

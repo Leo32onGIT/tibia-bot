@@ -350,9 +350,9 @@ object RespawnButtons extends StrictLogging {
           val deferredRespond = new Responder(event, deferred = true)
           BotApp.respawnService.settings(guild.getId) match {
             case None => deferredRespond.text(s"${Config.noEmoji} The respawn claim system isn't set up here.")
-            case Some(settings) =>
-              deferredRespond.embed(RespawnEmbeds.serverSettingsEmbed(settings),
-                Some(RespawnThreads.boardModeratorButtons))
+            case Some(settings) => deferredRespond.embed(
+              RespawnEmbeds.serverSettingsEmbed(settings, Config.Respawn.slotConfirmMinutes),
+              Some(RespawnThreads.boardModeratorButtons(settings.autoClaim)))
           }
         }
 
@@ -364,6 +364,23 @@ object RespawnButtons extends StrictLogging {
         // could be clicked long after the role was taken away.
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
         else event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
+
+      // Flips rather than asks, so the whole setting is one press. Answers with
+      // the Config panel again rather than a line of text: the panel is where the
+      // toggle's label and the embed's Autoclaim field live, and both are stale
+      // the moment this is written.
+      case "autoclaim" =>
+        if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
+        else {
+          val service = BotApp.respawnService
+          val wanted = !service.settings(guild.getId).exists(_.autoClaim)
+          service.setAutoClaim(guild.getId, wanted) match {
+            case Left(problem) => respond.text(s"${Config.noEmoji} $problem")
+            case Right(updated) => respond.embed(
+              RespawnEmbeds.serverSettingsEmbed(updated, Config.Respawn.slotConfirmMinutes),
+              Some(RespawnThreads.boardModeratorButtons(updated.autoClaim)))
+          }
+        }
 
       case other =>
         logger.warn(s"Unknown respawn board button '$other'")
