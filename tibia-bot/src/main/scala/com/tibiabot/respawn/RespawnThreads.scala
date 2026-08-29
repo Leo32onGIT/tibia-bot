@@ -124,16 +124,21 @@ object RespawnThreads extends StrictLogging {
    *
    *  Five is Discord's limit for one action row, and with a holder and a claim
    *  of the moderator's own this is now exactly five. There is no sixth slot: a
-   *  further spawn-level moderator action needs a second row or a menu. */
+   *  further spawn-level moderator action needs a second row or a menu.
+   *
+   *  My Defaults goes last, as it does on the board's Config panel. It is the
+   *  one button here about the person pressing it rather than about the spawn or
+   *  whoever holds it, and it sat in the middle of the moderator actions purely
+   *  because that is where an optional button had been added. */
   def spawnModeratorButtons(respawnId: Long, hasHolder: Boolean, ownClaim: Boolean): ActionRow = {
     val buttons = List(
       if (hasHolder) Some(Button.primary(RespawnButtonId.holderConfig(respawnId), "Edit Claim")) else None,
       if (hasHolder) Some(Button.danger(RespawnButtonId.forceLeave(respawnId), "Cancel Claim")) else None,
-      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None,
       Some(Button.secondary(RespawnButtonId.logPage(LogScope.Spawn(respawnId), 0), "Log")
         .withEmoji(Emoji.fromUnicode("📜"))),
       Some(Button.secondary(RespawnButtonId.spawnMax(respawnId), "Max Claim")
-        .withEmoji(Emoji.fromUnicode("⏳")))
+        .withEmoji(Emoji.fromUnicode("⏳"))),
+      if (ownClaim) Some(Button.secondary(RespawnButtonId.selfConfig(respawnId), "My Defaults")) else None
     ).flatten
     // The Collection overload, not the varargs one: `: _*` doesn't apply to a
     // Java method whose first parameter is a single component.
@@ -159,7 +164,7 @@ object RespawnThreads extends StrictLogging {
       Button.secondary(RespawnButtonId.boardAutoClaim,
         if (autoClaim) "Autoclaim: On" else "Autoclaim: Off").withEmoji(Emoji.fromUnicode("🎯")),
       Button.secondary(RespawnButtonId.logPage(LogScope.Everything, 0), "Log").withEmoji(Emoji.fromUnicode("📜")),
-      Button.secondary(RespawnButtonId.boardMySettings, "My settings")
+      Button.secondary(RespawnButtonId.boardMySettings, "My Defaults")
     )
 
   /** Previous/Next under a page of the claim log, and Find beside them.
