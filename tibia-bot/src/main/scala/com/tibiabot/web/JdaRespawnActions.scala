@@ -519,33 +519,55 @@ object JdaRespawnActions {
           schedule.repeats, schedule.daysOfWeek, predicted = true))
     }
 
-    // What has already happened here. Drawn to when each claim actually ended
-    // rather than to when it was due to: a hunt given up after twenty minutes
-    // was twenty minutes, and a block drawn to its deadline would be drawing an
-    // evening that nobody had.
+    // What has already happened here, drawn between the two ends of what was
+    // actually held.
+    //
+    // Not past what it was due to run, which `endedAt` alone does not respect:
+    // a slot whose whole window went by while the bot was down is closed by the
+    // sweep that later notices it (see RespawnService's missedReservations), so
+    // its `endedAt` is when it was found rather than when the evening was over.
+    // Drawn to that, an evening nobody had reached from its start to whenever
+    // the bot next ran — hours of grid for a hunt that never happened.
+    //
+    // Nor past when it really stopped, which is the other half of the same
+    // rule: a hunt given up after twenty minutes was twenty minutes, and a
+    // block drawn to its deadline would be drawing an evening nobody had
+    // either. So the end is the earlier of the two.
     val finished = history.flatMap { claim =>
-      claim.startsAt.filter(start => start.isBefore(to)).map { start =>
-        val ended = claim.endedAt
-          .orElse(claim.endsAt)
-          .getOrElse(start.plusMinutes(claim.durationMinutes.toLong))
-        CalendarSlot(
+      claim.startsAt.filter(start => start.isBefore(to)).flatMap { start =>
+        val due = claim.endsAt.getOrElse(start.plusMinutes(claim.durationMinutes.toLong))
+        val ended = claim.endedAt.filter(_.isBefore(due)).getOrElse(due)
+        // A row that finished at or before it began never happened, and gets no
+        // block. Most of them are a booking given up before its evening came
+        // round: cancelling one leaves a history row that keeps the future start
+        // it was made for, so this is the one kind of history that is not in the
+        // past at all.
+        //
+        // This used to be drawn a minute tall instead, on the reasoning that
+        // invisible is worse than absent. Absent is better: the stub sat on a
+        // slot that was free and every reader that measures the grid took it for
+        // a booking, so the evening somebody had *cancelled* refused to be
+        // booked again — by them or by anybody — and offered to be cancelled a
+        // second time. Nothing is lost by leaving it out. The row stays in the
+        // database, and the claim log is where it is read, which is the surface
+        // that can say "booking cancelled" in words rather than as a mark on a
+        // timetable.
+        if (!ended.isAfter(start)) None
+        else Some(CalendarSlot(
           scheduleId = claim.scheduleId,
           ownerId = claim.userId,
           owner = label(claim.userName, claim.characterName),
           account = claim.userName,
           nickname = claim.nickname,
           startsAt = start,
-          // Never a block of no height: a slot removed the instant it began has
-          // the same two timestamps, and a zero-length one would be invisible
-          // rather than absent, which is worse.
-          endsAt = if (ended.isAfter(start)) ended else start.plusMinutes(1),
+          endsAt = ended,
           state = if (wasHunted(claim)) RespawnBoardEntry.Claimed else RespawnBoardEntry.Booked,
           repeats = false,
           daysOfWeek = RespawnSchedule.OneOff,
           predicted = false,
           past = true,
           hunted = wasHunted(claim),
-          note = historyNote(claim))
+          note = historyNote(claim)))
       }
     }
 

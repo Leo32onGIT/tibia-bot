@@ -112,14 +112,44 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
       slot.note shouldBe ""
     }
 
-    // A day taken off the calendar the instant it began has both timestamps
-    // equal. Zero height is invisible rather than absent, which reads as the
-    // grid having lost something.
-    "give a row that ended where it started something to draw" in {
-      val slot = assemble(history = List(finished(1, at(1, 20), minutes = 120,
+    // Reversing an earlier call: this used to be drawn a minute tall so that it
+    // was visible rather than absent. The stub is worse than nothing. It sits on
+    // a slot that is free, and everything that measures the grid reads it as a
+    // booking.
+    "draw nothing for a row that ended where it started" in {
+      assemble(history = List(finished(1, at(1, 20), minutes = 120,
         outcome = Some(RespawnClaim.Outcome.SlotRemoved),
-        endedAt = Some(at(1, 20))))).slots.loneElement
-      slot.endsAt.isAfter(slot.startsAt) shouldBe true
+        endedAt = Some(at(1, 20))))).slots shouldBe empty
+    }
+
+    // The reported case. A booking cancelled before its evening arrives keeps
+    // the start it was made for, so its history row is the one kind that is not
+    // in the past — and while it was drawn, the slot could not be booked again
+    // by anyone, its owner included.
+    "draw nothing for a booking given up before it began" in {
+      assemble(history = List(finished(1, at(3, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.ScheduleCancelled),
+        endedAt = Some(at(1, 9))))).slots shouldBe empty
+    }
+
+    // A slot the bot was down over is closed whenever the sweep next runs, which
+    // can be long after the evening it belongs to. The block is the evening, not
+    // the wait for somebody to notice.
+    "draw a missed slot to the window it was booked for, not to when it was noticed" in {
+      val slot = assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.Missed),
+        endedAt = Some(at(2, 9))))).slots.loneElement
+      slot.startsAt shouldBe at(1, 20)
+      slot.endsAt shouldBe at(1, 22)
+      slot.hunted shouldBe false
+      slot.note shouldBe "never started"
+    }
+
+    // The cap cuts one way only: a hunt that stopped early still stops early.
+    "leave a hunt that ended early ending early" in {
+      assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.Released),
+        endedAt = Some(at(1, 20, 25))))).slots.loneElement.endsAt shouldBe at(1, 20, 25)
     }
 
     "leave the past out of a window that ends before it" in {
