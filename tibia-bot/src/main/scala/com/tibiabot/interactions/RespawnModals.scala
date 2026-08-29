@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
-import com.tibiabot.presentation.{Embeds, RespawnEmbeds}
-import com.tibiabot.domain.Respawn
+import com.tibiabot.presentation.{AdminLog, Embeds, RespawnEmbeds}
+import com.tibiabot.domain.{Respawn, RespawnSettings}
 import com.tibiabot.commands.Permissions
 import com.tibiabot.respawn.{RespawnButtonId, ScheduleResult}
 import com.tibiabot.{BotApp, Config}
@@ -16,6 +16,7 @@ import net.dv8tion.jda.api.modals.Modal
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
+import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
 
 /** The two modals behind the board post's buttons.
@@ -655,6 +656,41 @@ object RespawnModals extends StrictLogging {
     }
   }
 
+  /** Say in the command log that the server's respawn rules were changed, and by
+   *  whom. These bind everybody who hunts here, and until now the only trace of
+   *  one being changed was the panel that flashed up in front of whoever changed
+   *  it — so a member finding their claims suddenly shorter had nothing to read.
+   *
+   *  Silent when nothing actually moved: a form submitted with every number left
+   *  alone is not a change. Silent too where there is no log channel, which is
+   *  every guild that has deleted it — [[AdminLog.post]] takes that as a no-op
+   *  rather than something to complain about.
+   *
+   *  `before` is an Option because the settings are read through the same call
+   *  that answers None for a guild with no respawn system at all. That cannot be
+   *  the case by the time an edit has succeeded, but it is not worth an
+   *  exception to say so.
+   */
+  private[interactions] def logSettingsChange(guild: Guild, who: String,
+                                             before: Option[RespawnSettings], after: RespawnSettings): Unit =
+    try {
+      for {
+        was <- before
+        entry <- RespawnEmbeds.settingsChangeLog(Names.user(who), was, after)
+      } AdminLog.post(
+        guild.getTextChannelById(BotApp.discordRetrieveConfig(guild).getOrElse("admin_channel", "0")),
+        entry,
+        // The same gif the respawn system's own setup notice wears, since this is
+        // the same kind of news about the same thing.
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+    } catch {
+      // An audit line is not worth failing the change it describes. A guild whose
+      // config row cannot be read still gets its settings changed; it just does
+      // not get told about it in a channel it has evidently stopped keeping.
+      case NonFatal(e) =>
+        logger.warn(s"Could not log a respawn settings change in guild '${guild.getId}': ${e.getMessage}")
+    }
+
   private def submitSettings(event: ModalInteractionEvent): Unit = {
     val guildId = event.getGuild.getId
     // Re-checked on submit rather than trusted from when the panel opened: a modal
@@ -668,11 +704,15 @@ object RespawnModals extends StrictLogging {
       if (ids.exists(field(_).isEmpty)) {
         reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
       } else {
+        // Read before the write, because the command log says what moved rather
+        // than what it now is — see RespawnEmbeds.settingsChanges.
+        val before = BotApp.respawnService.settings(guildId)
         val result = BotApp.respawnService.updateSettings(guildId, field("default"), field("max"),
           field("queue"), field("stamina"), field("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
+            logSettingsChange(event.getGuild, event.getUser.getName, before, updated)
             replyEmbed(event, RespawnEmbeds.serverSettingsEmbed(updated))
         }
       }

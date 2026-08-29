@@ -636,6 +636,52 @@ object RespawnEmbeds {
       .addField("Autoclaim", if (settings.autoClaim) "On" else "Off", true)
       .build()
 
+  /** What a moderator actually changed about the server's rules, a line each.
+   *
+   *  For the command log, which is an audit rather than a reading: the whole
+   *  settings panel posted after every edit would say six things where one of
+   *  them moved, and leave whoever reads that channel later to work out which.
+   *  So only the fields that differ, each as what it was and what it now is.
+   *
+   *  Empty when nothing moved, which is the caller's signal not to post at all —
+   *  a form submitted unchanged, or a toggle already at the value it was pushed
+   *  to, is not something that happened.
+   *
+   *  The labels are [[serverSettingsEmbed]]'s own, and the values are written
+   *  the way it writes them, so the two cannot come to describe the same setting
+   *  differently. `warnMinutes` is not here for the same reason it is not there:
+   *  it stopped being a per-guild setting, so nothing in this panel can change
+   *  it. Nor are the forum and board ids, which are plumbing rather than rules.
+   */
+  def settingsChanges(before: RespawnSettings, after: RespawnSettings): List[String] = {
+    def line[A](label: String, was: A, now: A, show: A => String): Option[String] =
+      if (was == now) None else Some(s"$label: **${show(was)}** → **${show(now)}**")
+
+    val stamina = (minutes: Int) => if (minutes <= 0) "unlimited" else humanDuration(minutes)
+    val onOff = (on: Boolean) => if (on) "On" else "Off"
+
+    List(
+      line("Default claim", before.defaultDurationMinutes, after.defaultDurationMinutes, humanDuration),
+      line("Maximum claim", before.maxDurationMinutes, after.maxDurationMinutes, humanDuration),
+      line("Queue limit", before.queueLimit, after.queueLimit, (n: Int) => n.toString),
+      line("Daily stamina", before.staminaMinutes, after.staminaMinutes, stamina),
+      line("Handover window", before.handoverMinutes, after.handoverMinutes, humanDuration),
+      line("Autoclaim", before.autoClaim, after.autoClaim, onOff)
+    ).flatten
+  }
+
+  /** Those changes as the command log carries them: who, and then what, quoted
+   *  under it so the list reads as one block rather than as loose lines.
+   *
+   *  None when nothing changed — see [[settingsChanges]]. */
+  def settingsChangeLog(who: String, before: RespawnSettings, after: RespawnSettings): Option[String] =
+    settingsChanges(before, after) match {
+      case Nil     => None
+      case changes => Some(
+        s"$who changed the server's respawn settings:\n" +
+          changes.map(change => s"> $change").mkString("\n"))
+    }
+
   /** The moderator panel for one spawn: who holds it, and what can be done to
    *  them. Rendered instead of going straight to a duration form, because the
    *  actions here affect somebody else's hunt. */

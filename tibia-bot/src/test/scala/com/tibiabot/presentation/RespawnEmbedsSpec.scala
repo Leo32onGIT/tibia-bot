@@ -867,4 +867,55 @@ class RespawnEmbedsSpec extends AnyFunSuite with Matchers {
     off should include("15m")
     off should not include "no need to claim it"
   }
+
+  // ---- The command-log line for a settings change -------------------------
+
+  test("only what actually moved is reported, as what it was and what it is") {
+    val changed = settings.copy(defaultDurationMinutes = 60, queueLimit = 10)
+    val lines = RespawnEmbeds.settingsChanges(settings, changed)
+    lines should have size 2
+    lines should contain("Default claim: **2h** → **1h**")
+    lines should contain("Queue limit: **20** → **10**")
+    // The four that were left alone say nothing at all — the log is an audit,
+    // not a reading of the whole panel.
+    lines.mkString should not include "Maximum claim"
+    lines.mkString should not include "Handover window"
+  }
+
+  test("a form submitted with nothing touched is not a change") {
+    RespawnEmbeds.settingsChanges(settings, settings) shouldBe empty
+    RespawnEmbeds.settingsChangeLog("**`mod`**", settings, settings) shouldBe None
+  }
+
+  test("stamina switched off reads as unlimited, the way the panel writes it") {
+    RespawnEmbeds.settingsChanges(settings, settings.copy(staminaMinutes = 0)) shouldBe
+      List("Daily stamina: **4h** → **unlimited**")
+    RespawnEmbeds.settingsChanges(settings.copy(staminaMinutes = 0), settings) shouldBe
+      List("Daily stamina: **unlimited** → **4h**")
+  }
+
+  test("autoclaim is reported like the panel says it, not as true and false") {
+    RespawnEmbeds.settingsChanges(settings, settings.copy(autoClaim = false)) shouldBe
+      List("Autoclaim: **On** → **Off**")
+  }
+
+  test("the setting the panel cannot change is never reported as changed") {
+    // warnMinutes stopped being a per-guild setting, and the forum and board ids
+    // are plumbing. A row that differs in those is not somebody changing a rule.
+    RespawnEmbeds.settingsChanges(settings,
+      settings.copy(warnMinutes = 30, forumChannel = "9", boardThread = "8")) shouldBe empty
+  }
+
+  test("the log line names who did it, and quotes what they did under it") {
+    val entry = RespawnEmbeds.settingsChangeLog("**`mod`**", settings,
+      settings.copy(maxDurationMinutes = 300, handoverMinutes = 5))
+    entry.isDefined shouldBe true
+    val text = entry.get
+    text should startWith("**`mod`** changed the server's respawn settings:")
+    // Quoted line by line, so Discord draws the list as one block under the
+    // sentence rather than as loose text running on from it.
+    text.linesIterator.drop(1).foreach(_ should startWith("> "))
+    text should include("Maximum claim: **4h** → **5h**")
+    text should include("Handover window: **10m** → **5m**")
+  }
 }

@@ -382,10 +382,17 @@ object RespawnButtons extends StrictLogging {
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
         else {
           val service = BotApp.respawnService
-          val wanted = !service.settings(guild.getId).exists(_.autoClaim)
+          val before = service.settings(guild.getId)
+          val wanted = !before.exists(_.autoClaim)
           service.setAutoClaim(guild.getId, wanted) match {
             case Left(problem) => respond.text(s"${Config.noEmoji} $problem")
             case Right(updated) =>
+              // Logged like the rest of the panel's settings, because it is one:
+              // a rule binding everybody who hunts here, changed by one person.
+              // The toggle flips, so this normally always has something to say —
+              // but it goes through the same diff as the form, which keeps it
+              // quiet if the value it was pushed to was already the value.
+              RespawnModals.logSettingsChange(guild, event.getUser.getName, before, updated)
               event.getHook.editOriginalEmbeds(RespawnEmbeds.serverSettingsEmbed(updated))
                 .setComponents(RespawnThreads.boardModeratorButtons(updated.autoClaim))
                 .queue()
