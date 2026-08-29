@@ -109,12 +109,16 @@ final class PooledConnectionProvider(
    *  was closed hands out an error rather than a connection, and the answer to
    *  that is the pool that replaced it. Bounded, so a database that is genuinely
    *  refusing connections fails as itself rather than spinning.
+   *
+   *  A pool that cannot be started at all is not remembered — `computeIfAbsent`
+   *  records nothing when its function throws — so a guild whose database is
+   *  created later is simply asked again.
    */
   private def borrow(url: String, maxSize: Int): Connection = {
     var attempt = 0
     var connection: Connection = null
     while (connection eq null) {
-      val pool = pools.computeIfAbsent(url, u => new Pool(new HikariDataSource(configFor(u, maxSize))))
+      val pool = unwrapped(pools.computeIfAbsent(url, u => new Pool(new HikariDataSource(configFor(u, maxSize)))))
       pool.lastUsed = System.currentTimeMillis()
       if (!pool.closed) connection = pool.dataSource.getConnection()
       else {
@@ -128,6 +132,25 @@ final class PooledConnectionProvider(
     }
     connection
   }
+
+  /** Hikari reports a database it cannot reach by wrapping the driver's own
+   *  exception in a `PoolInitializationException`, which is a RuntimeException.
+   *  The driver's is what callers are written against — `JdbcRespawnRepository.settings`
+   *  reads a missing database off SQLState 3D000 and answers None, which is how
+   *  the sweep asks every guild for its settings without a stack trace for each
+   *  guild the bot was never set up in — so the wrapper is taken back off.
+   *
+   *  Only the wrapper. A failure that is not a SQLException underneath is not
+   *  something this understands, and is left exactly as it arrived. */
+  private def unwrapped(pool: => Pool): Pool =
+    try pool
+    catch {
+      case e: com.zaxxer.hikari.pool.HikariPool.PoolInitializationException =>
+        e.getCause match {
+          case sql: SQLException => throw sql
+          case _                 => throw e
+        }
+    }
 
   /** Hikari's own defaults, minus the ones that assume a pool serving a single
    *  busy application rather than one of many serving a quiet guild. */
@@ -176,6 +199,12 @@ final class PooledConnectionProvider(
     catch { case NonFatal(e) => logger.warn(s"Sweeping idle connection pools failed: ${e.getMessage}") }
 
   private[persistence] def size: Int = pools.size
+
+  /** Whether the thread every pool keeps house on is still running. Only a test
+   *  asks: Hikari tears down its housekeeping when a pool fails to start, and
+   *  the whole point of handing it one of ours is that a single unreachable
+   *  guild must not stop every other pool from evicting its idle connections. */
+  private[persistence] def housekeepingAlive: Boolean = !housekeeping.isShutdown
 
   /** Let go of everything. Nothing calls this in the bot — the process ends and
    *  the connections end with it — but a test that makes a provider should be

@@ -88,6 +88,37 @@ class PooledConnectionProviderIntegrationSpec extends AnyFunSuite with Matchers 
     }
   }
 
+  test("a database that does not exist fails as the driver said, not as Hikari wrapped it") {
+    val direct = pgOrCancel()
+    val provider = pooled(direct)
+    try {
+      // What the periodic sweep hits for every guild the bot was never set up
+      // in. JdbcRespawnRepository.settings reads this exact state off the
+      // exception and answers None; wrapped in Hikari's RuntimeException it
+      // stopped matching, and every such guild logged a stack trace instead.
+      val thrown = intercept[java.sql.SQLException](provider.guild("888000888000888599"))
+      thrown.getSQLState shouldBe "3D000"
+
+      // And the failure is not remembered, so a guild whose database is created
+      // afterwards is simply asked again.
+      provider.size shouldBe 0
+
+      // The pools share one housekeeping thread, and Hikari tears its own down
+      // when a pool fails to start. One unreachable guild must not stop every
+      // other pool evicting its idle connections.
+      provider.housekeepingAlive shouldBe true
+      // Torn down through the pooled provider rather than the plain one, since
+      // by then the pool is what is holding the database open — which is the
+      // whole reason dropGuild evicts.
+      new SchemaInitializer(direct).initGuild(guildId, "pool-spec")
+      try {
+        val conn = provider.guild(guildId)
+        try backendPid(conn) should be > 0 finally conn.close()
+      } finally new SchemaInitializer(provider).dropGuild(guildId)
+      provider.housekeepingAlive shouldBe true
+    } finally provider.close()
+  }
+
   test("dropping a guild's database is not blocked by the pool holding it open") {
     val direct = pgOrCancel()
     val initializer = new SchemaInitializer(direct)
