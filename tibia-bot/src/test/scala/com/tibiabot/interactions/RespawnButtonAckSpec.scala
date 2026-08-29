@@ -29,13 +29,26 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.opensModal(RespawnButtonId.boardConfig) shouldBe true
   }
 
-  test("the autoclaim toggle replies rather than opening a modal") {
-    // It sits in the same row as Claim rules, which does open one — and the two
-    // are told apart by nothing but their id, so this is worth pinning: deferred
-    // is what lets it answer with the redrawn Config panel through the hook.
+  test("the autoclaim toggle rewrites the panel it is drawn on") {
+    // It sits in the same row as Claim rules, which opens a modal instead — and
+    // the two are told apart by nothing but their id, so this is worth pinning
+    // twice over. Replying rather than editing would leave the pressed panel
+    // showing the label and the field it had before the press, with a corrected
+    // copy stacked under it.
+    RespawnButtonId.ackFor(RespawnButtonId.boardAutoClaim) shouldBe
+      RespawnButtonId.Ack.EditsMessage
     RespawnButtonId.opensModal(RespawnButtonId.boardAutoClaim) shouldBe false
     RespawnButtonId.parse(RespawnButtonId.boardAutoClaim) shouldBe
       Some(RespawnButtonId.BoardButton("autoclaim"))
+  }
+
+  test("Config itself still opens rather than edits, being pressed from the board post") {
+    // The panel is a new ephemeral every time it is opened; only the toggle
+    // inside it edits. Deferring an edit here would try to rewrite the board
+    // post everyone can see.
+    RespawnButtonId.ackFor(RespawnButtonId.boardConfig) shouldBe RespawnButtonId.Ack.OpensModal
+    RespawnButtonId.ackFor(RespawnButtonId.boardMySettings) shouldBe RespawnButtonId.Ack.OpensModal
+    RespawnButtonId.ackFor(RespawnButtonId.boardClaimRules) shouldBe RespawnButtonId.Ack.OpensModal
   }
 
   test("spawn buttons that open a modal are not deferred") {

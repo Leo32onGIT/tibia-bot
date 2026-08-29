@@ -1190,6 +1190,12 @@ object RespawnButtonId {
     parse(componentId) match {
       case Some(BoardButton(what)) if what == "config" || ModalActions.contains(what) => Ack.OpensModal
       case Some(SpawnButton(action, _)) if action == "config" || ModalActions.contains(action) => Ack.OpensModal
+      // Autoclaim is a toggle drawn on the panel it redraws, so it rewrites its
+      // own message for the same reason the log's pages do. Replying instead
+      // left the panel that was pressed sitting there with the stale label and
+      // the stale field, and put a second panel underneath it — one more per
+      // press, all but the last of them wrong.
+      case Some(BoardButton("autoclaim")) => Ack.EditsMessage
       // Find sits on a log message but must not be deferred at all: it answers
       // with a modal, and `replyModal` has to be an interaction's first response.
       // It is listed before LogButton for exactly that reason.

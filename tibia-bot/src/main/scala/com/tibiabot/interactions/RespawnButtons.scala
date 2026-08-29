@@ -365,10 +365,16 @@ object RespawnButtons extends StrictLogging {
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
         else event.replyModal(RespawnModals.claimRulesModal(guild.getId)).queue()
 
-      // Flips rather than asks, so the whole setting is one press. Answers with
-      // the Config panel again rather than a line of text: the panel is where the
-      // toggle's label and the embed's Autoclaim field live, and both are stale
-      // the moment this is written.
+      // Flips rather than asks, so the whole setting is one press. Redraws the
+      // panel it was pressed on rather than sending another one: the toggle's
+      // own label and the embed's Autoclaim field both live there, and both are
+      // stale the moment this is written — see RespawnButtonId.ackFor, which is
+      // where the deferEdit that makes this an edit is decided.
+      //
+      // Only the success path edits. A refusal goes out as a follow-up through
+      // `respond`, which leaves the panel alone: somebody who has just lost the
+      // role should be told so, not have the settings they were reading replaced
+      // by the sentence saying they may not change them.
       case "autoclaim" =>
         if (!RespawnModals.moderates(guild, event.getMember)) respond.text(notModeratorText)
         else {
@@ -376,9 +382,10 @@ object RespawnButtons extends StrictLogging {
           val wanted = !service.settings(guild.getId).exists(_.autoClaim)
           service.setAutoClaim(guild.getId, wanted) match {
             case Left(problem) => respond.text(s"${Config.noEmoji} $problem")
-            case Right(updated) => respond.embed(
-              RespawnEmbeds.serverSettingsEmbed(updated),
-              Some(RespawnThreads.boardModeratorButtons(updated.autoClaim)))
+            case Right(updated) =>
+              event.getHook.editOriginalEmbeds(RespawnEmbeds.serverSettingsEmbed(updated))
+                .setComponents(RespawnThreads.boardModeratorButtons(updated.autoClaim))
+                .queue()
           }
         }
 
