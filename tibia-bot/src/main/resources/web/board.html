@@ -964,6 +964,19 @@
        how many it runs for; a block being dragged writes over these with a
        plain pixel top, which is what an inline style is for. */
     top: calc(var(--row) * var(--at, 0)); height: max(var(--min-block), calc(var(--row) * var(--len, 1) - 2px));
+    /* Opaque, whatever the state's tint. Every block used to be a wash of colour
+       with the hour rules showing straight through it, so a booking read as
+       coloured glass laid over the grid rather than as a thing sitting on it —
+       and on a two-hour block the line across the middle looked like the block
+       had been cut in two.
+
+       Each state gives its colour as `--tint` and it is composited here over the
+       panel's own background, so the hue is exactly what it always was. Over a
+       known colour rather than over whatever happens to lie behind, which is
+       also what makes a block the same shade wherever on the grid it falls: a
+       block over an hour rule, over the shaded past, or over another block used
+       to be three slightly different colours. */
+    background: linear-gradient(var(--tint, transparent), var(--tint, transparent)), var(--panel);
   }
   .wk-block .who { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* What a block gives up as its column narrows, in the order it can afford to.
@@ -997,21 +1010,21 @@
   /* State decides the colour; whose it is decides how loud. Two hues would have
      meant a booking of yours and a booking of theirs looked like different
      kinds of thing, which they are not. */
-  .b-claimed { background: rgba(210,51,105,0.26); border-color: var(--st-claimed); color: #f3a6c0; }
-  .b-booked { background: rgba(91,140,255,0.16); border-color: var(--st-booked); border-style: dashed; color: #cfdcff; }
-  .b-confirmed { background: rgba(91,140,255,0.3); border-color: var(--st-confirmed); color: #cfdcff; }
-  .b-asked { background: rgba(224,169,62,0.2); border-color: var(--st-asked); color: #e8c887; }
+  .b-claimed { --tint: rgba(210,51,105,0.26); border-color: var(--st-claimed); color: #f3a6c0; }
+  .b-booked { --tint: rgba(91,140,255,0.16); border-color: var(--st-booked); border-style: dashed; color: #cfdcff; }
+  .b-confirmed { --tint: rgba(91,140,255,0.3); border-color: var(--st-confirmed); color: #cfdcff; }
+  .b-asked { --tint: rgba(224,169,62,0.2); border-color: var(--st-asked); color: #e8c887; }
   .b-mine { box-shadow: inset 3px 0 0 currentColor; }
   /* A rule that will produce this slot but has not booked a row for it yet.
      Real enough to plan around, not yet real enough for its owner to be asked. */
   .b-predicted { opacity: 0.62; }
-  .b-pick { background: rgba(167,139,250,0.34); border: 1px dashed var(--purple); color: #ddd0ff; z-index: 3; }
+  .b-pick { --tint: rgba(167,139,250,0.34); border: 1px dashed var(--purple); color: #ddd0ff; z-index: 3; }
   /* The selection is the one block on the grid you can pick up and move. */
   .b-drag { cursor: grab; touch-action: none; }
   .b-drag.dragging { cursor: grabbing; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
   /* An evening the weekly rule will also take. Fainter than the one being
      picked, because it is a consequence rather than a choice. */
-  .b-echo { background: rgba(167,139,250,0.14); opacity: 0.8; }
+  .b-echo { --tint: rgba(167,139,250,0.14); opacity: 0.8; }
   /* The foot of the selection, for dragging its length. Given a real target
      height rather than a hairline, since it has to be grabbable with a mouse
      and with a thumb. */
@@ -1047,11 +1060,15 @@
      the past that anybody asks about — did they actually hunt it — so it is the
      one the shape carries. */
   .wk-block.b-past {
-    background: rgba(255,255,255,0.035); border-color: rgba(255,255,255,0.1);
+    --tint: rgba(255,255,255,0.035); border-color: rgba(255,255,255,0.1);
     color: var(--muted); cursor: default;
   }
   .wk-block.b-past .tm, .wk-block.b-past .acct { color: #59617a; }
-  .wk-block.b-past.b-unhunted { background: transparent; border-style: dashed; }
+  /* Still the hollow one of the pair: no tint at all against the faint wash the
+     hunted block carries, and the dashed edge that was always the louder half of
+     the distinction. Hollow, not see-through — a block nobody turned up for is
+     no more a window onto the grid than any other. */
+  .wk-block.b-past.b-unhunted { --tint: transparent; border-style: dashed; }
   /* Said on the block itself where there is room for it, since the alternative
      is a tooltip, and a tooltip is a thing you have to already suspect before
      you go looking for it. */
@@ -1066,7 +1083,7 @@
      has little enough area for a wash of colour to read on. */
   .wk-block.b-past.b-chosen {
     border-color: var(--purple);
-    background: rgba(167,139,250,0.16);
+    --tint: rgba(167,139,250,0.16);
     color: #ddd0ff;
     box-shadow: 0 0 0 1px var(--purple);
   }
