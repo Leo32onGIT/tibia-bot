@@ -2332,8 +2332,8 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                       now: ZonedDateTime = ZonedDateTime.now()): List[RespawnClaim] =
     repository.reservationsFor(guildId, respawnId, now)
 
-  /** Every row a guild's calendars are drawn from, over one window, in four
-   *  reads rather than five per spawn per week.
+  /** Every row a guild's calendars are drawn from, over one window, in five
+   *  reads rather than six per spawn per week.
    *
    *  The same rows the per-spawn calls return, asked for guild-wide and grouped
    *  here — see [[com.tibiabot.web.CalendarRows]], which is what holds them.
@@ -2344,6 +2344,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   def calendarRows(guildId: String, from: ZonedDateTime,
                    to: ZonedDateTime): com.tibiabot.web.CalendarRows =
     com.tibiabot.web.CalendarRows(
+      respawns = repository.listRespawns(guildId),
       active = repository.allActiveClaims(guildId).map(claim => claim.respawnId -> claim).toMap,
       // Anchored at the window's own start rather than at now, so a grid showing
       // earlier in the week still draws what was booked then.
@@ -2768,6 +2769,20 @@ object RespawnService {
    *  Pure and separated from the repository so it can be read against a handful
    *  of rows in a test rather than a database.
    */
+  /** [[RespawnService.resolve]] against rows already in hand.
+   *
+   *  The same two steps in the same order — the code first, then the ladder
+   *  below — for a caller that has the guild's catalogue already and should not
+   *  go back to the database to ask which spawn a code it is holding refers to.
+   *  The dashboard's calendar is that caller: its rows arrive guild-wide in one
+   *  read, catalogue included.
+   */
+  def resolveAmong(all: List[Respawn], query: String): Option[Respawn] = {
+    val trimmed = query.trim
+    if (trimmed.isEmpty) None
+    else all.find(_.code.equalsIgnoreCase(trimmed)).orElse(resolveIn(all, trimmed))
+  }
+
   private[respawn] def resolveIn(all: List[Respawn], query: String): Option[Respawn] = {
     val trimmed = query.trim
     if (trimmed.isEmpty) return None

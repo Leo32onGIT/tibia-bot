@@ -82,4 +82,32 @@ class ResolveSpawnSpec extends AnyFunSuite with Matchers {
     RespawnService.resolveIn(sparse, "camp").map(_.code) shouldBe Some("101")
     RespawnService.resolveIn(sparse, "anything else").map(_.code) shouldBe None
   }
+
+  // ---- resolveAmong: the same question asked of rows already in hand --------
+  //
+  // The dashboard's calendar resolves this way rather than going back to the
+  // database per request, so what it answers has to be what `resolve` answers —
+  // the code first, and the ladder above only where the code misses.
+
+  test("the code is tried before anything else, as the database lookup was") {
+    RespawnService.resolveAmong(catalogue, "415").map(_.name) shouldBe Some("Cult Orcs")
+    RespawnService.resolveAmong(catalogue, "201").map(_.name) shouldBe Some("Secret Library (Fire)")
+  }
+
+  test("a code is matched without regard to case, as LOWER(code) = LOWER(?) was") {
+    val lettered = List(spawn(1, "Ab1", "Somewhere"))
+    RespawnService.resolveAmong(lettered, "aB1").map(_.name) shouldBe Some("Somewhere")
+  }
+
+  test("what the code misses falls through to the same ladder") {
+    RespawnService.resolveAmong(catalogue, "fire library").map(_.code) shouldBe Some("201")
+    RespawnService.resolveAmong(catalogue, "205 — Carlin Cults").map(_.code) shouldBe Some("205")
+  }
+
+  test("nothing matches nothing") {
+    RespawnService.resolveAmong(catalogue, "").map(_.code) shouldBe None
+    RespawnService.resolveAmong(catalogue, "   ").map(_.code) shouldBe None
+    RespawnService.resolveAmong(catalogue, "999").map(_.code) shouldBe None
+    RespawnService.resolveAmong(Nil, "415").map(_.code) shouldBe None
+  }
 }

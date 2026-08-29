@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import com.tibiabot.domain.{RespawnClaim, RespawnSchedule}
+import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule}
 
 import java.time.{Duration, Instant, ZonedDateTime}
 import java.util.concurrent.ConcurrentHashMap
@@ -14,6 +14,15 @@ import java.util.concurrent.ConcurrentHashMap
  *  used to ask five questions per spawn per week.
  */
 final case class CalendarRows(
+  /** The guild's catalogue.
+   *
+   *  Here because resolving the code the page asked about is a database read
+   *  like any other, and it was the one still being paid per request: a card
+   *  polling every ten seconds asked which spawn "415" is sixty times a minute
+   *  and got the same row back every time. It belongs to the guild rather than
+   *  to the window, so a snapshot read for one window answers for any other.
+   */
+  respawns: List[Respawn],
   /** The hunt in progress on each spawn, where there is one. */
   active: Map[Long, RespawnClaim],
   /** Bookings that have not started, by spawn, soonest first. */

@@ -184,11 +184,13 @@ final class JdaRespawnActions(
   /** One spawn's window, expanded into blocks. The gathering is here; the
    *  deciding is in [[JdaRespawnActions.assembleCalendar]], which is pure. */
   def calendar(guildId: String, code: String,
-               from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] =
-    respawnService.resolve(guildId, code).map { respawn =>
-      // One read of the guild, sliced to this spawn. Every panel open on this
-      // guild in the next few seconds is answered from the same rows.
-      val rows = rowsOf(guildId, from, to)
+               from: java.time.ZonedDateTime, to: java.time.ZonedDateTime): Option[CalendarView] = {
+    // One read of the guild, sliced to this spawn. Every panel open on this
+    // guild in the next few seconds is answered from the same rows — including
+    // the question of which spawn the code names, which used to be a query of
+    // its own on every request and is now part of what the snapshot holds.
+    val rows = rowsOf(guildId, from, to)
+    com.tibiabot.respawn.RespawnService.resolveAmong(rows.respawns, code).map { respawn =>
       val schedules = rows.schedules.getOrElse(respawn.id, Nil)
       val scheduleIds = schedules.map(_.id).toSet
       JdaRespawnActions.assembleCalendar(
@@ -211,6 +213,7 @@ final class JdaRespawnActions(
         if (from.isBefore(java.time.ZonedDateTime.now())) respawnService.historyFor(guildId, respawn.id, from, to)
         else Nil)
     }
+  }
 
   /** A schedule as the calendar draws it.
    *
