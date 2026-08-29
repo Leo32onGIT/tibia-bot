@@ -68,6 +68,28 @@
     <appender-ref ref="DASHBOARD" />
   </logger>
 
+  <!-- And the pool itself says nothing at all.
+
+       It logs "Exception during pool initialization" at ERROR whenever a
+       database cannot be reached, and the commonest reason by far is one this
+       bot does not consider an error: a guild it was never set up in has no
+       `_<guildId>` database, and the settings sweep asks all of them (see
+       JdbcRespawnRepository.settings, which reads SQLState 3D000 and answers
+       None). Before there was a pool that was silent, and it should stay
+       silent rather than putting a red row per unconfigured guild on the
+       status dashboard's alerts panel every cycle.
+
+       Nothing is lost that the application cannot say for itself: every
+       failure this logger reports is also thrown to whoever asked for the
+       connection, with Hikari's wrapper taken back off, so a genuine outage
+       still surfaces wherever it actually matters.
+
+       What this does give up is two warnings that share the logger — a
+       retrograde clock change, and thread starvation detected by the pool's
+       housekeeper. Both are diagnosable elsewhere, and neither is worth the
+       noise this otherwise carries. -->
+  <logger name="com.zaxxer.hikari.pool.HikariPool" level="OFF" />
+
   <root level="INFO">
     <!-- <appender-ref ref="ASYNC_DISCORD" /> -->
     <appender-ref ref="CONSOLE" />
