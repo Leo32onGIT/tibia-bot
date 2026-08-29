@@ -32,14 +32,39 @@ class PooledConnectionProviderIntegrationSpec extends AnyFunSuite with Matchers 
     try backendPid(conn) finally conn.close()
   }
 
-  private def pooled(direct: JdbcConnectionProvider, poolIdleMillis: Long = PooledConnectionProvider.PoolIdle) =
+  private def pooled(direct: JdbcConnectionProvider,
+                     poolIdleMillis: Long = PooledConnectionProvider.PoolIdle,
+                     maxPools: Int = PooledConnectionProvider.MaxPools) =
     new PooledConnectionProvider(
       sys.env.getOrElse("PGHOST", ""), sys.env.getOrElse("PGPASSWORD", "postgres"),
-      poolIdleMillis = poolIdleMillis, unpooled = direct)
+      poolIdleMillis = poolIdleMillis, maxPools = maxPools, unpooled = direct)
 
   private def withGuildDatabase(direct: JdbcConnectionProvider)(body: => Unit): Unit = {
     new SchemaInitializer(direct).initGuild(guildId, "pool-spec")
     try body finally new SchemaInitializer(direct).dropGuild(guildId)
+  }
+
+  private def withGuildDatabases(direct: JdbcConnectionProvider, guildIds: List[String])(body: => Unit): Unit = {
+    val initializer = new SchemaInitializer(direct)
+    guildIds.foreach(initializer.initGuild(_, "pool-spec"))
+    try body finally guildIds.foreach(initializer.dropGuild)
+  }
+
+  /** How many backends the server is actually running for these guilds'
+   *  databases — the ceiling is about this number, not about how many pool
+   *  objects happen to exist. */
+  private def backendsAgainst(direct: JdbcConnectionProvider, guildIds: List[String]): Int = {
+    val names = guildIds.map(id => s"'_$id'").mkString(", ")
+    val conn = direct.admin()
+    try {
+      val statement = conn.createStatement()
+      try {
+        val result = statement.executeQuery(
+          s"SELECT count(*) FROM pg_stat_activity WHERE datname IN ($names);")
+        result.next()
+        result.getInt(1)
+      } finally statement.close()
+    } finally conn.close()
   }
 
   test("a closed connection goes back to the pool rather than to the server") {
@@ -117,6 +142,42 @@ class PooledConnectionProviderIntegrationSpec extends AnyFunSuite with Matchers 
       } finally new SchemaInitializer(provider).dropGuild(guildId)
       provider.housekeepingAlive shouldBe true
     } finally provider.close()
+  }
+
+  test("walking the whole fleet does not leave a connection open per guild") {
+    val direct = pgOrCancel()
+    // A fleet walk in miniature: more guilds than the ceiling allows pools,
+    // asked one after another exactly as the roster and the respawn sweep ask
+    // them. Without the ceiling this is where a bot in a few hundred guilds
+    // takes a few hundred backends and holds them for the life of the process.
+    val fleet = (1 to 5).map(n => s"88800088800088861$n").toList
+    withGuildDatabases(direct, fleet) {
+      val provider = pooled(direct, maxPools = 2)
+      try {
+        fleet.foreach(id => pidOf(() => provider.guild(id)))
+        provider.size shouldBe 2
+        // And on the server, which is the only side of it Postgres counts.
+        backendsAgainst(direct, fleet) shouldBe 2
+      } finally provider.close()
+    }
+  }
+
+  test("a pool with a query still running is not the one closed to make room") {
+    val direct = pgOrCancel()
+    val fleet = (1 to 3).map(n => s"88800088800088862$n").toList
+    withGuildDatabases(direct, fleet) {
+      val provider = pooled(direct, maxPools = 1)
+      try {
+        // Least recently used of the three by the time the ceiling bites, so it
+        // is first in line to be closed — and it is the one connection that
+        // cannot be closed, because Hikari's shutdown aborts what is checked out.
+        val held = provider.guild(fleet.head)
+        try {
+          fleet.tail.foreach(id => pidOf(() => provider.guild(id)))
+          backendPid(held) should be > 0
+        } finally held.close()
+      } finally provider.close()
+    }
   }
 
   test("dropping a guild's database is not blocked by the pool holding it open") {

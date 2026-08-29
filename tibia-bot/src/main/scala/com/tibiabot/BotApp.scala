@@ -511,6 +511,13 @@ object BotApp extends App with StrictLogging {
   private def publishGuildRoster(): Unit =
     try {
       val guilds = discordGateway.guilds
+        // Only guilds that have a database at all, for the same reason the
+        // respawn sweep filters on this: the bot sits in plenty of guilds that
+        // never ran /setup, and asking those for their settings opens a
+        // connection that can only fail — here, every thirty seconds, forever.
+        // A guild cannot have a respawn forum without /setup having made its
+        // database first, so nothing is lost by not asking.
+        .filter(g => worldsData.contains(g.getId))
         .filter(g => respawnService.settings(g.getId).isDefined)
         .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
       persistence.RedisCacheProvider.cache.setEx(
