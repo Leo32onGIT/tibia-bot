@@ -507,9 +507,121 @@ object BotApp extends App with StrictLogging {
   @volatile private var answeringOnChannel = false
 
   /** Republished well inside its own TTL, so a missed beat or two never drops
-   *  this bot's guilds out of anybody's picker. */
+   *  this bot's guilds out of anybody's picker.
+   *
+   *  '''The TTL is twenty beats rather than four, and the width of that margin
+   *  is the point.''' What it governs is not how long a bot that has died goes
+   *  on being asked about — that costs nothing and is self-correcting, because
+   *  a question published to a bot that is gone reaches no subscriber, comes
+   *  back in a single round trip, and the guild is *named on the picker* as one
+   *  that did not answer (see `RemoteGuildAccess.askViaChannel`). What it
+   *  governs is what happens while this bot is merely slow.
+   *
+   *  And those two failures are not equally visible. A guild in nobody's roster
+   *  is not a candidate at all: it is never asked about, so it can never be
+   *  reported unreachable either, and it simply is not on the page. So a short
+   *  TTL converts a few missed beats — one stalled database walk — into every
+   *  guild this bot runs silently vanishing from every other bot's picker, with
+   *  nothing anywhere saying a server is missing. A long one converts the same
+   *  stall into servers that are still offered and answer honestly.
+   *
+   *  Given the choice, fail towards the outage that says something. */
   private val guildRosterPublishEvery = 30.seconds
-  private val guildRosterTtl = 2.minutes
+  private val guildRosterTtl = 10.minutes
+
+  /** Where the roster walk runs, which is emphatically not `ex`.
+   *
+   *  The walk is one blocking database read per guild this bot serves. On the
+   *  default dispatcher it shared eight-odd threads with every world stream,
+   *  every scheduled job in this file and — where one is bound — the HTTP
+   *  server, so a walk that stalled on a slow borrow (the pooled provider gives
+   *  a caller fifteen seconds before refusing it) stalled all of them with it.
+   *  Akka's own IO is the visible casualty: an outgoing connection has five
+   *  seconds to be registered by the stream that asked for it, and a blocked
+   *  dispatcher misses that deadline, which is what a log full of undelivered
+   *  `Tcp$Register` dead letters is saying.
+   *
+   *  Deliberately not the dashboard's lookup pool either. Everything else on
+   *  the dashboard waits on that one, so a fleet walk parked there is a visitor
+   *  waiting for a thread.
+   *
+   *  One thread, because the walk is sequential and wants isolation rather than
+   *  width — see [[publishGuildRosterSoon]] for what keeps beats from queueing
+   *  up behind a slow one.
+   */
+  private val guildRosterPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newSingleThreadExecutor((r: Runnable) => {
+      val thread = new Thread(r, "guild-roster")
+      thread.setDaemon(true)
+      thread
+    }))
+
+  /** How long this bot's answer to "has this guild set the respawn system up"
+   *  is reused. Bounds how late a guild that has just run /setup joins the
+   *  roster, which is the only thing the staleness costs.
+   *
+   *  The map below needs no eviction to go with it: it holds a row per guild
+   *  this bot is in, which is a bound the process already lives inside, rather
+   *  than a row per visitor the way the dashboard's own memories do. */
+  private val respawnSetupMemoFor = 5.minutes
+  private val respawnSetupMemo =
+    new java.util.concurrent.ConcurrentHashMap[String, (Boolean, Long)]()
+
+  /** Whether `guildId` has the respawn system set up, remembered for a while.
+   *
+   *  `respawnService.settings` is an uncached blocking query against that
+   *  guild's own database, and the roster asks it about every guild this bot
+   *  serves. Asked every beat it is the heaviest standing database load in the
+   *  fleet, for an answer that changes only when somebody runs /setup — and it
+   *  is paid against a connection budget shared with every other bot pointed at
+   *  the same Postgres, which is the contention that made the walk slow in the
+   *  first place.
+   *
+   *  '''A guild that cannot be read keeps whatever was last known about it.'''
+   *  That is the other half of what this is for. A throw here used to escape
+   *  into `publishGuildRoster`'s own catch, which abandoned the entire roster —
+   *  so one guild whose database hiccupped took every guild this bot runs out
+   *  of the fleet's picker until the next beat, and out of it altogether if the
+   *  hiccup outlasted the TTL. Read as an answer, a failure would be just as
+   *  wrong the other way: "not set up" drops the guild on its own. Neither is
+   *  something the database actually said, so neither is believed.
+   */
+  private def hasRespawnSetup(guildId: String): Boolean = {
+    val now = System.nanoTime()
+    val known = Option(respawnSetupMemo.get(guildId))
+    known match {
+      case Some((answer, at)) if now - at < respawnSetupMemoFor.toNanos => answer
+      case _ =>
+        try {
+          val answer = respawnService.settings(guildId).isDefined
+          respawnSetupMemo.put(guildId, (answer, now))
+          answer
+        } catch {
+          case e: Throwable =>
+            logger.warn(s"Could not read respawn settings for guild '$guildId' while " +
+              s"building the roster, keeping what was last known: ${e.getMessage}")
+            known.exists(_._1)
+        }
+    }
+  }
+
+  private val guildRosterInFlight = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Run a roster beat on [[guildRosterPool]], unless the last one is still
+   *  going.
+   *
+   *  The guard is what makes a single thread safe to schedule onto. Without it
+   *  a walk lasting longer than the beat leaves the next one queued behind it,
+   *  and a bot slow enough to do that repeatedly ends up publishing from a
+   *  backlog — every roster it writes older than the one before it, which is
+   *  worse than skipping. Skipping costs nothing: the TTL is twenty beats wide
+   *  precisely so that missing some of them is survivable.
+   */
+  private def publishGuildRosterSoon(): Unit =
+    if (guildRosterInFlight.compareAndSet(false, true)) {
+      guildRosterPool.execute(() =>
+        try publishGuildRoster() finally guildRosterInFlight.set(false))
+    } else logger.debug("Skipping a guild roster beat; the previous one is still running")
 
   /** The guilds this bot could answer about, so the others know to ask.
    *
@@ -518,6 +630,9 @@ object BotApp extends App with StrictLogging {
    *  whose answer is always no. Republished rather than kept, so a bot that dies
    *  falls out of everyone's picker within the TTL instead of being asked about
    *  forever.
+   *
+   *  Blocking, and run on [[guildRosterPool]] rather than wherever the schedule
+   *  fired — see [[publishGuildRosterSoon]], which is what the timer calls.
    */
   private def publishGuildRoster(): Unit =
     try {
@@ -529,7 +644,7 @@ object BotApp extends App with StrictLogging {
         // A guild cannot have a respawn forum without /setup having made its
         // database first, so nothing is lost by not asking.
         .filter(g => worldsData.contains(g.getId))
-        .filter(g => respawnService.settings(g.getId).isDefined)
+        .filter(g => hasRespawnSetup(g.getId))
         .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
       persistence.RedisCacheProvider.cache.setEx(
         web.GuildRoster.key(discordGateway.selfUserId),
@@ -577,9 +692,12 @@ object BotApp extends App with StrictLogging {
     })(ex)
     // Published straight away as well as on the beat, so a bot restarting does
     // not drop out of everybody else's server picker for half a minute.
+    //
+    // The schedule fires on `ex` and the walk itself does not: what runs here
+    // only hands the work to the roster's own thread — see publishGuildRosterSoon.
     actorSystem.scheduler.scheduleWithFixedDelay(
       scala.concurrent.duration.Duration.Zero, guildRosterPublishEvery
-    )(() => publishGuildRoster())(ex)
+    )(() => publishGuildRosterSoon())(ex)
     logger.info("Dashboard access relay listening for questions from other bots' dashboards")
   }
   // One read of a guild's board answers every tab watching it — see

@@ -227,4 +227,46 @@ class DashboardAccessSpec extends AnyWordSpec with Matchers {
       DashboardAccess.permits(Nil, "g-mod", AccessTier.Member) shouldBe false
     }
   }
+
+  /** The third state a pass can end in: not short of a named server, but short
+   *  of knowing what there was to name. */
+  "an access report" should {
+
+    // The silent failure. `unreachable` covers a guild we knew to ask about and
+    // did not hear from; nothing covered failing to find out what the other
+    // bots run at all, and a report of that shape - nothing granted, nothing
+    // unreachable - is indistinguishable from a visitor who genuinely has no
+    // servers elsewhere. Read as complete it was cached as the whole answer.
+    "not call itself complete when it never learned what the fleet runs" in {
+      AccessReport.FleetUnknown.complete shouldBe false
+      AccessReport.FleetUnknown.unreachable shouldBe empty
+    }
+
+    // The distinction the flag exists to keep. An empty answer is a real
+    // answer and must stay one, or every visitor in a single-bot deployment
+    // would be re-resolved every few seconds forever.
+    "still call a genuinely empty answer complete" in {
+      AccessReport.Empty.complete shouldBe true
+    }
+
+    // Resolution is two halves joined by `++` - what this bot knows, and what
+    // it had to ask for - and the doubt belongs to the join. A local half that
+    // resolved perfectly must not launder a remote half that failed.
+    "carry the doubt through a join with a half that went fine" in {
+      val local = AccessReport.of(List(access("g1", "Violent")))
+      (local ++ AccessReport.FleetUnknown).complete shouldBe false
+      (AccessReport.FleetUnknown ++ local).complete shouldBe false
+      (local ++ AccessReport.Empty).complete shouldBe true
+    }
+
+    // Both kinds of shortfall at once, which is the ordinary case when the
+    // fleet is having a bad minute: one bot named and silent, another not
+    // heard of at all. The named one still has to reach the page.
+    "keep a named server alongside a fleet it could not read" in {
+      val named = AccessReport(Nil, List(UnreachableGuild("g2", "Ruckus")))
+      val both = named ++ AccessReport.FleetUnknown
+      both.unreachable.map(_.guildName) shouldBe List("Ruckus")
+      both.complete shouldBe false
+    }
+  }
 }

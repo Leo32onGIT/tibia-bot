@@ -310,8 +310,13 @@ final class DashboardAccessService(
           // this visitor is in is reported as unanswered - which is true of at
           // least one of them, and is the safe way to be wrong: it shows the
           // picker and names a server, rather than silently dropping the lot.
+          //
+          // Marked unknown as well as unanswered, because `pendingFor` can only
+          // name what the last roster read knew about. Where that read had not
+          // happened yet, or had itself failed, it names nothing at all and the
+          // report would otherwise look like a complete "no other servers".
           logger.warn(s"Gave up waiting on other bots for dashboard access: ${e.getMessage}")
-          AccessReport(Nil, resolver.pendingFor(userGuildIds))
+          AccessReport(Nil, resolver.pendingFor(userGuildIds), fleetUnknown = true)
       }
     }
 

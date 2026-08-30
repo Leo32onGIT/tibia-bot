@@ -75,10 +75,17 @@ final class RemoteGuildAccess(
       case NonFatal(e) =>
         // Redis itself, rather than any one bot. Which guilds were involved is
         // not known at this point - the roster read is what failed - so this
-        // reports nothing rather than inventing names, and the caller's own
-        // backstop covers the case where it matters.
+        // reports nothing rather than inventing names.
+        //
+        // Reporting nothing is not the same as finding nothing, though, and it
+        // used to be indistinguishable from it: an empty report with nothing
+        // unreachable in it reads as a complete answer, so a moment's Redis
+        // trouble was cached for ten minutes as "this visitor has no servers
+        // anywhere else". Saying the fleet is unknown costs the caller a
+        // re-resolve a few seconds later and is the difference between a
+        // picker that heals itself and one that stays wrong.
         logger.warn(s"Could not resolve dashboard access held by other bots: ${e.getMessage}")
-        AccessReport.Empty
+        AccessReport.FleetUnknown
     }
 
   /** The foreign guilds this visitor is in, as far as the last roster read

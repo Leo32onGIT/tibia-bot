@@ -88,17 +88,40 @@ final case class UnreachableGuild(guildId: String, guildName: String)
  *  the second is a reason to show it and say what went wrong. Everything that
  *  decides where a visitor lands now reads this rather than a list.
  */
-final case class AccessReport(granted: List[GuildAccess], unreachable: List[UnreachableGuild]) {
+final case class AccessReport(granted: List[GuildAccess], unreachable: List[UnreachableGuild],
+                              fleetUnknown: Boolean = false) {
   def ++(other: AccessReport): AccessReport =
-    AccessReport(granted ++ other.granted, unreachable ++ other.unreachable)
+    AccessReport(granted ++ other.granted, unreachable ++ other.unreachable,
+      fleetUnknown || other.fleetUnknown)
 
-  /** Whether this pass got a straight answer about everything it asked about. */
-  def complete: Boolean = unreachable.isEmpty
+  /** Whether this pass got a straight answer about everything it asked about.
+   *
+   *  Two ways to fall short of that, and they have to be counted separately
+   *  because only one of them can be put on screen. `unreachable` is a guild we
+   *  knew to ask about and did not hear back from: the picker names it, and the
+   *  visitor can see that something is missing. `fleetUnknown` is not having
+   *  found out what there was to ask about — the rosters are the only record of
+   *  which guilds the other bots run, and a pass that could not read them
+   *  cannot tell a visitor with one server from one whose other three are
+   *  behind a bot it never heard of.
+   *
+   *  That second kind has nothing to name and so is invisible on the page,
+   *  which is precisely why it must not be stored as though it were the whole
+   *  answer. Left claiming completeness it took [[AccessCache]]'s full ten
+   *  minutes, and a Redis blip of a moment turned into a picker missing a
+   *  server for the rest of the visitor's session.
+   */
+  def complete: Boolean = unreachable.isEmpty && !fleetUnknown
 }
 
 object AccessReport {
   val Empty: AccessReport = AccessReport(Nil, Nil)
   def of(granted: List[GuildAccess]): AccessReport = AccessReport(granted, Nil)
+
+  /** Nothing resolved, and not because there was nothing to resolve — as
+   *  distinct from [[Empty]], which is the honest answer for a visitor who is
+   *  in no guild any other bot runs. */
+  val FleetUnknown: AccessReport = AccessReport(Nil, Nil, fleetUnknown = true)
 }
 
 /** Where a visitor lands after signing in. */

@@ -91,6 +91,21 @@ class AccessCacheSpec extends AnyWordSpec with Matchers {
       cache.get("u1") shouldBe None
     }
 
+    // The same rule, for the failure that has nothing to show for itself. A
+    // pass that could not read the rosters grants nothing and names nothing, so
+    // by shape alone it is identical to a visitor with no servers elsewhere —
+    // and it took the full window on that resemblance. One Redis blip then
+    // spent ten minutes telling somebody their other servers did not exist.
+    "let go of a pass that never learned what the fleet runs" in {
+      val clock = new Clock
+      val cache = new AccessCache(Duration.ofSeconds(45), hardTtl = Duration.ofSeconds(45),
+                                  partialTtl = Duration.ofSeconds(5), now = clock)
+      cache.put("u1", AccessReport.FleetUnknown)
+      cache.get("u1").map(_.report) shouldBe Some(AccessReport.FleetUnknown)
+      clock.advance(6)
+      cache.get("u1") shouldBe None
+    }
+
     // The other half of the same rule: a complete answer is the thing this
     // exists to keep, and must not have been shortened along with the failures.
     "keep a complete pass for the full window" in {
