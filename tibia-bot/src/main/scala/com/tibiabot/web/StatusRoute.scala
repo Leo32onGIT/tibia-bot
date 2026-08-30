@@ -190,6 +190,12 @@ final class StatusRoute(
    *  however many secondaries are actually publishing, with zero config on
    *  the primary side when a new one joins. A secondary that's gone quiet
    *  (past its publish TTL) just stops appearing — no special-casing needed. */
+  /** The same snapshots the dashboard merges, exposed for
+   *  [[com.tibiabot.app.UnionFetchReconciler]]: the world lists in them are
+   *  already exactly what it needs to know, so it reuses this rather than
+   *  introducing a second way for bots to report the same thing. */
+  def secondaryStatusSnapshots(): Future[Vector[JsObject]] = remoteSecondaryStatuses()
+
   private def remoteSecondaryStatuses(): Future[Vector[JsObject]] =
     if (Config.BotRole.current != Config.BotRole.Primary) Future.successful(Vector.empty)
     else {

@@ -60,6 +60,9 @@ final class SharedWorldTibiaApi(
     worldTtl: FiniteDuration = 90.seconds,
     characterTtl: FiniteDuration = 300.seconds,
     characterKeyPrefix: String = SharedWorldTibiaApi.TibiaDataCharacterKeyPrefix,
+    // None keeps the original behaviour: a secondary that misses in Redis
+    // fetches the character itself.
+    primaryPresence: Option[PrimaryPresence] = None,
     now: () => java.time.Instant = () => java.time.Instant.now()
 )(implicit ec: ExecutionContext)
     extends TibiaApi with JsonSupport with StrictLogging {
@@ -124,11 +127,32 @@ final class SharedWorldTibiaApi(
               logger.warn(s"Failed to decode shared character data for '$name', fetching directly: ${e.getMessage}")
               underlying.getCharacter(name)
           }
-        case None => underlying.getCharacter(name)
+        case None => onCharacterMiss(name)
       }
     case Config.BotRole.Disabled =>
       underlying.getCharacter(name)
   }
+
+  /** What a secondary does when the primary has not published this character
+   *  yet.
+   *
+   *  Fetching it directly is the original behaviour and still the fallback, but
+   *  it is exactly what a consume-only deployment exists to prevent: it puts an
+   *  address on the wire that the upstream may not have agreed to, one request
+   *  per character the primary happens not to have reached yet.
+   *
+   *  While a primary is alive, the miss is answered with a Left instead. That
+   *  costs nothing and loses nothing: [[AgeCachedTibiaApi]] above reads a Left
+   *  as "stay due", so the character is simply asked for again on the next
+   *  poll, by which time the primary will have published it. With no primary
+   *  alive there is nobody to wait for, so it falls back to fetching. */
+  private def onCharacterMiss(name: String): Future[Either[String, CharacterResponse]] =
+    primaryPresence match {
+      case Some(presence) if presence.isAlive =>
+        Future.successful(Left(s"Waiting for the primary to publish '$name'"))
+      case _ =>
+        underlying.getCharacter(name)
+    }
 
   def getWorlds(): Future[Either[String, WorldsResponse]] = underlying.getWorlds()
   def getBoostedBoss(): Future[Either[String, BoostedResponse]] = underlying.getBoostedBoss()

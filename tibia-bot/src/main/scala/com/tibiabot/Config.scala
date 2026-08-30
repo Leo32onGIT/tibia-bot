@@ -277,6 +277,31 @@ object Config {
       case _ => Disabled
     }
     val sharingEnabled: Boolean = current != Disabled
+
+    /** A secondary waits for the primary's sheets rather than fetching its
+     *  own — see [[com.tibiabot.tibiadata.PrimaryPresence]] for why this is
+     *  safe to default on. */
+    val secondaryConsumeOnly: Boolean = discord.getBoolean("secondary-consume-only")
+
+    /** A primary polls worlds only a secondary serves, purely to publish them
+     *  — see [[com.tibiabot.app.UnionFetchReconciler]]. */
+    val primaryFetchesFleetWorlds: Boolean = discord.getBoolean("primary-fetches-fleet-worlds")
+
+    val heartbeatInterval: FiniteDuration = discord.getDuration("primary-heartbeat-interval").toScala
+
+    /** Longer than the interval, so one missed beat is not read as a death. */
+    val heartbeatTtl: FiniteDuration = heartbeatInterval * 3
+
+    /** Consume-only applies only where there is a primary to consume from. */
+    val consumeOnlyActive: Boolean = current == Secondary && secondaryConsumeOnly
+    val fleetFetchActive: Boolean = current == Primary && primaryFetchesFleetWorlds
+
+    /** How wide a fleet-fetch poll fans out. Narrower than a real world
+     *  stream's 32: these worlds are somebody else's, nothing here is waiting
+     *  on the result, and the point is to fill a cache rather than to detect a
+     *  death a moment sooner. Being gentler with the upstreams is worth more
+     *  than the speed. */
+    val fleetFetchFanOut: Int = discord.getInt("fleet-fetch-fan-out")
   }
 
   /** The respawn claim system (the `📅・sᴘᴀᴡɴs` forum, plus `/stamina` and

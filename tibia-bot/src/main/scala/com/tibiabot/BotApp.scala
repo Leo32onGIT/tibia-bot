@@ -633,6 +633,54 @@ object BotApp extends App with StrictLogging {
 
   private val secondaryStatusPublishTtl = 30.seconds
 
+  // --- shared world cycle: one bot fetches, the rest consume ---
+
+  if (Config.BotRole.current == Config.BotRole.Primary) {
+    // The signal every consume-only secondary decides on. Published before the
+    // reconciler starts so secondaries are never told to wait for a primary
+    // that is not yet fetching anything.
+    actorSystem.scheduler.scheduleWithFixedDelay(Duration.Zero, Config.BotRole.heartbeatInterval)(
+      () => publishPrimaryHeartbeat())(ex)
+  }
+
+  /** Tells every secondary that a primary is alive and publishing, so waiting
+   *  for its sheets is better than fetching their own. Its absence is what
+   *  sends them back to fetching, so this must keep beating for as long as this
+   *  process is actually polling — see [[tibiadata.PrimaryPresence]]. */
+  private def publishPrimaryHeartbeat(): Unit =
+    persistence.RedisCacheProvider.cache.setEx(
+      tibiadata.PrimaryPresence.HeartbeatKey,
+      discordGateway.selfUserId,
+      Config.BotRole.heartbeatTtl
+    ).recover { case e: Throwable => logger.warn(s"Failed to publish the primary heartbeat: ${e.getMessage}") }(ex)
+
+  /** Polls worlds that only a secondary serves, purely so their sheets reach
+   *  the shared cache from the one address the upstreams have agreed to. */
+  private lazy val unionFetchReconciler = new app.UnionFetchReconciler(
+    localWorlds = () => streamSupervisor.activeWorlds,
+    secondaryStatuses = () => statusRoute.secondaryStatusSnapshots(),
+    startPoller = world => {
+      val api = app.CharacterApiStack.forWorld(TibiaBot.PollInterval)(actorSystem, ex)
+      new app.FetchOnlyWorldPoller(
+        world, api, TibiaBot.PollInterval,
+        firstPollDelay = TibiaBot.fleetFetchFirstDelay(scala.util.Random.nextInt),
+        fanOut = Config.BotRole.fleetFetchFanOut
+      )(actorSystem, ex, akka.stream.Materializer.matFromSystem(actorSystem)).start()
+    },
+    enabled = Config.BotRole.fleetFetchActive
+  )(ex)
+
+  if (Config.BotRole.fleetFetchActive) {
+    // Reconciled on a timer rather than on an event: a secondary's snapshot
+    // expires on its own, so a bot that dies just stops appearing and its
+    // worlds are dropped on the next pass with nothing to miss.
+    actorSystem.scheduler.scheduleWithFixedDelay(30.seconds, 60.seconds)(
+      () => { unionFetchReconciler.reconcile(); () })(ex)
+    logger.info("Fetching character sheets for worlds only other bots in the fleet serve, so their lookups need no upstream call of their own")
+  }
+  if (Config.BotRole.consumeOnlyActive)
+    logger.info("Consuming character sheets published by the primary — this bot calls the character APIs only if that primary goes quiet")
+
   /** Publishes this secondary's full status snapshot (worlds/guilds, rate-limit
    *  lanes, bot identity — the exact same data its own dashboard would show,
    *  were it running one) for a primary to merge into its dashboard's
