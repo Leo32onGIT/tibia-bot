@@ -212,6 +212,40 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     cache.lastTtl(sharedWorldKey) shouldBe 90.seconds
   }
 
+  test("each character source publishes under its own prefix, so a secondary can race them") {
+    // With two upstreams running, one shared key would hold whichever source
+    // wrote last — which is not the same as the freshest. Namespacing lets a
+    // secondary read both and reach the primary's own answer without calling
+    // either API.
+    val stub = new StubApi(); val cache = new FakeCache()
+    val fansite = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary,
+      characterKeyPrefix = SharedWorldTibiaApi.FansiteCharacterKeyPrefix)
+    await(fansite.getCharacter("Abu Shusha"))
+
+    cache.store.keys.toList should contain("fansite:character-shared:abu shusha")
+    cache.store.keys.toList should not contain sharedCharacterKey
+  }
+
+  test("a secondary reads the prefix its own source publishes to") {
+    val published = character.toJson.compactPrint
+    val cache = new FakeCache(Map("fansite:character-shared:abu shusha" -> published))
+    val stub = new StubApi()
+    val fansite = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary,
+      characterKeyPrefix = SharedWorldTibiaApi.FansiteCharacterKeyPrefix)
+
+    await(fansite.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 0
+  }
+
+  test("the default prefix is unchanged, so an existing shared cycle keeps working") {
+    // A deploy that upgrades one bot before the other must not have the two
+    // silently reading different keys.
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacter("Abu Shusha"))
+    cache.store.keys.toList should contain(sharedCharacterKey)
+  }
+
   test("every other method passes straight through to the underlying API regardless of role") {
     val stub = new StubApi(); val cache = new FakeCache()
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)

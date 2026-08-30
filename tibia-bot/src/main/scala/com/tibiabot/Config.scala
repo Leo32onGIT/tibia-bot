@@ -39,6 +39,44 @@ object Config {
 
   val tibiaDataMaxInFlight: Int = discord.getInt("tibiadata-max-in-flight")
 
+  /** CipSoft's official fansite API, the bot's second source for character
+   *  sheets — see [[com.tibiabot.fansiteapi.FansiteApiClient]].
+   *
+   *  `mode` is the rollout gate and the rollback: `off` leaves the bot on the
+   *  TibiaData path it has always used, `shadow` fetches both and compares
+   *  without changing what gets posted, `race` runs both sources out of phase
+   *  and takes whichever sheet is fresher.
+   *
+   *  A mode past `off` with no token is treated as `off` rather than as a
+   *  configuration error, so a deploy that forgets the secret degrades to the
+   *  old behaviour instead of failing every character fetch. */
+  object FansiteApi {
+    sealed trait Mode
+    case object Off extends Mode
+    case object Shadow extends Mode
+    case object Race extends Mode
+
+    private val fansite = discord.getConfig("fansite-api")
+    val token: String = fansite.getString("token").trim
+    val baseUrl: String = fansite.getString("base-url").stripSuffix("/")
+    val userAgent: String = fansite.getString("user-agent")
+    val maxInFlight: Int = fansite.getInt("max-in-flight")
+    val phaseOffsetTicks: Int = fansite.getInt("phase-offset-ticks")
+
+    private val requested: Mode = fansite.getString("mode").trim.toLowerCase match {
+      case "shadow" => Shadow
+      case "race"   => Race
+      case _        => Off
+    }
+
+    val mode: Mode = if (token.isEmpty) Off else requested
+    val enabled: Boolean = mode != Off
+    /** True when a missing token is the only reason this is disabled — worth a
+     *  startup warning, since it means a deploy asked for the feature and
+     *  quietly did not get it. */
+    val disabledForMissingToken: Boolean = requested != Off && token.isEmpty
+  }
+
   /** Settings for the character age cache — see
    *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
    *  because it is not only durations, and because `enabled` is meant to be a

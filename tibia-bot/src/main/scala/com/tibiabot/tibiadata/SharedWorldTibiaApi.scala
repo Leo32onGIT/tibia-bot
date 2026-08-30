@@ -59,6 +59,7 @@ final class SharedWorldTibiaApi(
     role: Config.BotRole.Role,
     worldTtl: FiniteDuration = 90.seconds,
     characterTtl: FiniteDuration = 300.seconds,
+    characterKeyPrefix: String = SharedWorldTibiaApi.TibiaDataCharacterKeyPrefix,
     now: () => java.time.Instant = () => java.time.Instant.now()
 )(implicit ec: ExecutionContext)
     extends TibiaApi with JsonSupport with StrictLogging {
@@ -75,7 +76,7 @@ final class SharedWorldTibiaApi(
   }
 
   private def sharedWorldKey(world: String): String = s"tibia:world-shared:${world.toLowerCase}"
-  private def sharedCharacterKey(name: String): String = s"tibia:character-shared:${name.toLowerCase}"
+  private def sharedCharacterKey(name: String): String = s"$characterKeyPrefix${name.toLowerCase}"
 
   def getWorld(world: String): Future[Either[String, WorldResponse]] = role match {
     case Config.BotRole.Primary =>
@@ -139,6 +140,21 @@ final class SharedWorldTibiaApi(
 }
 
 object SharedWorldTibiaApi {
+
+  /** Redis namespace for sheets published from TibiaData. */
+  val TibiaDataCharacterKeyPrefix: String = "tibia:character-shared:"
+
+  /** ...and for sheets published from CipSoft's fansite API.
+   *
+   *  Each character upstream publishes under its own prefix rather than the two
+   *  contending for one key. That is what lets a secondary reproduce the
+   *  primary's choice instead of inheriting half of it: it reads both published
+   *  sheets and races them locally, arriving at the same answer for the price
+   *  of two Redis reads and no API calls at all. Sharing one key would publish
+   *  whichever source happened to write last, which is not the same thing as
+   *  the freshest. */
+  val FansiteCharacterKeyPrefix: String = "fansite:character-shared:"
+
   /** Floor on a published sheet's life. A copy fetched right at its turnover
    *  has a full lifetime left, but one adopted late has little, and writing a
    *  key that expires before anybody could read it is just work. */

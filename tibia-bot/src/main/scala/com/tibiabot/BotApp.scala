@@ -174,6 +174,17 @@ object BotApp extends App with StrictLogging {
 
   // Let the games begin
   logger.info("Starting up")
+  // Said once at startup rather than per world: which character upstreams are
+  // in play is the first thing to check when death latency looks wrong.
+  Config.FansiteApi.mode match {
+    case Config.FansiteApi.Shadow =>
+      logger.info("Fansite API in shadow mode — fetched and compared alongside TibiaData, but nothing is posted from it")
+    case Config.FansiteApi.Race =>
+      logger.info(s"Fansite API racing TibiaData — sources held ${Config.FansiteApi.phaseOffsetTicks} poll ticks apart, freshest sheet wins")
+    case Config.FansiteApi.Off =>
+      if (Config.FansiteApi.disabledForMissingToken)
+        logger.warn("FANSITE_API_MODE asked for the fansite API but FANSITE_API_TOKEN is empty — staying on TibiaData alone")
+  }
 
   val jda = app.Bootstrap.buildReadyJda(Config.token, new BotListener())
   logger.info("JDA ready")

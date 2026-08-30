@@ -1,0 +1,195 @@
+{
+    "characterGameInformation": {
+        "characterName": "Violent Beams",
+        "level": 1456,
+        "vocation": "sorcerer",
+        "isPromoted": true,
+        "sex": "female",
+        "world": "Victoris",
+        "residence": "Svargrond",
+        "deletedTimestamp": 0,
+        "comment": "press buttons\r\ninstant headshot\r\nred bar go down",
+        "wasRecentlyTradedAndNotRenamed": false,
+        "spouse": null,
+        "formerWorld": "Quidera",
+        "lastLogin": 1788064513,
+        "isPremium": true,
+        "formerNames": [],
+        "guildName": "Ruckus",
+        "guildRank": "Shot Caller",
+        "achievementPoints": 453
+    },
+    "characterDeathsData": {
+        "tooMany": false,
+        "deaths": [
+            {
+                "date": 1787874174,
+                "level": 1456,
+                "murderers": [
+                    {
+                        "name": "sorcerer's apparition",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            }
+        ]
+    },
+    "characterAdminInformation": {
+        "characterTitle": null,
+        "characterTitleCount": 35,
+        "displayedAchievements": [
+            {
+                "name": "Annihilator",
+                "achievementPoints": 5,
+                "isSecret": false
+            },
+            {
+                "name": "Master of the Nexus",
+                "achievementPoints": 6,
+                "isSecret": false
+            }
+        ],
+        "houses": []
+    },
+    "characterAccountInformation": {
+        "creationDate": 1140835145,
+        "deletionDate": 0,
+        "position": "none",
+        "loyaltyTitle": "Keeper of Tibia",
+        "accountBadgeImageBaseUrl": "static.tibia.com/images/badges",
+        "accountBadges": [
+            {
+                "icon": "badge_accountage5.png",
+                "name": "Exalted Hero",
+                "description": "The account is older than 20 years."
+            },
+            {
+                "icon": "badge_accountage4.png",
+                "name": "Ancient Hero",
+                "description": "The account is older than 15 years."
+            },
+            {
+                "icon": "badge_accountage3.png",
+                "name": "Senior Hero",
+                "description": "The account is older than 10 years."
+            },
+            {
+                "icon": "badge_accountage2.png",
+                "name": "Veteran Hero",
+                "description": "The account is older than 5 years."
+            },
+            {
+                "icon": "badge_accountage1.png",
+                "name": "Fledgeling Hero",
+                "description": "The account is older than 1 year."
+            },
+            {
+                "icon": "badge_tibialoyalist2.png",
+                "name": "Tibia Loyalist (Grade 2)",
+                "description": "The account earned more than 1000 loyalty points."
+            },
+            {
+                "icon": "badge_tibialoyalist1.png",
+                "name": "Tibia Loyalist (Grade 1)",
+                "description": "The account earned more than 100 loyalty points."
+            },
+            {
+                "icon": "badge_globalplayer3.png",
+                "name": "Global Player (Grade 3)",
+                "description": "Summing up the levels of all characters on the account amounts to at least 2000."
+            },
+            {
+                "icon": "badge_globalplayer2.png",
+                "name": "Global Player (Grade 2)",
+                "description": "Summing up the levels of all characters on the account amounts to at least 1000."
+            },
+            {
+                "icon": "badge_globalplayer1.png",
+                "name": "Global Player (Grade 1)",
+                "description": "Summing up the levels of all characters on the account amounts to at least 500."
+            },
+            {
+                "icon": "badge_tournamentparticipance1.png",
+                "name": "Freshman of the Tournament",
+                "description": "The account participated 1x in a Tournament."
+            }
+        ]
+    },
+    "accountCharacters": [
+        {
+            "name": "Raa Ji",
+            "world": "Victoris",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Arms",
+            "world": "Cantabra",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Beams",
+            "world": "Victoris",
+            "deletionDate": 0,
+            "isMainCharacter": true,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Genes",
+            "world": "Quidera",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Inc",
+            "world": "Wickera",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Means",
+            "world": "Monstera",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Prospector",
+            "world": "Ourobra",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        },
+        {
+            "name": "Violent Scenes",
+            "world": "Victoris",
+            "deletionDate": 0,
+            "isMainCharacter": false,
+            "group": null,
+            "isOnline": false,
+            "wasRecentlyTradedAndNotRenamed": false
+        }
+    ]
+}

@@ -126,11 +126,42 @@ class TibiaBot(
       if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current,
         characterTtl = Config.CharacterCache.ttl)
       else caching
-    // Outermost, so a skippable character fetch costs nothing at all — not the
-    // request, and not the shared-cycle Redis read in front of it either. One
-    // instance per world, holding only that world's characters.
-    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings(TibiaBot.PollInterval))
-    else shared
+    // Age cache outermost over each source, so a skippable character fetch
+    // costs nothing at all — not the request, and not the shared-cycle Redis
+    // read in front of it either. One instance per world, holding only that
+    // world's characters.
+    def ageCached(source: TibiaApi): TibiaApi =
+      if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(source, Config.CharacterCache.settings(TibiaBot.PollInterval))
+      else source
+
+    val tibiaDataSource = ageCached(shared)
+    if (Config.FansiteApi.enabled) {
+      // Each source gets its own age cache, so each keeps its own schedule and
+      // its own phase; DualCharacterApi only chooses between what they hold.
+      // The fansite client's delegate is never reached through this path — the
+      // endpoints it would serve are routed to TibiaData above it — but it is
+      // wired to the real stack rather than to a stub so the class stays usable
+      // on its own.
+      val fansiteClient = new fansiteapi.FansiteApiClient(shared, Config.FansiteApi.token)
+      // Published under its own Redis prefix, so a shared-cycle secondary can
+      // read both sources' sheets and race them to the same answer the primary
+      // reached, without calling either API. The world endpoint on this
+      // instance is never reached (DualCharacterApi routes it to TibiaData), so
+      // it cannot contend for the shared world key.
+      val fansiteShared =
+        if (Config.BotRole.sharingEnabled)
+          new tibiadata.SharedWorldTibiaApi(fansiteClient, persistence.RedisCacheProvider.cache, Config.BotRole.current,
+            characterTtl = Config.CharacterCache.ttl,
+            characterKeyPrefix = tibiadata.SharedWorldTibiaApi.FansiteCharacterKeyPrefix)
+        else fansiteClient
+      val fansiteSource = ageCached(fansiteShared)
+      new fansiteapi.DualCharacterApi(
+        tibiaData = tibiaDataSource,
+        fansite = fansiteSource,
+        mode = Config.FansiteApi.mode,
+        phaseOffset = TibiaBot.PollInterval * Config.FansiteApi.phaseOffsetTicks.toLong,
+        maxStale = Config.CharacterCache.maxStale)
+    } else tibiaDataSource
   }
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying

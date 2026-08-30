@@ -30,4 +30,14 @@ object ApiMetrics {
    *
    *  Dimensions: `endpoint` and `status`, each summing to the total. */
   val tibiaData = new ApiCallMetrics()
+
+  /** Every request to CipSoft's fansite API, counted at
+   *  [[com.tibiabot.fansiteapi.FansiteApiClient]]'s choke point.
+   *
+   *  Deliberately a separate counter from `tibiaData` rather than another
+   *  `endpoint` dimension on it: the two are different upstreams with
+   *  different failure modes and different budgets, and the question the
+   *  dashboard has to answer while both are running is "which one is
+   *  struggling", which one merged total cannot. */
+  val fansiteApi = new ApiCallMetrics()
 }

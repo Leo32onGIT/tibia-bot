@@ -95,4 +95,10 @@ object InFlightLimit {
    *  where every character has come due together. Those are precisely the
    *  moments the upstream is least able to absorb a spike from one address. */
   val tibiaData: InFlightLimit = new InFlightLimit(Config.tibiaDataMaxInFlight)
+
+  /** The same ceiling for CipSoft's fansite API, kept separate on purpose. A
+   *  shared limit would let one upstream stalling consume every permit and
+   *  throttle the other — the precise failure the second source exists to
+   *  survive. */
+  val fansiteApi: InFlightLimit = new InFlightLimit(Config.FansiteApi.maxInFlight)
 }
