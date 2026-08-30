@@ -173,7 +173,13 @@ final class StatusRoute(
     // without a separate fetch or a second shape to decode.
     "apiThroughput" -> JsObject(
       "discord" -> apiThroughputJson(tracking.ApiMetrics.discord),
-      "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData)
+      "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData),
+      // Its own subtree rather than another endpoint row under tibiadata: while
+      // both character upstreams are running, the question this panel exists to
+      // answer is which of the two is struggling, and one merged total cannot
+      // say. Always published, so a row that reads zero is itself the answer
+      // when the fansite source is off or failing.
+      "fansiteapi" -> apiThroughputJson(tracking.ApiMetrics.fansiteApi)
     )
   )
 

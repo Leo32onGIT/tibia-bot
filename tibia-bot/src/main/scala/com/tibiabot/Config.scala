@@ -62,6 +62,8 @@ object Config {
     val userAgent: String = fansite.getString("user-agent")
     val maxInFlight: Int = fansite.getInt("max-in-flight")
     val phaseOffsetTicks: Int = fansite.getInt("phase-offset-ticks")
+    val circuitOpenFor: java.time.Duration = fansite.getDuration("circuit-open-for")
+    val secondaryGrace: FiniteDuration = fansite.getDuration("secondary-grace").toScala
 
     private val requested: Mode = fansite.getString("mode").trim.toLowerCase match {
       case "shadow" => Shadow

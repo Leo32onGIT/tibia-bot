@@ -54,7 +54,8 @@ final class FansiteApiClient(
     baseUrl: String = Config.FansiteApi.baseUrl,
     userAgent: String = Config.FansiteApi.userAgent,
     metrics: tracking.ApiCallMetrics = tracking.ApiMetrics.fansiteApi,
-    inFlight: InFlightLimit = InFlightLimit.fansiteApi
+    inFlight: InFlightLimit = InFlightLimit.fansiteApi,
+    breaker: FansiteCircuitBreaker = new FansiteCircuitBreaker(Config.FansiteApi.circuitOpenFor)
 )(implicit val system: ActorSystem)
     extends FansiteJsonSupport with StrictLogging with TibiaApi {
 
@@ -103,10 +104,20 @@ final class FansiteApiClient(
    *  bounded the same way, but against this API's own metrics and in-flight
    *  limit — the two must not share a budget, or a stall on one would throttle
    *  the other. */
+  /** A refusal that costs no request. Shaped like any other failure so callers
+   *  need no special case — [[DualCharacterApi]] already falls back to
+   *  TibiaData on a Left. */
+  private val blockedResponse: Future[Either[String, CharacterResponse]] =
+    Future.successful(Left("Fansite API circuit is open — not sending"))
+
   private def requestWithRetry(name: String, attempt: Int = 0, callerRetriesSoon: Boolean = false): Future[HttpResponse] =
     inFlight(Http().singleRequest(request(name))).flatMap { response =>
       val status = response.status.intValue
       metrics.record("endpoint" -> "/CharacterData/GetCharacter", "status" -> status.toString)
+      // Before the retry policy sees it: a 403 here is the edge refusing the
+      // whole IP, which no amount of retrying improves and every further
+      // request makes worse.
+      if (breaker.blocks(status)) breaker.recordBlocked(status)
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt, callerRetriesSoon) match {
         case RetryDecision.RetryIn(delay) =>
@@ -180,16 +191,19 @@ final class FansiteApiClient(
    *  minute away, so an inline retry buys almost nothing and costs a request
    *  during whatever is already going wrong. */
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] =
-    requestWithRetry(name, callerRetriesSoon = true).flatMap(unmarshalCharacter(_, name))
+    if (breaker.isOpen) blockedResponse
+    else requestWithRetry(name, callerRetriesSoon = true).flatMap(unmarshalCharacter(_, name))
 
   /** A one-shot lookup with nobody polling behind it, so it keeps the inline
    *  retry — there is no "next cycle" to defer to. */
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] =
-    requestWithRetry(name).flatMap(unmarshalCharacter(_, name))
+    if (breaker.isOpen) blockedResponse
+    else requestWithRetry(name).flatMap(unmarshalCharacter(_, name))
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
     val (name, reason, reasonText) = input
-    requestWithRetry(name).flatMap(unmarshalCharacter(_, name)).map((_, name, reason, reasonText))
+    val result = if (breaker.isOpen) blockedResponse else requestWithRetry(name).flatMap(unmarshalCharacter(_, name))
+    result.map((_, name, reason, reasonText))
   }
 
   // --- no equivalent on this API (see class doc) ---

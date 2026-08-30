@@ -160,7 +160,9 @@ class TibiaBot(
         fansite = fansiteSource,
         mode = Config.FansiteApi.mode,
         phaseOffset = TibiaBot.PollInterval * Config.FansiteApi.phaseOffsetTicks.toLong,
-        maxStale = Config.CharacterCache.maxStale)
+        maxStale = Config.CharacterCache.maxStale,
+        secondaryGrace = Config.FansiteApi.secondaryGrace,
+        scheduler = system.scheduler)
     } else tibiaDataSource
   }
 

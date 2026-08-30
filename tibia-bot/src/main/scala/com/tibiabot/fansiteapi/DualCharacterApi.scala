@@ -5,11 +5,15 @@ import com.tibiabot.tibiadata.response._
 import com.tibiabot.tibiadata.{OriginTimestamp, TibiaApi}
 import com.typesafe.scalalogging.StrictLogging
 
+import akka.actor.Scheduler
+import akka.pattern.after
+
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
 
 /** Runs both character upstreams and decides what the bot is told.
  *
@@ -44,6 +48,8 @@ final class DualCharacterApi(
     mode: Config.FansiteApi.Mode,
     phaseOffset: FiniteDuration,
     maxStale: FiniteDuration,
+    secondaryGrace: FiniteDuration,
+    scheduler: Scheduler,
     now: () => Instant = () => Instant.now()
 )(implicit ec: ExecutionContext)
     extends TibiaApi with StrictLogging {
@@ -141,22 +147,48 @@ final class DualCharacterApi(
       // Still holding the second source back so its window opens out of phase.
       tibiaData.getCharacter(name)
     } else {
+      // Both are launched together; only the primary is ever waited on.
       val primary = tibiaData.getCharacter(name)
       val secondary = fansite.getCharacter(name)
-      for {
-        tibiaDataResult <- primary
-        fansiteResult <- secondary
-      } yield mode match {
-        case Config.FansiteApi.Shadow =>
-          compare(tibiaDataResult, fansiteResult)
-          tibiaDataResult
-        case Config.FansiteApi.Race =>
-          monotonic(cacheKey, entry, fresher(tibiaDataResult, fansiteResult))
-        case Config.FansiteApi.Off =>
-          tibiaDataResult
+      primary.flatMap { tibiaDataResult =>
+        withinGrace(secondary).map {
+          case None =>
+            // The secondary did not land in time. Its fetch is still in flight
+            // and will fill its own age cache, so the next poll gets the
+            // benefit — nothing is wasted by giving up on it here.
+            tibiaDataResult
+          case Some(fansiteResult) =>
+            mode match {
+              case Config.FansiteApi.Shadow =>
+                compare(tibiaDataResult, fansiteResult)
+                tibiaDataResult
+              case Config.FansiteApi.Race =>
+                monotonic(cacheKey, entry, fresher(tibiaDataResult, fansiteResult))
+              case Config.FansiteApi.Off =>
+                tibiaDataResult
+            }
+        }
       }
     }
   }
+
+  /** The secondary's answer if it arrives within `secondaryGrace`, else None.
+   *
+   *  The second source only ever buys a fresher sheet than the one already in
+   *  hand, so waiting on it can never be worth delaying a death — and once its
+   *  concurrency is capped low enough not to get the IP blocked, a due fetch
+   *  really can sit queued. Bounding the wait is what keeps a throttle on the
+   *  new upstream from turning into latency on the old one.
+   *
+   *  A failure counts as "did not land": the primary's answer already covers
+   *  it, and the failure itself is logged where it happens. */
+  private def withinGrace(
+      secondary: Future[Either[String, CharacterResponse]]
+  ): Future[Option[Either[String, CharacterResponse]]] =
+    Future.firstCompletedOf(Seq(
+      secondary.map(Option(_)).recover { case NonFatal(_) => None },
+      after(secondaryGrace, scheduler)(Future.successful(None))
+    ))
 
   /** A one-shot level lookup with no schedule behind it, so there is no phase
    *  to protect and nothing to compare against: ask the source least likely to

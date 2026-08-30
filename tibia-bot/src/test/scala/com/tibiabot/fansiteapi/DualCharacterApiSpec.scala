@@ -4,22 +4,26 @@ import com.tibiabot.Config
 import com.tibiabot.fansiteapi.response.FansiteCharacterResponse
 import com.tibiabot.tibiadata.TibiaApi
 import com.tibiabot.tibiadata.response._
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import spray.json._
 
 import java.time.Instant
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 /** How the bot chooses between two upstreams telling it about the same
  *  character: the phase seeding that makes running both worth it, the failover
  *  that comes free with it, and the monotonicity guard that keeps an
  *  alternating pair from showing the stream a character's history in reverse. */
-class DualCharacterApiSpec extends AnyFunSuite with Matchers with FansiteJsonSupport {
+class DualCharacterApiSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll with FansiteJsonSupport {
 
   private implicit val ec: ExecutionContext = ExecutionContext.global
   private def await[A](f: Future[A]): A = Await.result(f, 5.seconds)
+
+  private val system = akka.actor.ActorSystem("dual-character-api-spec")
+  override def afterAll(): Unit = { Await.result(system.terminate(), 10.seconds); () }
 
   private val payload: FansiteCharacterResponse = {
     val is = getClass.getResourceAsStream("/fansiteapi/character_full.json")
@@ -38,7 +42,10 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with FansiteJsonSup
 
   private class StubApi(var result: Either[String, CharacterResponse]) extends TibiaApi {
     var calls = 0
-    def getCharacter(n: String) = { calls += 1; Future.successful(result) }
+    /** Set to make getCharacter hang, standing in for a fetch queued behind a
+     *  low concurrency ceiling. */
+    var pending: Option[Promise[Either[String, CharacterResponse]]] = None
+    def getCharacter(n: String) = { calls += 1; pending.map(_.future).getOrElse(Future.successful(result)) }
     def getWorld(w: String) = Future.successful(Left("x"))
     def getWorlds() = Future.successful(Left("x"))
     def getBoostedBoss() = Future.successful(Left("x"))
@@ -57,6 +64,8 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with FansiteJsonSup
       tibiaData, fansite, mode,
       phaseOffset = (60 * offsetTicks).seconds,
       maxStale = 15.minutes,
+      secondaryGrace = 150.milliseconds,
+      scheduler = system.scheduler,
       now = () => clock)
     def advance(d: FiniteDuration): Unit = clock = clock.plusSeconds(d.toSeconds)
     def get(): Either[String, CharacterResponse] = await(api.getCharacter(name))
@@ -188,6 +197,46 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with FansiteJsonSup
     f.tibiaData.result = Right(sheetFrom(t0, level = 800))
     f.levelOf(await(f.api.getKillerFallback("Someone"))) shouldBe 800
     f.tibiaData.calls shouldBe 1
+  }
+
+  test("a slow secondary never holds up the answer") {
+    // The fix for the trap the concurrency cap creates: once the fansite source
+    // is throttled hard enough not to get the IP blocked, a due fetch can sit
+    // queued — and a death must not wait behind it.
+    val f = new Fixture(Config.FansiteApi.Race)
+    f.seed()
+    f.tibiaData.result = Right(sheetFrom(t0.plusSeconds(300), level = 300))
+    f.fansite.pending = Some(Promise[Either[String, CharacterResponse]]())
+
+    val started = System.nanoTime()
+    val got = f.get()
+    val tookMs = (System.nanoTime() - started) / 1000000L
+
+    f.levelOf(got) shouldBe 300
+    tookMs should be < 3000L // bounded by the grace, not by the hung fetch
+    f.fansite.calls shouldBe 1 // it was still asked; only the waiting was abandoned
+  }
+
+  test("a secondary that lands inside the grace is still used") {
+    // The bound must not be so eager that it throws away the whole point.
+    val f = new Fixture(Config.FansiteApi.Race)
+    f.seed()
+    f.tibiaData.result = Right(sheetFrom(t0, level = 100))
+    f.fansite.result = Right(sheetFrom(t0.plusSeconds(300), level = 200))
+    f.levelOf(f.get()) shouldBe 200
+  }
+
+  test("shadow mode does not wait on the secondary either") {
+    // Shadow is meant to be observation with no cost to what gets posted, so a
+    // hung comparison fetch must not delay the answer it is comparing against.
+    val f = new Fixture(Config.FansiteApi.Shadow)
+    f.seed()
+    f.tibiaData.result = Right(sheetFrom(t0, level = 100))
+    f.fansite.pending = Some(Promise[Either[String, CharacterResponse]]())
+
+    val started = System.nanoTime()
+    f.levelOf(f.get()) shouldBe 100
+    ((System.nanoTime() - started) / 1000000L) should be < 3000L
   }
 
   test("endpoints this API does not have never reach the fansite source") {

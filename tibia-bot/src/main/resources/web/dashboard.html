@@ -728,7 +728,8 @@ const expandedApiRows = new Set();
 
 const API_SOURCES = [
   { key: 'discord', label: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
-  { key: 'tibiadata', label: 'TibiaData', icon: 'ti-api', color: '#5b8cff' }
+  { key: 'tibiadata', label: 'TibiaData', icon: 'ti-api', color: '#5b8cff' },
+  { key: 'fansiteapi', label: 'Fansite API', icon: 'ti-api', color: '#3fb98f' }
 ];
 
 // One breakdown table. `share` is normally computed within the group, which is
@@ -801,24 +802,6 @@ function renderLaneGroup(lanes) {
 // (the default for detail groups) would scramble a histogram, so they keep
 // this order instead. Anything unrecognised sorts to the end rather than
 // silently vanishing.
-const CACHE_AGE_ORDER = ['fresh', '0-59s', '60-119s', '120-179s', '180-239s', '240-299s', '300-359s', '360s+', 'error'];
-
-// 'fresh' is the only bucket that actually learned something new, so it reads
-// as the good one; 'error' is a wasted call. The ageing buckets are deliberately
-// uncoloured — a high age is not a fault, it is just what a cache does.
-function cacheAgeColor(name) {
-  if (name === 'fresh') return 'var(--good)';
-  if (name === 'error') return 'var(--warn)';
-  return null;
-}
-
-function cacheAgeRows(throughput) {
-  const rank = (n) => { const i = CACHE_AGE_ORDER.indexOf(n); return i === -1 ? CACHE_AGE_ORDER.length : i; };
-  return dimensionRows(throughput, 'cacheAge')
-    .sort((a, b) => rank(a.name) - rank(b.name))
-    .map(r => ({ ...r, color: cacheAgeColor(r.name) }));
-}
-
 function renderApiDetail(sourceKey, throughput, lanes) {
   if (sourceKey === 'discord') {
     // Catch-all dropped from the view (see DiscordApiRoute.Other): it is
@@ -833,9 +816,7 @@ function renderApiDetail(sourceKey, throughput, lanes) {
   }
   return renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
     + renderDetailGroup('By response', '', 'Status',
-        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff')
-    + renderDetailGroup('By cache age', 'how old the upstream copy was', 'Age',
-        cacheAgeRows(throughput), '#5b8cff', throughput.total, true);
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff');
 }
 
 function renderApiSourceRow(bot, source, throughput, lanes) {
@@ -962,6 +943,7 @@ function renderApiThroughput(bots) {
       <div class="bot-roll">
         <div class="r"><div class="v">${rollFor('discord')}</div><div class="k">Discord</div></div>
         <div class="r"><div class="v">${rollFor('tibiadata')}</div><div class="k">TibiaData</div></div>
+        <div class="r"><div class="v">${rollFor('fansiteapi')}</div><div class="k">Fansite</div></div>
         <div class="r"><div class="v">${combinedTotal}</div><div class="k">Total</div></div>
       </div>
       <i class="ti ti-chevron-down bot-chevron" aria-hidden="true"></i>
