@@ -36,6 +36,26 @@ object Killers {
     else None
   }
 
+  /** The (creature, summoner) behind a summon kill, or None for an ordinary one.
+   *
+   *  Both upstreams report a summon the same way, and it is '''not''' the way
+   *  [[parseSummon]] expects: the summoner goes in the killer's `name` and the
+   *  creature in a field beside it — `summon` on TibiaData, `remark` on the
+   *  fansite API. Verified against the same live "fire elemental of <player>"
+   *  death on both.
+   *
+   *  That field went unread for a long time, and because a player name always
+   *  begins with a capital, [[parseSummon]] could never match one either — so
+   *  every summon kill quietly rendered as a plain player kill. Preferring the
+   *  field here is what actually turns summon rendering on.
+   *
+   *  [[parseSummon]] is still consulted as a fallback: it costs nothing, and it
+   *  keeps working for any source that does inline the whole
+   *  "<creature> of <player>" phrase into the name. */
+  def summonBehind(name: String, summon: String): Option[(String, String)] =
+    Option(summon).map(_.trim).filter(_.nonEmpty).map(creature => (creature, name))
+      .orElse(parseSummon(name))
+
   /** The character names a death's killer list will want a level for, given the
    *  victim's name and each killer as (name, isPlayer).
    *

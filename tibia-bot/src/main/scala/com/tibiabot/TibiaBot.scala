@@ -999,7 +999,7 @@ class TibiaBot(
                         embedColor = 14869218 // bone white
                       }
                       embedThumbnail = presentation.DeathEffect.pvp
-                      domain.Killers.parseSummon(k.name) match {
+                      domain.Killers.summonBehind(k.name, k.summon) match {
                         case Some((creature, summoner)) => // e.g: fire elemental of Violent Beams
                           val vowel = domain.Killers.article(creature)
                           val summonerLevelText = getKillerLevel(summoner, killerLevelsAt).map(level => s" [$level]").getOrElse("")

@@ -17,6 +17,34 @@ class KillersSpec extends AnyFunSuite with Matchers {
     Killers.parseSummon("Lord of the Elements") shouldBe None
   }
 
+  test("summonBehind: the summon field wins, with the killer name as the summoner") {
+    // How both APIs actually report a summon kill: summoner in the name,
+    // creature alongside it. This is the case that used to be missed entirely.
+    Killers.summonBehind("Beams of Justice", "fire elemental") shouldBe Some(("fire elemental", "Beams of Justice"))
+    Killers.summonBehind("Saanchez Style", "sorcerer familiar") shouldBe Some(("sorcerer familiar", "Saanchez Style"))
+  }
+
+  test("summonBehind: an ordinary player kill carries no summon") {
+    Killers.summonBehind("Beams of Justice", "") shouldBe None
+    Killers.summonBehind("Beams of Justice", "   ") shouldBe None
+    Killers.summonBehind("Bubble", null) shouldBe None
+  }
+
+  test("summonBehind: falls back to the inline '<creature> of <player>' form") {
+    Killers.summonBehind("fire elemental of Violent Beams", "") shouldBe Some(("fire elemental", "Violent Beams"))
+  }
+
+  test("summonBehind: a player whose name contains ' of ' is still not a summon") {
+    // The guard that made the old name-parsing path safe has to survive.
+    Killers.summonBehind("Knight of Flame", "") shouldBe None
+  }
+
+  test("summonBehind: the level shown beside a summon is the summoner's") {
+    // levelLookupNames feeds the killer-level prefetch, and for a summon the
+    // embed renders the summoner's level — so that is the name it must ask for.
+    Killers.levelLookupNames("Victim", Seq(("Beams of Justice", true))) shouldBe Seq("Beams of Justice")
+  }
+
   test("parseSummon: a plain creature or plain player name is not a summon") {
     Killers.parseSummon("a dragon lord") shouldBe None
     Killers.parseSummon("Bubble") shouldBe None
