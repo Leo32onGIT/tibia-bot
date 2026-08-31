@@ -909,7 +909,7 @@ class TibiaBot(
               var embedThumbnail = presentation.DeathEffect.thumbnail(killer).getOrElse(creatureImageUrl(killer))
               var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
               val killerBuffer = ListBuffer[String]()
-              val exivaBuffer = ListBuffer[String]()
+              val exivaBuffer = ListBuffer[(String, Option[Int])]()
               var exivaList = ""
               val killerList = charDeath.death.killers // get all killers
 
@@ -994,19 +994,21 @@ class TibiaBot(
                       domain.Killers.summonBehind(k.name, k.summon) match {
                         case Some((creature, summoner)) => // e.g: fire elemental of Violent Beams
                           val vowel = domain.Killers.article(creature)
-                          val summonerLevelText = getKillerLevel(summoner, killerLevelsAt).map(level => s" [$level]").getOrElse("")
+                          val summonerLevel = getKillerLevel(summoner, killerLevelsAt)
+                          val summonerLevelText = summonerLevel.map(level => s" [$level]").getOrElse("")
                           killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
                           if (embedColor == 13773097) {
                             if (exivaListCheck == "true") {
-                              exivaBuffer += summoner
+                              exivaBuffer += ((summoner, summonerLevel))
                             }
                           }
                         case None => // a player (incl. names with " of " like "Knight of Flame") or an undetected summon
-                          val levelText = getKillerLevel(k.name, killerLevelsAt).map(level => s" [$level]").getOrElse("")
+                          val killerLevel = getKillerLevel(k.name, killerLevelsAt)
+                          val levelText = killerLevel.map(level => s" [$level]").getOrElse("")
                           killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
                           if (embedColor == 13773097) {
                             if (exivaListCheck == "true") {
-                              exivaBuffer += k.name
+                              exivaBuffer += ((k.name, killerLevel))
                             }
                           }
                       }
@@ -1027,7 +1029,8 @@ class TibiaBot(
               }
 
               if (exivaBuffer.nonEmpty) {
-                exivaBuffer.zipWithIndex.foreach { case (exiva, i) =>
+                // Not everyone in the kill: only the few worth chasing, hardest first.
+                domain.Killers.exivaTargets(exivaBuffer.toSeq).zipWithIndex.foreach { case (exiva, i) =>
                   if (i == 0) {
                     exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
                   } else {
@@ -1039,7 +1042,9 @@ class TibiaBot(
                 val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
                 if (detectHunteds == "on") {
                   // scan exiva list for enemies to be added to hunted
-                  val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+                  // Every killer, not just the listed few — this feeds the hunted list
+                  // rather than the embed, and an enemy it skips is never added at all.
+                  val exivaBufferFlow = Source(exivaBuffer.map(_._1).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
                   val futureResults: Future[Seq[Either[String, CharacterResponse]]] = exivaBufferFlow.run()
                   futureResults.onComplete {
                     case Success(output) =>
@@ -1095,24 +1100,30 @@ class TibiaBot(
                 }
               }
 
-              // convert formatted killer list to one string ("a, b and c")
-              var killerText = domain.Killers.joinNatural(killerBuffer.toSeq)
+              val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+              val limit = 4065
+              val header = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}"
 
               // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
-              if (killerText == "") {
-                  embedThumbnail = presentation.DeathEffect.suicide
-                  killerText = s"""`suicide`"""
-              }
+              val killerParts = if (killerBuffer.isEmpty) {
+                embedThumbnail = presentation.DeathEffect.suicide
+                Seq(s"""`suicide`""")
+              } else killerBuffer.toSeq
 
-              val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+              // Fit the killer list to the room actually left for it, rather than
+              // letting it overrun and be cut below: it is one line, so the cut can
+              // only drop it whole. The exiva list is a handful of lines and takes
+              // its space first; the half-room floor below only bites if that list
+              // ever grows, and keeps the killers from being squeezed out if it does.
+              val room = limit - s"$header\nby .".length
+              // convert formatted killer list to one string ("a, b and c")
+              val killerText = domain.Killers.joinWithin(killerParts, room - math.min(exivaList.length, room / 2))
 
               // this is the actual embed description
-              var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
+              var embedText = s"$header\nby $killerText.$exivaList"
 
               // if the length is over 4065 truncate it
-              val embedLength = embedText.length
-              val limit = 4065
-              if (embedLength > limit) {
+              if (embedText.length > limit) {
                 val newlineIndex = embedText.lastIndexOf('\n', limit)
                 embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
               }

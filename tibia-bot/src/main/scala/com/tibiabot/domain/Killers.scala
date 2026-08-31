@@ -76,4 +76,67 @@ object Killers {
     case Seq(one) => one
     case _        => parts.init.mkString(", ") + " and " + parts.last
   }
+
+  /** The tail an over-long killer list ends with. Rendered rather than guessed:
+   *  its width is exactly what [[joinWithin]] has to reserve, and it grows with
+   *  the digits of the count. */
+  private def andMore(hidden: Int): String = s" and $hidden more"
+
+  /** [[joinNatural]], but never wider than `limit` characters.
+   *
+   *  A death in a big war can name more killers than Discord's entire 4096-char
+   *  description allows, and the list is rendered on a single line ("by a, b and
+   *  c."). A cut made at the last newline that fits can therefore only drop that
+   *  line whole — the killers, and the exiva list beneath them, disappeared and
+   *  left a lone "out of space" marker in their place. Fitting the list here is
+   *  what keeps the rest of the notification.
+   *
+   *  Entries are kept whole: half an entry is half a markdown link, which renders
+   *  as raw text rather than as a name. The ones that do not fit become a count,
+   *  and because that count needs room of its own, the last entry that would
+   *  otherwise fit may have to be given up to make space for it — which is why
+   *  this searches down from the full list rather than stopping at the first
+   *  entry to overflow. */
+  def joinWithin(parts: Seq[String], limit: Int): String = {
+    val full = joinNatural(parts)
+    if (parts.isEmpty || full.length <= limit) full
+    else {
+      val total = parts.size
+      // widths(k) = characters in the first k entries, separators aside
+      val widths = parts.iterator.map(_.length).scanLeft(0)(_ + _).toVector
+      // k entries joined by ", ", followed by the tail naming the rest
+      def width(kept: Int): Int = widths(kept) + 2 * (kept - 1) + andMore(total - kept).length
+      (total - 1).to(1, -1).find(width(_) <= limit) match {
+        case Some(kept) => parts.take(kept).mkString(", ") + andMore(total - kept)
+        // Not even the first entry fits beside its tail. Unreachable at Discord's
+        // limit with any real killer name, but the count still says what happened.
+        case None       => if (total == 1) "1 killer" else s"$total killers"
+      }
+    }
+  }
+
+  /** How many killers an exiva list names. Everyone in the kill can be exiva'd,
+   *  but a reader can only chase one at a time, and a war death lists dozens. */
+  val ExivaTargets: Int = 5
+
+  /** The killers an exiva list should name, hardest first.
+   *
+   *  Level is what ranks them: the high levels are the ones worth locating, and
+   *  they are also the ones still standing after the fight. A killer whose level
+   *  never resolved sorts last — unknown is not low, but it is not worth one of
+   *  the few slots ahead of a level that is known. Ties keep the order the death
+   *  reported them in.
+   *
+   *  A name can reach here twice, since a player and that player's summon are
+   *  separate killer entries and both resolve to the same person to exiva. That
+   *  is one name on the list, carrying the highest level seen for it. */
+  def exivaTargets(killers: Seq[(String, Option[Int])], limit: Int = ExivaTargets): Seq[String] =
+    killers.zipWithIndex
+      .groupBy { case ((name, _), _) => name }
+      .values
+      .map(entries => (entries.head._1._1, entries.flatMap(_._1._2).maxOption, entries.map(_._2).min))
+      .toSeq
+      .sortBy { case (_, level, order) => (-level.getOrElse(0), order) }
+      .take(limit)
+      .map(_._1)
 }
