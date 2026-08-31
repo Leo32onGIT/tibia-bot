@@ -2034,28 +2034,44 @@ function paintCard(spawn) {
 }
 
 /** Which spawns are shown, and in what order: the ones being hunted right now
- *  first, soonest to finish at the front, then everything else by how recently
- *  it was touched — and a spawn nobody has ever claimed last.
+ *  first, soonest to finish at the front, then the ones with a booking due,
+ *  soonest to start at the front, then everything else by how recently it was
+ *  touched — and a spawn nobody has ever claimed last.
  *
  *  A live hunt is the one thing on the board that is about to change, so the
  *  front of the list is ordered by when it changes. Letting a spawn go drops it
  *  behind everything still held, which is the point: the top of the board is
  *  for what is happening, not for who was last to do something.
  *
- *  The second tier is still plain recency, the rule Discord's forum follows for
- *  a post. A booked slot that has not come round yet does not count as activity
+ *  The middle tier is what is about to happen, on the same reasoning. It is the
+ *  blue cards exactly — booked and confirmed alike — and it is keyed off the
+ *  time the card prints rather than off the state word, so the tier a spawn is
+ *  in is the tier its face says it is in. A settled booking whose start the
+ *  server did not send has nothing to sort by and no time on the card either,
+ *  so it drops to recency with the rest.
+ *
+ *  The last tier is still plain recency, the rule Discord's forum follows for a
+ *  post. A booked slot that has not come round yet does not count as activity
  *  — see lastActivityByRespawn, without which a spawn booked for tomorrow
- *  outranked everything until tomorrow.
+ *  outranked everything until tomorrow. That is still the right rule down here:
+ *  the booking now lifts the card by its own tier, and letting it also count as
+ *  activity would rank a spawn twice for one fact.
  */
 function shownSpawns() {
-  const held = s => (s.state === 'claimed' ? 0 : 1);
+  const tier = s => (s.state === 'claimed' ? 0 : s.nextAt ? 1 : 2);
   // A held spawn with no window on it — both ends have to be present for the
   // server to send either — has no time left to read, so it sorts to the back
   // of the held group rather than turning the comparison into NaN.
   const ends = s => (s.endsAt ? new Date(s.endsAt).getTime() : Infinity);
+  const starts = s => new Date(s.nextAt).getTime();
   const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
-  return board.spawns.filter(matches).slice().sort((a, b) =>
-    held(a) - held(b) || (held(a) === 0 ? ends(a) - ends(b) : since(a) - since(b)));
+  return board.spawns.filter(matches).slice().sort((a, b) => {
+    const group = tier(a) - tier(b);
+    if (group) return group;
+    if (tier(a) === 0) return ends(a) - ends(b);
+    if (tier(a) === 1) return starts(a) - starts(b);
+    return since(a) - since(b);
+  });
 }
 
 /** Put the cards in the right order, making and removing only what changed.
