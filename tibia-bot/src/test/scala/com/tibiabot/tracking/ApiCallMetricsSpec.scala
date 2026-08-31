@@ -39,6 +39,41 @@ class ApiCallMetricsSpec extends AnyWordSpec with Matchers {
       snap.dimensions("status").values.map(_.total).sum shouldBe snap.total
     }
 
+    "let a dimension named on only some calls sum to that subset" in {
+      // How Discord's `ratelimited` dimension is fed (see app.Bootstrap): the
+      // operation again, but only for the 429s, so the dashboard can say which
+      // call was the one being throttled. The whole-total dimensions must be
+      // untouched by it — a 429 is still one call, not two.
+      val clock = new TestClock
+      val metrics = new ApiCallMetrics(clock.now)
+      def call(operation: String, status: String): Unit = {
+        val tags = Seq("operation" -> operation, "status" -> status)
+        metrics.record((if (status == "429") tags :+ ("ratelimited" -> operation) else tags): _*)
+      }
+      call("PATCH message", "429")
+      call("PATCH message", "200")
+      call("PATCH message", "200")
+      call("PATCH channel", "429")
+
+      val snap = metrics.snapshot()
+      snap.total shouldBe 4
+      snap.dimensions("operation").values.map(_.total).sum shouldBe 4
+      snap.dimensions("status").values.map(_.total).sum shouldBe 4
+      snap.dimensions("ratelimited").values.map(_.total).sum shouldBe 2
+      snap.dimensions("ratelimited")("PATCH message").total shouldBe 1
+      snap.dimensions("ratelimited")("PATCH channel").total shouldBe 1
+    }
+
+    "carry no entry at all for a partial dimension nothing has triggered" in {
+      // The healthy case, and the one the dashboard has to render without
+      // blowing up: no 429s means no `ratelimited` key, not a key of zeroes.
+      val clock = new TestClock
+      val metrics = new ApiCallMetrics(clock.now)
+      metrics.record("operation" -> "POST message", "status" -> "200")
+
+      metrics.snapshot().dimensions.get("ratelimited") shouldBe None
+    }
+
     "average per-second over a full minute rather than the current second" in {
       val clock = new TestClock
       val metrics = new ApiCallMetrics(clock.now)

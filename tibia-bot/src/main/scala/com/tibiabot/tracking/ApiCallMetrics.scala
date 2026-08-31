@@ -14,6 +14,15 @@ final case class ApiCallStats(total: Long, perSecond: Double, perHour: Long)
  *  and once under `status`), so the values within one dimension sum to the
  *  overall total but values across dimensions do not.
  *
+ *  A dimension supplied on only *some* calls is the exception, and a deliberate
+ *  one: it sums to that subset instead. Discord's `ratelimited` (see
+ *  `app.Bootstrap`) is recorded only for 429s, because "which call was
+ *  throttled" is a question the whole-total dimensions cannot answer between
+ *  them. A consumer that shares such a dimension against the overall total gets
+ *  a fraction of all traffic, which is meaningful; one that shares it within
+ *  the dimension gets a fraction of the subset, which is also meaningful. Both
+ *  are correct, so the caller has to say which it meant.
+ *
  *  `observedSeconds` is how long this counter has actually been collecting,
  *  capped at the hour window. Below 3600 the `perHour` figure is a partial
  *  hour rather than a rate, and the dashboard says so rather than showing a
@@ -134,9 +143,10 @@ private[tracking] object RollingCounter {
  *
  *  Each call is recorded once against the overall counter and once under each
  *  tag supplied, so one `record("endpoint" -> "/v4/world", "status" -> "200")`
- *  populates both breakdowns without double-counting the total. Every dimension
- *  therefore sums to the overall total, which is what lets the dashboard show a
- *  share per row.
+ *  populates both breakdowns without double-counting the total. A dimension
+ *  named on every call therefore sums to the overall total, which is what lets
+ *  the dashboard show a share per row; one named on only some calls sums to
+ *  that subset instead — see [[ApiCallSnapshot]].
  *
  *  Unlike [[WorldMetrics]]' fixed 15-minute counters (reset externally on a
  *  timer) and [[com.tibiabot.discord.RateLimitedSender]]'s per-label window

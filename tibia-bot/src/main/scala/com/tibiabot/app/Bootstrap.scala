@@ -37,10 +37,24 @@ object Bootstrap {
   private def countingInterceptor: okhttp3.Interceptor = (chain: okhttp3.Interceptor.Chain) => {
     val request = chain.request()
     val response = chain.proceed(request)
-    try ApiMetrics.discord.record(
-      "operation" -> DiscordApiRoute.operation(request.method(), request.url().encodedPath()),
-      "status" -> response.code().toString
-    ) catch { case _: Throwable => () }
+    try {
+      val status = response.code()
+      val operation = DiscordApiRoute.operation(request.method(), request.url().encodedPath())
+      // A third tag carrying the operation again, but only on the calls Discord
+      // rate-limited. "Which call is being throttled" is not answerable from
+      // the other two: each sums to the whole call total on its own, so a 10%
+      // 429 share beside a 73% PATCH-message share says nothing about whether
+      // those 429s were that operation's. Every route here sits in a different
+      // Discord bucket, so which one is at its ceiling is what decides where
+      // the pacing has to change.
+      //
+      // Added to the same record call rather than made a second one: `record`
+      // counts the overall total once per call, so recording twice would
+      // inflate the headline throughput by the 429 count and leave the other
+      // two dimensions no longer summing to it.
+      val tags = Seq("operation" -> operation, "status" -> status.toString)
+      ApiMetrics.discord.record((if (status == 429) tags :+ ("ratelimited" -> operation) else tags): _*)
+    } catch { case _: Throwable => () }
     response
   }
 

@@ -103,6 +103,12 @@ class TibiaBot(
   // Seeded from bot_cache.rename_cooldowns so a channel renamed moments before
   // a restart isn't immediately eligible for another rename (see
   // renameOnlineCategoryIfDue/renameOnlineChannelIfDue).
+  // Unlike every other timer here, this one is touched from two threads: the
+  // sweep decides a rename is due, and the send itself re-stamps it when the
+  // request actually leaves (see markRenamed). Hence the lock — a lost update
+  // here would let a channel be renamed inside Discord's 2-per-10-minutes
+  // window, which is the exact thing the cooldown exists to prevent.
+  private val renameTimerLock = new Object()
   private var onlineListCategoryTimer: Map[String, ZonedDateTime] = BotApp.getRenameCooldowns(world)
   private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -789,8 +795,9 @@ class TibiaBot(
    *
    *  Single-threaded by construction — scheduleWithFixedDelay never overlaps
    *  runs — which is what lets this and everything it calls own the online-list
-   *  timers (onlineListTimer, the purge timers, onlineListCategoryTimer)
-   *  without locking. */
+   *  timers (onlineListTimer and the purge timers) without locking.
+   *  onlineListCategoryTimer is the one exception — a rename re-stamps it from
+   *  the send's own thread, so that one carries a lock of its own. */
   private def onlineListSweep(): Unit = {
     try {
       // Before the first poll (or Redis warm-restore) lands there is no roster
@@ -1802,11 +1809,60 @@ class TibiaBot(
     )
   }
 
+  /** How long a channel or category must wait between renames.
+   *
+   *  Discord limits a channel's *name or topic* to 2 changes per 10 minutes —
+   *  a far tighter bucket than the 10-per-15s that every other field on the
+   *  channel gets, and one it has never documented. Seven minutes fits two
+   *  inside any ten-minute window with room to spare; the six this used to be
+   *  fitted exactly two and left nothing for jitter.
+   *
+   *  Spent against the clock the rename actually *sent* on, not the one it was
+   *  queued on — see [[markRenameSent]]. */
+  private val RenameCooldownMinutes = 7L
+
+  /** Open this channel's rename cooldown when the rename is queued, and store
+   *  it, so a rename that was decided just before a restart still holds the
+   *  channel back afterwards (see the seeding of onlineListCategoryTimer).
+   *
+   *  The stored time is the queued one rather than the sent one, and that is
+   *  the safe direction: it is the earlier of the two, so a restart can only
+   *  ever restore a cooldown that opened too early, never one that opened too
+   *  late. A rename that was queued and never sent leaves a channel holding a
+   *  stale name for one window, which is the cheap failure. */
+  private def markRenameQueued(entityId: String, at: ZonedDateTime): Unit = {
+    markRenameSent(entityId, at)
+    BotApp.recordRenameCooldown(world, entityId, at)
+  }
+
+  /** Re-open the cooldown from the moment the rename actually left, which is
+   *  what Discord's 2-per-10-minutes window is counted against — the shared
+   *  lane in between can hold an item for a while, and it is the spacing of
+   *  the requests Discord sees, not of our decisions to make them, that its
+   *  bucket measures.
+   *
+   *  In memory only, deliberately. This runs on the lane's drain thread, and
+   *  [[markRenameQueued]]'s store is a blocking database write; putting one on
+   *  that thread would let a slow database stall every other kind of post the
+   *  lane carries. The stored value stays the queued time, which is already
+   *  the conservative one. */
+  private def markRenameSent(entityId: String, at: ZonedDateTime): Unit =
+    renameTimerLock.synchronized { onlineListCategoryTimer = onlineListCategoryTimer + (entityId -> at) }
+
+  /** When this channel or category was last renamed. A time long past for one
+   *  this process has never renamed and that carried no stored cooldown, so a
+   *  first rename is always due. */
+  private def lastRenamedAt(entityId: String): ZonedDateTime =
+    renameTimerLock.synchronized {
+      onlineListCategoryTimer.getOrElse(entityId, TibiaBot.NeverRenamed)
+    }
+
   /** Renames a world's online-list category to reflect the live ally/enemy
-   *  counts (and the mass-log ⚡), throttled to at most once per 6-minute
-   *  window *actually spent renaming* — the window only advances when a
-   *  rename is genuinely dispatched, not on every check, so a channel whose
-   *  name is already correct doesn't burn its window and go stale later.
+   *  counts (and the mass-log ⚡), throttled to at most one rename per
+   *  [[RenameCooldownMinutes]] *actually spent renaming* — the window only
+   *  advances when a rename is genuinely dispatched, not on every check, so a
+   *  channel whose name is already correct doesn't burn its window and go
+   *  stale later.
    *  The name-change guard intentionally ignores the ⚡ suffix, matching the
    *  original — so the category re-renames once after a mass-log toggle.
    *  The actual send goes through the shared bot-wide background lane
@@ -1818,15 +1874,14 @@ class TibiaBot(
   private def renameOnlineCategoryIfDue(guild: Guild, categoryId: String, world: String, alliesCount: Int, enemiesCount: Int, masslogIcon: String): Unit = {
     val category = guild.getCategoryById(categoryId)
     if (category != null) {
-      val lastRename = onlineListCategoryTimer.getOrElse(categoryId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-      if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
+      val lastRename = lastRenamedAt(categoryId)
+      if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(RenameCooldownMinutes))) {
         val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
         if (category.getName != baseName) {
-          val renamedAt = ZonedDateTime.now()
-          onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> renamedAt)
-          BotApp.recordRenameCooldown(world, categoryId, renamedAt)
+          markRenameQueued(categoryId, ZonedDateTime.now())
           outboundSender.enqueue("editchannel", Some(categoryId)) { () =>
             try {
+              markRenameSent(categoryId, ZonedDateTime.now())
               category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
             } catch {
               case ex: Throwable => logger.warn(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
@@ -1838,22 +1893,21 @@ class TibiaBot(
   }
 
   /** Renames an online-list text channel to `targetName`, throttled to at most
-   *  once per 6-minute window *actually spent renaming* (tracked in
-   *  onlineListCategoryTimer, only advanced when a rename is genuinely
-   *  dispatched — see renameOnlineCategoryIfDue) and skipped when the name is
-   *  already correct. The actual send goes through the shared bot-wide
+   *  one rename per [[RenameCooldownMinutes]] *actually spent renaming*
+   *  (tracked in onlineListCategoryTimer, only advanced when a rename is
+   *  genuinely dispatched — see renameOnlineCategoryIfDue) and skipped when the
+   *  name is already correct. The actual send goes through the shared bot-wide
    *  background lane (`outboundSender`), keyed by channel id, same reasoning
    *  as above. Rename failures (e.g. missing Manage Channels) are logged,
    *  not fatal — `label` names the channel in the log line. */
   private def renameOnlineChannelIfDue(channel: TextChannel, targetName: String, label: String, guildId: String, guildName: String): Unit = {
-    val lastRename = onlineListCategoryTimer.getOrElse(channel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-    if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
+    val lastRename = lastRenamedAt(channel.getId)
+    if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(RenameCooldownMinutes))) {
       if (channel.getName != targetName) {
-        val renamedAt = ZonedDateTime.now()
-        onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> renamedAt)
-        BotApp.recordRenameCooldown(world, channel.getId, renamedAt)
+        markRenameQueued(channel.getId, ZonedDateTime.now())
         outboundSender.enqueue("editchannel", Some(channel.getId)) { () =>
           try {
+            markRenameSent(channel.getId, ZonedDateTime.now())
             channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)
           } catch {
             case ex: Throwable => logger.warn(s"Failed to rename the $label for Guild ID: '$guildId' Guild Name: '$guildName'", ex)
@@ -1892,6 +1946,11 @@ class TibiaBot(
 }
 
 object TibiaBot {
+  /** Stands in for "this has never been renamed" in the rename cooldown map.
+   *  Any time far enough in the past that the first rename is always due; the
+   *  literal it replaces was repeated at both call sites. */
+  val NeverRenamed: ZonedDateTime = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+
   /** How often a world re-polls. Named because two things depend on it and
    *  they must not drift apart: the stream's own tick, and the character age
    *  cache, which rounds each character's next fetch to the nearest poll and

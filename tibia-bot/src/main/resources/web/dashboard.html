@@ -812,11 +812,34 @@ function renderApiDetail(sourceKey, throughput, lanes) {
     return renderLaneGroup(lanes)
       + renderDetailGroup('By operation', '', 'Call', operations, '#a78bfa', throughput.total)
       + renderDetailGroup('By response', '', 'Status',
-          dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#a78bfa');
+          dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#a78bfa')
+      + renderRateLimitedGroup(throughput, operations);
   }
   return renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
     + renderDetailGroup('By response', '', 'Status',
         dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff');
+}
+
+// Which call Discord actually throttled. The two groups above cannot answer
+// this between them — each sums to the whole call total on its own, so a 10%
+// 429 share sitting under a 73% PATCH-message share says nothing about whose
+// 429s those were. Every route here sits in a different Discord bucket, so the
+// operation that is hitting its ceiling is the one whose pacing has to change.
+//
+// Shared against the call total, like the operation group, so a row reads as a
+// fraction of all Discord traffic and lines up with the operation row above it.
+// The note carries the number that actually decides anything: how often THIS
+// call is throttled, which a share of the total cannot show — a busy operation
+// and a rare one can post the same share at wildly different failure rates.
+function renderRateLimitedGroup(throughput, operations) {
+  const attempts = new Map(operations.map(r => [r.name, r.total]));
+  const rows = dimensionRows(throughput, 'ratelimited')
+    .filter(r => r.total > 0)
+    .map(r => {
+      const of = attempts.get(r.name);
+      return { ...r, color: 'var(--bad)', note: of ? `${(r.total / of * 100).toFixed(1)}% of its calls` : '' };
+    });
+  return renderDetailGroup('Rate limited', '429s by call', 'Call', rows, 'var(--bad)', throughput.total);
 }
 
 function renderApiSourceRow(bot, source, throughput, lanes) {
