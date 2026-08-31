@@ -12,7 +12,13 @@ scalaVersion := "2.13.18"
 //
 // Deliberately not -Xlint: it finds another hundred things in code that already
 // works, which is a separate piece of work from keeping the build quiet.
-scalacOptions ++= Seq("-deprecation", "-feature")
+// -release pins the JDK API this compiles against, which matters because the
+// runtime is fixed at Java 8 (`dockerBaseImage` below) while developers build
+// on newer JDKs. Without it, calling something like `java.time.Duration.toSeconds`
+// — added in Java 9 — compiles clean locally and fails on the deploy box, which
+// is the worst possible place to find out. With it, the local build fails
+// immediately and says which method.
+scalacOptions ++= Seq("-deprecation", "-feature", "-release:8")
 
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)

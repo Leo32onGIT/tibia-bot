@@ -51,7 +51,7 @@ final class FansiteCircuitBreaker(
     else if (now().isBefore(until)) true
     else {
       if (openUntil.compareAndSet(until, Instant.EPOCH))
-        logger.info(s"Fansite API circuit closed after ${openFor.toSeconds}s — resuming requests; the next failure reopens it")
+        logger.info(s"Fansite API circuit closed after ${openFor.getSeconds}s — resuming requests; the next failure reopens it")
       false
     }
   }
@@ -65,7 +65,7 @@ final class FansiteCircuitBreaker(
     if (previous == Instant.EPOCH || !now().isBefore(previous))
       logger.warn(
         s"Fansite API returned $status — treating it as an edge-level block and pausing all requests to it for " +
-          s"${openFor.toSeconds}s. TibiaData covers character fetches meanwhile, so deaths keep being detected, " +
+          s"${openFor.getSeconds}s. TibiaData covers character fetches meanwhile, so deaths keep being detected, " +
           "but the second source is contributing nothing until this clears.")
   }
 
