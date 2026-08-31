@@ -444,7 +444,9 @@ object JdaRespawnActions {
    *  Tuesday and let somebody plan straight into a weekly booking.
    *
    *  A predicted occurrence is dropped when a row already exists for it, so the
-   *  same slot is never drawn twice. The row wins because it knows things the
+   *  same slot is never drawn twice. A finished claim earns a block only if it
+   *  is long enough to read ([[JdaRespawnActions.MinimumDrawnMinutes]]) and was
+   *  not folded into a hunt that is already drawn. The row wins because it knows things the
    *  rule cannot: who has been asked, and whether the window was handed over.
    *
    *  Pure, so the whole expansion — including the one that spans local midnight
@@ -555,7 +557,29 @@ object JdaRespawnActions {
         // database, and the claim log is where it is read, which is the surface
         // that can say "booking cancelled" in words rather than as a mark on a
         // timetable.
-        if (!ended.isAfter(start)) None
+        //
+        // Two more evenings are not worth a block either.
+        //
+        // A claim folded into a hunt already running is the same evening as the
+        // block beside it. The hunt it merged into is already drawn, in full,
+        // under whoever is holding it — so drawing this one too puts the same
+        // time on the grid twice and reads as two people booked against each
+        // other. It lasts seconds, so it also draws as a hairline that says
+        // 21:00-21:00. The claim log still records it in words.
+        //
+        // And an evening dropped almost as soon as it started was not an
+        // evening. Below MinimumDrawnMinutes the block is too short to read,
+        // too short to click, and says nothing a reader of a timetable wants
+        // to know — while still occupying a slot that was, in practice, free.
+        // A hunt still running is never measured this way: it is drawn from
+        // `hunting` above and is short only because it has not finished yet.
+        val drawnMinutes = java.time.Duration.between(start, ended).toMinutes
+        val worthDrawing =
+          ended.isAfter(start) &&
+          !claim.outcome.contains(RespawnClaim.Outcome.Merged) &&
+          drawnMinutes >= JdaRespawnActions.MinimumDrawnMinutes
+
+        if (!worthDrawing) None
         else Some(CalendarSlot(
           scheduleId = claim.scheduleId,
           ownerId = claim.userId,
@@ -589,6 +613,18 @@ object JdaRespawnActions {
    *  A row from before outcomes were recorded has none. Those are read as
    *  hunted: an old row with a start and an end is a hunt that happened, and
    *  calling it a no-show would be inventing an accusation. */
+  /** Shortest finished claim still worth a block on the calendar.
+   *
+   *  The grid is read to answer "who had this spawn, and when". An evening that
+   *  lasted ten minutes answers neither: it draws too thin to read or click,
+   *  and it makes a slot that was free for the rest of the night look taken.
+   *  The claim log keeps every one of them, in words, which is the surface that
+   *  can explain a short evening rather than merely mark it.
+   *
+   *  Applies only to claims that are over. A live hunt is drawn however long it
+   *  has been running, because "short" there just means "started recently". */
+  val MinimumDrawnMinutes: Long = 15L
+
   private[web] def wasHunted(claim: RespawnClaim): Boolean = claim.outcome match {
     case None => true
     case Some(outcome) => outcome == RespawnClaim.Outcome.Completed ||
