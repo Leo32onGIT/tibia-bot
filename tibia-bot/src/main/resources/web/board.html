@@ -1461,8 +1461,32 @@ const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
  */
 const fmtClock12 = d =>
   `${d.getHours() % 12 === 0 ? 12 : d.getHours() % 12}:${pad(d.getMinutes())}${d.getHours() < 12 ? 'am' : 'pm'}`;
-const fmtDur = m =>
-  m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
+/** Every length of time the page prints, in one spelling: `45m`, `3hr`,
+ *  `3hr9m`.
+ *
+ *  There were three of these, and all three were on screen together with a
+ *  spawn window open — a hunt counting down in `189m`, its length beside it as
+ *  `3h9`, the next booking due `in 3h09m`. Three spellings of one unit is a
+ *  reader's problem before it is a tidiness one: `3h9` has to be decoded rather
+ *  than read, and two of them next to each other invite the question of whether
+ *  they are even the same measurement.
+ *
+ *  Hours are spelled `hr` rather than `h` because a bare `h` beside a bare `m`
+ *  reads as a pair of axes, and because the minutes that follow it are not
+ *  padded: `3h9` could be nine minutes or ninety, where `3hr9m` can only be one
+ *  of them. Under an hour it stays in plain minutes, the unit a short hunt is
+ *  actually counted in, and a whole hour drops the minutes rather than printing
+ *  a zero.
+ *
+ *  Nothing here has a width to fit: the labels that could collide are measured
+ *  at draw time (see the tank's `fits`) or ellipsised by CSS.
+ */
+const fmtDur = m => {
+  if (m == null) return '—';
+  if (m < 60) return `${m}m`;
+  const hours = Math.floor(m / 60), rest = m % 60;
+  return rest ? `${hours}hr${rest}m` : `${hours}hr`;
+};
 
 // Quantised rather than continuous, for the same reason the monitoring
 // dashboard's heat ramp is: a spawn should sit at a recognisable level rather
@@ -1502,37 +1526,27 @@ function minutesLeft(endsAt) {
   return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
 }
 
-/** What is left of a hunt, in units somebody can act on.
- *
- *  A claim can run for hours, and hours read as minutes stop being a quantity
- *  and become a number to divide: nobody reads 189m as "just over three hours"
- *  without doing the arithmetic, and the whole point of the line is to be
- *  glanced at. Under an hour it stays in plain minutes, which is where the
- *  minute is the unit worth having — the last stretch of a hunt is counted down
- *  in them.
- *
- *  Whole hours drop the minutes rather than printing a zero, as the page's other
- *  durations do. The count itself is unchanged: still rounded to the minute and
- *  floored at zero, so a hunt at the wire reads 0m and never goes negative.
- */
+/** What is left of a hunt. The count is [[minutesLeft]] — rounded to the minute
+ *  and floored at zero, so a hunt at the wire reads 0m and never goes negative —
+ *  and the spelling is the page's one duration spelling. */
 function timeLeft(endsAt) {
-  const mins = minutesLeft(endsAt);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60), rest = mins % 60;
-  return rest ? `${hours}hr${rest}m` : `${hours}hr`;
+  return fmtDur(minutesLeft(endsAt));
 }
 
 /** How far off something is, at the coarseness worth reading at that distance.
  *  Minutes while it is soon enough to wait for, hours through the evening, days
  *  once it is another day's problem — an evening seven days out does not become
- *  more useful for being told it is 168 hours. */
+ *  more useful for being told it is 168 hours.
+ *
+ *  Only the two ends are its own: `now`, which is a word rather than a length,
+ *  and the day count past which hours stop being worth counting. Everything
+ *  between is [[fmtDur]], because "in 3hr9m" and "3hr9m left" are the same
+ *  measurement seen from two sides and used to be spelled two ways. */
 function relTime(at) {
   const mins = Math.round((new Date(at).getTime() - Date.now()) / 60000);
   if (mins <= 0) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60), rest = mins % 60;
-  if (hours < 24) return rest ? `${hours}h${pad(rest)}m` : `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
+  if (mins < 60 * 24) return fmtDur(mins);
+  return `${Math.round(mins / 60 / 24)}d`;
 }
 
 /** Today, tomorrow, or the weekday — for a list whose whole point is *when*, a
