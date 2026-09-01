@@ -17,31 +17,25 @@ import scala.util.control.NonFatal
 
 /** Runs both character upstreams and decides what the bot is told.
  *
- *  Each source arrives here already wrapped in its own
- *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]], which is what makes this class
- *  small: the scheduling, the skipping and the replay of a stored sheet all
- *  happen below, so on any given poll this sees each source's latest copy —
- *  one perhaps freshly fetched, the other replayed — and only has to choose.
+ *  Each source arrives already wrapped in its own
+ *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]], which keeps this class small: the
+ *  scheduling, skipping and replay happen below, so this sees each source's latest
+ *  copy and only has to choose.
  *
- *  '''Why running both halves the wait rather than doubling the work for
- *  nothing.''' Both upstreams cache a character for 300s and rebuild that copy
- *  lazily, on the first request after it expires. So the phase of each window
- *  is set by when we first ask, not by any server-side schedule — it is ours to
- *  impose. Seeding the second source `phaseOffset` after the first leaves the
- *  two rebuilding in turn, and a death becomes visible at the next rebuild of
- *  *either*. The mean wait for a new copy falls from about half a window to
- *  about a quarter. It costs one extra request per character per window;
- *  neither upstream sees more traffic than it does today.
+ *  '''Why running both halves the wait rather than doubling the work.''' Both
+ *  upstreams cache a character for 300s and rebuild lazily on the first request
+ *  after expiry, so each window's phase is set by when we first ask — ours to
+ *  impose. Seeding the second `phaseOffset` after the first leaves them rebuilding
+ *  in turn, and a death becomes visible at the next rebuild of *either*: mean wait
+ *  falls from about half a window to a quarter, for one extra request per
+ *  character per window.
  *
- *  '''Monotonicity is not optional.''' Alternating between sources means the
- *  sheet handed downstream could otherwise go backwards whenever a fetch fails
- *  or the phases drift — and the stream reacts badly to that. `TibiaBot`
- *  already carries a six-minute settle on rename detection precisely because a
- *  sheet that regresses makes a rename "show up, disappear and show up again".
- *  Alternating sources would turn that occasional hazard into a systematic one,
- *  so a copy older than the last one served for that character is never
- *  returned. With the phases correct this never fires; it exists for when they
- *  are not. */
+ *  '''Monotonicity is not optional.''' Alternating sources means the sheet handed
+ *  downstream could go backwards whenever a fetch fails or phases drift, and the
+ *  stream reacts badly — `TibiaBot` already carries a six-minute settle on rename
+ *  detection because a regressing sheet makes a rename appear, vanish and reappear.
+ *  So a copy older than the last one served is never returned. With correct phases
+ *  this never fires; it exists for when they are not. */
 final class DualCharacterApi(
     tibiaData: TibiaApi,
     fansite: TibiaApi,
@@ -82,14 +76,11 @@ final class DualCharacterApi(
 
   private def originOf(sheet: CharacterResponse): Option[Instant] = OriginTimestamp.of(sheet.information)
 
-  /** Choose between two answers, newest wins.
-   *
-   *  A Right always beats a Left — an error from one source is exactly what the
-   *  other is here to cover, and this is where the second upstream stops being
-   *  only a latency win and becomes the failover the single-source design never
-   *  had. Between two Rights the newer origin wins; a sheet whose origin cannot
-   *  be read loses to one that can, since "unknown age" cannot be shown to be
-   *  an improvement. */
+  /** Choose between two answers, newest wins. A Right always beats a Left — an
+   *  error from one source is what the other is here to cover, which is where the
+   *  second upstream stops being a latency win and becomes failover. Between two
+   *  Rights the newer origin wins, and a sheet whose origin cannot be read loses,
+   *  since "unknown age" cannot be shown to be an improvement. */
   private def fresher(
       left: Either[String, CharacterResponse],
       right: Either[String, CharacterResponse]

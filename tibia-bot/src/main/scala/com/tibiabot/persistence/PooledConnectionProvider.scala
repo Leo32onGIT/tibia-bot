@@ -11,58 +11,40 @@ import scala.util.control.NonFatal
 /** A [[ConnectionProvider]] that keeps its connections instead of throwing them
  *  away.
  *
- *  [[JdbcConnectionProvider]] opens a connection per query and closes it again.
- *  Against a Postgres 16 asking for `scram-sha-256` that is a TCP handshake, an
- *  SSL probe, a four-message SCRAM exchange and a forked backend before a byte
- *  of SQL is sent — measured with pgbench on the development machine at 3.10ms
- *  a query against 0.139ms with the connection already open. Better than nine
- *  tenths of the cost of a small query was the greeting.
- *
- *  It adds up where the reads are small and numerous, which is the whole of the
- *  dashboard: opening one spawn's card was seven of these.
+ *  [[JdbcConnectionProvider]] opens one per query. Against a Postgres 16 asking
+ *  for `scram-sha-256` that is a TCP handshake, an SSL probe, a four-message SCRAM
+ *  exchange and a forked backend before any SQL — 3.10ms a query against 0.139ms
+ *  on an open connection. It adds up where reads are small and numerous, which is
+ *  the whole dashboard: one spawn's card was seven of them.
  *
  *  ==A pool per database==
- *  Every guild has a database of its own (`_<guildId>`), so "the pool" is really
- *  one pool per guild, started the first time that guild is asked about. They
- *  are deliberately allowed to hold nothing: `minimumIdle` is zero and an idle
- *  connection is dropped after [[PooledConnectionProvider.IdleTimeout]], so a
- *  guild nobody touches costs an empty pool object rather than a connection.
+ *  Every guild has its own database, so this is one pool per guild, started on
+ *  first use. They may hold nothing — `minimumIdle` is zero and idle connections
+ *  drop after [[PooledConnectionProvider.IdleTimeout]] — and they share one
+ *  housekeeping thread rather than starting one each.
  *
- *  The pools share one housekeeping thread rather than starting one each, which
- *  is the difference between a thread per guild and a thread.
+ *  ==A ceiling on how many pools hold connections==
+ *  "A guild nobody touches" did not survive contact with the bot: the roster
+ *  republishes every thirty seconds, the respawn sweep runs on its own beat, and
+ *  startup reads every guild — so no guild is idle long enough to give its
+ *  connection back. On a few hundred guilds that is Postgres' entire default
+ *  budget, which showed up as a second bot unable to connect at all.
  *
- *  ==A ceiling on how many pools may hold connections==
- *  "A guild nobody touches" is the part that did not survive contact with the
- *  bot, and [[PooledConnectionProvider.MaxPools]] is the answer to it. Several
- *  things here walk the whole fleet — the guild roster republishes every thirty
- *  seconds, the respawn sweep runs on its own thirty-second beat, and startup
- *  reads every guild's world list — so no guild is ever idle for the thirty
- *  seconds it would take to give its connection back. One connection per guild,
- *  held for the life of the process, is what that adds up to; on a bot in a few
- *  hundred guilds it is Postgres' entire default budget of a hundred, and the
- *  first thing to notice was a second bot against the same server being unable
- *  to open a connection at all.
- *
- *  So a borrow that would leave more than `MaxPools` pools alive closes the ones
- *  nobody has asked for in longest first. What that costs a fleet walk is the
- *  handshake it was paying before pooling existed — three milliseconds a guild,
- *  once every thirty seconds — and what it keeps is the case pooling was for:
- *  a guild being used right now stays at the warm end of that ordering for as
- *  long as it is being used. Only pools with nothing checked out are closed,
- *  since Hikari's shutdown aborts connections that are still in a query.
+ *  So a borrow that would exceed [[PooledConnectionProvider.MaxPools]] closes the
+ *  least recently asked-for pools first. A fleet walk pays the handshake it paid
+ *  before pooling existed; a guild in use stays warm. Only pools with nothing
+ *  checked out are closed, since Hikari's shutdown aborts live queries.
  *
  *  ==Pools that stop being used==
- *  A guild nobody has asked about for [[PooledConnectionProvider.PoolIdle]] has
- *  its pool closed and forgotten, so the map cannot grow for the life of the
- *  process. A borrow arriving at the same moment as that sweep can find itself
- *  holding a pool that has just been closed; it asks for a new one and tries
- *  again, which is cheaper to do than to reason about.
+ *  A guild untouched for [[PooledConnectionProvider.PoolIdle]] has its pool closed
+ *  and forgotten, so the map cannot grow for the life of the process. A borrow
+ *  racing that sweep may hold a just-closed pool; it asks for a new one and
+ *  retries, which is cheaper than reasoning about it.
  *
  *  ==What is deliberately not pooled==
- *  [[admin]] and [[premium]] are maintenance connections used a handful of times
- *  at startup and on a guild join, where a pool would be machinery for nothing.
- *  [[guildUnpooled]] is unpooled for a reason of its own — see the trait.
- */
+ *  [[admin]] and [[premium]] are maintenance connections used a handful of times,
+ *  where a pool is machinery for nothing. [[guildUnpooled]] has its own reason —
+ *  see the trait. */
 final class PooledConnectionProvider(
   host: String,
   password: String,
@@ -122,14 +104,12 @@ final class PooledConnectionProvider(
 
   override def evictGuild(guildId: String): Unit = discard(JdbcUrls.guild(host, guildId, port))
 
-  /** A connection from the pool for `url`, starting one if this is the first ask.
+  /** A connection from the pool for `url`, starting one on first ask.
    *
-   *  The retry is for the sweep: a pool taken from the map a moment before it
-   *  was closed hands out an error rather than a connection, and the answer to
-   *  that is the pool that replaced it. Bounded, so a database that is genuinely
-   *  refusing connections fails as itself rather than spinning.
-   *
-   *  A pool that cannot be started at all is not remembered — `computeIfAbsent`
+   *  The retry is for the sweep: a pool taken from the map just before it closed
+   *  hands out an error, and the answer is the pool that replaced it. Bounded, so
+   *  a database genuinely refusing connections fails as itself rather than
+   *  spinning. A pool that cannot start is not remembered — `computeIfAbsent`
    *  records nothing when its function throws — so a guild whose database is
    *  created later is simply asked again.
    */

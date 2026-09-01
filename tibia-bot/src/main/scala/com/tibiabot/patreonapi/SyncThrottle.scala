@@ -4,21 +4,14 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.FiniteDuration
 
 /** A "no more than once every `cooldown`" gate over the Patreon member sync,
- *  shared by the periodic sweep and `/setup`'s on-demand sync (see
- *  BotApp.syncPatreonMembersForSetup) so that one clock covers both: a
- *  `/setup` moments after a scheduled sync reuses what that just wrote rather
- *  than refetching it.
+ *  shared by the periodic sweep and `/setup`'s on-demand one so a `/setup` moments
+ *  after a scheduled sync reuses what it wrote. Split out of BotApp so it is
+ *  testable — BotApp is an `App` object, so touching it from a test boots the bot.
  *
- *  Split out of BotApp purely so this is testable — BotApp is an `App` object,
- *  so touching it from a test would boot the bot. Same pure-logic split
- *  PatreonApiClient's companion and PaywallService's `private[paywall]`
- *  methods already use.
- *
- *  Times are raw `System.nanoTime` readings, passed in rather than read here
- *  so tests can drive the clock. `Long.MinValue` is the "nothing has run yet"
- *  sentinel and is checked explicitly: `nanoTime`'s origin is arbitrary and
- *  may be negative, so no fixed number reliably reads as "long ago", and
- *  `now - Long.MinValue` would overflow rather than compare as a large gap. */
+ *  Times are raw `System.nanoTime` readings, passed in so tests can drive the
+ *  clock. `Long.MinValue` is the "nothing has run yet" sentinel and is checked
+ *  explicitly: `nanoTime`'s origin is arbitrary and may be negative, so no fixed
+ *  number reads as "long ago", and `now - Long.MinValue` would overflow. */
 final class SyncThrottle(cooldown: FiniteDuration) {
 
   private val lastStartedNanos = new AtomicLong(Long.MinValue)

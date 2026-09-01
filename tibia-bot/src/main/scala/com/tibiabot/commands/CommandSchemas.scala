@@ -308,23 +308,17 @@ object CommandSchemas {
   def excludedFromCommands(guildId: Long, selfUserId: String): Boolean =
     restrictedCommandGuildOwners.get(guildId).exists(_ != selfUserId)
 
-  /** The single place this decision is made — reused by the boot-time
-   *  registration loop, onGuildJoin, and ChannelService's post-/setup
-   *  upgrade, so a support guild with no world yet configured (were that to
-   *  ever happen) still correctly gets adminCommands, not just commands.
-   *  `excludeAll` is decided by the caller via `excludedFromCommands` (this
-   *  object deliberately stays decoupled from Config/BotRole/JDA) — when
-   *  true, an empty list is returned so the caller's bulk `updateCommands()`
-   *  call clears any commands this identity may have previously registered
-   *  there, not just skips future registration and leaves stale ones behind.
+  /** The single place this decision is made — reused by boot-time registration,
+   *  onGuildJoin and ChannelService's post-/setup upgrade, so a support guild with
+   *  no world configured still gets adminCommands.
    *
-   *  `respawnEnabled` is the respawn claim system's rollout gate, decided by
-   *  the caller from `Config.Respawn.enabled` (this object deliberately stays
-   *  decoupled from Config). `/stamina` stays in the lists above regardless, so
-   *  the schema is still covered by the routing spec, but it is filtered out of
-   *  what actually gets registered while the feature is off — prod and DEV run
-   *  the same image, and a command Discord shows but the bot won't service is
-   *  worse than no command at all. */
+   *  `excludeAll` and `respawnEnabled` are decided by the caller, since this object
+   *  stays decoupled from Config/BotRole/JDA. `excludeAll` returns an empty list so
+   *  the caller's bulk `updateCommands()` clears anything this identity registered
+   *  before, rather than leaving stale commands behind. `/stamina` stays in the
+   *  lists above so the routing spec still covers it, but is filtered out of what
+   *  is registered while the feature is off — a command Discord shows but the bot
+   *  will not service is worse than no command. */
   private def respawnCommandNames(command: SlashCommandData): Boolean =
     command.getName == staminaCommand.getName || command.getName == bookingsCommand.getName
 

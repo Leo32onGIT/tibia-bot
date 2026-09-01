@@ -14,32 +14,27 @@ import scala.util.control.NonFatal
 /** Caching decorator over a TibiaApi.
  *
  *  Caches only the freshness-tolerant, fan-out-heavy endpoints that hit the
- *  rate-limited local instance: boosted boss and boosted creature. These change
- *  once a day yet fan out per-guild at server-save, so caching collapses N
- *  identical calls into one. They are also the ONLY endpoints that may use that
- *  instance — it is rate-limited hard enough that the character firehose must
- *  never be pointed at it.
+ *  rate-limited local instance: boosted boss and creature. They change once a day
+ *  yet fan out per guild at server save, so caching collapses N identical calls
+ *  into one — and they are the ONLY endpoints that may use that instance, which is
+ *  rate-limited far too hard for the character firehose.
  *
- *  The per-cycle character firehose is deliberately passed straight through:
- *  caching it here would delay death detection, which is exactly what the bot
- *  exists to do quickly.
+ *  That firehose passes straight through: caching it would delay death detection,
+ *  which is what the bot exists to do quickly.
  *
- *  Boosted boss/creature flip at the 10:00 Berlin server save, and the
- *  change-detection that fires the daily notification compares the API value to
- *  the DB-stored one — so a value cached just before the save must NOT survive
- *  past it. We therefore key those entries by the current "save day" (the date
- *  of the most recent 10:00 Berlin boundary): the key rolls the instant the save
- *  day rolls, turning any pre-save entry into a guaranteed miss regardless of
- *  remaining TTL. The TTL still applies, purely to self-evict stale day keys.
+ *  Boosted values flip at the 10:00 Berlin server save, and the change detection
+ *  behind the daily notification compares the API value to the stored one — so a
+ *  value cached just before the save must NOT survive it. Those entries are keyed
+ *  by the current save day, so the key rolls when the save day does and any
+ *  pre-save entry is a guaranteed miss. The TTL only self-evicts stale day keys.
  *
- *  Caveat: JsonSupport.strFormat is asymmetric (unescape-on-read, plain-write),
- *  so a string carrying an HTML entity would decode differently on a cache hit
- *  vs a fresh fetch. Today's cached endpoints only carry fixed monster names /
- *  entity-free player names, so it cannot trigger; do NOT cache a
- *  free-form-text endpoint here without first making strFormat symmetric.
+ *  Caveat: JsonSupport.strFormat is asymmetric (unescape-on-read, plain-write), so
+ *  a string carrying an HTML entity decodes differently on a hit than on a fresh
+ *  fetch. Today's cached endpoints carry only fixed monster names, so it cannot
+ *  trigger — do NOT cache a free-form-text endpoint without fixing strFormat.
  *
- *  Cache misses, decode failures and cache errors all fall back to the
- *  underlying API, so Redis is strictly an optimisation. */
+ *  Misses, decode failures and cache errors all fall back to the underlying API,
+ *  so Redis is strictly an optimisation. */
 final class CachingTibiaApi(
     underlying: TibiaApi,
     cache: RedisCache,

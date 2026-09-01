@@ -1,9 +1,7 @@
 {$STATUS_DOMAIN} {
-	# The bot's two OAuth-gated areas: the members' respawn dashboard, and the
-	# owner's monitoring one. Both are served by the same process on 8080, and a
-	# single sign-in under /dashboard covers both — but each path has to be
-	# proxied explicitly, or it falls through to the GitHub Pages handler below
-	# and the area simply is not there.
+	# The bot's two OAuth-gated areas, both served by the same process on 8080,
+	# with one sign-in under /dashboard covering both. Each path must be proxied
+	# explicitly or it falls through to the GitHub Pages handler below.
 	handle /dashboard* {
 		reverse_proxy bot:8080
 	}
@@ -12,15 +10,12 @@
 		reverse_proxy bot:8080
 	}
 
-	# Everything else: pass through to the existing GitHub Pages landing page
-	# (Leo32onGIT/tibia-bot-resources), completely unauthenticated. GitHub's
-	# custom-domain routing (matching the CNAME file in that repo) is keyed to
-	# requests that arrive at GitHub Pages' own edge IPs with the right Host
-	# header and TLS SNI — connecting to the bare leo32ongit.github.io
-	# hostname instead routes by URL path (serving nothing useful at "/"), so
-	# the upstream here is one of GitHub Pages' documented edge IPs
-	# (185.199.108-111.153 are all equivalent) with SNI explicitly set to
-	# whatever Host the visitor requested.
+	# Everything else: unauthenticated pass-through to the GitHub Pages landing
+	# page (Leo32onGIT/tibia-bot-resources). GitHub's custom-domain routing is
+	# keyed to requests arriving at its own edge IPs with the right Host header
+	# and TLS SNI — the bare leo32ongit.github.io hostname routes by URL path and
+	# serves nothing at "/". Hence an edge IP (185.199.108-111.153 are
+	# equivalent) with SNI set to whatever Host the visitor requested.
 	handle {
 		reverse_proxy 185.199.108.153:443 {
 			header_up Host {http.request.host}

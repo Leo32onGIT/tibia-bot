@@ -8,16 +8,12 @@ import net.dv8tion.jda.api.entities.{Guild, User}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-/** [[RespawnActionPort]] against the real service.
- *
- *  Everything here funnels through `withActableGuild`, which is the one place
- *  the two preconditions a write has beyond permission are checked: this bot has
- *  to be *in* the guild to resolve it at all, and it has to be the identity that
- *  runs that guild's respawns. Several bot identities can share a guild and only
- *  the one that built its forum runs the lifecycle, so acting from the wrong one
- *  would write claims that the bot actually sending the reminders knows nothing
- *  about.
- */
+/** [[RespawnActionPort]] against the real service. Everything funnels through
+ *  `withActableGuild`, the one place a write's two preconditions beyond permission
+ *  are checked: this bot must be *in* the guild, and must be the identity that
+ *  runs its respawns. Several identities can share a guild and only the one that
+ *  built its forum runs the lifecycle, so acting from the wrong one writes claims
+ *  the bot sending the reminders knows nothing about. */
 final class JdaRespawnActions(
   discordGateway: DiscordGateway,
   respawnService: RespawnService,
@@ -80,22 +76,15 @@ final class JdaRespawnActions(
     Option(user.getName).filter(_.nonEmpty).getOrElse(user.getId)
 
   /** Both names a claim row is written with: the account, and what to call this
-   *  person on top of it.
+   *  person on top of it — the guild's nickname where the member is cached, else
+   *  the account's display name, which every user has.
    *
-   *  The guild's nickname where it has the member cached, and otherwise the
-   *  account's own display name — which every user has, so unlike the member
-   *  cache this cannot come back blank. That fallback is the whole point: the
-   *  bot builds its JDA with `createDefault` and no GUILD_MEMBERS intent, so the
-   *  member cache is a miss for nearly everybody, and every claim and booking
-   *  made from the dashboard was being written with no second name at all —
-   *  landing on the card as a bare account name while the same person booking
-   *  through Discord, where the interaction carries their member, got both.
-   *
-   *  It costs nothing: `retrieveUser` is the call [[displayName]] already made.
-   *  Retrieving the *member* instead would let the server's own nickname win
-   *  every time rather than only when cached, but at a REST round trip per
-   *  write for a name many guilds do not set.
-   */
+   *  That fallback is the point: JDA is built with no GUILD_MEMBERS intent, so the
+   *  member cache misses nearly everybody and every dashboard claim was written
+   *  with no second name, landing as a bare account name while the same person
+   *  booking through Discord got both. It costs nothing — `retrieveUser` is the
+   *  call [[displayName]] already made. Retrieving the *member* would let a
+   *  server nickname always win, at a REST round trip per write. */
   private def namesFor(guild: Guild, userId: String): (String, String) =
     try {
       Option(discordGateway.retrieveUser(userId)) match {
@@ -433,25 +422,21 @@ object JdaRespawnActions {
   import com.tibiabot.domain.{Respawn, RespawnClaim, RespawnSchedule}
   import com.tibiabot.respawn.RespawnBoardEntry
 
-  /** One spawn's window turned into blocks, from the three things that can put
-   *  one on the grid.
+  /** One spawn's window turned into blocks, from the three things that can put one
+   *  on the grid: a live hunt (the only one happening rather than promised), the
+   *  slots already written down (which know whether their owner has been asked),
+   *  and the occurrences a standing rule will produce but has not booked yet —
+   *  drawn too, or next Tuesday looks empty and somebody plans straight into a
+   *  weekly booking.
    *
-   *  A live hunt, which is the only block that is happening rather than
-   *  promised. The slots already written down, which are the ones that know
-   *  whether their owner has been asked. And the occurrences a standing rule
-   *  will produce but which have not been booked into rows yet — drawn as well,
-   *  because a week showing only the materialised ones would look empty next
-   *  Tuesday and let somebody plan straight into a weekly booking.
+   *  A predicted occurrence is dropped where a row exists, so a slot is never
+   *  drawn twice; the row wins because it knows what the rule cannot. A finished
+   *  claim earns a block only if long enough to read
+   *  ([[JdaRespawnActions.MinimumDrawnMinutes]]) and not folded into a hunt
+   *  already drawn.
    *
-   *  A predicted occurrence is dropped when a row already exists for it, so the
-   *  same slot is never drawn twice. A finished claim earns a block only if it
-   *  is long enough to read ([[JdaRespawnActions.MinimumDrawnMinutes]]) and was
-   *  not folded into a hunt that is already drawn. The row wins because it knows things the
-   *  rule cannot: who has been asked, and whether the window was handed over.
-   *
-   *  Pure, so the whole expansion — including the one that spans local midnight
-   *  and the one that has been asked about — can be checked without a database.
-   */
+   *  Pure, so the whole expansion — spanning local midnight included — is testable
+   *  without a database. */
   def assembleCalendar(respawn: Respawn,
                        active: Option[RespawnClaim],
                        reservations: List[RespawnClaim],
@@ -542,37 +527,20 @@ object JdaRespawnActions {
       claim.startsAt.filter(start => start.isBefore(to)).flatMap { start =>
         val due = claim.endsAt.getOrElse(start.plusMinutes(claim.durationMinutes.toLong))
         val ended = claim.endedAt.filter(_.isBefore(due)).getOrElse(due)
-        // A row that finished at or before it began never happened, and gets no
-        // block. Most of them are a booking given up before its evening came
-        // round: cancelling one leaves a history row that keeps the future start
-        // it was made for, so this is the one kind of history that is not in the
-        // past at all.
+        // Three kinds of row get no block, all for the same reason: a stub sits on
+        // a slot that is in practice free, and every reader that measures the grid
+        // takes it for a booking — so the evening refuses to be booked again and
+        // offers to be cancelled a second time. The claim log records all of them
+        // in words, which is the surface that can say "booking cancelled".
         //
-        // This used to be drawn a minute tall instead, on the reasoning that
-        // invisible is worse than absent. Absent is better: the stub sat on a
-        // slot that was free and every reader that measures the grid took it for
-        // a booking, so the evening somebody had *cancelled* refused to be
-        // booked again — by them or by anybody — and offered to be cancelled a
-        // second time. Nothing is lost by leaving it out. The row stays in the
-        // database, and the claim log is where it is read, which is the surface
-        // that can say "booking cancelled" in words rather than as a mark on a
-        // timetable.
-        //
-        // Two more evenings are not worth a block either.
-        //
-        // A claim folded into a hunt already running is the same evening as the
-        // block beside it. The hunt it merged into is already drawn, in full,
-        // under whoever is holding it — so drawing this one too puts the same
-        // time on the grid twice and reads as two people booked against each
-        // other. It lasts seconds, so it also draws as a hairline that says
-        // 21:00-21:00. The claim log still records it in words.
-        //
-        // And an evening dropped almost as soon as it started was not an
-        // evening. Below MinimumDrawnMinutes the block is too short to read,
-        // too short to click, and says nothing a reader of a timetable wants
-        // to know — while still occupying a slot that was, in practice, free.
-        // A hunt still running is never measured this way: it is drawn from
-        // `hunting` above and is short only because it has not finished yet.
+        // 1. Finished at or before it began — mostly a booking given up before its
+        //    evening came round, which is the one kind of history not in the past.
+        // 2. Folded into a hunt already running: the same evening as the block
+        //    beside it, so drawing both puts one time on the grid twice and reads
+        //    as two people booked against each other.
+        // 3. Dropped almost as soon as it started. Below MinimumDrawnMinutes a
+        //    block is too short to read or click. A hunt still running is never
+        //    measured this way — it is drawn from `hunting` above.
         val drawnMinutes = java.time.Duration.between(start, ended).toMinutes
         val worthDrawing =
           ended.isAfter(start) &&
@@ -602,27 +570,21 @@ object JdaRespawnActions {
       (finished ++ hunting ++ booked ++ predicted).sortBy(_.startsAt.toInstant))
   }
 
-  /** Whether anybody was actually on the spawn.
+  /** Whether anybody was actually on the spawn. Read off the outcome, not the
+   *  status: an evening hunted to its end and one nobody turned up for are both
+   *  closed rows with a window on them. The outcomes below are the ones only
+   *  reachable from a hunt in progress.
    *
-   *  Read off the outcome rather than off the status, because both kinds of row
-   *  finish the same way: an evening hunted to its end and an evening nobody
-   *  turned up for are both closed rows with a window on them. The outcomes
-   *  below are the ones that can only be reached from a hunt in progress —
-   *  everything else closed a booking that never started.
+   *  A row from before outcomes were recorded has none, and reads as hunted — an
+   *  old row with a start and an end is a hunt that happened, and calling it a
+   *  no-show would invent an accusation. */
+  /** Shortest finished claim still worth a block on the calendar. The grid answers
+   *  "who had this spawn, and when", which a ten-minute evening does not: it draws
+   *  too thin to read or click and makes a slot free all night look taken. The
+   *  claim log keeps every one in words.
    *
-   *  A row from before outcomes were recorded has none. Those are read as
-   *  hunted: an old row with a start and an end is a hunt that happened, and
-   *  calling it a no-show would be inventing an accusation. */
-  /** Shortest finished claim still worth a block on the calendar.
-   *
-   *  The grid is read to answer "who had this spawn, and when". An evening that
-   *  lasted ten minutes answers neither: it draws too thin to read or click,
-   *  and it makes a slot that was free for the rest of the night look taken.
-   *  The claim log keeps every one of them, in words, which is the surface that
-   *  can explain a short evening rather than merely mark it.
-   *
-   *  Applies only to claims that are over. A live hunt is drawn however long it
-   *  has been running, because "short" there just means "started recently". */
+   *  Only for claims that are over — a live hunt is drawn however long it has run,
+   *  since "short" there means "started recently". */
   val MinimumDrawnMinutes: Long = 15L
 
   private[web] def wasHunted(claim: RespawnClaim): Boolean = claim.outcome match {

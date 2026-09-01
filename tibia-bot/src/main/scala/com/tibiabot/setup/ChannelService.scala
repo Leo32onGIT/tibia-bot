@@ -106,19 +106,15 @@ final class ChannelService(
 
   /** The bot's own override on its "Violent Bot" category.
    *
-   *  MANAGE_PERMISSIONS is the load-bearing one. Discord only lets you write a
-   *  channel override if you either already hold every permission in it or hold
-   *  Manage Permissions *explicitly on that channel* — so without this, granting
-   *  the moderator role its access to the spawns forum fails, and takes the whole
-   *  forum setup down with it. The thread permissions are here for the same
-   *  reason: the forum override hands those to the moderator role, and you cannot
-   *  grant what you do not have.
+   *  MANAGE_PERMISSIONS is the load-bearing one: Discord only lets you write a
+   *  channel override if you hold every permission in it, or hold Manage
+   *  Permissions explicitly on that channel — so without it, granting the
+   *  moderator role access to the spawns forum fails and takes the forum setup
+   *  with it. The thread permissions are here for the same reason.
    *
-   *  Non-fatal. A bot invited without Manage Roles cannot grant itself Manage
-   *  Permissions either, and a guild in that position should still get its
-   *  channels — it just needs the permission adding by hand before the spawns
-   *  forum will set up.
-   */
+   *  Non-fatal: a bot invited without Manage Roles cannot grant itself this
+   *  either, and should still get its channels — the permission just needs adding
+   *  by hand before the spawns forum will set up. */
   private def setCategoryBotPerms(category: Category, botRole: Role): Unit =
     try {
       category.upsertPermissionOverride(botRole)
@@ -138,16 +134,13 @@ final class ChannelService(
           s"grants Manage Roles by hand", ex)
     }
 
-  /** The @everyone override on the bot's "Violent Bot" category.
+  /** The @everyone override on the bot's "Violent Bot" category. Members may see
+   *  it but not open posts or threads of their own. The spawns forum inherits from
+   *  here rather than carrying its own override, so this is where "one post per
+   *  respawn, created by the bot" is enforced.
    *
-   *  Members may see it — that is how they read the notifications channel and the
-   *  spawns forum — but may not open posts or threads of their own. The spawns
-   *  forum deliberately inherits from here rather than carrying its own override,
-   *  so this is where the "one post per respawn, created by the bot" rule is
-   *  actually enforced.
-   *
-   *  One helper for all four creation sites, so a new one can't quietly forget
-   *  the deny. `visible` is false on the path that hides the category entirely. */
+   *  One helper for all four creation sites, so a new one cannot forget the deny.
+   *  `visible` is false on the path that hides the category entirely. */
   private def setCategoryPublicPerms(category: Category, publicRole: Role, visible: Boolean): Unit = {
     val action = category.upsertPermissionOverride(publicRole)
       .grant(Permission.CREATE_PUBLIC_THREADS)
@@ -157,11 +150,9 @@ final class ChannelService(
   /** Reuse the guild's existing role of this name, or create it with the given
    *  colour. Used by /setup only; /repair looks up roles by stored id instead
    *  and creates its own replacements inline if they're missing. */
-  /** Create (or adopt) the guild's moderator role and remember its id.
-   *
-   *  Reuses an existing role of the same name, so a server that already made one
-   *  by hand — or is being repaired — keeps whatever members it already has
-   *  rather than getting a second, empty role. */
+  /** Create (or adopt) the guild's moderator role and remember its id. Reuses an
+   *  existing role of the same name, so a server that made one by hand — or is
+   *  being repaired — keeps its members rather than getting a second, empty role. */
   private def ensureModeratorRole(guild: Guild): Option[Role] =
     try {
       val role = getOrCreateRole(guild, com.tibiabot.commands.Permissions.ModeratorRoleName, new Color(114, 137, 218))
@@ -263,19 +254,17 @@ final class ChannelService(
     Button.secondary("bounty", " ").withEmoji(Emoji.fromFormatted(Config.bountyEmoji))
   )
 
-  /** The "the bot will poke" role-notification embed for a world. Built by
-   *  /setup (initial post), /fullbless (edits the existing message) and
-   *  /repair (reposts it). `level` is a String because /repair reads it
-   *  straight out of the stored world config; it is only ever interpolated.
+  /** The "the bot will poke" role-notification embed for a world. Built by /setup,
+   *  /fullbless (which edits it) and /repair (which reposts it). `level` is a
+   *  String because /repair reads it straight out of the stored world config.
    *
-   *  The last two lines describe a DM rather than a channel poke, so they say
-   *  so: a role that only ever messages you privately is a different promise
-   *  from one that mentions you in a channel, and the difference has to be
-   *  readable before anyone presses the button. */
+   *  The last two lines describe a DM rather than a channel poke and say so: a
+   *  role that only messages you privately is a different promise from one that
+   *  mentions you, and that has to be readable before anyone presses. */
   def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, bountyRoleId: String, level: String): MessageEmbed = {
-    // A world configured before bounties existed carries '0' here until /repair
-    // creates the role. `<@&0>` renders as a deleted role, which reads as
-    // something broken rather than as something not set up yet.
+    // A world configured before bounties existed carries '0' until /repair creates
+    // the role, and `<@&0>` renders as a deleted role — which reads as broken
+    // rather than as not set up yet.
     val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
     new EmbedBuilder()
       .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
@@ -309,17 +298,11 @@ final class ChannelService(
     else s"Catalogue: ${parts.mkString(", ")}."
   }
 
-  /** What the respawn system needs that this bot was not given.
-   *
-   *  Checked up front rather than discovered halfway through: the system is a
-   *  forum, a set of channel overrides, and threads it archives and un-archives.
-   *  Finding out at the third step leaves a guild holding a channel the bot
-   *  cannot manage.
-   *
-   *  Bots added before this feature existed were invited with a narrower set, so
-   *  this is the ordinary case for an existing server rather than an error — the
-   *  answer is a fresh invite, not a retry.
-   */
+  /** What the respawn system needs that this bot was not given. Checked up front
+   *  rather than discovered halfway through, which would leave a guild holding a
+   *  channel the bot cannot manage. Bots added before this feature were invited
+   *  with a narrower set, so this is ordinary for an existing server — the answer
+   *  is a fresh invite, not a retry. */
   private[setup] def missingRespawnPermissions(guild: Guild): List[Permission] =
     List(Permission.MANAGE_CHANNEL, Permission.MANAGE_ROLES, Permission.MANAGE_THREADS)
       .filterNot(permission => guild.getSelfMember.hasPermission(permission))
@@ -336,17 +319,12 @@ final class ChannelService(
   }
 
   /** Create the respawn system's `📅・sᴘᴀᴡɴs` forum and its pinned board post in
-   *  the guild's admin category, seeding the catalogue on the way.
+   *  the guild's admin category, seeding the catalogue on the way. Idempotent: an
+   *  existing forum is reported and left alone, so this doubles as the repair
+   *  path. Returns the text to show the caller.
    *
-   *  Idempotent by design: if the forum still exists this reports that and
-   *  changes nothing, so it doubles as the repair path. Returns the text to
-   *  show the caller.
-   *
-   *  Kept here rather than in RespawnService because it needs the guild's admin
-   *  category, which is `discord_info` state this class already owns — and
-   *  because `/setup` and `/repair` call it for exactly the same reason they
-   *  create the notifications channel.
-   */
+   *  Here rather than in RespawnService because it needs the guild's admin
+   *  category, which is `discord_info` state this class already owns. */
   def createSpawnsForum(guild: Guild): String = {
     if (!Config.Respawn.enabled) {
       return s"${Config.noEmoji} The respawn claim system isn't enabled on this bot."

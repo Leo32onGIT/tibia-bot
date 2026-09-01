@@ -13,40 +13,28 @@ object RespawnEmbeds {
   /** Green — the spawn is free to take. */
   val FreeColor: Int = 3066993
   /** The bot's red (as used for hunted activity and ally deaths) — a spawn that's
-   *  taken, and a claim that's over. Named for the colour rather than either
-   *  meaning, since one red serves both. */
+   *  taken, and a claim that's over. Named for the colour, since one red does both. */
   val RedColor: Int = 13773097
   /** The bot's yellow (see GuildActivity.activityColor) — a claim nearing its end. */
   val WarnColor: Int = 14397256
-  /** Blue — a booking, as opposed to a hunt someone claimed on the spot.
-   *
-   *  The same `#5b8cff` the member dashboard draws booked slots in (board.html's
-   *  `--st-booked`), so the colour means one thing across the website and
-   *  Discord: somebody reading a blue DM and a blue slot on the board is looking
-   *  at the same kind of thing. Keep the two in step if either moves. */
+  /** Blue — a booking, as opposed to a hunt claimed on the spot. The same
+   *  `#5b8cff` the dashboard draws booked slots in (board.html's `--st-booked`),
+   *  so the colour means one thing across the site and Discord. Keep them in step. */
   val BookedColor: Int = 5999871
 
-  /** The claim log's thumbnail: the in-game book, for the card that is one.
-   *
-   *  Written out rather than built through [[Urls.creatureImageUrl]] — that
-   *  helper's name parsing exists for creature names, and this is an item that
-   *  happens to resolve through the same wiki redirect. Same form as the other
-   *  fixed wiki pictures the bot uses (Rashid, Galthen's Satchel). */
+  /** The claim log's thumbnail. Written out rather than built through
+   *  [[Urls.creatureImageUrl]], whose name parsing is for creatures — this is an
+   *  item that happens to resolve through the same wiki redirect. */
   private val LogThumbnail: String =
     "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Tome_of_Knowledge.gif"
 
   /** A spawn as a link to its own forum post — how a spawn is named anywhere a
-   *  member is being told something about it.
+   *  member is told something about it.
    *
-   *  `<#id>` rather than the full `discord.com/channels/…` URL, because Discord
-   *  renders it as the post's name: the sentence still reads as the spawn's name
-   *  while being somewhere to click, and it follows the post if it is ever
-   *  renamed. It also renders the same in a DM as in the guild, which a member
-   *  reading "your hunt starts soon" is relying on.
-   *
-   *  Falls back to the bold name for a spawn with no post yet. Every spawn gets
-   *  one on its first claim, so that is a catalogue row nobody has ever hunted —
-   *  rare, but plain text there beats a link to nothing. */
+   *  `<#id>` rather than the full URL, because Discord renders it as the post's
+   *  name: the sentence still reads as the spawn's name, follows a rename, and
+   *  renders the same in a DM as in the guild. Falls back to the bold name for a
+   *  spawn with no post yet — a catalogue row nobody has ever hunted. */
   def spawnLink(respawn: Respawn): String =
     if (respawn.threadId.isEmpty || respawn.threadId == "0") s"**${respawn.displayName}**"
     else s"<#${respawn.threadId}>"
@@ -74,20 +62,16 @@ object RespawnEmbeds {
     else s"${remainder}m"
   }
 
-  /** How somebody is named on the surfaces the people hunting beside them read:
-   *  their Tibia character when they gave one, then the single Discord name
-   *  everybody calls them by.
+  /** How somebody is named on the surfaces their hunting partners read: their
+   *  Tibia character when they gave one, then the single Discord name everybody
+   *  calls them by.
    *
-   *  One Discord name rather than the account/nickname pair [[accountLabel]]
-   *  writes. What a card or a Book panel is opened for is who to go and ask, and
-   *  the name they'd be called in chat answers that on its own — the account
-   *  name beside it made every row half again as long to say a word nobody uses.
-   *  Somebody wearing a nickname to be taken for somebody else is a moderator's
-   *  problem, and [[spawnModeratorPanel]] still names the account.
+   *  One Discord name rather than [[accountLabel]]'s account/nickname pair — a
+   *  card is opened to find out who to ask, and the account name beside it made
+   *  every row half again as long for a word nobody uses. Impersonation is a
+   *  moderator's problem, and [[spawnModeratorPanel]] still names the account.
    *
-   *  Plain text either way — see [[Names.user]] for why none of these read as a
-   *  mention.
-   */
+   *  Plain text either way — see [[Names.user]] for why none of these mention. */
   private def personLabel(character: String, nickname: String, username: String): String =
     if (character.nonEmpty && username.nonEmpty) s"**$character** (${Names.called(nickname, username)})"
     else if (character.nonEmpty) s"**$character**"
@@ -126,41 +110,28 @@ object RespawnEmbeds {
 
   /** The Booked rows, with a person's identical bookings folded into one line.
    *
-   *  A recurring rule is already one row — it is listed as the next evening it
-   *  holds rather than as every evening it will ever hold. What this collapses is
-   *  the same booking made by hand: one person taking 7pm for two and a half
-   *  hours on seven separate days is seven rules, and so was seven rows, and a
-   *  card is not made more useful by saying one thing seven times. It is the same
-   *  fact a repeat label states, so it is stated the same way, on the soonest of
-   *  them, and the rest become a count.
+   *  A recurring rule is already one row. What this collapses is the same booking
+   *  made by hand: 7pm for two and a half hours on seven separate days is seven
+   *  rules and was seven rows. Stated the way a repeat label states it — on the
+   *  soonest, with the rest as a count.
    *
-   *  Same person, same hour, same length is the whole test. Grouping by person
-   *  alone would fold a Tuesday evening in with a Saturday morning, which are two
-   *  different things to anybody reading the list to find a free evening.
+   *  Same person, same hour, same length is the whole test; grouping by person
+   *  alone would fold a Tuesday evening in with a Saturday morning. A row already
+   *  carrying a note — a repeat label, or an outstanding request — stands alone,
+   *  since a count behind it would attach that note to the others.
    *
-   *  A row that already carries a note of its own — a repeat label, or the marker
-   *  saying somebody has asked for the slot — stands alone. Both say something
-   *  true only of that one row, which a count behind it would attach to the
-   *  others.
+   *  `zone` is the guild's, and the hour is compared in it: the rendered times are
+   *  Discord timestamps in each reader's own clock, so the grouping needs one
+   *  fixed clock. Any fixed zone agrees with any other on which bookings share an
+   *  hour, so every reader sees the same rows collapsed. */
+  /** The two sources a booked list has, as one list of entries. A booking exists
+   *  before its slot does — a row is written only once the start comes within the
+   *  look-ahead — so rows alone would answer "nothing booked" to somebody who just
+   *  booked it. `upcoming` is the rules with no row yet, decided by the caller,
+   *  which is the only thing that sees both.
    *
-   *  `zone` is the guild's, and the hour is compared in it: the rendered times
-   *  are Discord timestamps drawn in each reader's own clock, so the hour a
-   *  grouping is named for has to be one fixed clock's rather than nobody's. Any
-   *  fixed zone agrees with any other on which bookings share an hour, so every
-   *  reader sees the same rows collapsed — at their own time of day.
-   */
-  /** The two sources a booked list has, as one list of entries.
-   *
-   *  A booking exists before its slot does: a slot row is only written once its
-   *  start comes within the look-ahead, so one made for later in the week has
-   *  nothing but the rule behind it for days, and a list of rows alone would
-   *  answer "nothing booked" to somebody who had just booked it. `upcoming` is
-   *  the rules with no row yet, and the caller is what decides that, since only
-   *  it can see both.
-   *
-   *  Shared by the spawn's card and the Book panel because they list the same
-   *  bookings and differ only in how a row is drawn — which is what
-   *  [[collapseBooked]] takes a renderer for. */
+   *  Shared by the spawn's card and the Book panel, which list the same bookings
+   *  and differ only in how a row is drawn — hence [[collapseBooked]]'s renderer. */
   private def bookedEntries(reservations: List[RespawnClaim], upcoming: List[RespawnSchedule],
                             now: ZonedDateTime,
                             givenUp: Map[Long, Set[java.time.Instant]]): List[BookedEntry] =
@@ -210,15 +181,10 @@ object RespawnEmbeds {
       }
 
   /** The image for a spawn's thread — the main monster via the tibiawiki.com.br
-   *  redirect, reusing the same URL builder and name mappings the boosted
-   *  creature posts use. Falls back to a neutral sign for the many catalogue
-   *  entries whose main creature isn't set yet.
-   *
-   *  `mappings` (Config.creatureUrlMappings) and `fallback`
-   *  (Config.Respawn.fallbackImage) are passed in rather than read here, the
-   *  same way [[Urls.creatureImageUrl]] takes them — it keeps this object free
-   *  of config loading, which is what lets the whole presentation layer be
-   *  unit-tested without a populated environment. */
+   *  redirect, reusing what the boosted creature posts use. Falls back to a
+   *  neutral sign where no creature is set. `mappings` and `fallback` are passed
+   *  in rather than read here, keeping this object free of config loading so the
+   *  presentation layer is testable without a populated environment. */
   def imageFor(respawn: Respawn, mappings: Map[String, String], fallback: String): String =
     if (respawn.creature.nonEmpty) Urls.creatureImageUrl(respawn.creature, mappings)
     else fallback
@@ -356,36 +322,30 @@ object RespawnEmbeds {
     // The next ten bookings on this spawn, soonest first — what somebody
     // deciding when to book needs.
     //
-    // A marker rather than a highlight — an embed has no way to shade a line,
-    // and bolding alone doesn't survive a list where every name is bold. Filled
-    // for yours, hollow for everybody else's: one glyph pair from one Unicode
-    // block, so both rows are the same width and the dates line up with no
-    // spacing to tune. Padding a mismatched pair does not work here — Discord
-    // collapses a run of ordinary spaces to one. The small triangles rather than
-    // U+25B6/7, which some clients render as the emoji.
+    // A marker rather than a highlight: an embed cannot shade a line, and bolding
+    // doesn't survive a list where every name is bold. Filled for yours, hollow
+    // for others — one glyph pair from one Unicode block, so both rows are the
+    // same width and the dates line up. Padding a mismatched pair would not work:
+    // Discord collapses runs of spaces. Small triangles, not U+25B6/7, which some
+    // clients render as emoji.
     def marker(userId: String): String = if (userId == viewerId) "▸ " else "▹ "
-    // The same pair the claim card merges, and built the same way — but every
-    // booking, one row each, where the card folds a person's identical ones into
-    // a count.
+    // The same pair the claim card merges, built the same way, but one row per
+    // booking where the card folds a person's identical ones into a count.
     //
-    // Deliberately the two surfaces disagreeing. The card is the summary nobody
-    // opened: it is already in the thread, it has a field's 1024 characters to
-    // live in, and what it owes a passing reader is the shape of the week. This
-    // panel is what somebody pressed Bookings to see, and the question that
-    // press asks is which particular evenings are spoken for — a folded row
-    // names an hour and a count, which is exactly the specific booking it was
-    // opened to find.
+    // The two surfaces disagree deliberately. The card is a summary nobody opened,
+    // living in a field's 1024 characters, and owes a passing reader the shape of
+    // the week. This panel is what somebody pressed Bookings to see, and that
+    // press asks which particular evenings are spoken for — which a folded row
+    // hides behind an hour and a count.
     val ahead = bookedEntries(reservations, upcoming, now, givenUp)
 
-    // Sections of the description, and no fields at all. A field name is
-    // Discord's own section break, but it is drawn small and flat where a bold
-    // line of its own reads as a title — and the description holds four times
-    // what a field does, which is what lets the panel be one column of text
-    // rather than a paragraph followed by a boxed list.
+    // Sections of the description, no fields. A field name is Discord's own
+    // section break but is drawn small and flat, where a bold line reads as a
+    // title — and the description holds four times what a field does, which lets
+    // the panel be one column of text rather than a paragraph plus a boxed list.
     //
-    // Both lists are titled the same way, and named as a pair so it is plain
-    // which is the subset of which. The spawn's own card still titles its list
-    // "Booked"; that surface has no second list to pair with.
+    // Both lists are titled as a pair, so which is the subset of which is plain.
+    // The spawn's own card still says "Booked"; it has no second list to pair.
     val ordered = ahead.sortBy(_.start.toInstant).map { entry =>
       s"${marker(entry.userId)}${dateTime(entry.start)} · ${humanDuration(entry.minutes)} — " +
         s"${entry.who}${entry.note}"
@@ -636,23 +596,15 @@ object RespawnEmbeds {
       .addField("Autoclaim", if (settings.autoClaim) "On" else "Off", true)
       .build()
 
-  /** What a moderator actually changed about the server's rules, a line each.
+  /** What a moderator actually changed about the server's rules, a line each. For
+   *  the command log, which is an audit: posting the whole settings panel would
+   *  say six things where one moved and leave the reader to work out which.
    *
-   *  For the command log, which is an audit rather than a reading: the whole
-   *  settings panel posted after every edit would say six things where one of
-   *  them moved, and leave whoever reads that channel later to work out which.
-   *  So only the fields that differ, each as what it was and what it now is.
-   *
-   *  Empty when nothing moved, which is the caller's signal not to post at all —
-   *  a form submitted unchanged, or a toggle already at the value it was pushed
-   *  to, is not something that happened.
-   *
-   *  The labels are [[serverSettingsEmbed]]'s own, and the values are written
-   *  the way it writes them, so the two cannot come to describe the same setting
-   *  differently. `warnMinutes` is not here for the same reason it is not there:
-   *  it stopped being a per-guild setting, so nothing in this panel can change
-   *  it. Nor are the forum and board ids, which are plumbing rather than rules.
-   */
+   *  Empty when nothing moved, which signals the caller not to post at all.
+   *  Labels and values are [[serverSettingsEmbed]]'s, so the two cannot describe a
+   *  setting differently. `warnMinutes` is absent for the same reason it is absent
+   *  there — no longer per-guild — as are the forum and board ids, which are
+   *  plumbing rather than rules. */
   def settingsChanges(before: RespawnSettings, after: RespawnSettings): List[String] = {
     def line[A](label: String, was: A, now: A, show: A => String): Option[String] =
       if (was == now) None else Some(s"$label: **${show(was)}** → **${show(now)}**")
@@ -803,23 +755,15 @@ object RespawnEmbeds {
       ._1
       .reverse
 
-  /** The moderator claim log, for one spawn or for the whole guild.
-   *
-   *  Reverse-chronological and paged rather than exhaustive: the trail goes back
-   *  as far as the guild has existed, and every question a moderator actually
-   *  brings to it — who had this last night, is somebody sitting on it, did they
-   *  turn up — is answered by the recent end of it.
-   *
-   *  Nothing above the feed but the title. There used to be three inline fields
-   *  counting the week's hunts and naming the busiest spawn — read often enough
-   *  to keep, it turned out, by nobody: a moderator opens this with a question
-   *  about one spawn or one night, and a guild-wide tally answers neither while
-   *  pushing the rows that do answer them further down the card. */
+  /** The moderator claim log, for one spawn or the whole guild.
+   *  Reverse-chronological and paged: the trail goes back as far as the guild has
+   *  existed, and every question a moderator brings to it is answered by the
+   *  recent end. Nothing above the feed but the title — a guild-wide tally
+   *  answered neither of the questions people open this with, and pushed the rows
+   *  that do further down the card. */
   /** `heading` names what the log is scoped to when the feed cannot name it
-   *  itself — a member. A spawn's log and the guild's both leave it absent: the
-   *  spawn names itself on a group header, which for a one-spawn log is the only
-   *  header there is, and putting it in the title as well would print it twice
-   *  on a card that holds nothing else. */
+   *  itself — a member. Absent for a spawn's log and the guild's: a spawn names
+   *  itself on its group header, so the title would print it twice. */
   def claimLog(heading: Option[String], page: com.tibiabot.respawn.LogPage,
                names: Map[Long, String], maxPages: Int): MessageEmbed = {
     val embed = new EmbedBuilder()

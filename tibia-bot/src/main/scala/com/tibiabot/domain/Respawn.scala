@@ -4,16 +4,13 @@ import java.time.ZonedDateTime
 
 /** A claimable respawn in a guild's catalogue.
  *
- *  `threadId` is the guild's forum post for this spawn. It lives on the
- *  catalogue row rather than on a claim because one thread is reused for a
- *  spawn's whole life: created on the first claim, archived when the spawn goes
- *  free, un-archived on the next claim. That keeps thread count bounded by the
- *  catalogue size and keeps a spawn's history in one place.
+ *  `threadId` is the guild's forum post for this spawn. It lives on the catalogue
+ *  row rather than on a claim because one thread is reused for the spawn's whole
+ *  life — created on first claim, archived when it goes free — which bounds thread
+ *  count by catalogue size and keeps a spawn's history in one place.
  *
- *  `mapperLink` is stored but not rendered yet — the mapper button and minimap
- *  thumbnail are deliberately out of scope for now, so wiring them later is a
- *  display-only change with the data already present.
- */
+ *  `mapperLink` is stored but not rendered yet, so wiring the mapper button later
+ *  is a display-only change. */
 final case class Respawn(
   id: Long,
   code: String,
@@ -25,18 +22,13 @@ final case class Respawn(
   threadId: String,
   source: String,
   addedBy: String,
-  /** This spawn's own ceiling on how long a single claim may run, when it has
-   *  one. `None` — the usual case — means it follows the guild's
-   *  `RespawnSettings.maxDurationMinutes`, so retuning the server still moves
-   *  every spawn nobody has singled out.
+  /** This spawn's own ceiling on a single claim. `None` — the usual case — follows
+   *  the guild's `RespawnSettings.maxDurationMinutes`, so retuning the server
+   *  still moves every spawn nobody has singled out.
    *
-   *  It *replaces* the guild's number rather than capping it, so a spawn worth a
-   *  long session can be given one above the server's ceiling as well as below.
-   *  Read it through [[RespawnSettings.maxFor]] and never directly: the point of
-   *  that method is that no caller does this resolution by hand.
-   *
-   *  Defaulted so that the many places building one of these for a test — where
-   *  the ceiling is beside the point — need say nothing about it. */
+   *  It *replaces* the guild's number rather than capping it, so a spawn can be
+   *  set above the server ceiling as well as below. Read it through
+   *  [[RespawnSettings.maxFor]], never directly. */
   maxDurationMinutes: Option[Int] = None
 ) {
   /** "415 — Cult Orcs" — the forum post title and the way a spawn is named
@@ -92,10 +84,9 @@ final case class RespawnClaim(
   requestDeadline: Option[ZonedDateTime] = None,
   requesterUserId: Option[String] = None,
   requesterUserName: Option[String] = None,
-  /** What the guild calls whoever asked, kept beside their account name for the
-   *  same reason the owner's is: the DM putting the question names them, and a
-   *  request granted becomes their booking under both names. Cleared with the
-   *  rest of the request, so it never outlives the question it belongs to. */
+  /** What the guild calls whoever asked, kept beside their account name: the DM
+   *  names them, and a granted request becomes their booking under both. Cleared
+   *  with the rest of the request. */
   requesterNickname: Option[String] = None,
   /** The window the asker actually booked, which merely overlaps this slot
    *  rather than matching it — so granting the request has to create their
@@ -105,31 +96,24 @@ final case class RespawnClaim(
    *  ask; those hand over the slot as it stands. */
   requestedStartsAt: Option[ZonedDateTime] = None,
   requestedDurationMinutes: Option[Int] = None,
-  /** When this slot's owner said, in as many words, that they are hunting it —
-   *  by pressing Confirm on the reminder before it starts, or Take Claim once
-   *  it has. Empty on every ad-hoc claim, which needs no confirming: making one
-   *  is itself the act of turning up.
+  /** When this slot's owner said outright that they are hunting it — Confirm on
+   *  the reminder, or Take Claim once it started. Empty on an ad-hoc claim, where
+   *  making one is itself the act of turning up.
    *
-   *  Set once and never cleared. It is what makes a booking stop being
-   *  provisional: a confirmed slot can no longer be asked for (see
-   *  [[requestable]]) and is never swept away unhunted (see [[confirmBy]]). */
+   *  Set once and never cleared: it is what stops a booking being provisional. A
+   *  confirmed slot cannot be asked for (see [[requestable]]) and is never swept
+   *  away unhunted (see [[confirmBy]]). */
   confirmedAt: Option[ZonedDateTime] = None,
-  /** The deadline by which a booking that started on its own has to be
-   *  confirmed, or it is given up on the owner's behalf. Stamped by
-   *  `startReservation` and never cleared, so it also serves as the marker for
-   *  "this claim began as a booking rather than by somebody pressing Claim".
-   *
-   *  Empty on an ad-hoc claim, and on every row written before confirmation
-   *  existed — which is what keeps the sweep off hunts that were already
-   *  running when this shipped. */
+  /** The deadline by which a self-started booking must be confirmed, or it is
+   *  given up on the owner's behalf. Stamped by `startReservation` and never
+   *  cleared, so it also marks "this claim began as a booking". Empty on an ad-hoc
+   *  claim and on rows written before confirmation existed, which is what kept the
+   *  sweep off hunts already running when it shipped. */
   confirmBy: Option[ZonedDateTime] = None,
-  /** What this person is called in the guild, as they were called when they
-   *  took the spawn — their nickname where they have one, their display name
-   *  otherwise. Stamped rather than looked up: the rows outlive membership, and
-   *  a name resolved at render time is blank for everyone who has since left.
-   *
-   *  Last in the list only so adding it left every existing construction alone.
-   *  Empty on rows written before it existed, which read as the username. */
+  /** What the guild called this person when they took the spawn. Stamped rather
+   *  than looked up: rows outlive membership, and a name resolved at render time
+   *  is blank for everyone who has since left. Empty on rows written before it
+   *  existed, which read as the username. */
   nickname: String = ""
 ) {
   def isActive: Boolean = status == RespawnClaim.StatusActive
@@ -139,13 +123,10 @@ final case class RespawnClaim(
    *  free, or somebody else's, right now. */
   def isReserved: Boolean = status == RespawnClaim.StatusReserved
 
-  /** Whether this claim being given up means a handover is in flight and has to
-   *  move on to the next person.
-   *
-   *  True only for an *offered* claim. Somebody abandoning a mere queue place
-   *  changes nothing about the spawn — its holder is mid-hunt — and advancing a
-   *  handover closes out whoever it is replacing, so treating the two alike ended
-   *  a live hunt (or offered it away) because a third party left the queue. */
+  /** Whether giving this claim up means a handover is in flight and must move on.
+   *  True only for an *offered* claim: abandoning a queue place changes nothing
+   *  about the spawn, and advancing a handover closes out whoever it replaces, so
+   *  treating the two alike ended a live hunt because a third party left. */
   def leavingAdvancesHandover: Boolean = isOffered
 
   /** Whether a handover may legitimately finish this claim. Limbo is the marker
@@ -170,12 +151,9 @@ final case class RespawnClaim(
   /** Whether somebody is waiting on the owner's answer right now. */
   def requestPending: Boolean = isReserved && requesterUserId.isDefined
 
-  /** When a booked slot is due to finish, whatever time it actually starts.
-   *
-   *  A booking is a window rather than a stopwatch: a slot that starts late runs
-   *  to the end it was booked for, and the minutes lost to a late start are lost.
-   *  Running the full length from a late start would push it into whatever is
-   *  booked next, which is somebody else's hunt. */
+  /** When a booked slot is due to finish, whatever time it starts. A booking is a
+   *  window, not a stopwatch: a late start loses those minutes, because running
+   *  the full length would push into whatever is booked next. */
   def bookedEnd: Option[ZonedDateTime] =
     endsAt.orElse(startsAt.map(_.plusMinutes(durationMinutes.toLong)))
 
@@ -205,17 +183,13 @@ object RespawnClaim {
   /** Waiting for the current claim to end; `startsAt`/`endsAt` are empty
    *  because the start time isn't known until the claim ahead actually ends. */
   val StatusQueued: String = "queued"
-  /** Reached the front of the queue and been sent a handover offer by DM, but
-   *  hasn't pressed Claim yet. `offerExpiresAt` is the deadline; letting it
-   *  lapse is treated exactly like leaving the queue.
-   *
-   *  A separate status from `queued` so an unanswered offer can't be handed out
-   *  twice, and so the person isn't silently given a spawn they may have walked
-   *  away from. */
+  /** Reached the front of the queue and been sent a handover offer by DM, but has
+   *  not pressed Claim. `offerExpiresAt` is the deadline; lapsing is treated like
+   *  leaving the queue. Separate from `queued` so an unanswered offer cannot be
+   *  handed out twice, and nobody is silently given a spawn they walked away from. */
   val StatusOffered: String = "offered"
   /** A scheduled slot that hasn't started yet. Visible on the spawn's card so
-   *  people can plan around it — and, from phase 2, ask for it. Becomes
-   *  [[StatusActive]] when its time comes. */
+   *  people can plan around it and ask for it. Becomes [[StatusActive]] in time. */
   val StatusReserved: String = "reserved"
   /** Ran to completion. */
   val StatusFinished: String = "finished"
@@ -223,14 +197,11 @@ object RespawnClaim {
    *  insufficient stamina, or force-cleared by an admin. */
   val StatusCancelled: String = "cancelled"
 
-  /** Why a claim ended.
-   *
-   *  The status alone can't answer that — "cancelled" covers a member leaving
+  /** Why a claim ended. The status alone cannot say: "cancelled" covers leaving
    *  early, declining a handover, letting one lapse, running out of stamina and a
-   *  moderator stepping in, which are very different things when somebody is
-   *  auditing a dispute. Stored as a short string rather than an enum so an
-   *  unrecognised value from a future version reads as itself instead of failing
-   *  to parse. */
+   *  moderator stepping in — very different things when auditing a dispute. A
+   *  short string rather than an enum, so an unrecognised future value reads as
+   *  itself instead of failing to parse. */
   object Outcome {
     /** Ran its full time. */
     val Completed: String = "completed"
@@ -315,19 +286,14 @@ object RespawnClaim {
 /** A booking on a respawn: one slot, repeating on chosen weekdays or not at all.
  *
  *  The rule is an **anchor instant** plus a period, so a slot's time of day is
- *  pure arithmetic on instants and every time the bot shows is a Discord
- *  timestamp rendered in each reader's own zone.
+ *  pure arithmetic and every time shown is a Discord timestamp in the reader's own
+ *  zone. [[RespawnSchedule.daysOfWeek]] is the one part needing a calendar, read
+ *  in server time — the clock whose "Tuesday" a Tibia team means. `0` means it
+ *  does not repeat: a single slot held ahead of time.
  *
- *  [[RespawnSchedule.daysOfWeek]] is the one part that needs a calendar, and it
- *  is read in server time — the same clock the SS labels use, and the one whose
- *  "Tuesday" a Tibia team means when they say Tuesday. `0` means the booking
- *  does not repeat at all: a single slot, held ahead of time.
- *
- *  The trade on the anchor is that a slot stays fixed in absolute terms, so
- *  after a daylight saving change it lands an hour off relative to server time —
- *  and a slot within an hour of midnight can land on the neighbouring day.
- *  Editing the schedule re-anchors it.
- */
+ *  The trade on the anchor is that a slot is fixed in absolute terms, so after a
+ *  DST change it lands an hour off server time, and one near midnight can land on
+ *  the neighbouring day. Editing the schedule re-anchors it. */
 final case class RespawnSchedule(
   id: Long,
   respawnId: Long,
@@ -517,23 +483,17 @@ object RespawnSchedule {
     }
   }
 
-  /** Whether `schedule` has given up every day it would contest with
-   *  `candidate`, and so no longer stands in its way.
+  /** Whether `schedule` has given up every day it would contest with `candidate`.
    *
-   *  [[clash]] compares two rules, and a rule is a sentence about every day. It
-   *  cannot know that one of those days was handed to somebody else, or taken
-   *  off the calendar — that lives in the row for the day, and `settled` is the
-   *  starts of the days whose rows say they are over. Without this, giving a
-   *  Thursday away left the rule still defending it, and the next person to want
-   *  that evening was refused on behalf of a booking nobody was going to hunt.
+   *  [[clash]] compares two rules, and a rule speaks for every day; what became of
+   *  one day lives in that day's row, and `settled` holds the starts of the days
+   *  whose rows say they are over. Without this, giving a Thursday away left the
+   *  rule still defending it.
    *
-   *  All-or-nothing on purpose. A repeating rule that has given up one Thursday
-   *  still owns every other, so it takes every contested day being settled
-   *  before it stops counting. A day too far ahead to have a row has settled
-   *  nothing, which is what keeps [[ClashVerdict.TooFarAhead]] meaning what it
-   *  says rather than quietly becoming a yes — and why no contested day at all
-   *  inside the window is false rather than true.
-   */
+   *  All-or-nothing: a rule that gave up one Thursday still owns the rest, and a
+   *  day too far ahead to have a row has settled nothing — which keeps
+   *  [[ClashVerdict.TooFarAhead]] from quietly becoming a yes, and is why no
+   *  contested day inside the window is false rather than true. */
   def surrendered(schedule: RespawnSchedule, candidate: RespawnSchedule,
                   settled: Set[java.time.Instant],
                   from: ZonedDateTime, to: ZonedDateTime): Boolean = {
@@ -617,20 +577,14 @@ final case class RespawnSettings(
   /** How long someone has to accept a handover offer before it's assumed they
    *  walked away and the spawn moves on to the next person. */
   handoverMinutes: Int,
-  /** Whether a booked slot claims itself when it comes round.
+  /** Whether a booked slot claims itself when it comes round. On, the owner is
+   *  told the hunt started and nothing more is asked: no reminder, no Take Claim
+   *  deadline, no slot given up over an unread DM. Off, they have
+   *  `slot-confirm-minutes` to say they are there.
    *
-   *  On, its owner is told the hunt has started and nothing more is asked of
-   *  them: no reminder beforehand, no Take Claim deadline, no slot given up
-   *  because a DM went unread. Off, they have `slot-confirm-minutes` from the
-   *  start to say they are there or lose it.
-   *
-   *  Either way it leaves the *contested* case alone. Somebody trying to book
-   *  over a slot still puts "are you hunting tonight?" to its owner, and that is
-   *  still answered by hand — this setting is about the confirmations nobody
-   *  asked for, not the one somebody did.
-   *
-   *  Defaulted so the many places building one of these for a test say nothing
-   *  about it, and true because that is the behaviour a guild gets on setup. */
+   *  Either way the *contested* case is untouched: somebody booking over a slot
+   *  still puts "are you hunting tonight?" to its owner. This governs the
+   *  confirmations nobody asked for, not the one somebody did. */
   autoClaim: Boolean = true
 ) {
   /** The longest a single claim on `respawn` may run.
@@ -638,29 +592,23 @@ final case class RespawnSettings(
    *  The one place the guild ceiling and a spawn's own override are reconciled.
    *  Every check that used to read `maxDurationMinutes` straight off these
    *  settings goes through here instead — claiming, extending, a moderator
-   *  setting somebody else's length, and booking a repeating slot — because ten
-   *  call sites each doing their own resolution is how a limit ends up
-   *  disagreeing with itself depending on which door you came in.
+   *  setting somebody else's length, and booking a repeating slot — since ten call
+   *  sites each resolving it themselves is how a limit ends up disagreeing with
+   *  itself depending which door you came in.
    *
-   *  A spawn's own number wins outright, above the guild's as well as below.
-   *  "Maximum claim time for this spawn" reads as an absolute, and an admin who
-   *  types six hours on a raid spawn should not have it silently clamped to the
-   *  server's four.
+   *  A spawn's own number wins outright, above the guild's as well as below: six
+   *  hours typed on a raid spawn should not be clamped to the server's four.
    *
-   *  Not applied to a member's *personal* default — see
-   *  `RespawnService.saveUserPrefs`. A preference with no spawn attached has no
-   *  spawn's ceiling to be measured against, so that one stays guild-level. */
+   *  Not applied to a member's *personal* default (see
+   *  `RespawnService.saveUserPrefs`), which has no spawn to be measured against. */
   def maxFor(respawn: Respawn): Int =
     respawn.maxDurationMinutes.getOrElse(maxDurationMinutes)
 }
 
 /** One member's own preferences, overriding the guild defaults for their own
- *  claims. Set through the Config button on the spawns board.
- *
- *  Both are `None` until the member changes them, which is what lets a guild
- *  retune its defaults and have everyone who never expressed a preference
- *  follow along.
- */
+ *  claims. Set through the Config button on the spawns board. Both are `None`
+ *  until changed, which lets a guild retune its defaults and have everyone who
+ *  never expressed a preference follow along. */
 final case class RespawnUserPrefs(
   userId: String,
   /** How long their claims run when they don't say otherwise. */

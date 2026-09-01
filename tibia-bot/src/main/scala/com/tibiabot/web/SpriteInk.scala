@@ -26,14 +26,10 @@ final case class InkBox(canvasWidth: Int, canvasHeight: Int,
   def nudgeY: Double = (canvasHeight / 2.0 - (top + bottom) / 2.0) / canvasHeight
 }
 
-/** How far a sprite's art should be moved, on each axis, as a fraction of that
- *  axis of the canvas.
- *
- *  Fractions rather than counts of pixels because the same file is painted at
- *  wildly different sizes — a little over natural size on a card, a dozen times
- *  it in the window's watermark — so a pixel count right for one would be
- *  absurd on the other. Each surface multiplies by whatever it painted.
- */
+/** How far a sprite's art should move on each axis, as a fraction of that axis of
+ *  the canvas. Fractions rather than pixels because the same file is painted at
+ *  wildly different sizes — near natural size on a card, a dozen times it in the
+ *  watermark — so each surface multiplies by whatever it painted. */
 final case class SpriteNudge(x: Double, y: Double) {
   def isZero: Boolean = x == 0.0 && y == 0.0
 }
@@ -45,29 +41,24 @@ object SpriteNudge {
 
 /** Where a creature actually is inside its sprite file.
  *
- *  Tibia sprites are drawn standing on the bottom of their cell, and the cell
- *  is often bigger than the creature — the Misguided Bully is a 64x64 file with
- *  the creature in its lower half. `object-fit: contain` centres the *canvas*,
- *  so it centres the empty air along with it and the creature comes out low.
- *  Nothing in CSS can see past the canvas, so the answer is measured here and
- *  sent to the page, which shifts by what it is told.
+ *  Tibia sprites stand on the bottom of a cell often bigger than the creature —
+ *  the Misguided Bully is a 64x64 file with the creature in its lower half.
+ *  `object-fit: contain` centres the *canvas*, empty air included, so the creature
+ *  comes out low. CSS cannot see past the canvas, so this is measured here and the
+ *  page shifts by what it is told.
  *
- *  Both axes are measured, though they are not equally common: of thirty real
- *  sprites, vertical offsets are the rule and run to a quarter of the canvas,
- *  while all but four sit horizontally centred to within half a pixel. The
- *  horizontal correction therefore moves almost nothing — except for a sprite
- *  like the Mitmah Seer, drawn into the corner of its canvas, which it moves a
- *  long way.
+ *  Both axes are measured though they differ in weight: of thirty real sprites,
+ *  vertical offsets are the rule and run to a quarter of the canvas, while all but
+ *  four are horizontally centred to within half a pixel. The exception is a sprite
+ *  like the Mitmah Seer, drawn into its corner.
  *
- *  Worth knowing about that case: a creature whose ink reaches the canvas edge
- *  has been cut off by its own file, and centring brings that cut edge in from
- *  under the card's own edge, where it was hidden, to somewhere it can be seen.
- *  That is the file being wrong rather than this being wrong, and it is the
- *  price of putting the creature where it belongs.
+ *  Note that a creature whose ink reaches the canvas edge was cut off by its own
+ *  file, and centring brings that cut edge out from under the card's edge where it
+ *  was hidden. That is the file being wrong, and the price of putting the creature
+ *  where it belongs.
  *
- *  Deliberately free of everything else: bytes in, two numbers out. No cache,
- *  no filesystem, no config. [[CreatureSpriteCache]] decides when to ask.
- */
+ *  Bytes in, two numbers out: no cache, filesystem or config.
+ *  [[CreatureSpriteCache]] decides when to ask. */
 object SpriteInk extends StrictLogging {
 
   /** Alpha at or above which a pixel counts as drawn. GIF transparency is all

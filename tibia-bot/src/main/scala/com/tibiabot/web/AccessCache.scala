@@ -5,43 +5,34 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Remembers what a visitor was allowed to do.
  *
- *  Resolving access asks Discord whether somebody is a member of a guild and
- *  which channels they can see, which is a REST call — the bot keeps no member
- *  cache. That was being paid on *every* request, including the poll each open
- *  tab makes every ten seconds, so simply having the board open cost a round
- *  trip to Discord six times a minute and put a few hundred milliseconds on
- *  every read.
+ *  Resolving access is a Discord REST call — the bot keeps no member cache — and
+ *  it was paid on *every* request, including the ten-second poll each open tab
+ *  makes, so having the board open cost six round trips a minute.
  *
- *  Permissions do change, though, so this is a memory rather than a store.
- *  Anything that acts on somebody else's claim ignores it entirely and resolves
- *  live — see [[DashboardAccessService.accessFor]] — so the worst a stale entry
- *  can do is let somebody *read* a board they were removed from moments ago.
+ *  Permissions change, so this is a memory rather than a store. Anything acting on
+ *  somebody else's claim ignores it and resolves live (see
+ *  [[DashboardAccessService.accessFor]]), so the worst a stale entry does is let
+ *  somebody *read* a board they were removed from moments ago.
  *
  *  ==Two horizons==
- *  An entry passes through three states rather than two, because "old enough to
- *  refresh" and "too old to use" are different questions and were being
- *  answered with one number.
+ *  Three states rather than two, because "old enough to refresh" and "too old to
+ *  use" are different questions that were answered with one number.
  *
  *   - Fresh, until `staleAfter`: used as it stands.
- *   - Stale, until `hardTtl`: still handed to the reader, but the reader is
- *     expected to kick off a refresh behind them — see
+ *   - Stale, until `hardTtl`: still handed to the reader, who is expected to kick
+ *     off a refresh behind them — see
  *     [[DashboardAccessService.rememberedReportFor]].
- *   - Gone: resolved from scratch, with the reader waiting, as a cold entry
- *     always was.
+ *   - Gone: resolved from scratch with the reader waiting.
  *
- *  The middle state is what lets a busy dashboard scale. With one horizon,
- *  every entry falling due put a blocking chain of Discord calls in front of
- *  whichever poll happened to arrive at that moment — so the cost of resolving
- *  access was paid *on the request path*, by a random unlucky reader, over and
- *  over across a large enough dashboard. Serving the old answer and refreshing
- *  behind it takes that work off the request path without making anybody's
- *  answer any older than it would have been: the refresh fires at exactly the
- *  moment the old code would have re-resolved.
+ *  The middle state is what lets a busy dashboard scale. With one horizon, every
+ *  entry falling due put a blocking chain of Discord calls in front of whichever
+ *  poll arrived at that moment, so the cost was paid on the request path by a
+ *  random unlucky reader. Refreshing behind the old answer takes that off the
+ *  request path without making anybody's answer older: the refresh fires exactly
+ *  when the old code would have re-resolved.
  *
- *  Entries are dropped on read once expired, and the whole map is swept when it
- *  grows past a bound, so an idle process does not hold a row per visitor for
- *  ever.
- */
+ *  Expired entries are dropped on read and the map is swept past a bound, so an
+ *  idle process does not hold a row per visitor for ever. */
 final class AccessCache(staleAfter: Duration,
                         /** How long past `staleAfter` an answer may still be
                          *  served while a refresh is tried. Bounds how long a
@@ -130,24 +121,18 @@ object AccessCache {
 
   /** How long an answer stands before it is worth resolving again.
    *
-   *  Was forty-five seconds, chosen so a permission change was felt inside a
-   *  minute back when every expiry was paid by a reader waiting on Discord. Two
-   *  things make three minutes the better number now. A refresh no longer
-   *  blocks anybody, so the only thing a shorter window buys is a smaller
-   *  window in which a *read* can be stale — moderator actions are resolved
-   *  live and are not governed by this at all. And the Discord REST calls it
-   *  costs are the binding constraint on how many people can have the dashboard
-   *  open at once: the rate is visitors divided by this number, against a
-   *  global budget of about fifty calls a second shared with everything else
-   *  the bot does. At forty-five seconds a few hundred visitors were worth a
-   *  fifth of that budget on their own.
+   *  Was forty-five seconds, from when every expiry was paid by a reader waiting on
+   *  Discord. Two things make three minutes better now: a refresh no longer blocks
+   *  anybody, so a shorter window only shrinks how long a *read* can be stale
+   *  (moderator actions resolve live and are not governed by this); and the
+   *  Discord calls are the binding constraint on how many people can have the
+   *  dashboard open — the rate is visitors divided by this number, against a
+   *  global budget of ~50 calls a second, and at forty-five seconds a few hundred
+   *  visitors took a fifth of it.
    *
-   *  So the trade is: somebody removed from a channel can keep *reading* that
-   *  board for up to three minutes rather than up to one. They cannot act on
-   *  anybody else's claim in that window — see
-   *  [[DashboardAccessService.accessIn]] — which is what makes the longer
-   *  window affordable.
-   */
+   *  The trade: somebody removed from a channel can keep *reading* that board for
+   *  three minutes rather than one. They cannot act on anybody else's claim in
+   *  that window — see [[DashboardAccessService.accessIn]]. */
   val DefaultStaleAfter: Duration = Duration.ofMinutes(3)
 
   /** The outer horizon: how long an answer may be served while refreshes are

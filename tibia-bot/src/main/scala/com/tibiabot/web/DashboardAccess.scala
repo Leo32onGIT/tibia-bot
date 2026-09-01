@@ -1,14 +1,10 @@
 package com.tibiabot.web
 
-/** What someone may do on the respawn dashboard within one guild.
- *
- *  The tiers nest rather than being independent flags, because
- *  [[com.tibiabot.commands.Permissions.isModerator]] already treats Manage
- *  Server as implying the moderator role — somebody who can administer the
- *  server can obviously also move a claim. Modelling them as a ladder keeps a
- *  route's guard a single comparison and makes it impossible to write a check
- *  that accidentally excludes admins.
- */
+/** What someone may do on the respawn dashboard within one guild. The tiers nest
+ *  rather than being independent flags, because
+ *  [[com.tibiabot.commands.Permissions.isModerator]] already treats Manage Server
+ *  as implying the moderator role. A ladder keeps a route's guard to one
+ *  comparison and makes a check that accidentally excludes admins impossible. */
 sealed abstract class AccessTier(val rank: Int, val name: String) {
   /** Whether this tier is sufficient where `required` is asked for. */
   def atLeast(required: AccessTier): Boolean = rank >= required.rank
@@ -46,15 +42,12 @@ object AccessTier {
   def byName(name: String): Option[AccessTier] = All.find(_.name == name)
 }
 
-/** One guild a visitor may use the respawn dashboard in, and the worlds within
- *  it whose channels they can see.
- *
- *  `worlds` is what the visitor proved access *through*, not a filter on what
- *  they will then see: the respawn catalogue is guild-wide (`Respawn.world` is
- *  stored but nothing reads it), so a guild's whole catalogue is in scope once
- *  any one of its worlds is visible. Keeping the list is still worth it — it is
- *  what the guild picker shows to tell two entries apart, and it is the
- *  evidence behind the decision. */
+/** One guild a visitor may use the respawn dashboard in, and the worlds within it
+ *  whose channels they can see. `worlds` is what they proved access *through*, not
+ *  a filter on what they see: the catalogue is guild-wide, so all of it is in
+ *  scope once any one world is visible. The list is still worth keeping — it is
+ *  what the picker shows to tell two entries apart, and the evidence behind the
+ *  decision. */
 final case class GuildAccess(
   guildId: String,
   guildName: String,
@@ -69,14 +62,10 @@ final case class GuildAccess(
   iconUrl: Option[String] = None
 )
 
-/** A guild that could not be resolved this time round.
- *
- *  Not the same as one the visitor may not use — that one is simply absent.
- *  This is a guild whose answer never arrived: a rate-limited Discord lookup,
- *  or another bot in the fleet that did not reply inside its second. The name
- *  is whatever was known without asking, which is the guild's own name locally
- *  and the roster's copy of it for a guild run elsewhere.
- */
+/** A guild that could not be resolved this time round — not one the visitor may
+ *  not use, which is simply absent, but one whose answer never arrived: a
+ *  rate-limited Discord lookup, or a bot that did not reply in time. The name is
+ *  whatever was known without asking. */
 final case class UnreachableGuild(guildId: String, guildName: String)
 
 /** Everything one resolution pass found out, including what it failed to find

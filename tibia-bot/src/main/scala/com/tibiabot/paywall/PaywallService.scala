@@ -9,37 +9,26 @@ import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters._
 
-/** Ties ongoing bot activity to a Patreon subscription via a seat system:
- *  each supporter gets `seatLimit` seats (adjustable per-user via
- *  [[effectiveSeatLimit]] — a dashboard-granted override on top of the flat
- *  default), and running `/setup` for a (guild, world) pair assigns one —
- *  see [[com.tibiabot.setup.ChannelService]]. A positive seat-count
- *  adjustment also bypasses the underlying subscription check entirely (see
- *  [[callerIsSubscribed]]) — the dashboard's "grant extra seats" admin action
- *  doubles as a full paywall override for that one person, not just a
- *  seat-count bump.
+/** Ties ongoing bot activity to a Patreon subscription via seats: each supporter
+ *  gets `seatLimit` of them (adjustable per user via [[effectiveSeatLimit]]), and
+ *  `/setup` assigns one to a (guild, world) pair — see
+ *  [[com.tibiabot.setup.ChannelService]]. A positive seat adjustment also bypasses
+ *  the subscription check entirely (see [[callerIsSubscribed]]), so the
+ *  dashboard's "grant extra seats" doubles as a full paywall override.
  *
- *  Whether someone is subscribed is Patreon's answer, read from the synced
- *  campaign snapshot in `PatreonMemberRepository` — not, as it once was, a
- *  Patreon-granted role in the support Discord. See [[callerIsSubscribed]].
- *  The support guild is still consulted for one unrelated thing: resolving a
- *  *username* to a Discord id for the dashboard (see [[resolveUserId]]) — and
- *  only as a convenience, since a raw id or pasted mention bypasses it and
- *  works for anyone, member or not.
+ *  Subscription status is Patreon's answer, read from the synced snapshot in
+ *  `PatreonMemberRepository`. The support guild is consulted only to resolve a
+ *  *username* to a Discord id (see [[resolveUserId]]), as a convenience — a raw id
+ *  or mention bypasses it.
  *
- *  Nothing is cut off the moment it stops checking out. A configured world
- *  whose seat owner has lapsed — *and* one that was never tied to a seat at
- *  all (a legacy setup, grandfathered in from before the seat system
- *  existed) — instead starts a `graceDays` timer, kept in
- *  `PatreonGraceRepository` so it survives restarts, and keeps running
- *  untouched until that runs out. Resolving the subscription at any point
- *  before the deadline stops the clock and nothing ever happens. See
- *  `applyRefresh` — that one rule covers both cases, so an orphaned setup
- *  and a cancelled one are on identical footing.
+ *  Nothing is cut off the moment it stops checking out. A world whose seat owner
+ *  has lapsed — or that was never seated at all — starts a `graceDays` timer kept
+ *  in `PatreonGraceRepository`, and runs untouched until it expires. Resolving the
+ *  subscription first stops the clock. See `applyRefresh`, whose one rule puts an
+ *  orphaned setup and a cancelled one on identical footing.
  *
- *  The whole of the above steps aside on an install where Patreon was never
- *  set up — see `patreonNotConfigured`. That is what lets somebody
- *  self-host this without the gate having to be edited out of the source. */
+ *  All of it steps aside where Patreon was never set up (see
+ *  `patreonNotConfigured`), which is what makes the bot self-hostable. */
 final class PaywallService(
   discordGateway: DiscordGateway,
   patreonSeatRepository: PatreonSeatRepository,
@@ -58,36 +47,24 @@ final class PaywallService(
 ) extends StrictLogging {
   private val activeStatus = new ConcurrentHashMap[(String, String), Boolean]()
 
-  /** Cheap, synchronous — consulted on every send-loop iteration in
-   *  TibiaBot. Defaults true (fail-open): a (guild, world) pair not yet
-   *  checked, or one whose check errored transiently, is never silently cut
-   *  off. Pairs already past their grace deadline are seeded false at
-   *  construction (see `hydrateFromGrace`), so that default no longer
-   *  covers a paused world between startup and the first [[refreshAll]]
-   *  sweep. */
+  /** Cheap and synchronous — consulted on every send-loop iteration in TibiaBot.
+   *  Fail-open: a pair not yet checked, or whose check errored transiently, is
+   *  never silently cut off. Pairs past their grace deadline are seeded false at
+   *  construction (see `hydrateFromGrace`). */
   def isActive(guildId: String, world: String): Boolean = activeStatus.getOrDefault((guildId, world), true)
 
-  /** Being paused is durable — the grace row is — but the map above is not:
-   *  it's empty in a fresh process, and [[isActive]] fails open. Left
-   *  unseeded, every world whose grace period had already run out resumed
-   *  full tracking from boot until the first [[refreshAll]] sweep, which
-   *  lands ~31 minutes later (see BotApp's paywallCheckCounter). Deaths,
-   *  levels and online lists all posted again for the whole of that window,
-   *  and the harm outlived it: the online-list channel got renamed back to a
-   *  player count and the paused notice overwritten with real content, while
-   *  the sweep that re-paused it stayed silent (`applyRefresh` won't
-   *  re-announce an already-`notified` pause), so nothing ever put either
-   *  back.
+  /** Being paused is durable — the grace row is — but the map above is not, and
+   *  [[isActive]] fails open. Unseeded, every world past its grace period resumed
+   *  full tracking from boot until the first [[refreshAll]] sweep ~31 minutes
+   *  later. The harm outlived that window: the online-list channel was renamed
+   *  back to a player count and the paused notice overwritten, while the sweep
+   *  that re-paused it stayed silent (`applyRefresh` won't re-announce an
+   *  already-`notified` pause), so nothing ever put either back.
    *
-   *  Seeding closes that window at the source rather than by making the
-   *  sweep more eager: same expiry test `applyRefresh` uses, against the same
-   *  durable rows, so a restart resumes exactly the state it left. Only
-   *  *expired* timers are seeded — a world still inside its grace period is
-   *  meant to be active, which the fail-open default already gives it.
-   *
-   *  A failed read leaves everything fail-open, i.e. the old behaviour: a
-   *  database that isn't up yet must not be able to pause anyone, and the
-   *  first sweep will settle it either way. */
+   *  Seeding closes it at the source rather than by making the sweep eager: the
+   *  same expiry test against the same durable rows, so a restart resumes the
+   *  state it left. Only *expired* timers are seeded. A failed read leaves
+   *  everything fail-open — a database that isn't up must not pause anyone. */
   private def hydrateFromGrace(now: ZonedDateTime): Unit =
     try {
       val paused = patreonGraceRepository.allGrace().filterNot(_.started.plusDays(graceDays.toLong).isAfter(now))
@@ -97,17 +74,12 @@ final class PaywallService(
       case ex: Throwable => logger.warn("Paywall: could not read the grace table at startup — every world stays active until the first sweep", ex)
     }
 
-  /** How many rows the synced Patreon snapshot currently holds, or `None` if
-   *  it couldn't be read at all.
-   *
-   *  Three-valued deliberately, because "Patreon says nobody" and "Patreon
-   *  didn't answer" have to be told apart before either is acted on — see
-   *  [[resumeOnEmptySnapshot]] and [[refreshAll]]. A `Some(0)` is a fact:
-   *  the table really is empty, which is never a legitimate answer about who
-   *  is subscribed (BotApp.syncPatreonMembers refuses to *write* one for
-   *  exactly that reason), so it means the integration isn't running rather
-   *  than that every supporter lapsed at once. A `None` is the absence of a
-   *  fact, and nothing may be concluded from it in either direction. */
+  /** How many rows the synced Patreon snapshot holds, or `None` if it could not be
+   *  read. Three-valued deliberately: "Patreon says nobody" and "Patreon didn't
+   *  answer" must be told apart before either is acted on. `Some(0)` is a fact,
+   *  and never a legitimate answer about who is subscribed
+   *  (BotApp.syncPatreonMembers refuses to write one), so it means the integration
+   *  is not running. `None` is the absence of a fact and concludes nothing. */
   private def patreonSnapshotSize(): Option[Int] =
     try Some(patreonMemberRepository.snapshot().size)
     catch {
@@ -116,25 +88,19 @@ final class PaywallService(
         None
     }
 
-  /** Is Patreon provably not set up on this install? If so the whole paywall
-   *  steps aside — `/setup` is open to anyone and seats are unlimited — which
-   *  is what makes the bot self-hostable without gutting the gate for the
-   *  hosted one.
+  /** Is Patreon provably not set up here? If so the whole paywall steps aside,
+   *  which is what makes the bot self-hostable without gutting the hosted gate.
    *
-   *  Both halves are required, because either alone is too weak in a
-   *  direction that matters. Credentials alone: a deploy that loses its
-   *  access token through an env mistake would silently throw `/setup` open
-   *  to everyone, while its member table still holds a perfectly good
-   *  snapshot to gate on. An empty table alone: a database that hasn't
-   *  finished coming up looks identical to a self-host for as long as it
-   *  takes the first sync to land. Requiring both means the paywall is only
-   *  ever bypassed where there is no evidence Patreon was ever involved.
+   *  Both halves are required, since either alone is too weak. Credentials alone:
+   *  a deploy losing its token to an env mistake would throw `/setup` open while
+   *  its member table still held a good snapshot. An empty table alone: a database
+   *  still coming up looks exactly like a self-host. Requiring both means the
+   *  paywall is bypassed only where there is no evidence Patreon was involved.
    *
    *  Note the asymmetry with [[refreshAll]], which stands down on an empty
-   *  snapshot regardless of credentials. That is deliberate: pausing someone
-   *  wrongly costs them their tracking, so it fails open on the weaker
-   *  signal; letting someone in wrongly costs a subscription, so it fails
-   *  closed and demands the stronger one. */
+   *  snapshot regardless of credentials: pausing wrongly costs somebody their
+   *  tracking, so it fails open; letting somebody in wrongly costs a subscription,
+   *  so this fails closed. */
   private def patreonNotConfigured: Boolean =
     !patreonApiConfigured && patreonSnapshotSize().contains(0)
 
@@ -151,57 +117,38 @@ final class PaywallService(
     case _       => hydrateFromGrace(ZonedDateTime.now())
   }
 
-  /** The subscription check — the `/setup` command gate calls this directly;
-   *  `refreshAll` calls it once per distinct seat owner.
-   *
-   *  Answered from Patreon itself: the synced campaign snapshot (see
-   *  patreonapi.PatreonApiClient) is searched for this Discord account, and
-   *  they pass if Patreon reports them an active patron. This used to be a
-   *  REST lookup for a Patreon-granted role in the support guild, which
-   *  meant a real supporter still failed if they'd left that Discord, or if
-   *  Patreon's own role sync hadn't fired. Reading Patreon directly drops
-   *  both of those failure modes: subscribe, connect Discord on Patreon's
-   *  side, and the next `/setup` works.
+  /** The subscription check — `/setup` calls it directly, `refreshAll` once per
+   *  seat owner. Answered from the synced campaign snapshot (see
+   *  patreonapi.PatreonApiClient): they pass if Patreon reports them an active
+   *  patron. This was once a role lookup in the support guild, which failed real
+   *  supporters who had left that Discord or whose role sync had not fired.
    *
    *  Two bypasses come first and skip Patreon entirely. The bot owner always
-   *  passes — so they can always `/setup`, and any seat assigned to them
-   *  never lapses via the periodic recheck either, since that reuses this
-   *  same check. So does a user with a *positive* dashboard-granted seat
-   *  adjustment: an admin using "grant extra seats" is treated as an explicit
-   *  override of the whole paywall for that person, not just their seat count
-   *  (a zero or negative adjustment does not grant this bypass).
+   *  passes, so their seats never lapse on the periodic recheck either. So does a
+   *  *positive* dashboard-granted seat adjustment, which is treated as an explicit
+   *  override of the whole paywall (zero or negative does not).
    *
-   *  Unknown account, no linked Discord on Patreon's side, a lapsed or
-   *  declined pledge, or a failed database read all read as "not
-   *  subscribed", never as an error to propagate. That answer no longer cuts
-   *  anyone off on its own — it starts the grace period (see
-   *  `applyRefresh`), so a bad sync or a database blip costs days of
-   *  headroom rather than anyone's tracking. */
+   *  Unknown account, no linked Discord, a lapsed pledge or a failed read all
+   *  answer "not subscribed" rather than propagating an error. That answer cuts
+   *  nobody off on its own — it starts the grace period (see `applyRefresh`), so a
+   *  bad sync costs days of headroom rather than anyone's tracking. */
   def callerIsSubscribed(userId: String): Boolean =
     if (patreonNotConfigured || userId == ownerId || patreonSeatOverrideRepository.extraSeatsFor(userId) > 0) true
     else try patreonMemberRepository.isActivePatron(userId)
     catch { case _: Throwable => false }
 
-  /** Resolves whatever the dashboard's "grant extra seats" box was given into a
+  /** Resolve whatever the dashboard's "grant extra seats" box was given into a
    *  Discord user id: a raw id, a pasted `<@id>` mention, or a username.
    *
-   *  The id paths exist because the username path can only ever see the support
-   *  guild, and the people most likely to be granted a free seat — an allied
-   *  guild leader, say — are exactly the people who were never in it. That made
-   *  support-guild membership an accidental precondition for an override that
-   *  is supposed to be arbitrary. An id is resolved against Discord directly
-   *  (`GET /users/{id}` needs no shared guild), so it works for anyone.
+   *  The id paths exist because the username path only sees the support guild, and
+   *  the people most likely to be granted a free seat were never in it. An id
+   *  resolves against Discord directly (`GET /users/{id}` needs no shared guild),
+   *  so it works for anyone — and is verified rather than trusted, since a
+   *  mistyped snowflake would write a durable override for a nonexistent account.
    *
-   *  The id is still verified rather than trusted: a mistyped snowflake would
-   *  otherwise write a durable override for an account that does not exist,
-   *  and nothing downstream would ever flag it.
-   *
-   *  The username path is unchanged and kept for convenience. It uses
-   *  retrieveMembersByPrefix — a scoped, query-based gateway search, not the
-   *  full member cache — so it needs no privileged GUILD_MEMBERS intent
-   *  (Discord's bot-verification threshold past 100 guilds) for what is a rare,
-   *  admin-initiated lookup. Case-insensitive exact match; None if nobody
-   *  matches or the support guild isn't reachable. */
+   *  The username path uses retrieveMembersByPrefix, a scoped gateway search
+   *  rather than the full member cache, so it needs no privileged GUILD_MEMBERS
+   *  intent. Case-insensitive exact match; None if nobody matches. */
   def resolveUserId(input: String): Option[String] = {
     val trimmed = input.trim
     // A mention pasted straight out of Discord — `<@123>` or the legacy
@@ -328,22 +275,15 @@ final class PaywallService(
    *  exposed in bulk to avoid a per-supporter lookup. */
   def allExtraSeats(): Map[String, Int] = patreonSeatOverrideRepository.allExtraSeats()
 
-  /** Called after a Patreon member sync — Patreon becomes the source of
-   *  truth for anyone it now has a confirmed Discord link to, so a
-   *  dashboard-granted seat adjustment an admin gave that person as a
-   *  temporary bridge (before Patreon "picked them up" — see
-   *  [[callerIsSubscribed]]'s positive-override bypass) is reclaimed back to
-   *  the flat default. Only clears a *positive* adjustment — the actual
-   *  bypass/bonus this is undoing — a zero or negative one is left alone,
-   *  same "positive only" rule `callerIsSubscribed` itself uses. Returns the
-   *  ids actually cleared, for the caller to log.
+  /** Called after a Patreon member sync: Patreon becomes the source of truth for
+   *  anyone it now has a confirmed Discord link to, so a dashboard-granted
+   *  adjustment given as a temporary bridge is reclaimed to the flat default.
+   *  Clears only *positive* adjustments — the bypass this undoes — matching
+   *  `callerIsSubscribed`'s rule. Returns the ids cleared, for the caller to log.
    *
-   *  This method itself is a dumb, unconditional "clear these ids' positive
-   *  overrides" — it's the caller's job to pass only ids *newly* linked this
-   *  sync (see BotApp.syncPatreonMembers), not every currently-linked id.
-   *  Passing an already-linked id here every cycle would silently wipe out
-   *  a legitimate bonus later granted to an existing supporter — this is
-   *  meant to fire once, at the hand-off moment, not repeatedly. */
+   *  Unconditional by design: it is the caller's job to pass only ids *newly*
+   *  linked this sync (see BotApp.syncPatreonMembers). Passing every linked id
+   *  each cycle would wipe out a legitimate bonus granted later. */
   def reclaimOverridesFromPatreon(linkedDiscordUserIds: Iterable[String]): Set[String] = {
     val current = patreonSeatOverrideRepository.allExtraSeats()
     val toClear = linkedDiscordUserIds.filter(id => current.getOrElse(id, 0) > 0).toSet
@@ -384,31 +324,24 @@ final class PaywallService(
     activeStatus.put((guildId, world), true)
   }
 
-  /** Given every configured (guildId, world) and its seat owner if it has one
-   *  — `None` covers both a legacy setup that was never seated and one whose
-   *  seat has since been released — updates the active-status map and returns
-   *  the pairs whose grace period has just run out and which have not been
-   *  announced yet.
+  /** Given every configured (guildId, world) and its seat owner if it has one —
+   *  `None` covers both a never-seated legacy setup and a released seat — updates
+   *  the active-status map and returns the pairs whose grace has just run out and
+   *  which have not been announced.
    *
-   *  A setup is compliant when it has a seat *and* that seat's owner still
-   *  checks out. Anything else starts (or keeps) a grace timer, and stays
-   *  fully active until `graceDays` have passed since the first sweep that
-   *  saw it that way — so a lapsed subscription and a never-seated legacy
-   *  setup follow the same path, and a transient blip in `checkUser` (a
-   *  Discord outage, say) can no longer pause anyone as long as it clears
-   *  within the window. Becoming compliant again at any point deletes the
-   *  timer, deadline and `notified` flag together, so a later lapse gets a
-   *  fresh window and its own notice.
+   *  A setup is compliant when it has a seat *and* that seat's owner checks out.
+   *  Anything else starts or keeps a grace timer and stays fully active until
+   *  `graceDays` have passed, so a lapsed subscription and a never-seated setup
+   *  follow one path and a transient `checkUser` blip pauses nobody if it clears
+   *  in the window. Becoming compliant deletes timer, deadline and `notified`
+   *  together, so a later lapse gets a fresh window and its own notice.
    *
-   *  Announcing is gated on the persisted `notified` flag rather than on an
-   *  in-memory active -> inactive transition: the active-status map is
-   *  rebuilt from scratch every restart (see `hydrateFromGrace`, which
-   *  fails open if it can't read), so a transition test would re-announce
-   *  already paused worlds after a deploy.
+   *  Announcing is gated on the persisted `notified` flag rather than an in-memory
+   *  active -> inactive transition: the map is rebuilt every restart (see
+   *  `hydrateFromGrace`), so a transition test would re-announce after a deploy.
    *
-   *  Pure aside from the map mutation and the grace repository, so the
-   *  timing logic (the part worth getting right) is testable with a fake
-   *  `checkUser` and an in-memory grace repository, no JDA involved. */
+   *  Pure aside from the map and the grace repository, so the timing logic is
+   *  testable with a fake `checkUser` and no JDA. */
   private[paywall] def applyRefresh(setups: List[(String, String, Option[String])], checkUser: String => Boolean, now: ZonedDateTime): List[(String, String)] = {
     val timers = patreonGraceRepository.allGrace().map(g => (g.guildId, g.world) -> g).toMap
     setups.flatMap { case (guildId, world, ownerId) =>
@@ -434,24 +367,19 @@ final class PaywallService(
     }
   }
 
-  /** Periodic background re-check across every configured (guild, world) —
-   *  `setups`, supplied by the caller, since the seat table only knows about
-   *  the ones that have a seat and the whole point is to also catch the ones
-   *  that don't. Fires `onLapsed` once per pair whose grace period has just
-   *  run out, never twice for the same lapse (see `applyRefresh`) — with
-   *  the seat owner's id and username snapshot for the notice, both empty
-   *  when the world never had a seat at all and there's nobody to address.
+  /** Periodic re-check across every configured (guild, world). `setups` comes from
+   *  the caller, since the seat table knows only the seated ones and the point is
+   *  to catch the rest. Fires `onLapsed` once per pair whose grace has just run
+   *  out, never twice for the same lapse (see `applyRefresh`), with the seat
+   *  owner's id and username — both empty for a never-seated world.
    *
-   *  `onStillLapsed` fires for every pair this sweep left paused *without*
-   *  announcing — the ones `onLapsed` deliberately stays quiet about. That's
-   *  not a second notification: it's the caller's chance to put back the
-   *  paused presentation (channel name, online-list notice) for a world that
-   *  lost it, which is possible for anything paused before a restart that
-   *  `hydrateFromGrace` couldn't seed. It fires on every sweep for as long
-   *  as a world stays paused, so the caller must make it idempotent.
+   *  `onStillLapsed` fires for every pair left paused *without* announcing. Not a
+   *  second notification: it is the caller's chance to restore the paused
+   *  presentation (channel name, online-list notice) for a world that lost it. It
+   *  fires every sweep while a world stays paused, so it must be idempotent.
    *
-   *  Sweeps at all only when there's a Patreon snapshot worth judging against
-   *  — see the match below and `patreonSnapshotSize`. */
+   *  Sweeps only when there is a Patreon snapshot worth judging against — see
+   *  `patreonSnapshotSize`. */
   def refreshAll(setups: List[(String, String)])(
     onLapsed: (Guild, String, String, String) => Unit,
     onStillLapsed: (Guild, String) => Unit

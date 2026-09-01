@@ -12,29 +12,19 @@ trait RedisCache {
   def get(key: String): Future[Option[String]]
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit]
 
-  /** Set `key` only if nothing holds it, answering whether this caller won.
-   *
-   *  The one primitive here that is not merely an optimisation: the respawn
-   *  command relay uses it to decide which process executes a command, and
-   *  "did I win" has to be atomic or the same claim could be performed twice.
-   *  Distinct from [[setEx]] for that reason — a get-then-set would have a
-   *  window between the two wide enough to lose in.
-   *
-   *  A cache that cannot answer must say `false` rather than `true`: refusing
-   *  to run a command is recoverable, running it twice is not. */
+  /** Set `key` only if nothing holds it, answering whether this caller won. The
+   *  one primitive here that is not merely an optimisation: the respawn relay uses
+   *  it to decide which process executes a command, and "did I win" must be atomic
+   *  or the same claim runs twice — hence not [[setEx]], whose get-then-set has a
+   *  window wide enough to lose in. A cache that cannot answer says `false`:
+   *  refusing to run a command is recoverable, running it twice is not. */
   def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean]
 
-  /** Forget `key` now rather than at its TTL.
-   *
-   *  For a key that is a piece of work rather than a cached value: once it has
-   *  been done, leaving it to expire means everything sweeping for work finds
-   *  it again and does it again. [[com.tibiabot.web.AccessQueryConsumer]] is
-   *  the case in point — an answered question left lying around was
-   *  re-resolved on every beat until it expired, at the cost of a Discord
-   *  REST call each time.
-   *
-   *  Missing keys are not an error: deleting one twice, or one that was never
-   *  there, succeeds quietly. */
+  /** Forget `key` now rather than at its TTL. For a key that is a piece of work
+   *  rather than a cached value: left to expire, everything sweeping for work
+   *  finds it again — an answered question in
+   *  [[com.tibiabot.web.AccessQueryConsumer]] was re-resolved every beat, at a
+   *  Discord REST call each time. Deleting a missing key succeeds quietly. */
   def delete(key: String): Future[Unit]
 
   /** Discovers keys by prefix pattern (e.g. `tibia:secondary-status:*`) —

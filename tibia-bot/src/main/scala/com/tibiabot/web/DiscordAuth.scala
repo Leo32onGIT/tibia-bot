@@ -23,19 +23,16 @@ import scala.util.{Failure, Success, Try}
 
 /**
  * Generic Discord OAuth2 login/callback pipeline plus a signed session cookie
- * identifying *who* authenticated. Deliberately has no opinion on *what* that
- * user is allowed to do — that's each route's own concern, layered on top of
- * [[authenticatedUser]] (e.g. [[StatusRoute]]'s owner-only guard) — so this
- * class can be reused unchanged by a future gated route (a paywall) mounted at
- * its own `mountPath` that only needs "which Discord user is this", not "is
- * this the bot owner".
+ * identifying *who* authenticated. Deliberately has no opinion on what that user
+ * may do — each route layers that on [[authenticatedUser]] (e.g.
+ * [[StatusRoute]]'s owner-only guard) — so it is reusable by any gated route
+ * needing only "which Discord user is this".
  *
- * `mountPath` (e.g. "/dashboard") is where the caller nests [[routes]] via
- * `pathPrefix` — passed in separately here (rather than derived from the
- * request) because it's also needed for two things a route match can't tell
- * us: the absolute redirect target for an unauthenticated visitor, and the
- * cookie's scope, kept to this one gated area rather than the whole domain
- * (this app's domain also serves an unrelated, unauthenticated landing page).
+ * `mountPath` (e.g. "/dashboard") is where the caller nests [[routes]]. Passed in
+ * rather than derived from the request, because it is also needed for two things
+ * a route match cannot tell us: the absolute redirect target for an
+ * unauthenticated visitor, and the cookie's scope — kept to this gated area
+ * rather than the whole domain, which also serves an unauthenticated landing page.
  */
 final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: String, redirectUri: String,
                         mountPath: String, extraCookiePaths: List[String] = Nil,
@@ -49,12 +46,8 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
                         /** A page to answer a link crawler with, rather than
                          *  bouncing it to Discord's OAuth screen and letting it
                          *  describe this link as Discord — see [[LinkPreview]].
-                         *
-                         *  A function of the path that was asked for, not a
-                         *  fixed page: the areas behind this auth are different
-                         *  things to whoever is shown the card, and only the
-                         *  caller knows what each of them is called. None keeps
-                         *  the old behaviour for every caller. */
+                         *  A function of the path asked for, since only the
+                         *  caller knows what each gated area is called. */
                         linkPreview: Option[String => String] = None,
                         /** Where the guild list behind a session outlives this
                          *  process — see [[UserGuildCache]]. Unset keeps it in
@@ -64,45 +57,38 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   (implicit system: ActorSystem, ex: ExecutionContextExecutor) extends StrictLogging {
 
   /** Every area this session is good for. `mountPath` is where the auth routes
-   *  themselves live and where a bare login lands; the rest are other gated
-   *  areas on the same domain that should not demand a second sign-in.
+   *  live and where a bare login lands; the rest are other gated areas on the same
+   *  domain that should not demand a second sign-in.
    *
-   *  They get one cookie each rather than one cookie at `/`, which would be the
-   *  obvious shortcut and is the one thing that must not happen here: this
-   *  domain also proxies an unrelated landing page to GitHub Pages, so a
-   *  root-scoped session cookie would be handed to a third party on every visit
-   *  to the front page. A response may set the same cookie under several paths,
-   *  so one login still covers them all. */
+   *  One cookie each, not one at `/`: this domain also proxies a landing page to
+   *  GitHub Pages, so a root-scoped session cookie would be handed to a third
+   *  party on every front-page visit. A response may set the same cookie under
+   *  several paths, so one login still covers them all. */
   private val cookiePaths: List[String] = (mountPath :: extraCookiePaths).distinct
 
   private val cookieName = "vb_session"
   private val sessionTtl = 7.days
   private val loginPath = s"$mountPath/auth/login"
 
-  /** `guilds` is asked for on top of `identify` so the respawn dashboard can
-   *  narrow the bot's several hundred guilds down to the handful this visitor
-   *  is actually in. The bot cannot answer that itself: resolving it through
-   *  JDA would need the privileged GUILD_MEMBERS intent, which this bot
-   *  deliberately avoids (see PaywallService's note on Discord's verification
-   *  threshold past 100 guilds), and checking membership guild by guild would
-   *  be one REST call per guild per sign-in.
+  /** `guilds` on top of `identify`, so the dashboard can narrow the bot's several
+   *  hundred guilds to the handful this visitor is in. The bot cannot answer that
+   *  itself: JDA would need the privileged GUILD_MEMBERS intent this bot avoids,
+   *  and checking guild by guild is one REST call per guild per sign-in.
    *
-   *  Widening the scope invalidates consent, so every existing session has to
-   *  sign in again once — including the owner's. */
+   *  Widening the scope invalidates consent, so every existing session signs in
+   *  again once. */
   private val scope = "identify guilds"
 
   /** Guild ids from the login, kept only long enough to save asking again on
    *  every request. Not a permission — see [[UserGuildCache]]. */
   val userGuilds: UserGuildCache = new UserGuildCache(sessionTtl, store = userGuildStore)
 
-  /** Short-lived companion to the session cookie, holding the OAuth `state`
-   *  nonce for exactly as long as one login round-trip: set when we send the
-   *  visitor to Discord, compared against the `state` echoed back on the
-   *  callback, then deleted. Without it the callback would accept an
-   *  authorization code from anywhere, letting an attacker land their own
-   *  Discord identity in a victim's browser session (login CSRF). Ten minutes
-   *  is long enough to read a consent screen and short enough that an
-   *  abandoned attempt doesn't linger. */
+  /** Short-lived companion to the session cookie, holding the OAuth `state` nonce
+   *  for one login round-trip: set when the visitor is sent to Discord, compared
+   *  against the `state` echoed back, then deleted. Without it the callback would
+   *  accept an authorization code from anywhere, letting an attacker land their
+   *  own identity in a victim's session (login CSRF). Ten minutes covers reading a
+   *  consent screen without letting an abandoned attempt linger. */
   private val stateCookieName = "vb_oauth_state"
   private val stateTtl = 10.minutes
   private val secureRandom = new java.security.SecureRandom()

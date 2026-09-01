@@ -27,22 +27,17 @@ object RetryDecision {
  *    so spending two more requests on it is exactly wrong: it consumes more
  *    quota and can extend the penalty window. The natural retry is the next
  *    poll cycle, a minute away, which is the right timescale to back off on.
- *  - '''Nor is anything else, for a caller that polls again soon.''' The same
- *    argument as 429 applies wherever the caller has its own retry already:
- *    spending two extra requests to save at most a minute is a bad trade when
- *    the caller will ask again in a minute anyway. It is a very bad one on the
- *    character poll, which is ~99% of the traffic against this API and where
- *    503s are both common and bursty — a 250ms retry lands inside the same
- *    burst, fails alongside it, and triples the load arriving at an upstream
- *    that is already failing. Callers that fetch once and have nobody behind
- *    them keep the inline retry, since for them the next attempt is not
- *    minutes away, it is never.
- *  - '''A `Retry-After` longer than `maxHonouredRetryAfter` means give up
- *    now,''' rather than holding the request open for it. These run inside the
- *    poll's bounded concurrency, so sleeping for a server-suggested 30s would
- *    stall the stream far worse than simply missing this character until the
- *    next cycle. Honouring the header here means respecting the "stop asking"
- *    part of it, not the exact duration.
+ *  - '''Nor is anything else, for a caller that polls again soon.''' Two extra
+ *    requests to save at most a minute is a bad trade when the caller will ask
+ *    again anyway, and a very bad one on the character poll — ~99% of this API's
+ *    traffic, where 503s are common and bursty, so a 250ms retry lands inside the
+ *    same burst and triples the load on an upstream already failing. Callers that
+ *    fetch once keep the inline retry, since for them the next attempt is never.
+ *  - '''A `Retry-After` longer than `maxHonouredRetryAfter` means give up now,'''
+ *    rather than holding the request open. These run inside the poll's bounded
+ *    concurrency, so sleeping a server-suggested 30s stalls the stream far worse
+ *    than missing this character until the next cycle. Honouring the header means
+ *    respecting its "stop asking", not its exact duration.
  *  - '''A short `Retry-After` is honoured exactly''', in preference to our own
  *    backoff — the server knows better than we do.
  *  - '''Backoff is jittered.''' Every world stream hits the same upstream, so a

@@ -7,34 +7,30 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Stops calling the fansite API once it has told us to stop.
  *
- *  This exists because of how the API says no. It sits behind Cloudflare, and
- *  when a burst crosses whatever the edge tolerates the answer is a blanket
- *  '''403 against the whole IP''' — not a 429, not a per-request refusal. Every
- *  subsequent call fails the same way, including to the unauthenticated status
- *  endpoint, and it stays that way for as long as the edge decides.
+ *  It sits behind Cloudflare, and a burst past what the edge tolerates earns a
+ *  blanket '''403 against the whole IP''' — not a 429, not a per-request refusal.
+ *  Every later call fails the same way, including the unauthenticated status
+ *  endpoint, for as long as the edge decides.
  *
- *  Two things follow, and both were learned the hard way on a local smoke test
- *  that got the machine blocked inside four minutes:
+ *  Two things follow, both learned on a local smoke test that got the machine
+ *  blocked inside four minutes:
  *
  *  1. '''Retrying is worse than useless.''' [[com.tibiabot.tibiadata.RetryPolicy]]
- *     reasons about transient upstream failures, and a 403 is not one — it is a
- *     standing instruction. Continuing to send only deepens the block, and the
- *     character poll would send one per online character per cycle, forever.
+ *     reasons about transient failures, and a 403 is a standing instruction.
+ *     Sending deepens the block, and the poll would send one per online character
+ *     per cycle, forever.
  *
  *  2. '''Silence is the real danger.''' A 403 becomes a Left, which
- *     [[DualCharacterApi]] quietly covers with TibiaData — so the bot keeps
- *     working perfectly while half its design is dead, and nothing says so.
- *     That is exactly what happened: four minutes of a totally failed upstream
- *     produced not one log line. This logs the transition, once, at WARN.
+ *     [[DualCharacterApi]] quietly covers with TibiaData — so the bot works
+ *     perfectly while half its design is dead. Four minutes of a totally failed
+ *     upstream produced not one log line. This logs the transition once, at WARN.
  *
- *  While open, calls are refused locally without a request being made at all,
- *  which is both the point (stop sending) and free (the caller falls back to
- *  TibiaData on a Left, as it already does for any other failure).
+ *  While open, calls are refused locally with no request made at all — both the
+ *  point and free, since the caller already falls back on a Left.
  *
- *  Deliberately trips on the first 403 rather than after a threshold. A block
- *  is not a flaky response to be confirmed by trying again — by the time one
- *  arrives the damage is done, and the cheapest correct reaction is to stop
- *  immediately and find out later whether it has lifted. */
+ *  Trips on the first 403 rather than a threshold: a block is not a flaky response
+ *  to confirm by trying again, and by the time one arrives the damage is done — so
+ *  stop immediately and find out later whether it has lifted. */
 final class FansiteCircuitBreaker(
     openFor: java.time.Duration,
     now: () => Instant = () => Instant.now()

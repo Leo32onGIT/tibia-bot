@@ -10,24 +10,18 @@ import scala.util.Try
 
 /** The catalogue drawn as a PNG for the board post.
  *
- *  An image rather than embeds because the whole point of the board is being
- *  scanned: three hundred codes across four columns is a shape Discord's embeds
- *  cannot make, whatever they are given. The cost is real and worth stating —
- *  nothing here can be selected, copied or searched, so a code is read off the
- *  screen and typed into the Claim modal by hand.
+ *  An image rather than embeds because the board exists to be scanned: three
+ *  hundred codes across four columns is a shape Discord's embeds cannot make. The
+ *  cost is real — nothing here can be selected, copied or searched, so a code is
+ *  read off the screen and typed by hand.
  *
- *  Nothing about it survives being looked at inline: Discord fits an attachment
- *  into roughly 550x350, which puts this at a fifth of its size. It is drawn for
- *  the expanded view, which is why it is laid out squarish (the lightbox fits to
- *  the window, so the closer to square, the larger it renders) and spaced
- *  generously rather than packed tight.
+ *  Discord fits an attachment into roughly 550x350, a fifth of this. It is drawn
+ *  for the expanded view, hence squarish (the lightbox fits to the window, so
+ *  closer to square renders larger) and generously spaced.
  *
- *  Java2D, so there is no new dependency and nothing to install in the image.
- *  The names are set in a bundled font rather than the base image's (see
- *  `nameFont`); everything else uses the JDK's own sans. Either way no width is
- *  assumed — they are all measured, so a longer name or an added spawn grows the
- *  image instead of running off it.
- */
+ *  Java2D, so no new dependency. Names are set in a bundled font (see `nameFont`)
+ *  and everything else in the JDK's sans; either way no width is assumed — all are
+ *  measured, so a longer name grows the image rather than running off it. */
 object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
 
   private val Background = new Color(0x1E1F22)
@@ -56,17 +50,14 @@ object RespawnBoardImage extends com.typesafe.scalalogging.StrictLogging {
   private val codeFont = new Font(Font.SANS_SERIF, Font.BOLD, RowSize)
   private val footerFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12)
 
-  /** Lato Bold, bundled rather than borrowed from the base image.
+  /** Lato Bold, bundled rather than borrowed from the base image. Names are the
+   *  bulk of the board and the JDK's DejaVu sets them ~200px wider at the same
+   *  size. Shipping the file also pins the look: read off the container, a base
+   *  image update would silently reflow every board in every guild.
    *
-   *  The names are the bulk of the board and the JDK's own DejaVu sets them
-   *  around 200px wider than this at the same size, which is width the image
-   *  cannot spare. Shipping the file also pins what the board looks like: read
-   *  off the container, a base-image update that changed its fonts would silently
-   *  reflow every board in every guild.
-   *
-   *  Falls back to the JDK's sans if the resource is somehow missing, because a
-   *  board drawn in the wrong font beats no board at all. Loaded once — parsing a
-   *  650KB TTF per render would be paid on every redraw. */
+   *  Falls back to the JDK's sans if the resource is missing — a board in the
+   *  wrong font beats no board. Loaded once; parsing a 650KB TTF per render would
+   *  be paid on every redraw. */
   private lazy val nameFont: Font = {
     val loaded = Try {
       val stream = getClass.getResourceAsStream("/fonts/Lato-Bold.ttf")

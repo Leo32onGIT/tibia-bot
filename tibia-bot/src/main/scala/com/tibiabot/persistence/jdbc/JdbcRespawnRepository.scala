@@ -9,50 +9,37 @@ import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of RespawnRepository against a guild's own database.
  *
- *  The schema is checked on a guild's first use in this process, and not again
- *  — see `ensureSchema`. `SchemaInitializer.initGuild` only creates tables
- *  when it creates the database, so guilds that existed before this feature
- *  would otherwise never get them; this is the same create-on-read approach
- *  `JdbcGalthenRepository` uses for `satchel`, just not repeated per query.
+ *  The schema is checked on a guild's first use in this process and not again —
+ *  see `ensureSchema`. `SchemaInitializer.initGuild` only creates tables when it
+ *  creates the database, so guilds predating this feature would never get them.
  *
- *  Timestamps are `TIMESTAMPTZ`, not the plain `TIMESTAMP` the older tables
- *  use. Everything here is a deadline that has to survive a container timezone
- *  change or a daylight-saving shift without silently moving a claim's end
- *  time, and these are new tables so there's no migration cost to getting it
- *  right.
- */
+ *  Timestamps are `TIMESTAMPTZ`, not the plain `TIMESTAMP` the older tables use:
+ *  everything here is a deadline that must survive a container timezone change or
+ *  a DST shift without moving a claim's end time. */
 final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extends RespawnRepository {
 
   private def connect(guildId: String): () => Connection = () => connectionProvider.guild(guildId)
 
   /** Guilds whose schema this process has already brought up to date.
    *
-   *  [[ensureTables]] is thirty-two statements — six tables, six indexes and
-   *  twenty columns added if missing — and it ran before *every* read and write.
-   *  Measured against a live database that is around 13ms a call, against 1.6ms
-   *  for all seven queries a dashboard board actually needs: better than nine
-   *  tenths of the time went on establishing that tables which already exist
-   *  still exist. It is paid once per guild now.
+   *  [[ensureTables]] is thirty-two statements and used to run before *every*
+   *  read and write — ~13ms a call against 1.6ms for all seven queries a
+   *  dashboard board needs, so nine tenths of the time went on proving that
+   *  existing tables still exist. Paid once per guild now.
    *
-   *  Once per *process*, not once ever, which is what makes this safe to do at
-   *  all: a build that adds a column is a new process, so it re-runs on first
-   *  touch and the column appears exactly as before.
-   */
+   *  Once per *process*, not once ever, which is what makes it safe: a build that
+   *  adds a column is a new process, so it re-runs on first touch. */
   private val schemaReady = new java.util.concurrent.ConcurrentHashMap[String, java.lang.Boolean]()
 
   /** Runs the schema check for a guild the first time it is touched.
    *
-   *  `computeIfAbsent` rather than a check-then-set: it holds the key while the
-   *  work runs, so a second caller arriving on a guild whose tables are still
-   *  being created waits for them rather than querying a table that does not
-   *  exist yet. A throw records nothing, so the next caller tries again instead
-   *  of inheriting a database that was never set up.
+   *  `computeIfAbsent` rather than check-then-set: it holds the key while the work
+   *  runs, so a second caller waits rather than querying a table that does not
+   *  exist yet. A throw records nothing, so the next caller retries.
    *
-   *  On its own connection, deliberately. Run inside a caller's transaction it
-   *  would be rolled back with it — Postgres DDL being transactional — and this
-   *  would have remembered doing work that had been undone, leaving every later
-   *  query on that guild to fail against tables that are no longer there.
-   */
+   *  On its own connection deliberately — Postgres DDL is transactional, so inside
+   *  a caller's transaction it would be rolled back while this still remembered
+   *  doing the work, leaving every later query hitting tables that are gone. */
   private def ensureSchema(guildId: String): Unit = {
     schemaReady.computeIfAbsent(guildId, _ => {
       JdbcSupport.withConnection(connect(guildId))(ensureTables)
@@ -148,17 +135,13 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       // silently skip them and leave the new columns missing.
       statement.executeUpdate(
         "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS handover_minutes INT NOT NULL DEFAULT 10;")
-      // DEFAULT TRUE rather than FALSE, so a guild that has been running since
-      // before autoclaim existed gets it switched on by the migration. The
-      // confirm-or-lose rule it replaces was being answered by everybody every
-      // time, so arriving already on is the behaviour people were asking for —
-      // and Config -> Autoclaim turns it back off for a guild that wants the old
-      // rule.
+      // DEFAULT TRUE, so a guild running since before autoclaim existed gets it
+      // switched on by the migration: the confirm-or-lose rule it replaces was
+      // answered by everybody every time. Config -> Autoclaim turns it back off.
       statement.executeUpdate(
         "ALTER TABLE respawn_settings ADD COLUMN IF NOT EXISTS auto_claim BOOLEAN NOT NULL DEFAULT TRUE;")
-      // Added and removed inside one deploy: the bot always uses server time, so
-      // a per-guild zone was surface with nothing behind it. Dropped rather than
-      // left as a column nothing reads.
+      // Added and removed inside one deploy: the bot always uses server time, so a
+      // per-guild zone was surface with nothing behind it.
       statement.executeUpdate("ALTER TABLE respawn_settings DROP COLUMN IF EXISTS timezone;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS limbo_until TIMESTAMPTZ;")
@@ -166,10 +149,9 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS creature_pinned BOOLEAN NOT NULL DEFAULT FALSE;")
-      // Nullable with no default on purpose: NULL is "follow the server", which
-      // is what almost every row is and what lets a guild retune its own ceiling
-      // and have every un-singled-out spawn move with it. A DEFAULT here would
-      // freeze today's server value onto every existing row.
+      // Nullable with no default on purpose: NULL means "follow the server", which
+      // is what lets a guild retune its ceiling and move every un-singled-out
+      // spawn with it. A DEFAULT would freeze today's value onto every row.
       statement.executeUpdate(
         "ALTER TABLE respawns ADD COLUMN IF NOT EXISTS max_duration INT;")
       statement.executeUpdate(
@@ -236,21 +218,16 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS nickname VARCHAR(255) NOT NULL DEFAULT '';")
 
-      // Give a name back to every row that has none, from the newest one the
-      // same account has left anywhere else in this guild.
+      // Give a name back to every blank row, from the newest one the same account
+      // has left anywhere else in this guild.
       //
-      // Two kinds of row need it. Everything booked before the column existed
-      // defaulted to blank, and a *schedule* that predates it keeps minting
-      // fresh blank occurrences for as long as it runs — so healing the rules
-      // matters more than healing the claims. And a handful of paths still
-      // write a claim with no second name because the one that made it never
-      // had one to hand.
+      // Two kinds need it: everything booked before the column existed defaulted
+      // to blank, and a *schedule* predating it keeps minting fresh blank
+      // occurrences — so healing the rules matters more than the claims.
       //
-      // Deliberately not run once and marked done: it is re-run per guild on
-      // each start precisely so it keeps mopping up the second kind. It is
-      // cheap and it shrinks — every pass leaves fewer rows for the next one to
-      // match — and a row whose owner has never been seen under a name simply
-      // stays as it is, which is no worse than before.
+      // Deliberately not run-once-and-marked-done: re-running per guild on each
+      // start is what keeps mopping up the second kind. Cheap, and it shrinks
+      // every pass; a row whose owner was never seen under a name stays as it is.
       val knownNicknames =
         """WITH known AS (
           |  SELECT DISTINCT ON (user_id) user_id, nickname FROM (
@@ -287,18 +264,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;")
       statement.executeUpdate(
         "ALTER TABLE respawn_claims ADD COLUMN IF NOT EXISTS confirm_by TIMESTAMPTZ;")
-      // One holder per spawn, enforced by the database.
+      // One holder per spawn, enforced by the database. The service checks "is
+      // anyone on it" and then inserts, two statements, so two people pressing
+      // Claim both pass the check and both insert — the row lock below serialises
+      // the writes but not the decision. Every path that makes a claim active goes
+      // through this index instead.
       //
-      // The service checks "is anyone on it" and then inserts, and those are two
-      // statements: two people pressing Claim on a free spawn both pass the check
-      // and both insert. The row lock below serialises the writes but not the
-      // decision, so it cannot help. Every path that makes a claim active goes
-      // through this index instead — the insert, a handover promotion, and a
-      // booked slot starting.
-      //
-      // Any duplicates a live database already collected are closed first, oldest
-      // kept, or creating the index would fail and take the guild's whole
-      // migration with it.
+      // Duplicates a live database already collected are closed first, oldest
+      // kept, or creating the index fails and takes the whole migration with it.
       statement.executeUpdate(
         """UPDATE respawn_claims SET status = 'finished', outcome = 'taken-over', ended_at = NOW()
           |WHERE status = 'active' AND id NOT IN (
@@ -406,16 +379,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   // --- settings -----------------------------------------------------------
 
-  /** A guild with no database at all has certainly not configured respawns, so
-   *  that reads as None rather than propagating.
-   *
-   *  This is the one entry point reached for guilds the bot has never been set
-   *  up in — the periodic sweep asks every guild for its settings — and those
-   *  guilds have no `_<guildId>` database, so connecting throws. Without this
-   *  the sweep would log a stack trace for each of them on every cycle.
-   *  Postgres reports a missing database as SQLState 3D000
-   *  (`invalid_catalog_name`); any other failure is still a real error and is
-   *  left to propagate. */
+  /** A guild with no database has certainly not configured respawns, so that reads
+   *  as None rather than propagating. This is the one entry point reached for
+   *  guilds the bot was never set up in — the sweep asks every guild — and
+   *  connecting to their absent `_<guildId>` database throws, which would log a
+   *  stack trace each per cycle. Postgres reports it as SQLState 3D000; any other
+   *  failure is a real error and propagates. */
   def settings(guildId: String): Option[RespawnSettings] =
     try settingsQuery(guildId)
     catch {
@@ -481,15 +450,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   }
 
   def knownMembers(guildId: String, limit: Int): List[KnownMember] = withGuild(guildId) { conn =>
-    // Claims and schedules together: somebody whose only involvement is a
-    // standing weekly booking has no claim row at all until it materialises, and
-    // leaving them out would make them unpickable.
+    // Claims and schedules together: somebody whose only involvement is a standing
+    // weekly booking has no claim row until it materialises.
     //
-    // DISTINCT ON keeps one row per account — the newest, which is where the
-    // current spelling of both names is. Ordered by when the row was written and
-    // deliberately not by its id: the two tables have independent identity
-    // sequences, so a schedule's id and a claim's id are not comparable and the
-    // greater of the two says nothing about which came last.
+    // DISTINCT ON keeps the newest row per account, where the current spelling of
+    // both names is. Ordered by write time and deliberately not by id: the two
+    // tables have independent sequences, so their ids are not comparable.
     val statement = conn.prepareStatement(
       """SELECT DISTINCT ON (user_id) user_id, user_name, nickname FROM (
         |  SELECT user_id, user_name, nickname, claimed_at AS seen_at FROM respawn_claims
@@ -809,20 +775,15 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def lastActivityByRespawn(guildId: String): List[(Long, ZonedDateTime)] = withGuild(guildId) { conn =>
     val statement = conn.createStatement()
     try {
-      // GREATEST over the three, because a spawn's last activity is whichever
-      // happened most recently: a claim that ended, one still running, or a
-      // booked window that has since come round. COALESCE inside so a NULL
-      // column — a claim that never ended, a row from before ended_at existed —
-      // doesn't swallow the whole result, which is what GREATEST does with a
-      // NULL argument.
+      // GREATEST over the three, since last activity is whichever happened most
+      // recently: a claim that ended, one still running, or a booked window that
+      // has come round. COALESCE inside, because GREATEST with a NULL argument
+      // swallows the whole result.
       //
-      // A slot that has *not* come round yet is deliberately not counted. Its
-      // starts_at is in the future, and a future timestamp read as "when this
-      // last happened" sorts a spawn above everything that really did just
-      // happen — so booking a spawn for tomorrow pinned it to the top of the
-      // dashboard until tomorrow, over spawns being hunted right now. The
-      // comparison also covers starts_at being NULL, which is not > now and so
-      // falls to claimed_at exactly as it did before.
+      // A slot that has *not* come round is deliberately excluded: its future
+      // starts_at read as "when this last happened" would pin a spawn booked for
+      // tomorrow above spawns being hunted now. The comparison also covers a NULL
+      // starts_at, which is not > now and falls to claimed_at.
       val result = statement.executeQuery(
         """SELECT respawn_id,
           |       MAX(GREATEST(COALESCE(ended_at, claimed_at),
@@ -973,18 +934,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   def promoteClaim(guildId: String, claimId: Long, startsAt: ZonedDateTime): Option[RespawnClaim] =
     withGuildTransaction(guildId) { conn =>
-      // `status = 'offered'` in the WHERE clause is the concurrency guard: if the
-      // offer lapsed or was declined between the caller reserving their stamina
-      // and this update, nothing is written and the caller refunds instead of
-      // activating a claim nobody accepted.
+      // `status = 'offered'` is the concurrency guard: if the offer lapsed or was
+      // declined between the caller reserving stamina and this update, nothing is
+      // written and the caller refunds. ends_at is derived in SQL from the row's
+      // own duration, so the deadline cannot come from a stale in-memory copy.
       //
-      // ends_at is derived in SQL from the row's own duration so the deadline
-      // can't be computed from a stale in-memory copy of it.
-      //
-      // The CAST is required, not decoration: in `? + make_interval(...)`
-      // Postgres has nothing to infer the placeholder's type from except the
-      // interval on the right, so it types the parameter as an interval and
-      // rejects the assignment to a timestamptz column.
+      // The CAST is required: in `? + make_interval(...)` Postgres infers the
+      // placeholder's type from the interval and rejects assigning it to a
+      // timestamptz column.
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET status = 'active', queue_position = 0, starts_at = ?, warned = FALSE,
@@ -1081,15 +1038,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
 
   private def setStatus(guildId: String, claimId: Long, status: String, outcome: String): Unit =
     withGuild(guildId) { conn =>
-      // ended_at comes from the database rather than being threaded through every
-      // caller: it is an audit timestamp where a second either way is irrelevant,
-      // and NOW() keeps it off the signature of the dozen places a claim ends.
-      // The status guard makes this idempotent — a claim that already ended keeps
-      // its original outcome rather than being relabelled by a late second call.
-      // It has to list every *live* state, `reserved` included: a booked slot is
-      // cancelled when its owner gives it up, when the bot missed its window, and
-      // when it arrives to find the spawn taken. Leaving it out made all three
-      // silently do nothing.
+      // ended_at comes from NOW() rather than being threaded through the dozen
+      // callers: it is an audit timestamp where a second either way is irrelevant.
+      // The status guard makes this idempotent, so a claim that already ended
+      // keeps its original outcome. It must list every *live* state, `reserved`
+      // included — a booked slot is cancelled when its owner gives it up, when the
+      // bot missed its window, and when it finds the spawn taken.
       val statement = conn.prepareStatement(
         """UPDATE respawn_claims
           |SET status = ?, outcome = ?, ended_at = NOW()
@@ -1515,16 +1469,14 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
   def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A =
     withExclusiveTransaction(guildId) { conn =>
       lockRespawn(conn, respawnId)
-      // `body` opens connections of its own rather than joining this
-      // transaction, which is enough: whoever else wants this spawn is stopped
-      // at the lock above until this commits, so the reads inside cannot be
-      // interleaved with another decision about the same spawn.
+      // `body` opens its own connections rather than joining this transaction,
+      // which is enough: anyone else wanting this spawn is stopped at the lock
+      // until it commits.
       //
-      // This one connection comes from outside the pool — see
-      // ConnectionProvider.guildUnpooled. It is held for the whole of `body`
-      // while `body` asks for more, and enough claims landing together would
-      // otherwise have every pooled connection held by a lock holder waiting
-      // for a pooled connection.
+      // This connection comes from outside the pool (ConnectionProvider
+      // .guildUnpooled): it is held for all of `body` while `body` asks for more,
+      // so enough concurrent claims would otherwise have every pooled connection
+      // held by a lock holder waiting for a pooled connection.
       body
     }
 
@@ -1813,17 +1765,12 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       statement.executeUpdate("DELETE FROM respawn_claims;")
       statement.executeUpdate("DELETE FROM respawns;")
       statement.executeUpdate("DELETE FROM respawn_settings;")
-      // The note of what the pinned board post shows goes with the post: the
-      // forum is being torn down, and a digest left behind would tell a guild
+      // The board digest goes with the post: left behind, it would tell a guild
       // that set the bot up again that its brand-new board was already correct.
       statement.executeUpdate("DELETE FROM respawn_board_state;")
-      // respawn_user_prefs is left alone alongside respawn_stamina: both belong
-      // to the member rather than to this particular setup, and someone who
-      // chose a 3h default claim shouldn't silently lose it because an admin
-      // removed and re-added a world.
-      // Stamina is left alone: it is per user and per server-save day, resets
-      // itself on the next read, and is the one thing that would be wrong to
-      // hand back if the same people set the bot up again the same day.
+      // respawn_user_prefs and respawn_stamina are left alone: both belong to the
+      // member rather than this setup. Stamina in particular is per server-save
+      // day and resets itself, so handing it back the same day would be wrong.
     } finally statement.close()
   }
 

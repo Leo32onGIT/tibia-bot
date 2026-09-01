@@ -15,28 +15,24 @@ final case class EditOnlineListMessage(index: Int, messageId: String, field: Str
 final case class SendOnlineListMessage(index: Int, field: String) extends OnlineListAction
 final case class DeleteOnlineListMessages(messageIds: List[String]) extends OnlineListAction
 
-/** What the bot believes is currently posted in each online-list channel, and
- *  the diff needed to bring a channel in line with a freshly rendered list.
+/** What the bot believes is posted in each online-list channel, and the diff to
+ *  bring a channel in line with a freshly rendered list.
  *
- *  The bot posts these messages itself, so it already knows their ids and
- *  contents. Previously every refresh re-read up to 100 messages of channel
- *  history per (guild, channel) purely to rediscover them — at production
- *  scale a large amount of otherwise invisible REST budget, on the very route
- *  Discord rate-limits hardest for this bot. With this state held locally, the
- *  steady-state refresh reads Discord not at all; history is only re-read on a
- *  cold cache or after [[invalidate]].
+ *  The bot posts these messages itself, so it knows their ids and contents. Every
+ *  refresh used to re-read up to 100 messages of history per (guild, channel) just
+ *  to rediscover them — a large invisible REST cost on the very route Discord
+ *  rate-limits hardest here. Held locally, the steady-state refresh reads Discord
+ *  not at all; history is re-read only on a cold cache or after [[invalidate]].
  *
- *  This is purely an optimisation and is safe to drop at any time: an absent
- *  channel just costs one history read to rebuild. Absent means "not synced
- *  yet"; present-but-empty means "synced, channel is empty".
+ *  Purely an optimisation, safe to drop: an absent channel costs one history read
+ *  to rebuild. Absent means "not synced yet", present-but-empty "synced, empty".
  *
- *  Thread-safe: written both from a world stream's thread and from JDA callback
- *  threads (a completed send reports its message id back via
- *  [[recordMessageId]]), so [[plan]]'s decide-and-commit must be atomic.
+ *  Thread-safe: written from a world stream's thread and from JDA callbacks (a
+ *  completed send reports its id via [[recordMessageId]]), so [[plan]]'s
+ *  decide-and-commit must be atomic.
  *
  *  @param normalise applied to both sides of the "did this message change?"
- *                   comparison — see `OnlineListEmbeds.withoutDurations`.
- */
+ *                   comparison — see `OnlineListEmbeds.withoutDurations`. */
 final class OnlineListState(normalise: String => String = OnlineListEmbeds.withoutDurations) {
 
   private val lock = new Object()

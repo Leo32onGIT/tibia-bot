@@ -22,67 +22,44 @@ final case class AgeCacheSettings(
 
 /** Skips character fetches that provably cannot return anything new.
  *
- *  `api.tibiadata.com` serves `/v4/character` out of a Kong cache with a 300s
- *  TTL, and the bot polls every 60s. Four fetches in five therefore return a
- *  copy of the same bytes the previous one already got. Not "probably the
- *  same" — the same entry, byte for byte, until it expires. Skipping those
- *  loses nothing.
+ *  `api.tibiadata.com` serves `/v4/character` from a Kong cache with a 300s TTL
+ *  and the bot polls every 60s, so four fetches in five return the same entry byte
+ *  for byte. Every v4 response carries `information.timestamp` — when the origin
+ *  generated the data, pinned for the life of a cached copy while the Date header
+ *  moves on — so `timestamp + ttl` is when the upstream copy turns over, and the
+ *  poll landing nearest that moment is the one worth spending (see `worthReusing`
+ *  for why nearest rather than first-after).
  *
- *  Knowing when an entry expires needs to know when it was built, and every v4
- *  response says so in `information.timestamp`: the moment the origin generated
- *  the data, which stays pinned across the whole life of a cached copy while
- *  the Date header moves on. So `timestamp + ttl` is when the upstream copy
- *  turns over, and the poll that lands nearest that moment is the one worth
- *  spending — see `worthReusing` for why nearest, and not simply the first
- *  poll after it.
+ *  Three things are load-bearing:
  *
- *  Three things about this are load-bearing:
+ *  1. '''A hit returns the stored response, never a Left.''' TibiaBot's death scan
+ *     drops a Left for that tick, so answering with one would silently stop
+ *     level-ups, guild activity, renames and transfers for four ticks in five.
+ *     Deaths dedup on `recentDeaths`, so replaying posts nothing twice.
  *
- *  1. '''A hit returns the stored response, never a Left.''' TibiaBot's death
- *     scan drops a Left for that character on that tick, so answering with one
- *     would silently stop level-ups, guild activity, name changes and world
- *     transfers for the four ticks in five that hit. Replaying the body
- *     instead keeps every one of those paths running on exactly the bytes a
- *     real fetch would have returned. Deaths already dedup on `recentDeaths`,
- *     so replaying them posts nothing twice.
+ *  2. '''Only a parsed success updates the schedule.''' A failure stores nothing,
+ *     leaving the character due for the next 60s tick — the retry cadence from
+ *     before this class existed. Roughly 45% of this API's responses are 503s, so
+ *     pushing the next attempt out to a full TTL on failure would make a bad
+ *     upstream far more expensive than it already is.
  *
- *  2. '''Only a parsed success updates the schedule.''' A failure stores
- *     nothing, which leaves the character due, which means the next 60s tick
- *     retries it — the same retry cadence as before this class existed. That
- *     matters more than it sounds: roughly 45% of responses from this API are
- *     503s, and a design that pushed the next attempt out to a full TTL on a
- *     failed one would have made a bad upstream far more expensive than it
- *     already is. During an outage this degrades back to polling every 60s,
- *     which is the right thing to do when there is no data.
+ *  3. '''A failure is answered from the stored copy while one is fresh enough,'''
+ *     so a blip costs a stale sheet rather than a hole. Past `maxStale` the Left
+ *     is passed through rather than answering from something misleading.
  *
- *  3. '''A failure is answered from the stored copy while one is fresh
- *     enough.''' A blip then costs a stale sheet rather than a hole, so
- *     level-ups still fire off the fresh world poll. Past `maxStale` the
- *     failure is passed through as the Left it is, rather than answering from
- *     something old enough to mislead.
+ *  `canaryFraction` of otherwise-skippable fetches are made anyway: gating on age
+ *  makes the age histogram self-selecting, so acting on it would destroy the very
+ *  measurement that would reveal a wrong `ttl`.
  *
- *  `canaryFraction` of otherwise-skippable fetches are made anyway. Gating on
- *  age makes the age histogram self-selecting — once only near-expiry fetches
- *  are issued, the panel can only ever show near-expiry ages, and the very
- *  measurement that would reveal a wrong `ttl` is destroyed by acting on it.
- *  The canary keeps a small unbiased sample flowing so that number stays
- *  honest and a wrong TTL shows up in prod rather than staying silent.
+ *  Characters skipped together come due together, deliberately unsmoothed. A
+ *  copy's life is fixed when it is built, so asking early cannot move it and only
+ *  asking *late* shifts phase — paying for smoothing in exactly the delay this
+ *  exists to avoid. There is nothing to buy either: a poll where everything comes
+ *  due sends what every poll sent before, a peak the bot already sustains, now
+ *  reached a fifth as often. Player churn re-seeds phases anyway.
  *
- *  Characters skipped together come due together, and nothing here spreads
- *  them out. That is deliberate. A copy's life is fixed by when it was built,
- *  so asking early cannot move it — the same copy comes back and the entry is
- *  still due. Only asking *late* shifts a character's phase, which means any
- *  smoothing is paid for in exactly the delay this exists to avoid. And there
- *  is nothing to buy with it: a poll on which every character comes due sends
- *  what every poll sent before this class existed, so the peak is the one the
- *  bot already sustains, now reached a fifth as often. Player churn re-seeds
- *  phases continuously anyway, so the lockstep case needs a cold start to
- *  arise and decays on its own.
- *
- *  Every other endpoint passes straight through: the world poll is already
- *  matched to its own 60s upstream TTL, and the rest are neither hot nor
- *  cached upstream.
- */
+ *  Every other endpoint passes straight through: the world poll already matches
+ *  its own 60s upstream TTL, and the rest are neither hot nor cached upstream. */
 final class AgeCachedTibiaApi(
     underlying: TibiaApi,
     settings: AgeCacheSettings,

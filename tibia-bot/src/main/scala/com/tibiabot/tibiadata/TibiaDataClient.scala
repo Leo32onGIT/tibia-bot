@@ -18,11 +18,8 @@ import scala.concurrent.duration._
 import spray.json.DeserializationException
 import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 
-/** `metrics` defaults to the process-wide TibiaData counter rather than being
- *  wired in at each call site: this class is constructed in three places
- *  (BotApp, TibiaBot, WorldManager) that all issue real traffic, and the
- *  dashboard wants one figure for the process, not three. Tests pass their own
- *  instance to keep assertions isolated. */
+/** `metrics` defaults to the process-wide counter so the dashboard sees one
+ *  figure for the process, not one per construction site. Tests pass their own. */
 class TibiaDataClient(
   metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData,
   inFlight: InFlightLimit = InFlightLimit.tibiaData
@@ -36,10 +33,9 @@ class TibiaDataClient(
   private val retryPolicy = new RetryPolicy()
   private val maxRetries = 2
 
-  /** The server's requested backoff, if it asked for one. `Retry-After` is
-   *  legal as either delta-seconds or an HTTP-date; Cloudflare and Kong both
-   *  send the former, but the date form is accepted rather than ignored.
-   *  A date already in the past reads as "retry now". */
+  /** The server's requested backoff, if any. `Retry-After` is legal as either
+   *  delta-seconds or an HTTP-date; both are accepted, and a past date reads as
+   *  "retry now". */
   private def retryAfterOf(response: HttpResponse): Option[FiniteDuration] =
     response.header[`Retry-After`].map { header =>
       header.delaySecondsOrDateTime match {
@@ -48,34 +44,16 @@ class TibiaDataClient(
       }
     }
 
-  /** Which slice of the upstream cache's life this response was served from,
-   *  for the dashboard's cache-age breakdown.
+  /** Which slice of the upstream cache's life this response came from, for the
+   *  dashboard's cache-age breakdown. Kong stamps `Age` with how long the entry
+   *  has sat there (300s TTL on `/v4/character`, 60s on the world endpoints), so
+   *  it is the one header saying whether a request learned anything.
    *
-   *  `api.tibiadata.com` sits behind a Kong cache that stamps `Age` with how
-   *  long the entry it just served has been sitting there — measured at a 300s
-   *  TTL on `/v4/character`, and 60s on both `/v4/world` and `/v4/worlds`. That
-   *  makes `Age` the one header that says whether a request actually learned
-   *  anything: a response with `Age` 200 is byte-identical to the one the
-   *  previous caller got, and the entry cannot change for another 100s.
-   *  Bucketing it here is what tells us how much of the character firehose is
-   *  re-fetching bytes we already had.
-   *
-   *  `fresh` is a 2xx with no `Age` at all — the entry was cold and this
-   *  request is what refilled it from the origin. A self-hosted TibiaData
-   *  instance has no cache in front of it at all, so everything it serves reads
-   *  as `fresh` — correctly, since every one of those really did come from the
-   *  origin. `error` keeps non-2xx out of the age picture: a 503 also carries no
-   *  `Age`, and folding those into `fresh` would read as a healthy origin fetch
-   *  when it is the opposite.
-   *
-   *  Buckets run past the observed 300s TTL deliberately — if some characters
-   *  are cached longer than that, they show up as their own row rather than
-   *  hiding inside a catch-all at exactly the boundary we assumed.
-   *
-   *  Recorded for every endpoint, not just characters, so the dimension still
-   *  sums to the overall total (which is what the dashboard's share column is
-   *  taken against). `/v4/character` is ~99% of the traffic, so in practice
-   *  this reads as the character histogram anyway. */
+   *  `fresh` is a 2xx with no `Age` — a cold entry this request refilled from the
+   *  origin, which is also everything a self-hosted instance serves. `error`
+   *  keeps non-2xx out of the picture, since a 503 carries no `Age` either.
+   *  Buckets deliberately run past the 300s TTL so longer-cached entries get
+   *  their own row instead of hiding in a catch-all. */
   private def cacheAgeOf(response: HttpResponse, status: Int): String =
     if (status / 100 != 2) "error"
     else response.header[AgeHeader] match {
@@ -83,32 +61,24 @@ class TibiaDataClient(
       case None      => "fresh"
     }
 
-  /** The endpoint a request belongs to, for the dashboard's per-endpoint
-   *  breakdown: the first two path segments, so `/v4/character/Bubble` and
-   *  `/v4/world/Antica` collapse onto `/v4/character` and `/v4/world` rather
-   *  than becoming one counter per character and world ever looked up. */
+  /** The first two path segments, so `/v4/character/Bubble` collapses onto
+   *  `/v4/character` instead of becoming one counter per character. */
   private def endpointOf(request: HttpRequest): String = {
     val segments = request.uri.path.toString.split('/').filter(_.nonEmpty).take(2)
     if (segments.isEmpty) "/" else segments.mkString("/", "/", "")
   }
 
   /** Issue a GET, retrying only when [[RetryPolicy]] says it is worth it: a
-   *  transient upstream failure (500/502/503/504) or a connection-level failure
-   *  (timeout, reset). Anything else — a well-formed 200, a definitive 404, or
-   *  a 429 telling us to send less — is returned as-is, since retrying an
-   *  answer just gets the same answer, and retrying a rate limit makes it
-   *  worse. A response the policy declines to retry degrades to the existing
-   *  logged-Left behaviour untouched.
+   *  transient upstream failure (500/502/503/504) or a connection-level one.
+   *  Anything else is returned as-is and degrades to the logged-Left path.
    *
-   *  `callerRetriesSoon` turns the inline retry off entirely for callers that
-   *  are already on a poll cycle — see [[RetryPolicy]] for why that is the
-   *  better trade on the character firehose. */
+   *  `callerRetriesSoon` disables the inline retry for callers already on a poll
+   *  cycle — see [[RetryPolicy]] for why. */
   private def requestWithRetry(request: HttpRequest, attempt: Int = 0, callerRetriesSoon: Boolean = false): Future[HttpResponse] =
     inFlight(Http().singleRequest(request)).flatMap { response =>
       val status = response.status.intValue
-      // Counted per attempt, not per logical fetch: a retried request really is
-      // a second call on TibiaData, and hiding that would make the panel
-      // understate our load exactly when an upstream wobble is causing it.
+      // Per attempt, not per logical fetch — a retry really is a second call,
+      // and hiding it would understate our load during an upstream wobble.
       metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt, callerRetriesSoon) match {
@@ -117,8 +87,8 @@ class TibiaDataClient(
           response.discardEntityBytes()
           after(delay, system.scheduler)(requestWithRetry(request, attempt + 1, callerRetriesSoon))
         case RetryDecision.GiveUp =>
-          // Worth its own line: being rate-limited is the one upstream response
-          // that says something about our own behaviour rather than theirs.
+          // Worth its own line: 429 is the one response that says something
+          // about our behaviour rather than theirs.
           if (retryPolicy.isRateLimited(status))
             logger.warn(s"Rate limited (429) by '${request.uri}'${retryAfter.fold("")(d => s", asked to wait ${d.toSeconds}s")} — not retrying; the next poll cycle is the retry")
           else
@@ -128,8 +98,7 @@ class TibiaDataClient(
     }.recoverWith {
       case NonFatal(ex) =>
         // A call that never got a status still left this process, so it counts;
-        // "failed" keeps timeouts and resets visible on the panel instead of
-        // silently shrinking the total.
+        // "failed" keeps timeouts and resets visible instead of shrinking the total.
         metrics.record("endpoint" -> endpointOf(request), "status" -> "failed")
         retryPolicy.onConnectionFailure(attempt, callerRetriesSoon) match {
           case RetryDecision.RetryIn(delay) =>
@@ -139,13 +108,10 @@ class TibiaDataClient(
         }
     }
 
-  /** Shared recovery for an Unmarshal failure across every endpoint. On a
-   *  non-JSON response (UnsupportedContentType) the spray-json unmarshaller
-   *  rejects on the content-type check before reading the body, so the entity
-   *  is unconsumed — drain it to free the akka-http pool connection. Parse
-   *  failures already read the body, so they are not drained. Both log the
-   *  friendly message plus the exception detail and yield Left; unmatched
-   *  throwables propagate, exactly as the inline blocks did. */
+  /** Shared recovery for an Unmarshal failure. A non-JSON response is rejected on
+   *  the content-type check before the body is read, so the entity is drained to
+   *  free the pool connection; parse failures already read it. Both log and yield
+   *  Left; unmatched throwables propagate. */
   private def recoverUnmarshal[T](decoded: HttpResponse, contentTypeMessage: => String, parseMessage: => String): PartialFunction[Throwable, Either[String, T]] = {
     case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
       decoded.discardEntityBytes()
@@ -158,11 +124,8 @@ class TibiaDataClient(
       Left(errorMessage)
   }
 
-  /** Issue a GET, decode the (possibly gzipped) response and unmarshal its JSON
-   *  body to T, recovering non-JSON / parse failures into a logged Left (draining
-   *  the entity). The request/decode/unmarshal/recover shape shared by the
-   *  parameter-free GET endpoints. `contentTypeMessage` receives the response so
-   *  it can include the status. */
+  /** GET, decode (possibly gzipped) and unmarshal to T, recovering failures into a
+   *  logged Left. `contentTypeMessage` receives the response so it can name the status. */
   private def fetch[T](uri: String, contentTypeMessage: HttpResponse => String, parseMessage: => String)
                       (implicit um: akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
     for {
@@ -217,8 +180,7 @@ class TibiaDataClient(
       .map(unmarshalled => (unmarshalled, guild, reason))
   }
 
-  /** Decode + unmarshal a character response, recovering failures to a logged
-   *  Left (draining on the non-JSON path). Shared by the character endpoints. */
+  /** Decode + unmarshal a character response, recovering failures to a logged Left. */
   private def unmarshalCharacter(response: HttpResponse, encodedName: String): Future[Either[String, CharacterResponse]] = {
     val decoded = decodeResponse(response)
     Unmarshal(decoded).to[CharacterResponse].map(Right(_)).recover(recoverUnmarshal(
@@ -227,9 +189,8 @@ class TibiaDataClient(
       s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"))
   }
 
-  /** The poll's character fetch — ~99% of this process's traffic against the
-   *  API, and the one caller with its own retry: a failure here is picked up by
-   *  the next poll a minute later, so it does not buy one inline. */
+  /** The poll's character fetch — ~99% of this process's API traffic, and the one
+   *  caller with its own retry: the next poll is a minute away, so no inline retry. */
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
     requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName"), callerRetriesSoon = true)
@@ -277,16 +238,12 @@ class TibiaDataClient(
 }
 
 object TibiaDataClient {
-  /** Width of one cache-age bucket, and the age past which they stop being
-   *  split. 60s buckets against a 300s TTL give five rows across an entry's
-   *  life plus an overflow, which is enough to see the shape without turning
-   *  the dashboard panel into a wall of rows. */
+  /** Bucket width, and the age past which buckets stop splitting. 60s against a
+   *  300s TTL gives five rows plus an overflow — the shape, without a wall of rows. */
   private[tibiadata] val CacheAgeBucketSeconds = 60L
   private[tibiadata] val CacheAgeMaxBucket = 360L
 
-  /** Label for the bucket `seconds` of upstream cache age falls in — e.g. 0
-   *  -> "0-59s", 240 -> "240-299s", 400 -> "360s+". Pure, so the bucketing can
-   *  be pinned by tests without going near HTTP. */
+  /** Label for the bucket `seconds` falls in — 0 -> "0-59s", 400 -> "360s+". */
   private[tibiadata] def cacheAgeBucket(seconds: Long): String =
     if (seconds >= CacheAgeMaxBucket) s"${CacheAgeMaxBucket}s+"
     else {

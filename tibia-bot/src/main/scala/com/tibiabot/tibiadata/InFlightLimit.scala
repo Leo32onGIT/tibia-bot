@@ -5,22 +5,17 @@ import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.control.NonFatal
 
-/** A ceiling on how many things run at once, where waiting for a turn does not
- *  cost a thread.
+/** A ceiling on how many things run at once, where waiting for a turn costs no
+ *  thread. A plain semaphore would block, which is wrong here: the callers are
+ *  akka dispatcher threads serving every other world's stream. A caller with no
+ *  permit gets a Future that completes when one frees up.
  *
- *  A plain semaphore would block, which is exactly wrong here: the callers are
- *  akka dispatcher threads serving every other world's stream, and parking one
- *  to wait for a request slot would stall unrelated work. So a caller with no
- *  permit available is handed a Future that completes when one frees up, and
- *  the thread goes back to doing something useful.
+ *  The waiter queue is unbounded, safe only because what feeds it is not: each
+ *  world's fan-out runs at a fixed concurrency. Do not put an unbounded producer
+ *  in front of this.
  *
- *  The queue of waiters is unbounded, which is safe only because what feeds it
- *  is already bounded: each world's fan-out runs at a fixed concurrency, so a
- *  process can never have more work waiting here than the sum of those. Do not
- *  put an unbounded producer in front of this.
- *
- *  Fair in arrival order — a waiter cannot be starved by later arrivals, which
- *  matters because a starved character fetch is a death nobody hears about. */
+ *  Fair in arrival order — a starved character fetch is a death nobody hears
+ *  about. */
 final class InFlightLimit(permits: Int) {
   require(permits > 0, s"permits must be positive, got $permits")
 
@@ -59,16 +54,13 @@ final class InFlightLimit(permits: Int) {
 
   /** Run `f` once a permit is free, releasing it however `f` ends.
    *
-   *  `f` is by-name and evaluated only after the permit is in hand, so nothing
-   *  starts before it is allowed to. A synchronous throw from `f` releases the
-   *  permit just as a failed Future does — without that, one thrown exception
-   *  would leak a permit permanently and the ceiling would ratchet down to
-   *  zero over a long-running process.
+   *  `f` is by-name and evaluated only with the permit in hand. A synchronous
+   *  throw releases it just as a failed Future does — otherwise one exception
+   *  leaks a permit permanently and the ceiling ratchets to zero.
    *
-   *  The returned Future completes strictly after the permit has gone back, so
-   *  a caller that waits on it can rely on the slot being free. Registering the
-   *  release as a side callback instead would leave the two racing, and a
-   *  caller that finished a batch could find the ceiling still full. */
+   *  The returned Future completes strictly after the permit has gone back, so a
+   *  caller waiting on it can rely on the slot being free; a side callback would
+   *  leave the two racing and a finished batch could find the ceiling full. */
   def apply[A](f: => Future[A])(implicit ec: ExecutionContext): Future[A] =
     acquire().flatMap { _ =>
       val started =

@@ -7,38 +7,29 @@ import com.typesafe.scalalogging.StrictLogging
  * Owns the outbound Discord message queue and drains it one item per tick so we
  * never exceed Discord's rate limits.
  *
- * Each queued item is a `dispatch` thunk that performs the actual JDA send, which
- * keeps this class free of JDA types and unit-testable, tagged with a `label`
- * naming the Discord operation ("editmessage", "editchannel", "send") or the
- * kind of post it is ("activity", "admin", "level-up"), purely for
- * observability — it buckets the queue-wait stats in [[snapshotAndReset]], and
- * the worst of those buckets is what the dashboard shows as a lane's avg wait.
- * It says nothing about how many Discord calls were made; that is counted at
- * the HTTP layer instead (see app.Bootstrap), since plenty of this bot's
- * traffic never passes through here at all.
- * Scheduling is injected via `startTicker`: it must run the
- * supplied drain action immediately and then on a fixed delay, returning a handle
- * that stops the ticker. The drain loop is started lazily on the first enqueue.
+ * Each queued item is a `dispatch` thunk performing the actual JDA send, which
+ * keeps this class free of JDA types and testable. Its `label` names the Discord
+ * operation or the kind of post, purely for observability: it buckets the
+ * queue-wait stats in [[snapshotAndReset]], whose worst bucket is the lane's avg
+ * wait on the dashboard. It says nothing about how many Discord calls were made —
+ * that is counted at the HTTP layer (see app.Bootstrap), since plenty of traffic
+ * never passes through here. Scheduling is injected via `startTicker`, which must
+ * run the drain immediately then on a fixed delay and return a stop handle; the
+ * loop starts lazily on the first enqueue.
  *
- * An optional `key` identifies what a send targets (e.g. a specific channel/message):
- * enqueueing under a key that's still pending replaces the earlier one instead of
- * queuing both, so a lane whose pace can't keep up with demand for "current state"
- * traffic (online-list content, renames) has its backlog bounded by the number of
- * distinct targets rather than growing without bound while every entry goes stale.
- * Leave `key` unset for one-off events (a notification, an alert) where every
- * enqueued item is meaningful and none should be silently replaced.
+ * An optional `key` identifies what a send targets. Enqueueing under a pending key
+ * replaces the earlier item rather than queuing both, so a lane that cannot keep
+ * up with "current state" traffic has its backlog bounded by distinct targets
+ * rather than growing while every entry goes stale. Leave unset for one-off events
+ * where every item is meaningful.
  *
- * An optional `group` names the resource a send competes for (e.g. the channel
- * it targets). With `perGroupMinGapMs` set, the drain skips past any item whose
- * group was dispatched less than that long ago and takes the next eligible one
- * instead, so a single group's items are spread out rather than draining
- * back-to-back. This matters because the pace above is bot-wide while Discord's
- * tighter limits on this traffic are per-channel: a channel whose online list
- * packs into several messages enqueues them all at once, and in strict FIFO
- * they leave in one tight burst that trips that per-channel limit even though
- * the bot-wide rate is fine. Skipping is not a delay — the slot goes to another
- * group's work, so total throughput is unchanged. Leave at 0 to drain in plain
- * FIFO order.
+ * An optional `group` names the resource a send competes for. With
+ * `perGroupMinGapMs` set, the drain skips an item whose group was dispatched more
+ * recently than that and takes the next eligible one, spreading a group's items
+ * out. The pace above is bot-wide while Discord's limits on this traffic are
+ * per-channel, so a channel's several messages leaving in one FIFO burst trip the
+ * per-channel limit even at a fine bot-wide rate. Skipping is not a delay — the
+ * slot goes to another group — so throughput is unchanged. 0 drains plain FIFO.
  *
  * The default capacity (`Int.MaxValue`) reproduces the previous unbounded behaviour
  * exactly; a finite capacity drops messages instead of leaking memory under a burst.

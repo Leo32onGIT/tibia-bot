@@ -3,13 +3,9 @@ package com.tibiabot.web
 import com.tibiabot.discord.{DiscordGateway, MemberLookup}
 
 /** The parts of a tracked world this needs: its name, and the category whose
- *  visibility stands in for belonging to that world's team.
- *
- *  Narrower than `domain.Worlds` on purpose. That carries twenty-six fields
- *  about channels, roles and display options, none of which bear on who may
- *  open the dashboard — depending on it would drag all of them into every test
- *  here for the sake of two.
- */
+ *  visibility stands in for belonging to that world's team. Narrower than
+ *  `domain.Worlds` on purpose — its twenty-six fields would be dragged into every
+ *  test here for the sake of two. */
 final case class WorldChannel(name: String, categoryId: String)
 
 /** Resolves which guilds a signed-in visitor may use the respawn dashboard in,
@@ -25,23 +21,17 @@ final case class WorldChannel(name: String, categoryId: String)
  */
 final class DashboardAccessService(
   discordGateway: DiscordGateway,
-  /** Whether this guild has a respawn forum that is actually there: the
-   *  settings row says which channel it is, *and* that channel still resolves
-   *  on Discord.
+  /** Whether this guild has a respawn forum that is actually there: the settings
+   *  row names a channel *and* that channel still resolves on Discord.
    *
-   *  Both halves are needed and the second is the one that was missing. The row
-   *  is written with a placeholder channel id before the forum is created (see
-   *  `ChannelService.createSpawnsForum`), so a setup that fell over on a
-   *  missing permission leaves a guild that reads as configured and has no
-   *  forum — and a forum deleted by hand afterwards leaves exactly the same
-   *  state. Either way the picker offered a server whose dashboard has nothing
-   *  behind it.
+   *  The second half is the one that was missing. The row is written with a
+   *  placeholder channel id before the forum is created (see
+   *  `ChannelService.createSpawnsForum`), so a setup that fell over on a missing
+   *  permission — or a forum deleted by hand — leaves a guild reading as
+   *  configured with no forum, and the picker offered it anyway.
    *
-   *  Takes the guild rather than its id so the caller can answer it with
-   *  `RespawnThreads.findForum`, which is how the rest of the bot asks the same
-   *  question. Two places deciding "is there a forum here" separately is the
-   *  kind of drift that only shows up as a server appearing where it should
-   *  not. */
+   *  Takes the guild rather than its id so the caller can answer with
+   *  `RespawnThreads.findForum`, which is how the rest of the bot asks. */
   respawnForumExists: net.dv8tion.jda.api.entities.Guild => Boolean,
   worldsOf: String => List[WorldChannel],
   moderatorRoleOf: String => String,
@@ -54,43 +44,32 @@ final class DashboardAccessService(
    *  for itself — see [[RemoteGuildAccess]]. Absent on a deployment with no
    *  Redis or no other bots, where it costs nothing and contributes nothing. */
   remote: Option[RemoteGuildAccess] = None,
-  /** How long to let the other bots answer before rendering without them. Kept
-   *  a little above [[RemoteGuildAccess.DefaultTimeout]] so the wait is decided
-   *  there, by the part that can say which guild gave up, rather than here.
+  /** How long to let the other bots answer before rendering without them. A little
+   *  above [[RemoteGuildAccess.DefaultTimeout]], so the wait is decided there — by
+   *  the part that can say which guild gave up.
    *
-   *  Derived from that timeout rather than written down beside it, because the
-   *  two moving apart is silent and ruinous: a backstop at or under the
-   *  per-guild deadline fires first, and this path cannot say which guild it
-   *  was waiting on, so it reports *every* foreign guild as unanswered. Raising
-   *  the deadline while leaving a fixed two seconds here would have turned one
-   *  slow server into all of them.
-   *
-   *  This is a backstop and should not be what fires. When it did, it meant a
-   *  page load held one of four blocking threads for its whole duration — so
-   *  the ceiling matters more than the guild it was waiting on. */
+   *  Derived from that timeout rather than written beside it, because the two
+   *  drifting apart is silent and ruinous: a backstop at or under the per-guild
+   *  deadline fires first and, unable to name a guild, reports *every* foreign
+   *  guild as unanswered. This should not be what fires — when it does, a page
+   *  load has held one of four blocking threads for its whole duration. */
   remoteWait: java.time.Duration =
     java.time.Duration.ofMillis(RemoteGuildAccess.DefaultTimeout.toMillis + 1000),
   /** Where a refresh runs when nobody is waiting for it — see
-   *  [[rememberedReportFor]]. Blocking work, so it wants a pool of its own and
-   *  a bounded one: its width is the ceiling on how many Discord lookups this
-   *  can have in the air at once, which is the whole point of doing them here
-   *  rather than on whichever request happened to find the entry stale.
-   *
-   *  Defaulted so a test or a deployment that never refreshes in the background
-   *  need not think about it; BotApp passes a real one. */
+   *  [[rememberedReportFor]]. Blocking work, so it wants its own bounded pool: its
+   *  width is the ceiling on how many Discord lookups can be in the air at once,
+   *  which is the point of doing them here rather than on whichever request found
+   *  the entry stale. Defaulted so tests need not think about it. */
   refreshOn: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global,
   /** How long a reader that lost the race to resolve will wait on the winner
    *  before giving up and resolving for itself. A backstop against a hung
    *  resolution holding readers indefinitely; duplicating the work is wasteful
    *  but never wrong. */
   shareWait: java.time.Duration = java.time.Duration.ofSeconds(15),
-  /** Where a visitor's guilds are looked up when there is more than one of
-   *  them — see [[localAccessFor]].
-   *
-   *  Must not be any pool this service is itself called on. Every caller here
-   *  blocks waiting for these, so fanning out onto the caller's own pool would
-   *  have a full pool of resolutions each waiting on subtasks that pool has no
-   *  thread left to run. */
+  /** Where a visitor's guilds are looked up when there is more than one — see
+   *  [[localAccessFor]]. Must not be a pool this service is itself called on:
+   *  every caller blocks waiting on these, so fanning out onto the caller's own
+   *  pool deadlocks it. */
   lookupOn: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global,
   /** How long the whole of one visitor's guilds may take. A backstop against a
    *  Discord call that never comes back, not a latency target — it should never
@@ -110,29 +89,21 @@ final class DashboardAccessService(
    *  still being able to move people off spawns. The worst this can do is let
    *  somebody read a board they were removed from moments ago.
    *
-   *  `mustInclude` names the guild the caller is about to check, where there is
-   *  one. A remembered answer that does not contain it is thrown away and the
-   *  question asked again, because the only thing that answer can produce is a
-   *  refusal — and a refusal is exactly what a half-resolved list looks like.
+   *  `mustInclude` names the guild the caller is about to check. A remembered
+   *  answer without it is thrown away and re-asked, since the only thing it can
+   *  produce is a refusal — and a refusal is what a half-resolved list looks like.
    *  One page load that lost its race with another bot would otherwise be
-   *  remembered as "no such server for you" and refuse every reload for the
-   *  next three quarters of a minute.
-   *
-   *  It costs nothing in the ordinary case: a visitor reading a board they can
-   *  see is answered from the memory as before, and it is only the load that
-   *  was about to fail anyway that pays for a fresh lookup.
-   */
+   *  remembered as "no such server for you" for the next three quarters of a
+   *  minute. It costs nothing in the ordinary case; only the load that was about
+   *  to fail anyway pays for a fresh lookup. */
   def rememberedAccessFor(userId: String, userGuildIds: Set[String],
                           mustInclude: Option[String] = None): List[GuildAccess] =
     rememberedReportFor(userId, userGuildIds, mustInclude).granted
 
-  /** As [[rememberedAccessFor]], keeping what the pass failed to resolve.
-   *
-   *  The memory holds the whole report rather than the granted half, so a page
-   *  drawn from it can still say that a server is missing. Remembering only the
-   *  successes would have the cache quietly launder an incomplete answer into
-   *  one that looked complete, which is the original bug wearing a hat.
-   */
+  /** As [[rememberedAccessFor]], keeping what the pass failed to resolve. The
+   *  memory holds the whole report rather than the granted half, so a page drawn
+   *  from it can still say a server is missing — remembering only successes would
+   *  launder an incomplete answer into one that looked complete. */
   def rememberedReportFor(userId: String, userGuildIds: Set[String],
                           mustInclude: Option[String] = None): AccessReport = {
     val key = s"$userId:${userGuildIds.toList.sorted.mkString(",")}"
@@ -249,26 +220,16 @@ final class DashboardAccessService(
 
   /** Every guild this visitor can use, resolved live.
    *
-   *  `userGuildIds` comes from their login (see [[UserGuildCache]]) and is used
-   *  only to narrow the bot's several hundred guilds to the few worth a REST
-   *  call — it grants nothing. Everything that decides access is read here,
-   *  now, so a stale or tampered-with guild list can at worst make this do less
-   *  work, never more.
+   *  `userGuildIds` comes from their login (see [[UserGuildCache]]) and only
+   *  narrows the bot's several hundred guilds to the few worth a REST call — it
+   *  grants nothing. Everything deciding access is read here and now, so a stale
+   *  or tampered list can at worst make this do less work, never more.
    *
-   *  An empty list resolves to no access, and deliberately so.
-   *
-   *  It briefly did the opposite: an empty list was treated as "no hint" and
-   *  every guild was considered, so that somebody whose cache had aged out was
-   *  not shown an empty dashboard. That is a real problem, but this was the
-   *  wrong answer to it. Each candidate costs a blocking member lookup, and
-   *  after a restart *every* visitor's list is empty at once — so the fallback
-   *  turned one page load into one REST call per respawn-configured guild and
-   *  pushed `GET /dashboard` past akka's request timeout in production.
-   *
-   *  The narrowing is what keeps this affordable, so it stays. The cache going
-   *  empty wants fixing where it happens — by outliving a restart — rather than
-   *  by scanning everything each time it does.
-   */
+   *  An empty list resolves to no access, deliberately. Treating it as "no hint"
+   *  and considering every guild costs one blocking member lookup per candidate,
+   *  and after a restart *every* visitor's list is empty at once — which pushed
+   *  `GET /dashboard` past akka's request timeout in production. The cache going
+   *  empty wants fixing where it happens, by outliving a restart. */
   def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
     accessReportFor(userId, userGuildIds).granted
 
@@ -283,20 +244,15 @@ final class DashboardAccessService(
   def accessReportFor(userId: String, userGuildIds: Set[String]): AccessReport =
     localAccessFor(userId, userGuildIds) ++ remoteAccessFor(userId, userGuildIds)
 
-  /** Guilds another bot runs, resolved by asking it.
+  /** Guilds another bot runs, resolved by asking it. A visitor's tier is their
+   *  roles and visible channels, and only a bot in the guild can be told either,
+   *  so a guild run elsewhere was left out of the picker entirely.
    *
-   *  A visitor's tier is their roles and what channels they can see, and only a
-   *  bot in the guild can be told either — so a guild run elsewhere could never
-   *  be resolved here and was left out of the picker entirely, however plainly
-   *  the visitor belonged to it.
-   *
-   *  Blocking, unlike everything it calls: this whole service is already run on
-   *  the blocking pool by the routes above (see `RespawnDashboardRoute.read`),
-   *  and every caller is shaped around getting a list rather than a promise of
-   *  one. The wait is bounded twice over — once per guild inside, once here —
-   *  and a timeout yields no guilds rather than an error, so the worst it can
-   *  do is show a picker one server short.
-   */
+   *  Blocking, unlike everything it calls: this service already runs on the
+   *  blocking pool (see `RespawnDashboardRoute.read`) and every caller wants a
+   *  list rather than a promise. The wait is bounded twice — per guild inside,
+   *  and here — and a timeout yields no guilds rather than an error, so the worst
+   *  it does is show a picker one server short. */
   private def remoteAccessFor(userId: String, userGuildIds: Set[String],
                              remembering: Boolean = true): AccessReport =
     remote.fold(AccessReport.Empty) { resolver =>
@@ -320,23 +276,17 @@ final class DashboardAccessService(
       }
     }
 
-  /** Whether this process is in the guild at all, and so whether it can decide
-   *  anything about who somebody is there.
-   *
-   *  The question behind who checks permission for a write. A bot that cannot
-   *  see the guild has no way to read a member of it, and asking the bot that
-   *  can — then deciding here on its answer — is a round trip that can fail for
-   *  somebody perfectly entitled. So a write into a guild this bot cannot see is
-   *  carried to the bot that can, and decided there; see [[RespawnCommand]]. */
+  /** Whether this process is in the guild at all, and so can decide anything about
+   *  who somebody is there. The question behind who checks permission for a write:
+   *  asking the bot that can see it, then deciding here on its answer, is a round
+   *  trip that can fail for somebody entitled — so a write into an unseen guild is
+   *  carried to the bot that can and decided there (see [[RespawnCommand]]). */
   def canSee(guildId: String): Boolean = discordGateway.guildById(guildId) != null
 
-  /** One guild, resolved here and never by asking anyone else.
-   *
-   *  What [[AccessQueryConsumer]] answers with. It must not be the full
-   *  [[accessFor]]: that asks the other bots in turn, so answering a question
-   *  with it would have two processes asking each other the same one until both
-   *  timed out.
-   */
+  /** One guild, resolved here and never by asking anyone else. What
+   *  [[AccessQueryConsumer]] answers with: it must not be the full [[accessFor]],
+   *  which asks the other bots and would have two processes asking each other the
+   *  same question until both timed out. */
   def localAccessIn(userId: String, guildId: String): Option[GuildAccess] =
     localAccessFor(userId, Set(guildId)).granted.headOption
 
@@ -367,21 +317,15 @@ final class DashboardAccessService(
 
   /** Everything this bot can decide for itself about a visitor.
    *
-   *  Each guild costs a blocking Discord REST call, and these used to be folded
-   *  over one at a time — so somebody in three tracked guilds waited for three
-   *  round trips end to end, and held the thread doing it for the sum of them.
-   *  Since no guild's answer bears on any other's, the wait is now the longest
-   *  of them rather than the total.
+   *  Each guild costs a blocking Discord REST call. Folded one at a time, somebody
+   *  in three tracked guilds waited three round trips end to end; since no guild's
+   *  answer bears on another's, the wait is now the longest rather than the total.
+   *  That matters most where it is least visible — the background refresh (see
+   *  [[rememberedReportFor]]) holds a thread for exactly this long, which decides
+   *  how many visitors one small pool can keep refreshed.
    *
-   *  Which matters most where it is least visible: the background refresh (see
-   *  [[rememberedReportFor]]) occupies a thread for exactly this long, so
-   *  shortening it is what decides how many visitors one small pool can keep
-   *  refreshed.
-   *
-   *  One guild - much the commonest case - is resolved on the caller's own
-   *  thread. Handing a single lookup to another pool and waiting for it back
-   *  costs a thread hop and buys nothing.
-   */
+   *  One guild, much the commonest case, resolves on the caller's own thread: a
+   *  thread hop for a single lookup buys nothing. */
   private def localAccessFor(userId: String, userGuildIds: Set[String]): AccessReport =
     worthAsking(userGuildIds) match {
       case Nil          => AccessReport.Empty
@@ -466,19 +410,14 @@ final class DashboardAccessService(
   def permits(userId: String, userGuildIds: Set[String], guildId: String, required: AccessTier): Boolean =
     DashboardAccess.permits(accessIn(userId, userGuildIds, guildId), guildId, required)
 
-  /** Access in one named guild, resolved fresh.
+  /** Access in one named guild, resolved fresh. The caller already knows which
+   *  guild they mean, so the other bots are troubled only when the answer can come
+   *  from one of them — going through [[accessFor]] made every moderator action
+   *  wait on Redis and on every bot that had published a roster.
    *
-   *  Whoever asks this already knows which guild they mean, so the other bots
-   *  are only troubled when the answer can actually come from one of them.
-   *  Going through the full [[accessFor]] made every moderator action — a
-   *  force-leave, a reassign — wait on Redis and on however many bots had
-   *  published a roster, for guilds that had nothing to do with the action.
-   *
-   *  A guild run elsewhere is asked about without the standing memory that
-   *  [[RemoteGuildAccess]] keeps for reads. This is the check that grants a
-   *  mutation, so a bot that cannot say *now* whether somebody is still a
-   *  moderator has to be taken as a no.
-   */
+   *  A guild run elsewhere is asked without the standing memory
+   *  [[RemoteGuildAccess]] keeps for reads: this check grants a mutation, so a bot
+   *  that cannot say *now* whether somebody is a moderator is taken as a no. */
   def accessIn(userId: String, userGuildIds: Set[String], guildId: String): List[GuildAccess] =
     if (!userGuildIds.contains(guildId)) Nil
     else if (discordGateway.guildById(guildId) != null) localAccessFor(userId, Set(guildId)).granted

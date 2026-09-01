@@ -16,19 +16,15 @@ import scala.collection.concurrent.TrieMap
  *  DMs themselves.
  *
  *  ==Why the subscriptions are cached==
- *  The online-list sweep asks "does anyone here care?" every fifteen seconds for
- *  every guild on a world, and the honest answer is almost always no. Reading
- *  that from Postgres each time would be a query per guild per sweep to learn
- *  nothing, so the whole (small) set is loaded once at startup and written
- *  through from there. Writes go to the database first and to the cache after,
- *  so a failed write can't leave the cache claiming a subscription that isn't
- *  stored.
+ *  The online-list sweep asks "does anyone here care?" every fifteen seconds per
+ *  guild per world, and the answer is almost always no — a query per guild per
+ *  sweep to learn nothing. The whole (small) set is loaded at startup and written
+ *  through: database first, cache after, so a failed write cannot leave the cache
+ *  claiming a subscription that is not stored.
  *
  *  ==Concurrency==
- *  Reads come from each world's sweep thread; writes come from JDA's interaction
- *  pool. TrieMap rather than a plain mutable map for exactly that reason — see
- *  BotListener's pendingScreenshots for the same choice.
- */
+ *  Reads come from each world's sweep thread, writes from JDA's interaction pool —
+ *  hence TrieMap rather than a plain mutable map. */
 final class NotifyService(
   repository: NotifyRepository,
   discordGateway: DiscordGateway,

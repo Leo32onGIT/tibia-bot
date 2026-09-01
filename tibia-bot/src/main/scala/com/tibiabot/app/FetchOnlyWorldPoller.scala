@@ -15,30 +15,23 @@ import scala.util.control.NonFatal
 /** Polls a world purely to fill the shared cache, posting nothing anywhere.
  *
  *  Runs on the primary for worlds only a secondary serves. Those worlds have no
- *  guild on this bot, so nothing here has an audience — the entire product of
- *  this class is the side effect of the fetches passing through
- *  [[com.tibiabot.tibiadata.SharedWorldTibiaApi]] underneath and being
- *  published to Redis, where the secondary that does serve the world reads them
- *  instead of calling the upstream itself.
+ *  guild here, so nothing has an audience — the whole product is the side effect
+ *  of fetches passing through [[com.tibiabot.tibiadata.SharedWorldTibiaApi]] and
+ *  being published to Redis for the secondary to read.
  *
- *  '''This deliberately does not reuse [[com.tibiabot.TibiaBot]].''' Reaching
- *  for it is the obvious move, since most of its posting is already skipped for
- *  a world with no guilds — but not all of its writes are. `addDeathsCache` and
- *  `addLevelsCache` sit outside that guard and write dedup rows into the shared
- *  `bot_cache`. A primary running a full stream over somebody else's world
- *  would mark those deaths as already seen, and a secondary loads that table at
- *  boot — so its next restart would silently stop posting deaths it had never
- *  actually posted. Wrong, shared between bots, and visible only as deaths
- *  quietly going missing. Hence a class that can only fetch.
+ *  '''This deliberately does not reuse [[com.tibiabot.TibiaBot]].''' Most of its
+ *  posting is already skipped for a world with no guilds, but not all its writes
+ *  are: `addDeathsCache` and `addLevelsCache` sit outside that guard and write
+ *  dedup rows into the shared `bot_cache`. A primary running a full stream over
+ *  somebody else's world would mark those deaths seen, and since a secondary loads
+ *  that table at boot, its next restart would silently stop posting deaths it
+ *  never posted. Hence a class that can only fetch.
  *
- *  What it fetches mirrors a real stream closely enough to be useful: the same
- *  fan-out width over the same client stack, so the cache is filled with the
- *  same sheets a real poll would have produced, on the same schedule. What it
- *  cannot do is remember who was recently online — a real stream keeps checking
- *  someone for a few minutes after they log off, to catch a death that lands
- *  after the logout. Here the online list is the whole population, which is
- *  the small, safe difference: the secondary still fetches such a straggler
- *  itself on a cache miss, exactly as it does today. */
+ *  It mirrors a real stream closely enough to be useful: same fan-out width, same
+ *  client stack, same schedule. What it cannot do is remember who was recently
+ *  online — a real stream keeps checking somebody for a few minutes after they log
+ *  off. Here the online list is the whole population, which is the safe
+ *  difference: the secondary still fetches such a straggler on a cache miss. */
 final class FetchOnlyWorldPoller(
     world: String,
     api: TibiaApi,

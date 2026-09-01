@@ -38,32 +38,23 @@ object Killers {
 
   /** The (creature, summoner) behind a summon kill, or None for an ordinary one.
    *
-   *  Both upstreams report a summon the same way, and it is '''not''' the way
+   *  Both upstreams report a summon the same way, and it is '''not''' what
    *  [[parseSummon]] expects: the summoner goes in the killer's `name` and the
-   *  creature in a field beside it — `summon` on TibiaData, `remark` on the
-   *  fansite API. Verified against the same live "fire elemental of <player>"
-   *  death on both.
+   *  creature in a field beside it — `summon` on TibiaData, `remark` on the fansite
+   *  API. That field went unread for a long time, and since a player name always
+   *  begins with a capital [[parseSummon]] could never match one either, so every
+   *  summon kill rendered as a plain player kill.
    *
-   *  That field went unread for a long time, and because a player name always
-   *  begins with a capital, [[parseSummon]] could never match one either — so
-   *  every summon kill quietly rendered as a plain player kill. Preferring the
-   *  field here is what actually turns summon rendering on.
-   *
-   *  [[parseSummon]] is still consulted as a fallback: it costs nothing, and it
-   *  keeps working for any source that does inline the whole
-   *  "<creature> of <player>" phrase into the name. */
+   *  [[parseSummon]] is still a fallback: it costs nothing and keeps working for a
+   *  source that inlines the whole "<creature> of <player>" phrase. */
   def summonBehind(name: String, summon: String): Option[(String, String)] =
     Option(summon).map(_.trim).filter(_.nonEmpty).map(creature => (creature, name))
       .orElse(parseSummon(name))
 
-  /** The character names a death's killer list will want a level for, given the
-   *  victim's name and each killer as (name, isPlayer).
-   *
-   *  Mirrors exactly what the death embed renders a "[level]" beside: player
-   *  killers only (creatures and environmental sources have no level), never
-   *  the victim themselves (deaths list "self" entries the embed skips), and a
-   *  summon resolved to its summoner — "fire elemental of X" asks about X, not
-   *  about the elemental. */
+  /** The character names a death's killer list wants a level for, given the victim
+   *  and each killer as (name, isPlayer). Mirrors what the embed renders a
+   *  "[level]" beside: player killers only, never the victim (the embed skips
+   *  "self" entries), and a summon resolved to its summoner. */
   def levelLookupNames(victim: String, killers: Seq[(String, Boolean)]): Seq[String] =
     killers.collect {
       case (name, true) if name != victim => parseSummon(name).map(_._2).getOrElse(name)

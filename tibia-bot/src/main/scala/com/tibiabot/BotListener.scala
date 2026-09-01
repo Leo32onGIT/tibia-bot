@@ -40,23 +40,19 @@ class BotListener extends ListenerAdapter with StrictLogging {
     Executors.newFixedThreadPool(size, factory)
   }
 
-  // Slash-command handlers run here, off JDA's shared event thread. Some
-  // handlers (channel/role creation in particular) make many sequential
-  // blocking JDA REST calls; without this, one slow command would starve
-  // dispatch of every other event — including a different user's slash
-  // command, whose deferReply() would then never fire within Discord's
-  // 3-second ack window and show as "interaction failed" even though its
-  // own handler code is fine.
+  // Slash-command handlers run here, off JDA's shared event thread. Channel and
+  // role creation make many sequential blocking REST calls, and without this one
+  // slow command starves dispatch of every other event — including another user's
+  // command, whose deferReply() then misses Discord's 3-second ack window and
+  // shows as "interaction failed" though its own code is fine.
   private val commandExecutor = namedPool(8, "slash-command")
 
-  // Buttons and modals run on their own pool rather than sharing the one
-  // above. A `/setup` holds a thread for as long as it takes to build a
-  // category, four channels, five roles and their permission overrides, one
-  // blocking call at a time — so on a shared pool a press arriving mid-setup
-  // waited behind all of it. Everything here either acknowledges on the event
-  // thread before it queues (see below) or, for a press that opens a modal and
-  // so cannot be acknowledged early, must reach Discord within three seconds
-  // from a cold start. Neither can afford to sit behind server-building work.
+  // Buttons and modals get their own pool. A `/setup` holds a thread for as long
+  // as it takes to build a category, four channels and five roles one blocking
+  // call at a time, so on a shared pool a press arriving mid-setup waited behind
+  // all of it. Everything here either acknowledges on the event thread before
+  // queueing or — for a press opening a modal, which cannot be acknowledged early
+  // — must reach Discord within three seconds from cold.
   private val interactionExecutor = namedPool(8, "interaction")
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
@@ -106,12 +102,12 @@ class BotListener extends ListenerAdapter with StrictLogging {
     // the pinned board post. They also hit the database and JDA, so like the
     // respawn buttons they run off the event thread.
     if (interactions.RespawnModals.handles(event.getModalId)) {
-      // Acknowledged here rather than inside the handler, for the same reason
-      // as the buttons below: deferring as the handler's first statement still
-      // left the acknowledgement waiting for a free worker. Every branch can be
-      // deferred, since none of them opens a further modal — but *how* differs.
-      // The log's search rewrites the log panel it was opened from, which needs
-      // deferEdit; everything else answers with an ephemeral of its own.
+      // Acknowledged here rather than inside the handler, as with the buttons
+      // below: deferring as the handler's first statement still left the
+      // acknowledgement waiting for a free worker. Every branch can be deferred,
+      // since none opens a further modal — but *how* differs: the log's search
+      // rewrites the panel it came from and needs deferEdit, everything else
+      // answers with an ephemeral of its own.
       if (interactions.RespawnModals.editsOriginal(event.getModalId)) event.deferEdit().queue()
       else event.deferReply(true).queue()
       // A form submitted from a spawn's post counts as touching it, exactly as

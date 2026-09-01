@@ -183,13 +183,11 @@ final class StatusRoute(
     )
   )
 
-  /** Any shared-world-cycle secondary's published status, fetched raw — see
-   *  `secondaryStatusKeyPrefix`. Only a Primary looks; a plain/secondary
-   *  deployment gets an empty list back with no Redis round-trip at all.
-   *  Uses `keysMatching` rather than a fixed secondary list so this supports
-   *  however many secondaries are actually publishing, with zero config on
-   *  the primary side when a new one joins. A secondary that's gone quiet
-   *  (past its publish TTL) just stops appearing — no special-casing needed. */
+  /** Any secondary's published status, fetched raw — see
+   *  `secondaryStatusKeyPrefix`. Only a primary looks; anything else gets an empty
+   *  list with no Redis round trip. `keysMatching` rather than a fixed list, so a
+   *  new secondary needs no config on the primary and one gone quiet past its TTL
+   *  simply stops appearing. */
   /** The same snapshots the dashboard merges, exposed for
    *  [[com.tibiabot.app.UnionFetchReconciler]]: the world lists in them are
    *  already exactly what it needs to know, so it reuses this rather than
@@ -242,31 +240,23 @@ final class StatusRoute(
     "discordUsername" -> member.discordUsername.map(s => JsString(s): JsValue).getOrElse(JsNull)
   )
 
-  /** One entry per supporter (not per seat), each carrying their seats — the
-   *  dashboard's Option-B grouped view. Guild names are resolved via
-   *  `guildById` (an in-memory JDA cache read, not a REST call — same as
-   *  `buildStatusJson`'s per-world discord names above) so this stays cheap
-   *  on the 10s poll; `userName` uses the stored snapshot rather than a live
-   *  `retrieveUser` REST lookup for the same reason — a live lookup only
-   *  happens once, in PatreonAdminRoute, when a seat is actually assigned.
+  /** One entry per supporter (not per seat), each carrying their seats. Guild
+   *  names come from `guildById` — an in-memory JDA cache read, not a REST call —
+   *  and `userName` from the stored snapshot, both so this stays cheap on the 10s
+   *  poll; a live `retrieveUser` happens once, in PatreonAdminRoute.
    *
-   *  Additively merges in patreonMemberRepository's synced snapshot (see
-   *  patreonapi.PatreonApiClient) — the same snapshot the paywall gate reads,
-   *  so a supporter's patronStatus here and their ability to `/setup` come
-   *  from one source and can't disagree:
-   *   - a seat-holding supporter whose Discord id matches a synced member
-   *     gets that member's patronStatus/pledgeCents spliced on, and their
-   *     Patreon fullName supersedes the seat's own one-time stored name;
-   *   - a synced member with a linked Discord id but no seat becomes its own
-   *     entry (userId set, empty seats — the existing add/remove-seat flow
-   *     still targets a real Discord id, just starting from zero seats);
-   *   - a synced member never linked to Discord at all also becomes its own
-   *     entry, but with `userId: null` — the dashboard has no Discord id to
-   *     act on, so it renders informational-only, no seat-management
-   *     buttons.
-   *  Members with no patron_status at all (Patreon's own null state — never
-   *  completed becoming a patron, distinct from a real active/former/declined
-   *  status) are dropped before any of this, seat-holders included. */
+   *  Additively merges patreonMemberRepository's synced snapshot, the same one the
+   *  paywall gate reads, so patronStatus here and the ability to `/setup` cannot
+   *  disagree:
+   *   - a seat-holder matching a synced member gets its patronStatus/pledgeCents,
+   *     and its Patreon fullName supersedes the seat's stored name;
+   *   - a synced member with a linked Discord id but no seat becomes its own entry
+   *     with empty seats, which the add/remove-seat flow still targets;
+   *   - a synced member never linked to Discord becomes an entry with
+   *     `userId: null`, rendered informational-only with no seat buttons.
+   *
+   *  Members with no patron_status at all — Patreon's null state, distinct from
+   *  active/former/declined — are dropped first, seat-holders included. */
   private def buildPatreonJson(): JsArray = {
     val bySupporter = paywallService.allSeats().groupBy(_.userId)
     // A null patron_status (never completed becoming a patron, or a similar

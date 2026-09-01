@@ -7,40 +7,26 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
-/** Which Discord guilds a signed-in visitor belongs to, remembered from their
- *  login so the dashboard doesn't have to ask Discord again on every request.
+/** Which Discord guilds a signed-in visitor belongs to, remembered from their login
+ *  so the dashboard need not ask Discord on every request.
  *
- *  Ids only, deliberately. Discord's `/users/@me/guilds` also reports the
- *  caller's permission bitfield in each guild, and it is tempting to keep it —
- *  but the moderator role is invisible to OAuth, so permissions have to be
- *  resolved through JDA regardless. Storing them here would create a second,
- *  staler answer to a question that already has an authoritative one, and
- *  sooner or later something would read the wrong one. What is kept therefore
- *  carries no authority whatsoever: it can only ever *narrow* the handful of
- *  guilds worth resolving properly, never grant anything.
+ *  Ids only, deliberately. `/users/@me/guilds` also reports a permission bitfield,
+ *  but the moderator role is invisible to OAuth so permissions are resolved
+ *  through JDA regardless — keeping them here would be a second, staler answer to
+ *  a question that already has an authoritative one. What is kept carries no
+ *  authority: it can only *narrow* the guilds worth resolving properly.
  *
- *  That is also what makes the TTL a UX decision rather than a security one. A
- *  stale entry can leave a guild off somebody's picker until they sign in
- *  again; it cannot let them act anywhere, because
- *  [[DashboardAccess.permits]] runs against freshly resolved access.
+ *  That makes the TTL a UX decision rather than a security one. A stale entry can
+ *  leave a guild off somebody's picker until they sign in again; it cannot let
+ *  them act anywhere, since [[DashboardAccess.permits]] runs against fresh access.
  *
- *  A miss is not a failure — the caller sends the visitor back through login,
- *  which is transparent when their Discord session is live, since the consent
- *  has already been given.
+ *  Kept in `store` as well as in memory where there is one, because a miss is a
+ *  bounce and a restart used to cause one for everybody at once: the signed session
+ *  cookie outlives a restart by design, but the list behind it did not. What is
+ *  written is what is held — ids and the deadline they already had — so nothing
+ *  lives longer for having been written down.
  *
- *  Kept in `store` as well as in memory, where there is one, because a miss is
- *  still a bounce and a restart used to cause one for everybody at once. The
- *  session cookie is signed rather than stored and so outlives a restart by
- *  design; the list behind it did not, which left people perfectly signed in
- *  and resolving to nothing until they logged in again. What is written is what
- *  is held here — guild ids, and the deadline they already had — so a restart
- *  restores the entry somebody would have had rather than a fresh one, and
- *  nothing lives a day longer for having been written down.
- *
- *  The OAuth token is still never stored, here or anywhere: holding user access
- *  tokens is a liability this avoids by not needing them twice, which is a
- *  separate matter from remembering an answer that grants nothing.
- */
+ *  The OAuth token is never stored, here or anywhere. */
 final class UserGuildCache(ttl: FiniteDuration, now: () => Long = () => System.currentTimeMillis(),
                            /** Where the entries outlive this process. Absent by
                             *  default and wherever Redis is unconfigured, which

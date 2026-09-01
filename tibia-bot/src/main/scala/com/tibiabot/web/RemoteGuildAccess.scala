@@ -10,30 +10,21 @@ import scala.util.control.NonFatal
 
 import RemoteGuildAccess.{Answered, Asked, Unanswered}
 
-/** The guilds a visitor can use that *this* bot is not in.
- *
- *  Reads the rosters every bot publishes to find which guilds are run
- *  elsewhere, narrows those to ones the visitor is actually in, and asks the
- *  bot that runs each about them — see [[AccessQuery]].
- *
- *  Nothing here blocks a thread: the wait is a scheduled re-read, the same way
- *  a relayed write waits.
+/** The guilds a visitor can use that *this* bot is not in. Reads the rosters every
+ *  bot publishes, narrows them to guilds the visitor is in, and asks the bot that
+ *  runs each — see [[AccessQuery]]. Nothing blocks a thread: the wait is a
+ *  scheduled re-read, as a relayed write's is.
  *
  *  ==Cost==
- *  A guild is only ever asked about when the visitor is in it *and* somebody
- *  publishes a roster naming it, which is normally a handful at most. Asking is
- *  worth roughly a second, so the answer is cached by whoever calls this — see
- *  [[DashboardAccessService.rememberedAccessFor]] — and the ten-second board
+ *  A guild is asked about only when the visitor is in it *and* a roster names it,
+ *  normally a handful. Asking costs roughly a second, so callers cache the answer
+ *  (see [[DashboardAccessService.rememberedAccessFor]]) and the ten-second board
  *  poll pays nothing.
  *
- *  A quiet or absent bot costs the timeout once and then contributes no guilds.
- *  That is still the right failure - a picker one server short is a smaller
- *  wrong than a dashboard that will not load - but the short picker has to say
- *  so, which is why this reports the guilds it could not get an answer about
- *  rather than merely leaving them out. A list silently one short is
- *  indistinguishable from a complete one, and at two servers down to one it
- *  stopped being a picker at all.
- */
+ *  A quiet bot costs the timeout once and contributes no guilds — the right
+ *  failure, since a picker one server short beats a dashboard that will not load.
+ *  But it must *say* so, which is why unanswered guilds are reported rather than
+ *  left out: a list silently one short is indistinguishable from a complete one. */
 final class RemoteGuildAccess(
   cache: RedisCache,
   scheduler: Scheduler,
@@ -48,16 +39,14 @@ final class RemoteGuildAccess(
   newId: () => String = () => java.util.UUID.randomUUID().toString
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
-  /** Every guild in `userGuildIds` that another bot runs and this visitor may
-   *  use. Empty — never failed — when Redis is unreachable or nobody answers.
+  /** Every guild in `userGuildIds` that another bot runs and this visitor may use.
+   *  Empty — never failed — when Redis is unreachable or nobody answers.
    *
-   *  `remembering` decides what a *missed* answer means. With it, a guild that
-   *  answered a moment ago but has not answered this time keeps the tier it
-   *  gave then; without it, no answer means no guild. Reads take the first,
-   *  because a page that drops a server the visitor was just using is the whole
-   *  of the bug this exists to avoid. Moderator actions take the second — see
-   *  [[DashboardAccessService.accessIn]].
-   */
+   *  `remembering` decides what a *missed* answer means: with it, a guild that
+   *  answered a moment ago keeps that tier; without it, no answer means no guild.
+   *  Reads take the first, since dropping a server the visitor was just using is
+   *  the bug this exists to avoid; moderator actions take the second — see
+   *  [[DashboardAccessService.accessIn]]. */
   def accessFor(userId: String, userGuildIds: Set[String],
                 remembering: Boolean = true): Future[AccessReport] =
     if (userGuildIds.isEmpty) Future.successful(AccessReport.Empty)
@@ -73,17 +62,14 @@ final class RemoteGuildAccess(
         }.map(_.foldLeft(AccessReport.Empty)(_ ++ _))
     }.recover {
       case NonFatal(e) =>
-        // Redis itself, rather than any one bot. Which guilds were involved is
-        // not known at this point - the roster read is what failed - so this
-        // reports nothing rather than inventing names.
+        // Redis itself failed, not any one bot, and the roster read is what
+        // failed — so which guilds were involved is unknown and none are named.
         //
-        // Reporting nothing is not the same as finding nothing, though, and it
-        // used to be indistinguishable from it: an empty report with nothing
-        // unreachable in it reads as a complete answer, so a moment's Redis
+        // Reporting nothing is not finding nothing, though: an empty report with
+        // nothing unreachable reads as a complete answer, so a moment's Redis
         // trouble was cached for ten minutes as "this visitor has no servers
-        // anywhere else". Saying the fleet is unknown costs the caller a
-        // re-resolve a few seconds later and is the difference between a
-        // picker that heals itself and one that stays wrong.
+        // anywhere else". Saying the fleet is unknown costs a re-resolve a few
+        // seconds later, and is what makes the picker heal itself.
         logger.warn(s"Could not resolve dashboard access held by other bots: ${e.getMessage}")
         AccessReport.FleetUnknown
     }
@@ -372,29 +358,18 @@ object RemoteGuildAccess {
 
   /** How long one bot is given to answer about one guild.
    *
-   *  Was cut to a second when the wait was paid on the same four threads as
-   *  every dashboard write: a handful of visitors waiting on a bot that had
-   *  gone away was enough to hold up everybody else's requests, so the cost of
-   *  waiting mattered more than the answer did.
+   *  A second was under the real cost of an answer, not over it. The round trip
+   *  is: the question reaches Redis, the answering bot notices on its next sweep
+   *  (up to `AccessQueryConsumer.SweepEvery`), makes a *blocking Discord REST
+   *  call*, writes the reply, and the asker notices on its next poll (up to
+   *  `DefaultPoll`). A third of the budget went to scheduling jitter before any
+   *  work started, so the deadline landed mid-distribution and threw away answers
+   *  that were on their way.
    *
-   *  A second turned out to be under the real cost of an answer rather than
-   *  over it. The round trip is: the question reaches Redis, the answering bot
-   *  notices it on its next sweep (up to `AccessQueryConsumer.SweepEvery`), it
-   *  makes a *blocking Discord REST call* to read the member, it writes the
-   *  reply, and the asker notices that on its next poll (up to `DefaultPoll`).
-   *  A third of the budget was gone to scheduling jitter before any work
-   *  started, and the Discord call in the middle is worth a few hundred
-   *  milliseconds on a good day and much more behind a rate limit. So the
-   *  deadline was landing in the middle of the distribution: the answer was
-   *  usually on its way, and got thrown away.
-   *
-   *  Three seconds sits past the tail rather than inside it. This screen is
-   *  chosen once at the start of a session and does not need to be quick — it
-   *  needs to be right, and a picker that quietly drops a server is wrong in a
-   *  way a slow one is not. The thread cost that forced the cut is answered
-   *  where it belongs: reads have their own pool now (see BotApp), so a wait
-   *  here no longer holds up a write.
-   */
+   *  Three seconds sits past the tail. This screen is chosen once per session and
+   *  needs to be right rather than quick — a picker that quietly drops a server is
+   *  wrong in a way a slow one is not. The thread cost that forced the earlier cut
+   *  is answered where it belongs: reads have their own pool now (see BotApp). */
   val DefaultTimeout: FiniteDuration = 3.seconds
   val DefaultPoll: FiniteDuration = 100.millis
 

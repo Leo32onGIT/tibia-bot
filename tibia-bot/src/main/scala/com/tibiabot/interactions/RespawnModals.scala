@@ -19,18 +19,13 @@ import scala.util.Try
 import scala.util.control.NonFatal
 import com.tibiabot.presentation.Names
 
-/** The two modals behind the board post's buttons.
+/** The two modals behind the board post's buttons, so the claim system is usable
+ *  entirely from the forum: a spawn nobody has claimed has no post and so no
+ *  Claim button, which the board's Claim plus a code prompt covers.
  *
- *  These exist so the claim system is usable entirely from the forum. A spawn
- *  that nobody has claimed yet has no post of its own, so it has no Claim button
- *  — the board's Claim button plus a code/name prompt is what covers that gap
- *  without making anyone learn a slash command.
- *
- *  Routed separately from [[ModalHandler]] rather than added to it: that handler
- *  opens with `deferEdit()`, which edits the message the modal came from. Here
- *  that message is the pinned board post, which must not be rewritten by
- *  somebody adjusting their own settings.
- */
+ *  Routed separately from [[ModalHandler]], which opens with `deferEdit()` — here
+ *  the message is the pinned board post, and it must not be rewritten by somebody
+ *  adjusting their own settings. */
 object RespawnModals extends StrictLogging {
 
   private val SpawnField = "spawn"
@@ -46,14 +41,11 @@ object RespawnModals extends StrictLogging {
 
   def handles(modalId: String): Boolean = modalId.startsWith(RespawnButtonId.ModalPrefix)
 
-  /** Whether this form answers by rewriting the message it was opened from,
-   *  rather than with an ephemeral reply of its own.
-   *
-   *  Only the log's search does. It is opened from a log panel and replaces what
-   *  that panel is showing, so a reply would leave the old log sitting above the
-   *  new one — and pressing Find twice would stack three. `BotListener` reads
-   *  this to choose `deferEdit` over `deferReply`, which has to be decided before
-   *  the handler runs. */
+  /** Whether this form answers by rewriting the message it was opened from rather
+   *  than with an ephemeral reply. Only the log's search does: it replaces what
+   *  its panel shows, and a reply would leave the old log above the new one.
+   *  `BotListener` reads this to choose `deferEdit` over `deferReply`, which must
+   *  be decided before the handler runs. */
   def editsOriginal(modalId: String): Boolean = modalId == RespawnButtonId.modalLogFind
 
   /** As RespawnButtons.nicknameOf: what the caller is called in this guild. */
@@ -186,18 +178,13 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** One spawn's own ceiling on how long a claim there may run.
+  /** One spawn's own ceiling on how long a claim there may run. Deliberately not
+   *  in `claimRulesModal` with the server-wide numbers: this is a fact about one
+   *  respawn and belongs where a moderator is already looking at it.
    *
-   *  Deliberately not in `claimRulesModal` with the server-wide numbers, and not
-   *  only because that modal is full at Discord's five components. This is a fact
-   *  about one respawn, and it belongs where a moderator is already looking at
-   *  that respawn.
-   *
-   *  Empty means "follow the server", which is why the field is optional and why
-   *  the description says so: clearing an override has to be as easy as setting
-   *  one, and the alternative — a separate Clear button — would spend the row's
-   *  last free slot on something a blank box already says.
-   */
+   *  Empty means "follow the server", hence the optional field — clearing an
+   *  override must be as easy as setting one, and a separate Clear button would
+   *  spend the row's last slot on what a blank box already says. */
   def spawnMaxModal(guildId: String, respawn: Respawn): Modal = {
     val service = BotApp.respawnService
     val serverMax = service.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
@@ -251,16 +238,12 @@ object RespawnModals extends StrictLogging {
       .build()
   }
 
-  /** Every server-wide setting a moderator can change, in one modal.
+  /** Every server-wide setting a moderator can change, in one modal. A second
+   *  panel called Timers held the handover window and a default reminder; the
+   *  reminder went (members set their own), which left the handover window alone
+   *  and not a panel, so it moved here.
    *
-   *  There used to be a second one called Timers holding the handover window and
-   *  a default reminder. The reminder went: members set their own, and a server
-   *  default that only applies to people who never opened Config was a setting
-   *  about the absence of a setting. That left the handover window on its own,
-   *  which is not a panel — so it moved here, and Timers went with it.
-   *
-   *  Five inputs is `Modal.MAX_COMPONENTS` exactly. The next server-wide setting
-   *  after this one needs somewhere new to live; there is no sixth slot. */
+   *  Five inputs is `Modal.MAX_COMPONENTS` exactly — there is no sixth slot. */
   def claimRulesModal(guildId: String): Modal = {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")

@@ -39,17 +39,13 @@ object Config {
 
   val tibiaDataMaxInFlight: Int = discord.getInt("tibiadata-max-in-flight")
 
-  /** CipSoft's official fansite API, the bot's second source for character
-   *  sheets — see [[com.tibiabot.fansiteapi.FansiteApiClient]].
+  /** CipSoft's official fansite API, the bot's second source for character sheets
+   *  — see [[com.tibiabot.fansiteapi.FansiteApiClient]].
    *
-   *  `mode` is the rollout gate and the rollback: `off` leaves the bot on the
-   *  TibiaData path it has always used, `shadow` fetches both and compares
-   *  without changing what gets posted, `race` runs both sources out of phase
-   *  and takes whichever sheet is fresher.
-   *
-   *  A mode past `off` with no token is treated as `off` rather than as a
-   *  configuration error, so a deploy that forgets the secret degrades to the
-   *  old behaviour instead of failing every character fetch. */
+   *  `mode` is both rollout gate and rollback: `off` stays on the TibiaData path,
+   *  `shadow` fetches both and compares without changing what is posted, `race`
+   *  runs them out of phase and takes the fresher sheet. A mode past `off` with no
+   *  token degrades to `off` rather than failing every fetch. */
   object FansiteApi {
     sealed trait Mode
     case object Off extends Mode
@@ -177,33 +173,24 @@ object Config {
     val statusDomain: String = web.getString("status-domain")
     val statusPort: Int = web.getInt("status-port")
 
-    /** Where a browser actually reaches this bot, as a scheme and authority
-     *  with no trailing slash — the origin the OAuth redirect URI is built on.
-     *
-     *  Derived from `status-domain` unless overridden, so production needs no
-     *  new setting and gets exactly the string it had before. The override
-     *  exists for local runs: there the bot is reached through a plain-HTTP
-     *  port forward on localhost, and an `https://` redirect URI is one Discord
-     *  will send a browser to and the browser cannot load. Discord allows
-     *  `http://` redirect URIs for localhost specifically, which is what makes
-     *  signing in locally possible at all. */
+    /** Where a browser actually reaches this bot — scheme and authority, no
+     *  trailing slash — the origin the OAuth redirect URI is built on. Derived
+     *  from `status-domain` unless overridden, so production needs no new setting.
+     *  The override is for local runs behind a plain-HTTP port forward, where an
+     *  `https://` redirect URI is one the browser cannot load; Discord allows
+     *  `http://` for localhost specifically. */
     val baseUrl: String = {
       if (configuredBaseUrl.nonEmpty) configuredBaseUrl else s"https://$statusDomain"
     }
 
     private def configuredBaseUrl: String = web.getString("base-url").trim.stripSuffix("/")
 
-    /** Where members are sent to use the dashboard, which is not always
-     *  somewhere this bot serves.
-     *
-     *  [[baseUrl]] answers "where is *this* bot reached", and on a bot that runs
-     *  no dashboard the honest answer is nowhere — it has no `status-domain`, so
-     *  that origin comes out as a bare `https://`. This one answers the
-     *  different question the respawn board asks: where does the person reading
-     *  this post go to use the dashboard. There is one dashboard serving every
-     *  guild whichever bot runs them, so its address has a default here instead
-     *  of being something each bot has to be told, and a bot that does serve its
-     *  own still links to itself. */
+    /** Where members are sent to use the dashboard, which is not always somewhere
+     *  this bot serves. [[baseUrl]] answers "where is *this* bot reached", which
+     *  on a bot running no dashboard is a bare `https://`. This answers what the
+     *  respawn board asks instead: where the reader goes to use the dashboard.
+     *  One dashboard serves every guild, so its address defaults here rather than
+     *  being told to each bot; a bot serving its own still links to itself. */
     val dashboardOrigin: String =
       com.tibiabot.web.Origin.of(configuredBaseUrl, statusDomain, web.getString("dashboard-domain"))
 
@@ -248,12 +235,10 @@ object Config {
     val refreshToken: String = patreonApi.getString("refresh-token")
     val campaignId: String = patreonApi.getString("campaign-id")
     val syncInterval: FiniteDuration = patreonApi.getDuration("sync-interval").toScala
-    /** `/setup` kicks off its own sync before the subscription check, so
-     *  someone who subscribed minutes ago doesn't have to wait out
-     *  `sync-interval` — this is the shortest gap allowed between two syncs,
-     *  so a run of `/setup`s can't turn into a run of Patreon fetches. Shared
-     *  with the periodic sync: one that just ran counts, and `/setup` reuses
-     *  what it wrote. See BotApp.syncPatreonMembersForSetup. */
+    /** `/setup` syncs before its subscription check so a new supporter need not
+     *  wait out `sync-interval`. This is the shortest gap between two syncs, so a
+     *  run of `/setup`s cannot become a run of Patreon fetches. Shared with the
+     *  periodic sync — one that just ran counts. */
     val setupSyncCooldown: FiniteDuration = patreonApi.getDuration("setup-sync-cooldown").toScala
     /** How long `/setup` will wait on that sync before giving up on it and
      *  answering from the previous snapshot. The sync itself is left running;
@@ -307,23 +292,15 @@ object Config {
   /** The respawn claim system (the `📅・sᴘᴀᴡɴs` forum, plus `/stamina` and
    *  `/bookings`).
    *
-   *  `enabled` was the feature's rollout gate, defaulting to false so that the
-   *  first deploy of the branch couldn't start creating forum channels in every
-   *  guild that had run `/setup` — prod and DEV run the same image. The feature
-   *  has since been live in prod, so the default is now **true** and matches
-   *  what actually runs; `RESPAWN_ENABLED` no longer has to be set to turn on a
-   *  shipped feature.
+   *  `enabled` was the rollout gate and now defaults to **true**, matching what
+   *  prod runs. False is still a clean withdrawal rather than a broken state:
+   *  neither command is registered and `/setup`/`/repair` skip the forum — worth
+   *  keeping for a local run that shouldn't touch a guild's forums.
    *
-   *  Setting it false is still a clean withdrawal rather than a broken state:
-   *  neither command is registered with Discord and `/setup`/`/repair` skip the
-   *  forum entirely. Worth keeping for a local run that shouldn't touch a
-   *  guild's forums.
-   *
-   *  The duration/queue/stamina values here are *defaults for a guild's first
-   *  setup*. They're copied into that guild's `respawn_settings` row at creation
-   *  and read from there afterwards, so retuning the bot's defaults later never
-   *  silently changes the rules under a guild that is already using it.
-   */
+   *  The duration/queue/stamina values are *defaults for a guild's first setup*,
+   *  copied into its `respawn_settings` row at creation and read from there
+   *  afterwards, so retuning the bot's defaults never changes the rules under a
+   *  guild already using it. */
   object Respawn {
     private val respawn = discord.getConfig("respawn")
     val enabled: Boolean = respawn.getBoolean("enabled")

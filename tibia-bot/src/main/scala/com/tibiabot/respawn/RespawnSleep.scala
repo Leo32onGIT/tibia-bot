@@ -11,31 +11,23 @@ import scala.jdk.CollectionConverters._
 
 /** Which spawn posts are waiting to be put back to sleep, and when.
  *
- *  A free spawn's post is archived, and [[RespawnService.refreshThread]] closes
- *  it the moment the spawn comes free. It does not stay closed: interacting with
- *  an archived post re-opens it, and most of the buttons on a free spawn's card
- *  — Config, Book, and every form they open — change nothing about the claim
- *  state, so they never reach `refreshThread` and nothing ever asked for the
- *  post to be closed again. It sat on the forum's front page until somebody
- *  claimed and left the spawn.
+ *  [[RespawnService.refreshThread]] archives a post the moment its spawn comes
+ *  free, but it does not stay closed: interacting with an archived post re-opens
+ *  it, and a free spawn's buttons change no claim state, so they never reach
+ *  `refreshThread` and nothing asks for it to close again.
  *
- *  Closing it as the press is handled does not work either: the press is what
- *  re-opened it, and an archive racing that would either lose or flap the post
- *  open and shut through a burst of clicks. So a touched post is written down
- *  here instead and closed once it has been quiet for
- *  [[com.tibiabot.Config.Respawn.closeDelay]] — somebody can work through a
- *  booking form, change their mind and read the panel again, and the whole
- *  visit costs one archive at the end of it rather than one per click.
+ *  Closing it as the press is handled fails too — the press is what re-opened it,
+ *  and an archive racing that would flap the post open and shut through a burst of
+ *  clicks. So a touched post is written down here and closed once quiet for
+ *  [[com.tibiabot.Config.Respawn.closeDelay]], making a whole visit cost one
+ *  archive rather than one per click.
  *
- *  Keyed on the thread, which is unique across guilds, so the bot's other
- *  servers can never collide here. The value carries the guild because the
- *  closer needs it to reach that guild's settings and its claim state.
+ *  Keyed on the thread, which is unique across guilds; the value carries the guild
+ *  because the closer needs its settings and claim state.
  *
- *  In memory, so a restart forgets whatever was pending — which is why
- *  [[RespawnService.reconcileThreads]] exists as the backstop rather than this
- *  being persisted. Everything here is a map operation, so `touch` is safe on
- *  JDA's event thread; only the respawn sweep drains it.
- */
+ *  In memory, so a restart forgets what was pending — which is why
+ *  [[RespawnService.reconcileThreads]] is the backstop. Everything here is a map
+ *  operation, so `touch` is safe on JDA's event thread; only the sweep drains it. */
 object RespawnSleep {
 
   /** A post waiting to be closed: which guild it belongs to, and the earliest

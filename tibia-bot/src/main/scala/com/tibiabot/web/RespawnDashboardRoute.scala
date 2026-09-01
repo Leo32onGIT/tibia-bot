@@ -10,18 +10,14 @@ import spray.json._
 
 /** The member-facing respawn dashboard, mounted at `/dashboard`.
  *
- *  The counterpart to [[StatusRoute]], which is the owner's monitoring
- *  dashboard at `/status`. Both sit behind the same [[DiscordAuth]] session,
- *  but they gate on completely different things: that one asks "are you the
- *  owner", this one asks "which of the bot's guilds can you see a tracked world
- *  in, and what may you do there" — see [[DashboardAccessService]].
+ *  Counterpart to [[StatusRoute]] at `/status`. Both sit behind the same
+ *  [[DiscordAuth]] session but gate on different things: that one asks "are you
+ *  the owner", this one "which guilds can you see a tracked world in, and what may
+ *  you do there" — see [[DashboardAccessService]].
  *
- *  The owner is not special here. They land on the member dashboard like
- *  anybody else, and reach the monitoring one by going to `/status`; a session
- *  is good for both. Making this route branch on identity would mean the owner
- *  could never see what their own members see, which is the surest way to ship
- *  a broken member experience.
- */
+ *  The owner is not special here, and reaches the monitoring dashboard by going to
+ *  `/status`. Branching on identity would mean they could never see what their own
+ *  members see. */
 final class RespawnDashboardRoute(
   discordAuth: DiscordAuth,
   accessService: DashboardAccessService,
@@ -44,14 +40,10 @@ final class RespawnDashboardRoute(
   // call site below reads exactly as it did.
   import RespawnDashboardRoute.{esc, serverChip}
 
-  /** Runs blocking work somewhere it cannot hurt.
-   *
-   *  Everything this route reads is blocking — Discord REST calls to resolve
-   *  access, database round trips for a board — and akka's HTTP dispatcher is a
-   *  small pool shared with every other request. One slow Discord call on that
-   *  pool does not just slow its own request; it takes a server thread out of
-   *  circulation for everybody. So reads go to the same pool the writes already
-   *  use, and the request simply is not completed until they answer. */
+  /** Runs blocking work somewhere it cannot hurt. Everything this route reads
+   *  blocks — Discord REST calls, database round trips — and akka's HTTP
+   *  dispatcher is a small pool shared with every request, so one slow call there
+   *  takes a server thread out of circulation for everybody. */
   private def read[A](work: => A)(inner: A => Route): Route =
     onSuccess(scala.concurrent.Future(work)(blocking))(inner)
 
@@ -100,49 +92,33 @@ final class RespawnDashboardRoute(
       }
     }
 
-  /** As [[withAccess]], but also hands over everything else the visitor can
-   *  reach. Only the board page needs it, and only to decide whether its server
-   *  chip is a switcher or a label — there is no point offering a choice to
-   *  somebody with one server.
+  /** As [[withAccess]], but also hands over everything else the visitor can reach.
+   *  Only the board page needs it, to decide whether its server chip is a switcher
+   *  or a label.
    *
-   *  And, unlike the guards above, this one answers a *page* rather than a
-   *  payload, so a visitor it cannot admit is sent to the front door instead of
-   *  being handed the word "Forbidden".
+   *  Unlike the guards above this answers a *page*, so a visitor it cannot admit
+   *  goes to the front door rather than being handed "Forbidden". That matters now
+   *  the URL is a link in Discord: there are two ordinary ways to arrive with a
+   *  session resolving to nothing — the guild is not theirs, or, far more often,
+   *  [[UserGuildCache]] is in memory and written only by the OAuth callback, so a
+   *  restart empties it while the seven-day cookies keep working.
    *
-   *  That mattered little while this URL was only ever reached from the
-   *  dashboard itself. It is a link in Discord now — the Dashboard button on a
-   *  spawn's Book panel — and there are two ordinary ways to arrive holding a
-   *  session that resolves to nothing. Either the guild genuinely is not
-   *  theirs, or, far more often, we no longer know which servers they are in:
-   *  [[UserGuildCache]] lives in memory and is written only by the OAuth
-   *  callback, so every restart empties it while the seven-day cookies it
-   *  belongs to go on working. Somebody pressing that button after a deploy was
-   *  shown a bare error page for what is really "sign in again".
-   *
-   *  The landing route already tells those cases apart and has a page for each,
-   *  so this defers to it rather than growing a second opinion. Nothing loops:
-   *  the landing draws a board itself and never redirects on to one.
-   *
-   *  The data endpoints keep their 403 — the page's own fetches read that status
-   *  as "no longer have access" and say so in the header, which is the right
-   *  answer to a poll and would be a strange one to a browser.
-   */
+   *  The landing route already tells those apart and has a page for each, so this
+   *  defers to it. Nothing loops: the landing draws a board itself. Data endpoints
+   *  keep their 403, which the page's own fetches read as "no longer have access". */
   private def withAccessAmong(guildId: String)(inner: (GuildAccess, AccessReport) => Route): Route =
     discordAuth.authenticatedUser { userId =>
       read(accessService.rememberedReportFor(userId, guildIdsOf(userId), Some(guildId))) { report =>
         report.granted.find(_.guildId == guildId) match {
           case Some(access) => inner(access, report)
-          // Signed in, and yet we hold no list of their servers at all: the
-          // session outlived the memory of what is behind it. Signing in again
-          // is the entire fix, so send them to do it *through the bounce*, which
-          // takes the spawn along — landing them on the dashboard's front door
-          // would make them find it again by hand, which is the version of this
-          // that was reported.
+          // Signed in, yet we hold no list of their servers: the session outlived
+          // the memory behind it. Signing in again is the whole fix, so send them
+          // *through the bounce*, which takes the spawn along rather than making
+          // them find it again by hand.
           //
-          // `None` from the cache, not an empty set: a login writes an entry
-          // whatever Discord says, so somebody genuinely in no servers comes
-          // back with `Some(empty)` and takes the branch below. That is what
-          // keeps this from being a loop.
+          // `None`, not an empty set: a login writes an entry whatever Discord
+          // says, so somebody genuinely in no servers comes back `Some(empty)` and
+          // takes the branch below. That is what keeps this from looping.
           case None if discordAuth.userGuilds.get(userId).isEmpty =>
             extractUri(uri => redirect(discordAuth.loginUrlFor(uri), StatusCodes.Found))
           // We know their servers; this one simply is not among them. Nothing a
@@ -152,27 +128,23 @@ final class RespawnDashboardRoute(
       }
     }
 
-  /** Runs a *write* if the visitor may make it — deciding here only when this
-   *  bot is in a position to decide.
+  /** Runs a *write* if the visitor may make it, deciding here only when this bot
+   *  is in a position to decide.
    *
-   *  For a guild this bot is in, that is here and now, exactly as before: the
-   *  remembered answer is good enough for somebody acting on their own claim,
-   *  and anything acting on another person is resolved fresh.
+   *  For a guild this bot is in, that is here and now: the remembered answer is
+   *  good enough for somebody acting on their own claim, and anything acting on
+   *  another person is resolved fresh.
    *
-   *  For a guild it is not in, it is nobody's decision to make here. The bot
-   *  serving this page cannot read a member of a guild it is not in, so it used
-   *  to ask the bot that runs it over Redis, wait a second, and refuse if the
-   *  answer did not arrive — then send the write to that same bot anyway. Two
-   *  round trips to one process, and the first of them refused perfectly
-   *  ordinary members whenever it lost the race. Now the write carries who is
-   *  asking and the bot that has to do the work decides, which it can do without
-   *  asking anybody: see [[RespawnCommandConsumer]].
+   *  For a guild it is not in, it is nobody's decision to make here. This used to
+   *  ask the bot that runs it over Redis, wait a second, refuse if no answer came
+   *  — then send the write to that same bot anyway. Two round trips to one
+   *  process, the first refusing ordinary members whenever it lost the race. Now
+   *  the write carries who is asking and the bot doing the work decides: see
+   *  [[RespawnCommandConsumer]].
    *
-   *  What is still checked here is that the visitor is in the guild at all, from
-   *  their own Discord login. That is not the permission — the tier and the
-   *  worlds they can see are settled at the other end — it is what stops this
-   *  bot relaying writes into guilds a signed-in stranger merely named.
-   */
+   *  What is still checked here is that the visitor is in the guild at all. That
+   *  is not the permission — tier and worlds are settled at the other end — it is
+   *  what stops this bot relaying writes into guilds a stranger merely named. */
   private def withWrite(guildId: String, required: AccessTier)(inner: String => Route): Route =
     discordAuth.authenticatedUser { userId =>
       val theirs = guildIdsOf(userId)
@@ -190,25 +162,18 @@ final class RespawnDashboardRoute(
     }
 
   /** As [[withAccessAs]], but also requires the moderator tier in *this* guild.
-   *
-   *  What is left of it: the one moderator surface that is a *read* rather than
-   *  a write, and so has to be answered here from what this bot can see. Every
-   *  moderator write goes through [[withWrite]] instead, which can hand the
-   *  decision to a bot in a better position to make it.
-   *
-   *  Separate from the page's own hiding of these tools: that is convenience,
-   *  and this is the control. Resolved per request, so somebody who lost the
-   *  role a minute ago is refused on their next action rather than whenever a
-   *  cache happens to expire. */
+   *  The one moderator surface that is a *read*, and so must be answered from what
+   *  this bot can see; every moderator write goes through [[withWrite]] instead.
+   *  Separate from the page hiding these tools, which is convenience where this is
+   *  the control. */
   private def withModerator(guildId: String)(inner: (String, GuildAccess) => Route): Route =
     discordAuth.authenticatedUser { userId =>
-      // Deliberately not the remembered answer. These act on other people's
-      // claims, and somebody who lost the role a minute ago must be refused
-      // now rather than whenever a cache happens to expire.
+      // Deliberately not the remembered answer: these act on other people's
+      // claims, so somebody who lost the role a minute ago must be refused now
+      // rather than whenever a cache expires.
       //
-      // Only the guild being acted on is resolved. Resolving every guild the
-      // visitor is in made a force-leave wait on the other bots about servers
-      // that had nothing to do with it.
+      // Only the guild being acted on is resolved — resolving every guild made a
+      // force-leave wait on the other bots about unrelated servers.
       read(accessService.accessIn(userId, guildIdsOf(userId), guildId)) { granted =>
         granted.find(_.guildId == guildId) match {
           case Some(access) if access.tier.atLeast(AccessTier.Moderator) => inner(userId, access)
@@ -220,18 +185,13 @@ final class RespawnDashboardRoute(
   private def json(value: JsValue) =
     complete(HttpEntity(ContentTypes.`application/json`, value.compactPrint))
 
-  /** JSON with an ETag, so a caller that already has this exact answer is told
-   *  so instead of being sent it again.
+  /** JSON with an ETag, so a caller that already has this answer is told so rather
+   *  than sent it again. The board is polled every ten seconds by every open tab
+   *  and most polls find nothing changed; producing the answer still costs the
+   *  read, but it stops crossing the network and the page skips its own work.
    *
-   *  The board is polled every ten seconds by every open tab and most of those
-   *  polls find nothing has changed. The work of producing the answer still
-   *  happens — knowing whether anything changed means reading it — but the
-   *  answer stops crossing the network, and the page can skip its own work too.
-   *
-   *  `maxAge` is how long a caller may reuse it without asking at all. Zero for
-   *  anything live; a catalogue can sit for a while, since a spawn being
-   *  renamed is not urgent.
-   */
+   *  `maxAge` is how long a caller may reuse it without asking. Zero for anything
+   *  live; a catalogue can sit for a while. */
   private def cachedJson(value: JsValue, maxAge: Long): Route = {
     val body = value.compactPrint
     val tag = EntityTag(Integer.toHexString(body.hashCode) + "-" + body.length)
@@ -297,18 +257,11 @@ final class RespawnDashboardRoute(
   private def unreachable(guilds: List[UnreachableGuild]): String =
     shell("Couldn't reach your servers", RespawnDashboardRoute.unreachableBody(guilds))
 
-  /** Signed in, and nothing resolved.
-   *
-   *  Two very different situations wearing one page until now. Either we never
-   *  learned which servers this visitor is in — the list lives in memory beside
-   *  their login and does not survive a restart — or we knew them, checked every
-   *  one, and none has a respawn list they can see.
-   *
-   *  The old page addressed only the second and offered only the first's fix, so
-   *  somebody in the second state signed in again, came back to the identical
-   *  page, and signed in again. `userGuildIds` is the whole of the difference,
-   *  and it was sitting in the caller untouched.
-   */
+  /** Signed in, and nothing resolved — two different situations. Either we never
+   *  learned which servers this visitor is in (the list is in memory beside their
+   *  login and does not survive a restart), or we knew them, checked every one and
+   *  none has a respawn list they can see. One page for both made the second state
+   *  offer the first's fix, so signing in again just returned the same page. */
   private def signedInEmpty(userGuildIds: Set[String]): String = {
     val (title, body) =
       RespawnDashboardRoute.signedInEmptyPage(guildIdsKnown = userGuildIds.nonEmpty)
@@ -355,18 +308,14 @@ final class RespawnDashboardRoute(
           // servers at all is what decides which empty state they see, and
           // asking again after resolving could give a different answer.
           val theirs = guildIdsOf(userId)
-          // Resolved once and used twice: where to send them, and — if that is
-          // straight to a board — whether its header has anywhere to switch to.
+          // Resolved once and used twice: where to send them, and whether the
+          // header has anywhere to switch to.
           //
-          // From the short memory, like every other read here. This route
-          // alone resolved live, so the most-visited page on the dashboard
-          // paid a Discord REST call per candidate guild and a fresh wait on
-          // the other bots every single time it was opened — and, resolving
-          // outside the cache, never left an answer behind for the routes that
-          // do read it. Landing is a read: it decides where to send somebody,
-          // and the board it sends them to re-resolves before showing them
-          // anything, so nothing is granted on the strength of what is
-          // remembered here.
+          // From the short memory, like every other read here. Resolving live made
+          // the most-visited page pay a Discord REST call per candidate guild and
+          // a fresh wait on the other bots on every open, and left no answer behind
+          // for the routes that do read the cache. Nothing is granted on what is
+          // remembered — the board re-resolves before showing anything.
           read(accessService.rememberedReportFor(userId, theirs)) { report =>
             accessService.entryOf(report) match {
               case DashboardEntry.Nowhere               => html(signedInEmpty(theirs))
@@ -759,35 +708,6 @@ object RespawnDashboardRoute {
     s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
       .replace("\"", "&quot;").replace("'", "&#39;")
 
-  /** Which Discord this board belongs to, in the masthead, and the way to leave
-   *  it for another.
-   *
-   *  Every code, claim and booking on the page belongs to exactly one server,
-   *  and somebody in two communities that both run the bot has two boards that
-   *  look alike — so the page says which one it is rather than leaving it to be
-   *  inferred from the tab. `/dashboard` follows it the way `/status` follows
-   *  the bot's name on the owner page, so the two mastheads read alike.
-   *
-   *  A menu only when there is somewhere to go: a chevron on the page of
-   *  somebody with one server would offer a choice that does not exist, so that
-   *  case stays a plain label.
-   *
-   *  "Somewhere to go" includes a server that failed to answer. Landing here
-   *  because the picker collapsed to one entry used to strip the switcher too,
-   *  so the one page a visitor most needed a way off was the one page with no
-   *  way off - the full picker at `/dashboard/choose` was still there, but
-   *  nothing on screen said so. A server that could not be resolved is listed
-   *  unlinked, since we do not know it is theirs to open; what the menu is for
-   *  in that state is the "All servers" row beneath it.
-   *
-   *  Rendered here rather than fetched, because the caller already holds every
-   *  server this viewer can reach — it is what decides whether the chevron is
-   *  drawn at all — so the menu costs one substitution and no round trip. The
-   *  items are ordinary links: switching rebuilds the board against another
-   *  guild, which is a page load however it is dressed. The full picker at
-   *  `/dashboard/choose` stays as the landing answer and for anyone who arrives
-   *  there directly.
-   */
   /** Where the sign-in lives. Written once here rather than at each use, since
    *  three screens now point at it. */
   private[web] val LoginPath = "/dashboard/auth/login"
@@ -796,17 +716,10 @@ object RespawnDashboardRoute {
    *  boards they can see, or shown the one they can. */
   private[web] val LandingPath = "/dashboard"
 
-  /** The title and body for a visitor who is signed in and has nothing.
-   *
+  /** Title and body for a visitor who is signed in and has nothing.
    *  `guildIdsKnown` is the branch: false means we hold no list of their servers
-   *  and have to ask Discord again, true means we asked, checked every server,
-   *  and there was nothing on the other end. The second must not offer to sign
-   *  them in again — that is the loop the old single page created.
-   *
-   *  The two share a composition on purpose. It is the same handshake either
-   *  way; what differs is the state of the connection, which is doing the work
-   *  of a sentence before any sentence is read.
-   */
+   *  and must ask Discord again; true means we asked and found nothing. The second
+   *  must not offer to sign them in again — that is the loop. */
   private[web] def signedInEmptyPage(guildIdsKnown: Boolean): (String, String) =
     if (!guildIdsKnown)
       ("Reconnect",
@@ -899,6 +812,19 @@ object RespawnDashboardRoute {
        |  <span class="tier tier-${a.tier.name}">${a.tier.name}</span>
        |</a>""".stripMargin
 
+  /** Which Discord this board belongs to, in the masthead, and the way to leave it
+   *  for another. Everything on the page belongs to exactly one server, and two
+   *  communities running the bot give a visitor two boards that look alike.
+   *
+   *  A menu only when there is somewhere to go — one server stays a plain label —
+   *  where "somewhere" includes a server that failed to answer. Landing here
+   *  because the picker collapsed to one entry used to strip the switcher, leaving
+   *  the page that most needed a way off with none. An unresolved server is listed
+   *  unlinked; the menu's point in that state is the "All servers" row.
+   *
+   *  Rendered rather than fetched: the caller already holds every server this
+   *  viewer can reach, so the menu costs one substitution and no round trip. The
+   *  items are ordinary links, since switching is a page load either way. */
   private[web] def serverChip(a: GuildAccess, among: AccessReport): String = {
     val glyph = """<i class="ti ti-brand-discord" aria-hidden="true"></i>"""
     val suffix = """<span class="brand-suffix">/dashboard</span>"""
@@ -1109,22 +1035,15 @@ object RespawnDashboardRoute {
     "state" -> JsString(booking.state)
   )
 
-  /** One spawn for the board.
-   *
-   *  Times go out as absolute instants, never as pre-formatted strings or
-   *  minutes-remaining: the page renders them in the reader's own zone, and a
-   *  countdown computed here would be wrong by however long the response sat in
-   *  flight or on screen between polls.
-   *
-   *  The sprite is a URL on our own domain or absent — the page falls back to
-   *  the placeholder — so nothing here ever points a browser at the wiki that
-   *  some of them cannot reach. */
-  /** What a spawn is, as opposed to what is happening on it.
-   *
-   *  Its name, where it is and what it looks like change when an admin edits
-   *  the catalogue and not otherwise, so this is fetched once and kept. It is
-   *  also most of the bytes: on a 285-spawn guild the names, regions and sprite
-   *  paths are several times the size of everything that actually moves. */
+  /** One spawn for the board. Times go out as absolute instants, never formatted
+   *  strings or minutes-remaining: the page renders them in the reader's zone, and
+   *  a countdown computed here would be wrong by however long the response sat in
+   *  flight. The sprite is a URL on our own domain or absent, so nothing points a
+   *  browser at the wiki some of them cannot reach. */
+  /** What a spawn is, as opposed to what is happening on it. Changes only when an
+   *  admin edits the catalogue, so it is fetched once and kept — and it is most of
+   *  the bytes: on a 285-spawn guild the names, regions and sprite paths are
+   *  several times the size of everything that moves. */
   /** The people a moderator may pick between. Both names travel: the account is
    *  what is searchable and unique, the nickname is what anybody would actually
    *  look for. Neither is composed into a sentence here — the page decides how

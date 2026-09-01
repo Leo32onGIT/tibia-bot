@@ -64,18 +64,16 @@ final class WorldMetrics {
 
   /** Record how far behind a death this bot was when it first *detected* it.
    *
-   *  Deliberately not folded into [[incrementDeaths]], which counts posts, not
-   *  deaths: the same death posts once per discord tracking this world, so
-   *  `deaths` is already weighted by how many discords watch a world. This is
-   *  called once per death, at the point it first clears the recent-deaths
-   *  dedup, so the average is an average over deaths rather than over posts.
+   *  Not folded into [[incrementDeaths]], which counts posts: the same death posts
+   *  once per discord tracking the world, so `deaths` is weighted by audience.
+   *  This is called once per death, as it clears the dedup, so the average is over
+   *  deaths rather than posts.
    *
-   *  `lagSeconds` is measured from the death's own timestamp on the character
-   *  sheet, so it includes delays nobody here controls — Tibia publishing the
-   *  death, TibiaData scraping it, and the upstream cache holding the sheet.
-   *  That makes the absolute figure fairly large and not very interesting; what
-   *  it is for is comparison, since a change to how the bot schedules its
-   *  character fetches moves this number and little else does. */
+   *  `lagSeconds` runs from the death's own timestamp on the character sheet, so
+   *  it includes delays nobody here controls — Tibia publishing it, TibiaData
+   *  scraping it, the upstream cache holding the sheet. The absolute figure is
+   *  therefore large and uninteresting; it is for comparison, since little but a
+   *  change to fetch scheduling moves it. */
   def recordDeathDetected(lagSeconds: Long): Unit = synchronized {
     deathDetections += 1
     deathLagTotalSeconds += lagSeconds

@@ -11,28 +11,19 @@ import java.time.ZonedDateTime
  *  empty on a row written before it was recorded. */
 final case class KnownMember(userId: String, userName: String, nickname: String)
 
-/** One day a standing booking has given up.
+/** One day a standing booking has given up. A rule says "every day at eleven" and
+ *  cannot say what became of last Thursday; only that day's row can, and there is
+ *  exactly one per `(schedule, start)`.
  *
- *  A rule says "every day at eleven"; it cannot say what became of last
- *  Thursday. Only the row for that day can, and there is exactly one per
- *  `(schedule, start)` — the pair the database already treats as an
- *  occurrence's identity.
- *
- *  A day is given up when its row has stopped standing: cancelled by its owner,
- *  handed to whoever asked for it, missed, or taken off the calendar by a
- *  moderator. Everywhere a rule speaks for a day — the card, the week, the
- *  clash check, somebody's list of bookings — has to consult these first, or it
- *  goes on naming an evening its owner no longer has. */
+ *  A day is given up when its row stops standing — cancelled, handed to whoever
+ *  asked, missed, or taken off the calendar. Everywhere a rule speaks for a day
+ *  must consult these first, or it names an evening its owner no longer has. */
 final case class ScheduleOccurrence(scheduleId: Long, startsAt: ZonedDateTime)
 
-/** What bringing a guild's catalogue in line with the bundled file did.
- *
- *  `retired` is the rows themselves rather than a count of them, because the
- *  caller has a second job to do with each one: the spawn's forum post has to
- *  come down too, and a post can only be found by the `threadId` on the row
- *  that has just been deleted. A count would leave every retired code as a
- *  card in Discord that nothing can resolve.
- */
+/** What bringing a guild's catalogue in line with the bundled file did. `retired`
+ *  is the rows themselves, not a count: the caller must also take down each
+ *  spawn's forum post, and a post can only be found by the `threadId` on the row
+ *  just deleted. */
 final case class SeedSync(added: Int, updated: Int, retired: List[Respawn]) {
   def changedAnything: Boolean = added > 0 || updated > 0 || retired.nonEmpty
 }
@@ -57,27 +48,20 @@ trait RespawnRepository {
   /** Point the guild at a (re)created forum channel and board post. */
   def updateChannels(guildId: String, forumChannel: String, boardThread: String): Unit
 
-  /** Everybody this guild's respawn system has ever seen, newest first.
+  /** Everybody this guild's respawn system has ever seen, newest first. Exists
+   *  because there is no member list to offer: the bot runs without the
+   *  GUILD_MEMBERS intent (see `DiscordGateway.memberAccess`). These are the
+   *  people who have claimed, queued or booked something, named from the rows
+   *  themselves, so somebody who has left is still nameable.
    *
-   *  Exists because there is no member list to offer instead: the bot runs
-   *  without the privileged GUILD_MEMBERS intent, so Discord's own user picker
-   *  has no web counterpart here (see `DiscordGateway.memberAccess`). These are
-   *  the people who have actually claimed, queued or booked something, which is
-   *  the set a moderator ever needs to pick from — and the names come from the
-   *  rows themselves, so somebody who has since left is still nameable.
-   *
-   *  One entry per account, carrying the most recent name and nickname recorded
-   *  for them: people change both, and the newest is the one anybody would
-   *  search by. */
+   *  One entry per account with the most recent name and nickname, since people
+   *  change both and the newest is what anybody searches by. */
   def knownMembers(guildId: String, limit: Int): List[KnownMember]
 
-  /** The fingerprint of the catalogue the pinned board post was last drawn from,
-   *  or None if it has never been recorded — which is every guild the first time
-   *  a build that keeps it runs, and reads as "redraw it".
-   *
-   *  Persisted rather than held in memory precisely because the question is
-   *  asked at boot: what is being remembered is the state of a message in
-   *  Discord, which outlives this process. */
+  /** Fingerprint of the catalogue the pinned board post was last drawn from, or
+   *  None if never recorded, which reads as "redraw it". Persisted rather than
+   *  held in memory because the question is asked at boot, and what is remembered
+   *  is the state of a Discord message, which outlives this process. */
   def boardDigest(guildId: String): Option[String]
 
   def setBoardDigest(guildId: String, digest: String): Unit
@@ -119,25 +103,17 @@ trait RespawnRepository {
    *  Only rows whose `source` is seed are touched, so a spawn a guild added
    *  itself is never rewritten or removed by an edit to the bundled file.
    *
-   *  A retired code goes immediately, taking its claims and its bookings with
-   *  it. Waiting for one to be free first sounds kinder and is not: a code the
-   *  file has dropped is usually one that has been split into sub-codes, so
-   *  what a standing booking pins in place is a spawn nobody should be on any
-   *  more — live on the board, on the calendar and claimable, beside the codes
-   *  that replaced it, until whichever restart happens to find it idle. The
-   *  hunt it ends is on a spawn that no longer exists. */
+   *  A retired code goes immediately, taking its claims and bookings with it.
+   *  Waiting for it to be free sounds kinder and is not: a dropped code has
+   *  usually been split into sub-codes, so a standing booking pins a spawn nobody
+   *  should be on — live and claimable beside the codes that replaced it. */
   def syncSeed(guildId: String, spawns: List[(String, String, String, String)]): SeedSync
 
-  /** Bring seed-derived rows' `creature` back in line with the bundled list,
-   *  returning how many actually changed.
-   *
-   *  Curating which monster represents each spawn is an ongoing job, and
-   *  `importSeed` deliberately never touches a code the guild already has — so
-   *  without this, an improved seed would only ever reach a brand-new guild.
-   *
-   *  Skips rows a guild added itself, and rows whose creature an admin has set by
-   *  hand (see `updateRespawn`, which pins them): someone who fixed a monster in
-   *  Discord should not have it reverted by the next deploy. */
+  /** Bring seed-derived rows' `creature` back in line with the bundled list, and
+   *  say how many changed. `importSeed` never touches a code the guild already
+   *  has, so without this an improved seed would only reach new guilds. Skips
+   *  custom rows and creatures an admin set by hand (see `updateRespawn`, which
+   *  pins them), so a fix made in Discord survives the next deploy. */
   def syncSeedCreatures(guildId: String, creaturesByCode: List[(String, String)]): Int
 
   // --- claims -------------------------------------------------------------
@@ -184,20 +160,16 @@ trait RespawnRepository {
    *  as the spawn's holder while the next person decides. */
   def expiredClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Active claims still running that haven't had their reminder yet.
-   *
-   *  Returns the whole set rather than filtering by a lead time in SQL, because
-   *  the lead time is now per member (see `RespawnUserPrefs`) — there is no
-   *  single window to query by. The set is bounded by how many spawns are held
-   *  at once, so filtering the rest in Scala is cheap. */
+  /** Active claims still running that haven't had their reminder yet. Returns the
+   *  whole set rather than filtering by lead time in SQL, since the lead time is
+   *  per member (see `RespawnUserPrefs`) and there is no single window to query
+   *  by. Bounded by how many spawns are held at once, so filtering in Scala is
+   *  cheap. */
   def unwarnedActiveClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Start a claim immediately.
-   *
-   *  None when somebody already holds the spawn — the caller's earlier "is it
-   *  free" read is not enough on its own, since two people pressing Claim at once
-   *  both pass it. Whoever loses is told the spawn was taken rather than ending up
-   *  with a second claim on the same hunt. */
+  /** Start a claim immediately. None when somebody already holds the spawn: the
+   *  caller's earlier "is it free" read is not enough, since two people pressing
+   *  Claim at once both pass it. */
   def insertActiveClaim(guildId: String, respawnId: Long, userId: String, userName: String, nickname: String,
                         characterName: String, startsAt: ZonedDateTime, endsAt: ZonedDateTime,
                         durationMinutes: Int, kind: String): Option[RespawnClaim]
@@ -211,12 +183,10 @@ trait RespawnRepository {
 
   def findClaimById(guildId: String, claimId: Long): Option[RespawnClaim]
 
-  /** Make one specific offered claim active, running from `startsAt`.
-   *
-   *  Targets a claim id rather than "whatever is at the head" so the caller can
-   *  reserve that person's stamina first and then promote exactly them. Returns
-   *  None if the row is no longer in the offered state — which is what makes
-   *  this safe against the offer lapsing, or being declined, in between. */
+  /** Make one specific offered claim active, running from `startsAt`. Targets a
+   *  claim id rather than "whatever is at the head", so the caller can reserve
+   *  that person's stamina first and promote exactly them. None if the row is no
+   *  longer offered, which makes it safe against the offer lapsing in between. */
   def promoteClaim(guildId: String, claimId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
 
   /** Move a queued claim to `offered`, meaning its owner has been DMed and has
@@ -414,18 +384,15 @@ trait RespawnRepository {
   def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim]
 
   /** Run `body` holding the spawn's row lock, so two people deciding about the
-   *  same spawn at once take turns rather than both deciding on the same
-   *  picture.
+   *  same spawn take turns rather than both deciding on the same picture.
    *
-   *  The one thing that makes a read-then-write safe here. Booking checks for a
-   *  clash and then inserts, across separate statements, so without this two
-   *  bookings arriving together both found the evening free and both took it —
-   *  and nothing downstream would catch it, since the unique index on
-   *  `(schedule_id, starts_at)` sees two ids and the one on `respawn_id` only
-   *  covers a claim that is already running.
+   *  The one thing making a read-then-write safe here: booking checks for a clash
+   *  and then inserts across separate statements, and nothing downstream catches a
+   *  collision — the unique index on `(schedule_id, starts_at)` sees two ids, and
+   *  the one on `respawn_id` only covers a claim already running.
    *
-   *  It has to be the database's lock rather than a mutex: dashboard writes are
-   *  relayed, so the two racers need not even be in the same process. */
+   *  It has to be the database's lock rather than a mutex, since dashboard writes
+   *  are relayed and the racers need not be in the same process. */
   def withRespawnLock[A](guildId: String, respawnId: Long)(body: => A): A
 
   /** Booked slots whose start has arrived, across the guild. */
@@ -463,13 +430,10 @@ trait RespawnRepository {
    *  the owner's behalf — see RespawnService's sweep. */
   def unconfirmedClaims(guildId: String, now: ZonedDateTime): List[RespawnClaim]
 
-  /** Settle every running claim still waiting on its owner to say they are
-   *  there, deadline reached or not. Returns how many were settled.
-   *
-   *  What a guild switching autoclaim on does to the hunts already under way:
-   *  without it the rule would only bind the next slot, and somebody sitting on
-   *  an unanswered Take Claim would still lose their spawn — to a deadline the
-   *  guild had just abolished. */
+  /** Settle every running claim still waiting on its owner, deadline reached or
+   *  not, and say how many. What switching autoclaim on does to hunts already
+   *  under way — otherwise the rule binds only the next slot, and somebody on an
+   *  unanswered Take Claim still loses their spawn to an abolished deadline. */
   def confirmPendingClaims(guildId: String, at: ZonedDateTime): Int
 
   /** Book a slot for somebody with no schedule of their own — used when a booked
@@ -519,12 +483,9 @@ trait RespawnRepository {
   // --- teardown -----------------------------------------------------------
 
   /** Forget everything the respawn system knows about this guild: claims,
-   *  catalogue and settings.
-   *
-   *  Used when the guild's last world is `/remove`d. The forum channel itself
-   *  is kept as read-only history (see ChannelService.retireSpawnsForum), but
-   *  none of it is tracked any more — a later `/setup` starts from the bundled
-   *  seed again rather than inheriting a catalogue whose threads all point into
-   *  a retired channel. */
+   *  catalogue and settings. Used when the last world is `/remove`d. The forum is
+   *  kept as read-only history (see ChannelService.retireSpawnsForum) but no
+   *  longer tracked, so a later `/setup` starts from the bundled seed rather than
+   *  inheriting a catalogue whose threads point into a retired channel. */
   def dropGuildData(guildId: String): Unit
 }

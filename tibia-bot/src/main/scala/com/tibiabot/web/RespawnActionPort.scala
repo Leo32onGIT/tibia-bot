@@ -5,32 +5,24 @@ import scala.concurrent.Future
 /** The writes the member dashboard can perform, as a seam over the respawn
  *  service.
  *
- *  A seam rather than the service itself for two reasons. The service's methods
- *  take a JDA `Guild`, which the route has no business resolving and no way to
- *  fake in a test. And every one of these has to be refused when *this* bot is
- *  not the one that should be acting on the guild — several bot identities can
- *  share a guild, and only the one that built its respawn forum runs its
- *  lifecycle (see `respawn.RespawnOwnership`). Putting that check behind this
- *  interface means a route cannot forget it.
+ *  A seam rather than the service itself for two reasons: the service's methods
+ *  take a JDA `Guild`, which a route has no business resolving and no way to fake
+ *  in a test; and every one must be refused when this bot is not the identity that
+ *  runs the guild's respawns (see `respawn.RespawnOwnership`). Behind an interface
+ *  a route cannot forget that check.
  *
- *  [[RespawnActionPort.Unavailable]] is that refusal, and it is deliberately
- *  distinct from a permission failure: the visitor did nothing wrong and
- *  retrying will not help, so the page says so rather than implying they lack
- *  access. It is also the seam a Redis relay to the owning bot slots into
- *  later, at which point the case stops being reachable for guilds another bot
- *  owns.
- */
+ *  [[RespawnActionPort.Unavailable]] is that refusal, deliberately distinct from a
+ *  permission failure — the visitor did nothing wrong and retrying will not help.
+ *  It is also where a Redis relay to the owning bot slots in. */
 trait RespawnActionPort {
 
-  /* Writes answer with a Future because one of the two implementations does not
-   * perform them at all: a guild whose respawns another bot runs has its writes
-   * handed to that process through Redis, and the answer only arrives once it
-   * has done the work. Blocking a request thread on that round trip would park
-   * an akka dispatcher for as long as another process takes to notice — so the
-   * waiting is expressed rather than hidden.
+  /* Writes answer with a Future because one implementation does not perform them
+   * at all: a guild another bot runs has its writes relayed through Redis, and the
+   * answer arrives once that process has done the work. Blocking a request thread
+   * would park an akka dispatcher for as long as another process takes to notice.
    *
-   * The two reads below stay synchronous: they go to the per-guild database
-   * every bot shares, so they never need relaying. */
+   * The two reads below stay synchronous: they go to the per-guild database every
+   * bot shares, so they never need relaying. */
 
   /** Take a spawn, or join its queue if somebody has it.
    *
@@ -46,17 +38,13 @@ trait RespawnActionPort {
   /** Add time to the claim the caller is currently holding. */
   def extend(guildId: String, userId: String, extraMinutes: Int): Future[ActionResult]
 
-  /** Book a window on a spawn.
+  /** Book a window on a spawn. `firstStart` is an absolute instant, so the page
+   *  can pick a time in the reader's zone without either side agreeing a timezone.
+   *  `daysOfWeek` is `RespawnSchedule`'s bitmask, zero for a one-off, resolved in
+   *  *server* time — which is why the page shows the server day before booking.
    *
-   *  `firstStart` is an absolute instant, so the page can pick a time in the
-   *  reader's own zone without either side having to agree a timezone.
-   *  `daysOfWeek` is the weekday bitmask from `RespawnSchedule` — zero for a
-   *  one-off. Those weekdays resolve in *server* time, which is why the page
-   *  shows which server day a slot lands on before it is booked.
-   *
-   *  Booking over somebody else's slot is not a refusal: it asks them whether
-   *  they are actually hunting it, which is why this can succeed with a
-   *  question outstanding rather than a booking. */
+   *  Booking over somebody else's slot is not a refusal but a question to them, so
+   *  this can succeed with a question outstanding rather than a booking. */
   def book(guildId: String, userId: String, characterName: String, code: String,
            firstStart: java.time.ZonedDateTime, durationMinutes: Int, daysOfWeek: Int): Future[ActionResult]
 

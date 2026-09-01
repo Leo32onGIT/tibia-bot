@@ -7,34 +7,29 @@ import com.tibiabot.tibiadata.response.{
 
 import java.time.Instant
 
-/** Translates a fansite API character payload into the `CharacterResponse` the
- *  rest of the bot already speaks.
+/** Translates a fansite API character payload into the `CharacterResponse` the rest
+ *  of the bot already speaks.
  *
- *  Mapping rather than replacing the model is what keeps this migration small:
- *  every consumer downstream — the death scan, LevelTracker, guild activity,
- *  world transfers, the two cache decorators — goes on reading exactly the type
- *  it reads today, so none of them (nor their tests) change. The cost is this
- *  file, and the cost is worth paying only because the correspondence is
- *  genuinely field-for-field; it was verified against 180 live characters, and
- *  the two shapes agreed on every field the bot reads.
+ *  Mapping rather than replacing the model keeps the migration small: every
+ *  consumer downstream reads exactly the type it reads today, so none of them nor
+ *  their tests change. Worth paying for only because the correspondence is
+ *  field-for-field — verified against 180 live characters, agreeing on every field
+ *  the bot reads.
  *
  *  Two fields carry real translation rather than a rename:
  *
- *  1. '''Vocation.''' TibiaData serves the promoted display name ("Elite
- *     Knight"); this API serves a base vocation plus `isPromoted`. The table in
- *     [[vocationName]] reconstructs the display string, so rows written to
- *     `bot_cache.levels` and `bot_cache.list` stay consistent with the ones
- *     already there.
+ *  1. '''Vocation.''' TibiaData serves the promoted display name ("Elite Knight");
+ *     this API serves a base vocation plus `isPromoted`. [[vocationName]]
+ *     reconstructs the display string, so rows written to `bot_cache.levels` and
+ *     `bot_cache.list` stay consistent with what is there.
  *
- *  2. '''Killers and assists.''' TibiaData splits them into two lists; this API
- *     returns one list tagged with `assist`. Partitioning preserves relative
- *     order, which matters: the death embed takes its thumbnail from
- *     `killers.lastOption`.
+ *  2. '''Killers and assists.''' TibiaData splits them; this API returns one list
+ *     tagged with `assist`. Partitioning preserves relative order, which matters:
+ *     the death embed takes its thumbnail from `killers.lastOption`.
  *
- *  Fields belonging to sections the client does not request (titles, houses,
- *  account information) are filled with the same values TibiaData reports for a
- *  character that has none. Nothing in the bot reads them — checked — so they
- *  exist to satisfy the case class rather than to be believed. */
+ *  Fields from sections the client does not request are filled with what TibiaData
+ *  reports for a character that has none. Nothing in the bot reads them, so they
+ *  satisfy the case class rather than being believed. */
 object CharacterMapping {
 
   /** Marks a mapped sheet's provenance in the `information` block. Nothing

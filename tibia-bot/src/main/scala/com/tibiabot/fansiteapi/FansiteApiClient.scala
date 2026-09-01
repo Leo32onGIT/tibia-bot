@@ -28,26 +28,23 @@ import scala.util.control.NonFatal
  *  [[com.tibiabot.tibiadata.TibiaApi]] so the rest of the bot cannot tell which
  *  upstream answered.
  *
- *  Only the three character methods are served here — this API has exactly two
- *  endpoints, `status` and `GetCharacter`, so worlds, guilds and the boosted
- *  pair have no equivalent and pass through to `delegate` unchanged. That makes
- *  this a split of the character firehose away from TibiaData, not a
- *  replacement of it: the online-list poll still goes where it always went.
+ *  Only the three character methods are served here — this API has two endpoints,
+ *  `status` and `GetCharacter` — so worlds, guilds and boosted pass through to
+ *  `delegate`. This splits the character firehose away from TibiaData rather than
+ *  replacing it; the online-list poll goes where it always went.
  *
- *  '''Two request headers are load-bearing, not cosmetic.''' The API sits
- *  behind Cloudflare, which answers 403 — not 401, not 429 — to a request
- *  missing either an `Accept-Encoding` header or a plausible `User-Agent`.
- *  Both were confirmed to fail independently. `br` is deliberately absent from
- *  the offered encodings: akka-http's `Coders` implements only gzip and
- *  deflate, so advertising brotli would earn a body this client cannot decode.
+ *  '''Two request headers are load-bearing.''' Cloudflare answers 403 — not 401,
+ *  not 429 — to a request missing either `Accept-Encoding` or a plausible
+ *  `User-Agent`, confirmed to fail independently. `br` is deliberately absent:
+ *  akka-http's `Coders` implements only gzip and deflate, so advertising brotli
+ *  would earn a body this client cannot decode.
  *
  *  '''The request shape must stay byte-stable per character.''' The upstream
- *  caches each distinct URL as its own entry with its own 300s window, so
- *  varying the `include` set between polls would fragment one character across
- *  several independently-phased copies and defeat the age cache in front of
- *  this. `include=characterDeathsData` is therefore fixed here rather than
- *  passed in: it is the narrowest request carrying everything the bot reads,
- *  and it more than halves the payload against asking for every section. */
+ *  caches each distinct URL as its own entry with its own 300s window, so varying
+ *  the `include` set would fragment one character across several
+ *  independently-phased copies and defeat the age cache in front of this.
+ *  `include=characterDeathsData` is fixed here: the narrowest request carrying
+ *  everything the bot reads, and less than half the payload of asking for all. */
 final class FansiteApiClient(
     delegate: TibiaApi,
     token: String,

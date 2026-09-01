@@ -1,18 +1,17 @@
 package com.tibiabot.domain
 
-/** One member of the Patreon campaign, as returned by Patreon's own API
- *  (see patreonapi.PatreonApiClient) — distinct from [[PatreonSeat]], which
- *  records which (guild, world) a supporter has spent a seat on. This is what
- *  the paywall gate reads to decide whether someone is subscribed at all
- *  (`patronStatus` == "active_patron", matched on `discordUserId`), and what
- *  the dashboard's supporters panel renders. Keyed by Patreon's own member id
- *  (stable, unlike `fullName`, and present even when `discordUserId` isn't —
- *  a member who's never connected Discord to Patreon still gets synced, they
- *  just can't be matched to a Discord account, so they can't pass the gate).
+/** One member of the Patreon campaign as returned by Patreon's API (see
+ *  patreonapi.PatreonApiClient) — distinct from [[PatreonSeat]], which records
+ *  which (guild, world) a supporter spent a seat on. What the paywall gate reads
+ *  to decide whether somebody is subscribed at all, and what the dashboard's
+ *  supporters panel renders.
  *
- *  `discordUsername` is resolved separately from Patreon's own response (see
- *  BotApp.syncPatreonMembers) — Patreon only gives us the linked Discord id,
- *  not a display name — and is filled in once per sync (infrequent), not on
+ *  Keyed by Patreon's member id: stable unlike `fullName`, and present even
+ *  without `discordUserId` — a member who never connected Discord still syncs,
+ *  they simply cannot be matched to an account and so cannot pass the gate.
+ *
+ *  `discordUsername` is resolved separately (see BotApp.syncPatreonMembers), since
+ *  Patreon gives only the linked id, and is filled once per sync rather than on
  *  every dashboard poll. */
 case class PatreonMember(
   patreonMemberId: String,

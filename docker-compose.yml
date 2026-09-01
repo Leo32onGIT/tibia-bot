@@ -1,16 +1,13 @@
 # Violent Bot — Docker Compose
 #
 # Quick start (see README "Running with Docker Compose"):
-#   1. Build the bot image once:   sbt docker:publishLocal   (-> violent-bot-dedicated:latest)
+#   1. sbt docker:publishLocal     -> violent-bot-dedicated:latest
 #   2. cp .env.example .env        and fill it in
-#   3. Start it:
-#        • bundled Postgres:   docker compose --profile local-db up -d
-#        • pre-existing DB:    docker compose up -d          (set POSTGRES_HOST in .env)
+#   3. bundled Postgres:  docker compose --profile local-db up -d
+#      pre-existing DB:   docker compose up -d   (set POSTGRES_HOST in .env)
 #
-# Redis (the cache) starts by default (the `local-cache` profile is meant to
-# be active via COMPOSE_PROFILES in .env — see .env.example). A shared-world-
-# cycle secondary doesn't run its own Redis at all (it points REDIS_HOST at
-# the primary's instead), so its .env leaves COMPOSE_PROFILES unset and the
+# Redis starts by default via COMPOSE_PROFILES in .env. A secondary points
+# REDIS_HOST at the primary instead and leaves COMPOSE_PROFILES unset, so its
 # local redis service is never created.
 
 services:
@@ -22,43 +19,31 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-        # Satisfied normally when the `local-cache` profile is active; simply
-        # skipped (not an error) when it isn't, e.g. a shared-world-cycle
-        # secondary — see the redis service below.
+        # Skipped, not an error, when the `local-cache` profile is inactive.
         required: false
-    # The bot connects to Postgres at boot; with the bundled DB (local-db profile)
-    # it may restart a couple of times while Postgres initialises — that is
-    # expected and harmless. It is NOT wired to depends_on postgres so that a
-    # pre-existing/external database works without starting the local one.
+    # With the bundled DB the bot may restart a couple of times while Postgres
+    # initialises — expected and harmless. Deliberately NOT depends_on postgres,
+    # so an external database works without starting the local one.
     restart: unless-stopped
     volumes:
-      # Both dashboards read their page fresh on every request, preferring this
-      # path over the copy baked into the jar — so editing one of these files
-      # (then just refreshing the browser) never needs a rebuild or restart.
+      # Both dashboards read their page fresh per request, preferring this path
+      # over the copy in the jar, so editing one needs no rebuild or restart.
       - ./tibia-bot/src/main/resources/web:/opt/docker/web:ro
-      # Creature sprites fetched from the wiki. Kept in a named volume so a
-      # container recreate does not throw the whole catalogue away and re-fetch
-      # it — which works, but is a few hundred needless requests to somebody
-      # else's server every deploy.
+      # Creature sprites from the wiki, in a named volume so a container recreate
+      # does not re-fetch a few hundred files from somebody else's server.
       - sprite-cache:/opt/docker/cache/sprites
-    # Status dashboard (see StatusRoute.scala) — internal-only, reached via
-    # Caddy below. Deliberately no `ports:` here: the host never talks to the
-    # bot directly, only through the reverse proxy that terminates TLS.
+    # No `ports:` deliberately — the host reaches the bot only through Caddy,
+    # which terminates TLS.
 
-  # Reverse proxy in front of STATUS_DOMAIN (the bot's public apex domain, also
-  # the existing GitHub Pages landing page's domain): automatic Let's Encrypt
-  # HTTPS, /dashboard* and /status* proxied to the bot's internal port, everything
-  # else passed through unauthenticated to GitHub Pages (see Caddyfile).
-  # Requires STATUS_DOMAIN's DNS to point at this host instead of GitHub
-  # Pages' IPs, and ports 80/443 forwarded to it (80 for the Let's Encrypt
-  # HTTP-01 challenge).
+  # Reverse proxy in front of STATUS_DOMAIN: automatic Let's Encrypt HTTPS,
+  # /dashboard* and /status* proxied to the bot, everything else passed through
+  # unauthenticated to GitHub Pages (see Caddyfile). Needs STATUS_DOMAIN's DNS
+  # pointed at this host and ports 80/443 forwarded (80 for the HTTP-01 challenge).
   caddy:
     image: caddy:2
-    # Only created when the `own-dashboard` profile is active (COMPOSE_PROFILES
-    # in .env — see .env.example). A shared-world-cycle secondary doesn't run
-    # its own dashboard at all (BotApp skips binding the internal HTTP server
-    # too when BOT_ROLE=secondary) — its worlds/guilds are published for the
-    # primary's dashboard to merge in instead, so no reverse proxy, no domain, needed.
+    # Only with the `own-dashboard` profile. A secondary runs no dashboard at all
+    # (BotApp skips binding the HTTP server when BOT_ROLE=secondary) — its worlds
+    # are published for the primary's dashboard to merge in.
     profiles: ["own-dashboard"]
     env_file: .env
     ports:
@@ -76,22 +61,17 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Only created when the `local-cache` profile is active (COMPOSE_PROFILES
-    # in .env — see .env.example). Absent entirely on a shared-world-cycle
-    # secondary, which has no use for its own Redis.
+    # Only with the `local-cache` profile. Absent on a secondary, which has no
+    # use for its own Redis.
     profiles: ["local-cache"]
     networks:
       - violentbot
-    # appendonly so the character-cache snapshot (and other cached keys) survive
-    # a redis restart instead of forcing a cold re-fetch. requirepass matches
-    # REDIS_PASSWORD (already used by the bot's own client config) — matters
-    # once this is reachable beyond this host's own docker network, below.
+    # appendonly so cached keys survive a restart instead of forcing a cold
+    # re-fetch. requirepass matches REDIS_PASSWORD, which matters once this is
+    # reachable beyond this host's docker network.
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
-    # Published only to a specific private IP — unset (the default) binds to
-    # loopback only, i.e. no real exposure beyond this host. Set
-    # REDIS_PUBLISH_HOST to this host's own private IP on a shared-world-cycle
-    # primary, so secondary bots elsewhere on the VPC can reach it; leave
-    # unset on a plain single-bot or secondary deployment.
+    # Unset (the default) binds loopback only. Set REDIS_PUBLISH_HOST to this
+    # host's private IP on a primary, so secondaries on the VPC can reach it.
     ports:
       - "${REDIS_PUBLISH_HOST:-127.0.0.1}:6379:6379"
     volumes:
@@ -103,11 +83,9 @@ services:
       timeout: 3s
       retries: 5
 
-  # Optional bundled Postgres — enabled ONLY with the `local-db` profile:
-  #   docker compose --profile local-db up -d
-  # To use a pre-existing database instead, omit the profile and point
-  # POSTGRES_HOST at your server. NOTE: the bot hardcodes port 5432, so an
-  # external database must listen on 5432.
+  # Optional bundled Postgres — only with the `local-db` profile. For an existing
+  # database, omit the profile and set POSTGRES_HOST. The bot hardcodes port 5432,
+  # so an external database must listen there.
   postgres:
     image: postgres:16
     profiles: ["local-db"]

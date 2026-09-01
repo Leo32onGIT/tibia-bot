@@ -9,27 +9,21 @@ import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import com.tibiabot.presentation.Names
 
-/** The buttons on a respawn's forum post, its board, and the DMs the system
- *  sends: Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
+/** The buttons on a respawn's forum post, its board, and the DMs the system sends:
+ *  Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
  *
- *  Separated from [[ButtonHandler]]'s if/else chain rather than adding a branch
- *  per button — this family shares an id format and a permission model, so
- *  routing on the `respawn:` prefix keeps that chain at one branch however many
- *  buttons the feature grows.
- *
- *  Every reply is ephemeral: a spawn post is a shared card, and one person's
- *  click shouldn't add noise the whole thread has to scroll past. The card and
- *  the DMs are updated by the service itself.
+ *  Separated from [[ButtonHandler]]'s if/else chain rather than a branch per
+ *  button — this family shares an id format and a permission model, so routing on
+ *  the `respawn:` prefix keeps that chain at one branch however many buttons the
+ *  feature grows. Every reply is ephemeral: a spawn post is a shared card, and the
+ *  service updates the card and the DMs itself.
  *
  *  ==Acknowledging in time==
- *  Discord drops an interaction that isn't acknowledged within three seconds,
- *  and most of these handlers do database work and blocking JDA calls (creating
- *  or reviving a forum thread, sending a DM) before they have anything to say.
- *  So anything answering with a *message* defers first and replies through the
- *  hook. Branches that open a *modal* cannot defer — `replyModal` has to be the
- *  first response to an interaction — so they answer directly and keep their
- *  pre-modal work to a lookup or two.
- */
+ *  Discord drops an interaction unacknowledged for three seconds, and most of
+ *  these handlers do database work and blocking JDA calls first. So anything
+ *  answering with a *message* defers and replies through the hook. Branches
+ *  opening a *modal* cannot defer — `replyModal` must be the first response — so
+ *  they answer directly and keep their pre-modal work to a lookup or two. */
 object RespawnButtons extends StrictLogging {
 
   def handles(componentId: String): Boolean = RespawnButtonId.handles(componentId)
@@ -247,17 +241,13 @@ object RespawnButtons extends StrictLogging {
   }
 
   /** A page of the claim log, opened from a moderator panel or turned by its own
-   *  Newer/Older buttons.
+   *  buttons. Rewrites the message it was pressed on rather than stacking a fresh
+   *  ephemeral log per click — hence `deferEdit` (see RespawnButtonId.ackFor) and
+   *  `editOriginal` for every answer, refusals included.
    *
-   *  Rewrites the message it was pressed on rather than sending a new one, so
-   *  paging turns the page instead of stacking a fresh ephemeral log per click
-   *  — which is why BotListener acknowledges these with `deferEdit` (see
-   *  RespawnButtonId.ackFor) and why every answer here goes through
-   *  `editOriginal`, including the refusals.
-   *
-   *  Moderator-only, re-checked here rather than trusted from the panel that
-   *  offered it: an ephemeral message persists, and the role can be taken away
-   *  while it sits open. */
+   *  Moderator-only, re-checked here rather than trusted from the panel: an
+   *  ephemeral message persists, and the role can be taken away while it sits
+   *  open. */
   private def handleLogButton(event: ButtonInteractionEvent, scope: LogScope, page: Int): Unit = {
     val guild = event.getGuild
     def refuse(text: String): Unit =

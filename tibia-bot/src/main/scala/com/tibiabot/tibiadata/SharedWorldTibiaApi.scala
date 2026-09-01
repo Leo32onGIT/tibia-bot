@@ -21,38 +21,27 @@ import scala.util.control.NonFatal
  *  though it were data, and a Primary that failed simply leaves whatever is
  *  already in Redis to expire on its own.
  *
- *  '''A published character sheet is kept for exactly as long as the upstream
- *  copy it came from is still the current one''' — its origin timestamp plus
- *  that copy's lifetime, not a flat duration. A flat one is wrong in both
- *  directions now that [[AgeCachedTibiaApi]] sits in front. The Primary only
- *  reaches this class when a character comes due, roughly once per upstream
- *  lifetime, so a TTL shorter than that leaves the key missing for most of the
- *  cycle and every Secondary fetches directly anyway — which is what a flat 90
- *  seconds against a 300 second lifetime did. Overshooting is worse than
- *  useless rather than merely useless: a Secondary reads Redis and only falls
- *  through to a real fetch on a miss, so an entry outliving its copy is one a
- *  Secondary keeps being served after it stopped being current, and if the
- *  Primary died it would go on being served until the key expired. Tying the
- *  key's life to the copy's makes it vanish exactly when it stops being the
- *  current answer, at which point a Secondary either finds the newly published
- *  one or goes and fetches.
+ *  '''A published character sheet is kept for exactly as long as the upstream copy
+ *  it came from is still current''' — origin timestamp plus that copy's lifetime,
+ *  not a flat duration, which is wrong in both directions now [[AgeCachedTibiaApi]]
+ *  sits in front. The Primary reaches this class only when a character comes due,
+ *  so a shorter TTL leaves the key missing for most of the cycle and every
+ *  Secondary fetches anyway — what a flat 90s against a 300s lifetime did.
+ *  Overshooting is worse: a Secondary only falls through on a miss, so an entry
+ *  outliving its copy keeps being served after it stopped being current, and would
+ *  go on being served if the Primary died.
  *
- *  Correctness does not rest on that, though — it is about hit rate and blast
- *  radius. The payload carries its own `information.timestamp`, so a
- *  Secondary's own [[AgeCachedTibiaApi]] re-derives freshness from the sheet
- *  itself: handed an out-of-date one it records the old origin, stays due, and
- *  asks again next poll rather than settling for it.
+ *  Correctness does not rest on that — it is hit rate and blast radius. The
+ *  payload carries its own `information.timestamp`, so a Secondary's
+ *  [[AgeCachedTibiaApi]] re-derives freshness from the sheet: handed an old one it
+ *  records the old origin, stays due, and asks again next poll.
  *
- *  `getWorld` keeps a flat TTL. Its upstream copy lives 60s and both bots poll
- *  every 60s, so the Primary republishes each cycle and the key is
- *  continuously present — the mismatch that broke the character path does not
- *  arise there, and nothing here changes what the online list sees.
+ *  `getWorld` keeps a flat TTL: its upstream copy lives 60s and both bots poll
+ *  every 60s, so the key is continuously present and the mismatch does not arise.
  *
- *  Deliberately a separate decorator from CachingTibiaApi rather than an
- *  extension of it — that class's own doc explains why the character firehose
- *  is never cached there. Sits in front of CachingTibiaApi (which wraps
- *  TibiaDataClient), so a Primary's own fetch still benefits from whatever
- *  CachingTibiaApi caches on other endpoints. */
+ *  A separate decorator from CachingTibiaApi rather than an extension — that
+ *  class's doc explains why the character firehose is never cached there. It sits
+ *  in front, so a Primary's own fetch still benefits from what it does cache. */
 final class SharedWorldTibiaApi(
     underlying: TibiaApi,
     cache: RedisCache,

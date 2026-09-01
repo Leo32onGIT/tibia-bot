@@ -7,18 +7,15 @@ import java.time.{Duration, Instant}
 
 /** What differed between the same character as told by two upstreams.
  *
- *  `stable` holds differences that no amount of staleness can explain, and
- *  `volatile` holds the ones it can. That split is the whole point of this
- *  file, and without it shadow mode is unreadable noise: the two sources are
- *  deliberately held out of phase, so at any moment one is looking at a copy up
- *  to a window older than the other's. A level that moved, a guild that
- *  changed, a death that only the newer copy has yet — all of those are the
- *  design working, not a mapping bug.
+ *  `stable` holds differences no amount of staleness can explain, `volatile` the
+ *  ones it can. That split is the point: the two sources are deliberately out of
+ *  phase, so one is always looking at a copy up to a window older. A level that
+ *  moved, a guild that changed, a death only the newer copy has — all the design
+ *  working, not a mapping bug.
  *
- *  What a mapping bug looks like instead is a field that cannot drift
- *  disagreeing (a character's sex or world), or the two copies disagreeing
- *  about a death that was already history when both were built. Only those are
- *  worth waking anybody for. */
+ *  A mapping bug looks like a field that cannot drift disagreeing (sex, world), or
+ *  the copies disagreeing about a death that was already history when both were
+ *  built. Only those are worth waking anybody for. */
 final case class CharacterDivergence(
     name: String,
     originSkewSeconds: Long,

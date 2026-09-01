@@ -104,10 +104,9 @@ class TibiaBot(
   // a restart isn't immediately eligible for another rename (see
   // renameOnlineCategoryIfDue/renameOnlineChannelIfDue).
   // Unlike every other timer here, this one is touched from two threads: the
-  // sweep decides a rename is due, and the send itself re-stamps it when the
-  // request actually leaves (see markRenamed). Hence the lock — a lost update
-  // here would let a channel be renamed inside Discord's 2-per-10-minutes
-  // window, which is the exact thing the cooldown exists to prevent.
+  // sweep decides a rename is due, and the send re-stamps it when the request
+  // leaves (see markRenamed). Hence the lock — a lost update would allow a rename
+  // inside Discord's 2-per-10-minutes window, which the cooldown exists to prevent.
   private val renameTimerLock = new Object()
   private var onlineListCategoryTimer: Map[String, ZonedDateTime] = BotApp.getRenameCooldowns(world)
   private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
@@ -122,12 +121,10 @@ class TibiaBot(
   // purge timers above.
   private var onlineListRefreshSeconds: Int = 0
 
-  // The implicit ExecutionContext CachingTibiaApi takes is the stream's own `ex`
-  // (an ExecutionContextExecutor, so it wins implicit resolution) — an inner
-  // `ExecutionContext.global` binding used to sit here but was never actually
-  // selected, so it is gone rather than left looking meaningful.
+  // CachingTibiaApi's implicit ExecutionContext is the stream's own `ex`, an
+  // ExecutionContextExecutor, so it wins implicit resolution.
   // One stack per world — see app.CharacterApiStack, which the primary's
-  // fetch-only poller builds the identical arrangement from.
+  // fetch-only poller builds identically.
   private val tibiaDataClient: TibiaApi = app.CharacterApiStack.forWorld(TibiaBot.PollInterval)
 
 
@@ -236,34 +233,27 @@ class TibiaBot(
         }
 
         // Incoming world transfer, detected once for the world rather than once
-        // per discord watching it. The record lives in the shared bot_cache
-        // beside deaths and levels, so every discord tracking this world shares
-        // one answer to "have we seen this arrival already?", and one that adds
-        // the world later inherits that answer instead of replaying every
-        // former-world flag Tibia still has set — a backlog up to six months deep.
+        // per discord watching it. The record lives in the shared bot_cache, so
+        // every discord shares one answer to "have we seen this arrival?", and one
+        // adding the world later inherits it instead of replaying every
+        // former-world flag Tibia still has set — up to six months deep.
         //
-        // Detecting and recording are deliberately unconditional, where posting
-        // below is not: which discords announce an arrival depends on their own
-        // filters, and if the record were only written when somebody announced it,
-        // what the shared baseline held would depend on who happened to be
-        // looking.
+        // Detecting and recording are unconditional where posting is not: if the
+        // record were only written when somebody announced it, the shared baseline
+        // would depend on who happened to be looking.
         //
-        // The former-world field says somebody moved within about 180 days, never
-        // when, so the first sweep of a world nobody has tracked before still
-        // announces whoever moved at some point in that window, however long ago.
-        // It settles into real arrivals once every character has been seen once.
+        // The former-world field says somebody moved within ~180 days but never
+        // when, so a world's first sweep still announces whoever moved at any point
+        // in that window. It settles once every character has been seen once.
         //
-        // Matched on former names as well as the live one: the record is keyed by
-        // whatever the character was called when it was written, so looking only
-        // under the name they carry now reads a renamed character as a stranger
-        // and posts their months-old transfer over again under the new name.
+        // Matched on former names too: the record is keyed by whatever the
+        // character was called when written, so looking only under the current name
+        // reads a renamed character as a stranger and reposts their old transfer.
         val postedTransfer = presentation.WorldTransfers.postedFor(
           BotApp.worldTransfersData.getOrElse(world, List()), charName, formerNamesList)
-        // A record still filed under a dropped name is moved onto the live one.
-        // This is the only place that happens, and it has to be here rather than
-        // in the rename branch below: that branch only fires for characters with
-        // an activity row — members of a tracked guild — and an untracked arrival
-        // has none.
+        // A record filed under a dropped name is moved onto the live one. Only
+        // here: the rename branch below fires only for characters with an activity
+        // row, and an untracked arrival has none.
         if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
           BotApp.rekeyWorldTransfer(world, charName, formerNamesList)
         }
@@ -306,16 +296,13 @@ class TibiaBot(
               val charVocation = vocEmoji(char.character.character.vocation)
               val charLevel = char.character.character.level.toInt
 
-              // Incoming world transfer, detected once for the world above.
-              // Independent of the guild join/leave logic below, and posted first so
-              // a character who transferred in and joined a tracked guild in the same
-              // poll reads in the order it happened.
+              // Incoming world transfer, detected once for the world above. Posted
+              // before the guild join/leave logic below, so a character who
+              // transferred in and joined a tracked guild in one poll reads in order.
               //
-              // Anyone tracked is announced at any level — that is the whole point of
-              // tracking them. Everybody else has to clear the world's bar (see
-              // WorldTransfers.UntrackedMinLevel), which keeps this from turning a
-              // channel about hunted and allied players into a feed of every stranger
-              // who moved house.
+              // Anyone tracked is announced at any level; everybody else must clear
+              // the world's bar (see WorldTransfers.UntrackedMinLevel), which keeps
+              // this from becoming a feed of every stranger who moved house.
               val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
               val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
               val notableStranger =
@@ -356,26 +343,22 @@ class TibiaBot(
                 // leaving under their new name this poll — that would read as a
                 // stranger appearing in the guild.
                 skipJoinLeave = true
-                // Six minutes for the character sheet to settle. A cache-bypassed
-                // fetch can be served different cached copies of the same sheet from
-                // one poll to the next, so a rename shows up, disappears and shows up
-                // again; announcing on first sight spammed the activity channel.
+                // Six minutes for the character sheet to settle: a cache-bypassed
+                // fetch can be served different cached copies poll to poll, so a
+                // rename appears, vanishes and reappears, and announcing on first
+                // sight spammed the activity channel.
                 //
-                // Moving the row is what makes the announcement one-shot — once it
-                // carries the new name, renameFromFormerNames stops recognising the
-                // character — so the move and the notice have to be the same decision.
-                // Renaming the row while staying silent (what this did before) spent
-                // the one chance to announce and posted nothing; the sheet could then
-                // flip-flop freely and the rename was simply never reported. Holding
-                // both back instead means the next poll re-detects it against the
-                // untouched row and announces exactly once, just later.
+                // The move and the notice must be one decision, because moving the
+                // row is what makes the announcement one-shot — once it carries the
+                // new name, renameFromFormerNames stops recognising the character.
+                // Moving it silently spent that one chance and posted nothing.
+                // Holding both back lets the next poll re-detect it against the
+                // untouched row and announce exactly once, just later.
                 if (renamed.previousUpdate.plusMinutes(6).isBefore(renamedAt)) {
-                  // The recorded guild is carried across as it stands rather than being
-                  // caught up to the character's current one: a rename and a guild swap
-                  // in the same poll are two events, and the swap is posted by the
-                  // guild-change branch on the next poll. Storing the current guild here
-                  // would agree with nothing in memory and would swallow the swap
-                  // outright if the bot restarted before that poll.
+                  // The recorded guild carries across as it stands rather than being
+                  // caught up: a rename and a guild swap in one poll are two events,
+                  // and the swap is posted by the guild-change branch next poll.
+                  // Storing the current guild here would swallow it outright.
                   var moved = false
                   BotApp.modifyActivityData { m =>
                     val live = m.getOrElse(guildId, List())
@@ -784,20 +767,16 @@ class TibiaBot(
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
 
-  /** One pass over every discord tracking this world, refreshing the online
-   *  list for those whose own refresh interval has elapsed.
+  /** One pass over every discord tracking this world, refreshing the online list
+   *  for those whose refresh interval has elapsed.
    *
-   *  Runs on its own fixed-delay schedule rather than off the back of the world
-   *  poll, so a slow or failing poll neither delays nor is delayed by the
-   *  online list. The per-guild timer below (not the sweep interval) is what
-   *  actually paces refreshes; the sweep just needs to tick often enough to
-   *  notice a guild coming due.
+   *  On its own fixed-delay schedule rather than off the world poll, so a slow
+   *  poll neither delays nor is delayed by the online list. The per-guild timer
+   *  paces refreshes; the sweep only ticks often enough to notice one coming due.
    *
-   *  Single-threaded by construction — scheduleWithFixedDelay never overlaps
-   *  runs — which is what lets this and everything it calls own the online-list
-   *  timers (onlineListTimer and the purge timers) without locking.
-   *  onlineListCategoryTimer is the one exception — a rename re-stamps it from
-   *  the send's own thread, so that one carries a lock of its own. */
+   *  Single-threaded by construction — scheduleWithFixedDelay never overlaps — so
+   *  this and everything it calls own the online-list timers without locking.
+   *  onlineListCategoryTimer is the exception, re-stamped from the send's thread. */
   private def onlineListSweep(): Unit = {
     try {
       // Before the first poll (or Redis warm-restore) lands there is no roster
@@ -806,11 +785,10 @@ class TibiaBot(
         // Only materialised if some guild is actually due — it copies the whole
         // roster, and most sweeps find nothing to do.
         lazy val roster = onlineTracker.snapshot
-        // Back off when the shared online-list lane is congested instead of
-        // always refreshing at the healthy cadence — see AdaptiveRefreshInterval
-        // for the queueDepth -> interval mapping. Feeding the current cadence
-        // back in is what gives that mapping its hysteresis, so a depth parked
-        // on a tier boundary doesn't flap between two cadences.
+        // Back off when the shared online-list lane is congested — see
+        // AdaptiveRefreshInterval for the queueDepth -> interval mapping. Feeding
+        // the current cadence back in gives it hysteresis, so a depth parked on a
+        // tier boundary doesn't flap.
         onlineListRefreshSeconds =
           discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth, onlineListRefreshSeconds)
         val refreshIntervalSeconds = onlineListRefreshSeconds
@@ -1566,23 +1544,17 @@ class TibiaBot(
   /** Diff `fields` against what we believe is posted and enqueue whatever makes
    *  Discord match.
    *
-   *  Sends go through their own dedicated lane (onlineListSender), separate
-   *  from the general background lane — Discord rate-limits message-edit PATCH
-   *  calls far harder than the general REST budget (confirmed via live 429s),
-   *  so this traffic needs a slower, isolated pace. Each send is keyed by
-   *  (channel id, message index): demand here can exceed what that slower pace
-   *  can drain, so without keying, a backed-up queue fills with many stale
-   *  updates to the same handful of channels, each superseded by the next
-   *  before it ever sends (observed depth in the thousands, 25+ minute average
-   *  wait). Keying caps the backlog at one pending update per channel/message
-   *  and guarantees whatever finally sends is current.
+   *  Sends use their own lane (onlineListSender): Discord rate-limits message-edit
+   *  PATCH calls far harder than the general REST budget, so this traffic needs a
+   *  slower, isolated pace. Each send is keyed by (channel id, message index),
+   *  because demand can exceed what that pace drains — unkeyed, the queue filled
+   *  with stale updates to a handful of channels, each superseded before it sent
+   *  (observed: thousands deep, 25+ minute waits). Keying caps the backlog at one
+   *  pending update per message and keeps whatever sends current.
    *
-   *  Each send is also grouped by channel id, because Discord's limit here is
-   *  per-channel while the lane's pace is bot-wide. A list that packs into
-   *  several embeds enqueues them all at once and in FIFO they would drain
-   *  back-to-back, putting 5+ edits into one channel inside a second; the group
-   *  makes the lane spend those slots on other channels and come back to this
-   *  one after its gap. */
+   *  Also grouped by channel id, since Discord's limit is per-channel while the
+   *  lane's pace is bot-wide: a list packing into several embeds would otherwise
+   *  drain back-to-back, putting 5+ edits into one channel in a second. */
   private def dispatchOnlineListUpdate(channel: TextChannel, fields: List[String], guildId: String, guildName: String): Unit = {
     val channelId = channel.getId
     val lastIndex = fields.size - 1
@@ -1686,18 +1658,14 @@ class TibiaBot(
   /** Resolve, in one bounded parallel batch, the killer levels this death batch
    *  needs and does not already have.
    *
-   *  This used to happen lazily inside the embed builder as a blocking
-   *  `Await.result(..., 10.seconds)` per killer — and the embed builder runs
-   *  once per discord tracking the world, so a world tracked by five discords
-   *  made five separate blocking lookups for the same killer, serially, inside
-   *  the stream's mapAsync(1) stage. That stalled not just the deaths but the
-   *  next poll tick behind them.
+   *  This used to happen lazily in the embed builder as a blocking
+   *  `Await.result(..., 10.seconds)` per killer — and that builder runs once per
+   *  discord tracking the world, so five discords made five serial lookups for the
+   *  same killer inside the stream's mapAsync(1), stalling the next poll tick too.
    *
    *  Names already in `onlineListTable` or freshly cached are skipped, so the
-   *  common case (every killer online on this world) fetches nothing and waits
-   *  for nothing. A single mass-PvP tick is capped: past the cap the remaining
-   *  killers simply render without a level, which is strictly better than
-   *  delaying the deaths themselves. */
+   *  common case fetches nothing. A mass-PvP tick is capped; past the cap killers
+   *  render without a level, which beats delaying the deaths. */
   private def prefetchKillerLevels(charDeaths: Set[CharDeath], now: ZonedDateTime): Unit = {
     killerLevelCache.prune(now)
     val wanted = killerNamesNeedingLevels(charDeaths).filter { name =>
@@ -1811,41 +1779,31 @@ class TibiaBot(
 
   /** How long a channel or category must wait between renames.
    *
-   *  Discord limits a channel's *name or topic* to 2 changes per 10 minutes —
-   *  a far tighter bucket than the 10-per-15s that every other field on the
-   *  channel gets, and one it has never documented. Seven minutes fits two
-   *  inside any ten-minute window with room to spare; the six this used to be
-   *  fitted exactly two and left nothing for jitter.
-   *
-   *  Spent against the clock the rename actually *sent* on, not the one it was
-   *  queued on — see [[markRenameSent]]. */
+   *  Discord limits a channel's *name or topic* to 2 changes per 10 minutes — far
+   *  tighter than the 10-per-15s every other field gets, and undocumented. Seven
+   *  minutes fits two in any ten-minute window with room for jitter; six fitted
+   *  exactly two and left none. Spent against the clock the rename *sent* on, not
+   *  the one it was queued on — see [[markRenameSent]]. */
   private val RenameCooldownMinutes = 7L
 
-  /** Open this channel's rename cooldown when the rename is queued, and store
-   *  it, so a rename that was decided just before a restart still holds the
-   *  channel back afterwards (see the seeding of onlineListCategoryTimer).
+  /** Open this channel's rename cooldown when the rename is queued, and store it,
+   *  so a rename decided just before a restart still holds afterwards.
    *
-   *  The stored time is the queued one rather than the sent one, and that is
-   *  the safe direction: it is the earlier of the two, so a restart can only
-   *  ever restore a cooldown that opened too early, never one that opened too
-   *  late. A rename that was queued and never sent leaves a channel holding a
-   *  stale name for one window, which is the cheap failure. */
+   *  The stored time is the queued one, the earlier of the two, so a restart can
+   *  only restore a cooldown that opened too early. A rename queued and never sent
+   *  leaves a stale name for one window, which is the cheap failure. */
   private def markRenameQueued(entityId: String, at: ZonedDateTime): Unit = {
     markRenameSent(entityId, at)
     BotApp.recordRenameCooldown(world, entityId, at)
   }
 
-  /** Re-open the cooldown from the moment the rename actually left, which is
-   *  what Discord's 2-per-10-minutes window is counted against — the shared
-   *  lane in between can hold an item for a while, and it is the spacing of
-   *  the requests Discord sees, not of our decisions to make them, that its
-   *  bucket measures.
+  /** Re-open the cooldown from the moment the rename actually left, since
+   *  Discord's bucket measures the spacing of requests it sees, not of our
+   *  decisions — and the shared lane can hold an item for a while.
    *
-   *  In memory only, deliberately. This runs on the lane's drain thread, and
-   *  [[markRenameQueued]]'s store is a blocking database write; putting one on
-   *  that thread would let a slow database stall every other kind of post the
-   *  lane carries. The stored value stays the queued time, which is already
-   *  the conservative one. */
+   *  In memory only: this runs on the lane's drain thread, and
+   *  [[markRenameQueued]]'s store is a blocking database write, which there would
+   *  let a slow database stall every other post the lane carries. */
   private def markRenameSent(entityId: String, at: ZonedDateTime): Unit =
     renameTimerLock.synchronized { onlineListCategoryTimer = onlineListCategoryTimer + (entityId -> at) }
 
@@ -1857,20 +1815,15 @@ class TibiaBot(
       onlineListCategoryTimer.getOrElse(entityId, TibiaBot.NeverRenamed)
     }
 
-  /** Renames a world's online-list category to reflect the live ally/enemy
-   *  counts (and the mass-log ⚡), throttled to at most one rename per
-   *  [[RenameCooldownMinutes]] *actually spent renaming* — the window only
-   *  advances when a rename is genuinely dispatched, not on every check, so a
-   *  channel whose name is already correct doesn't burn its window and go
-   *  stale later.
-   *  The name-change guard intentionally ignores the ⚡ suffix, matching the
-   *  original — so the category re-renames once after a mass-log toggle.
-   *  The actual send goes through the shared bot-wide background lane
-   *  (`outboundSender`), keyed by category id so a burst of many entities
-   *  coming due at once (many guilds sharing a world) drains at a safe
-   *  shared pace instead of firing all at once — and if this category
-   *  somehow gets re-queued before an earlier rename for it has sent, the
-   *  older one is superseded rather than both firing. */
+  /** Rename a world's online-list category to the live ally/enemy counts (and the
+   *  mass-log ⚡), throttled to one rename per [[RenameCooldownMinutes]] *actually
+   *  spent renaming*: the window advances only on a real dispatch, so a channel
+   *  already correctly named doesn't burn its window and go stale later.
+   *
+   *  The name-change guard ignores the ⚡ suffix, so the category re-renames once
+   *  after a mass-log toggle. The send goes through `outboundSender` keyed by
+   *  category id, so many guilds sharing a world drain at a safe pace and a
+   *  re-queued rename supersedes the older one rather than both firing. */
   private def renameOnlineCategoryIfDue(guild: Guild, categoryId: String, world: String, alliesCount: Int, enemiesCount: Int, masslogIcon: String): Unit = {
     val category = guild.getCategoryById(categoryId)
     if (category != null) {
@@ -1961,20 +1914,18 @@ object TibiaBot {
   /** A moment for the process to finish starting before any world polls. */
   private[tibiabot] val SettleDelay: FiniteDuration = 2.seconds
 
-  /** How long a world waits before its first poll: the settle delay, plus a
-   *  random offset spread across one whole interval.
+  /** How long a world waits before its first poll: the settle delay plus a random
+   *  offset across one whole interval.
    *
-   *  Every stream is built in the same startup loop and used to wait the same
-   *  two seconds, so every world polled on the same second and went on doing so
-   *  forever — tens of thousands of character requests leaving in one burst a
-   *  second or two wide, then near silence until the next minute. Averaged over
-   *  the minute that looks modest; arriving at somebody else's gateway it is a
-   *  spike, and a spike from one address is what load shedding is for.
+   *  Every stream is built in the same startup loop, so with a fixed delay every
+   *  world polled on the same second forever — tens of thousands of character
+   *  requests in one burst a second or two wide, then near silence. Averaged over
+   *  the minute that looks modest; at someone else's gateway it is a spike, and a
+   *  spike from one address is what load shedding is for.
    *
-   *  Offsetting the start spreads those bursts across the interval instead.
-   *  Each world still polls exactly once per interval, so nothing waits any
-   *  longer than it did — only the phase differs, and phase is the one property
-   *  of a poll schedule nothing downstream depends on. */
+   *  Offsetting spreads those bursts across the interval. Each world still polls
+   *  once per interval, so nothing waits longer — only the phase differs, and
+   *  nothing downstream depends on phase. */
   /** The same spreading applied to a fleet-fetch poller — see
    *  [[com.tibiabot.app.FetchOnlyWorldPoller]]. A primary can take on several
    *  of these at once when a secondary joins, and starting them together would

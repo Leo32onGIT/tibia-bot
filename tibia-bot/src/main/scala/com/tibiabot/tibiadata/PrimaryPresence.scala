@@ -9,27 +9,23 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-/** Whether a shared-world-cycle primary is currently alive, from a heartbeat
- *  key it refreshes on a short TTL.
+/** Whether a shared-world-cycle primary is alive, from a heartbeat key it
+ *  refreshes on a short TTL. This is what makes it safe for a secondary to stop
+ *  fetching for itself: consuming only what the primary publishes, a dead primary
+ *  would blind every secondary at once, and the heartbeat is the signal to go back
+ *  to fetching directly.
  *
- *  This is what makes it safe for a secondary to stop fetching for itself. Once
- *  it consumes only what the primary publishes, a primary that dies would
- *  otherwise blind every secondary at once; the heartbeat is the signal to go
- *  back to fetching directly.
+ *  '''It fails open in three ways.''' It starts saying the primary is absent, so a
+ *  cold start fetches directly; a Redis error reads as absent rather than
+ *  propagating; and an answer is believed only for `refreshEvery` before decaying
+ *  back to absent. The asymmetry is the point — believing a dead primary alive
+ *  stops the secondary dead, where believing a live one dead costs duplicate
+ *  requests.
  *
- *  '''It fails open, deliberately, in three separate ways.''' It starts out
- *  saying the primary is absent, so a cold start fetches directly rather than
- *  waiting for a bot it has not heard from yet. A Redis error reads as absent
- *  rather than propagating. And an answer is only ever believed for
- *  `refreshEvery`, after which it decays back to absent unless refreshed. The
- *  asymmetry is the point: believing a dead primary is alive stops the
- *  secondary dead, while believing a live one is dead costs some duplicate
- *  requests. Only one of those is recoverable without somebody noticing.
- *
- *  Reads are cheap because they never touch Redis inline. `isAlive` answers
- *  from the last known value and kicks off a refresh when that value is going
- *  stale — the caller is a per-character cache miss on a poll, so a Redis round
- *  trip per call would put the whole fleet's misses on the wire. */
+ *  Reads never touch Redis inline: `isAlive` answers from the last known value and
+ *  kicks off a refresh as it goes stale. The caller is a per-character cache miss
+ *  on a poll, so a round trip per call would put the whole fleet's misses on the
+ *  wire. */
 final class PrimaryPresence(
     cache: RedisCache,
     refreshEvery: FiniteDuration,

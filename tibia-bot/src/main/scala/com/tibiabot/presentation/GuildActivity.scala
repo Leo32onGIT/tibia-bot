@@ -35,22 +35,21 @@ object GuildActivity {
    *  next poll, which is the only place that posts the swap. */
   final case class Rename(oldName: String, previousUpdate: ZonedDateTime, guild: String)
 
-  /** Decide whether one of `charName`'s former names identifies a tracked-activity
-   *  row that is really this character under an older name.
+  /** Whether one of `charName`'s former names identifies a tracked-activity row
+   *  that is really this character under an older name.
    *
-   *  A row matching a former name is not on its own proof of a rename: renaming
-   *  frees the old name, and somebody else can take it. Renaming *their* row drops
-   *  them from the activity list, so the next poll sees them as untracked, posts
-   *  them as joining the guild and adds them back — then the next poll renames
-   *  their row away again, and the join is posted forever. Two checks rule that out:
+   *  A row matching a former name is not proof of a rename: renaming frees the old
+   *  name for somebody else, and renaming *their* row drops them from the list —
+   *  so the next poll sees them as untracked, posts them as joining, adds them
+   *  back, and posts the join forever. Two checks rule that out:
    *
    *   - the character is already tracked under their current name, so a row under
-   *     a former name has to belong to somebody else;
-   *   - the former name is online right now, which only a different, living
+   *     a former name must belong to somebody else;
+   *   - the former name is online right now, which only a different living
    *     character can be.
    *
-   *  Also skips the case where the character carries their own current name in
-   *  former_names (cause unclear, possibly a namelock) — that is not a rename. */
+   *  Also skips a character carrying their own current name in former_names (cause
+   *  unclear, possibly a namelock), which is not a rename. */
   def renameFromFormerNames(
     activity: List[PlayerCache],
     charName: String,
