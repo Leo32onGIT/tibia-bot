@@ -1502,6 +1502,26 @@ function minutesLeft(endsAt) {
   return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
 }
 
+/** What is left of a hunt, in units somebody can act on.
+ *
+ *  A claim can run for hours, and hours read as minutes stop being a quantity
+ *  and become a number to divide: nobody reads 189m as "just over three hours"
+ *  without doing the arithmetic, and the whole point of the line is to be
+ *  glanced at. Under an hour it stays in plain minutes, which is where the
+ *  minute is the unit worth having — the last stretch of a hunt is counted down
+ *  in them.
+ *
+ *  Whole hours drop the minutes rather than printing a zero, as the page's other
+ *  durations do. The count itself is unchanged: still rounded to the minute and
+ *  floored at zero, so a hunt at the wire reads 0m and never goes negative.
+ */
+function timeLeft(endsAt) {
+  const mins = minutesLeft(endsAt);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60), rest = mins % 60;
+  return rest ? `${hours}hr${rest}m` : `${hours}hr`;
+}
+
 /** How far off something is, at the coarseness worth reading at that distance.
  *  Minutes while it is soon enough to wait for, hours through the evening, days
  *  once it is another day's problem — an evening seven days out does not become
@@ -1590,7 +1610,7 @@ function atName(spawn) {
 
 const STATE_TEXT = {
   free: () => 'free',
-  claimed: s => `${atName(s)}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  claimed: s => `${atName(s)}${s.endsAt ? ` · ${timeLeft(s.endsAt)} left` : ''}`,
   booked: s => `${atName(s)} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
   confirmed: s => `${atName(s)} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
 };
@@ -5903,7 +5923,7 @@ refresh().then(openDeepLink);
 // away, and a week of bookings does not change under the reader the way a live
 // board does.
 setInterval(() => { if (!view.busy && !view.pick) refresh(); }, 10000);
-// The progress bars and "m left" move between polls, so redraw on a shorter beat
+// The progress bars and the time left move between polls, so redraw on a shorter beat
 // than the fetch — otherwise a hunt would visibly jump every ten seconds.
 setInterval(() => { if (board && !view.code) tick(); }, 1000);
 </script>
