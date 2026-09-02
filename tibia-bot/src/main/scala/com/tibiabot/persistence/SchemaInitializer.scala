@@ -228,9 +228,56 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE UNIQUE INDEX IF NOT EXISTS unique_bounty_subscription
            |ON bounty_notifications (guildid, world, userid, LOWER(character_name));""".stripMargin
 
+      // What each character's standing in each highscore list was at the last
+      // snapshot, so the next one can tell an advance from a character simply
+      // entering a list only a thousand deep. World-scoped like deaths and
+      // levels above: the answer is a fact about the world, not about any one
+      // discord, and blue and red share this database.
+      //
+      // `score`/`char_level` rather than `value`/`level` — both natural names
+      // are Postgres keywords that happen to work unquoted, and neither is
+      // worth a migration if that ever stops being true.
+      val createHighscoreValueTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_value (
+           |world VARCHAR(255) NOT NULL,
+           |category VARCHAR(32) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |score BIGINT NOT NULL,
+           |last_seen TIMESTAMP NOT NULL,
+           |PRIMARY KEY (world, category, name)
+           |);""".stripMargin
+
+      // Advances that were detected, for audit and the dashboard. Deliberately
+      // not what stops a repost — the stored score does that — so this can be
+      // pruned as hard as the disk wants without anything being announced twice.
+      val createHighscoreEventsTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_events (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |category VARCHAR(32) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |previous_score BIGINT NOT NULL,
+           |score BIGINT NOT NULL,
+           |observed TIMESTAMP NOT NULL
+           |);""".stripMargin
+
+      val createHighscoreEventsIndex =
+        s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
+           |ON highscore_events (world, observed);""".stripMargin
+
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
+
+      newStatement.executeUpdate(createHighscoreValueTable)
+      newStatement.executeUpdate(createHighscoreEventsTable)
+      newStatement.executeUpdate(createHighscoreEventsIndex)
 
       newStatement.close()
     }
