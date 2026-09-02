@@ -9,7 +9,7 @@ import java.sql.Connection
  *  real Postgres (cancels without PGHOST). */
 class SchemaInitializerIntegrationSpec extends AnyFunSuite with Matchers with PostgresSupport {
 
-  test("initCache ensures bot_cache with deaths/levels/list/satchel/world_transfers/highscore tables") {
+  test("initCache ensures bot_cache with deaths/levels/list/satchel/world_transfers/highscore/experience tables") {
     val provider = pgOrCancel()
     // Take the shared one-time setup first: it runs initCache under a JVM-wide
     // guard, so no sibling suite can be creating these tables in parallel. The
@@ -19,7 +19,7 @@ class SchemaInitializerIntegrationSpec extends AnyFunSuite with Matchers with Po
     new SchemaInitializer(provider).initCache()
     val conn = provider.cache()
     try {
-      Seq("deaths", "levels", "list", "satchel", "world_transfers", "highscore_value", "highscore_events")
+      Seq("deaths", "levels", "list", "satchel", "world_transfers", "highscore_value", "highscore_events", "experience_reading", "experience_daily")
       .foreach { t =>
         withClue(s"table=$t ") {
           hasTable(conn, t) shouldBe true

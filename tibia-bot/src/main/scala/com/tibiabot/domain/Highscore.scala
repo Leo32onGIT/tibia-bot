@@ -1,6 +1,6 @@
 package com.tibiabot.domain
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 
 /** A character's stored standing in one highscore list, as the `highscore_value`
  *  table holds it.
@@ -43,4 +43,20 @@ final case class HighscoreEvent(
     previousScore: Long,
     score: Long,
     observed: Instant
+)
+
+/** One character's experience on one server-save day, as the `experience_daily`
+ *  rollup holds it — the long-term half of the history the Statistics channel
+ *  will read.
+ *
+ *  Keyed by save day rather than calendar day because that is the boundary a
+ *  Tibia player's day actually has, and the same one the respawn system's
+ *  stamina already resets on. */
+final case class ExperiencePoint(
+    name: String,
+    displayName: String,
+    vocation: String,
+    level: Int,
+    experience: Long,
+    saveDay: LocalDate
 )

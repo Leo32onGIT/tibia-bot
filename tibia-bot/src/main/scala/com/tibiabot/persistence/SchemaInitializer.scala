@@ -271,6 +271,43 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
            |ON highscore_events (world, observed);""".stripMargin
 
+      // Experience history, which posts nothing and exists for the statistics
+      // channel to read later. Two tables because the honest hourly reading and
+      // the thing worth keeping for a year are different sizes: raw readings are
+      // 1.63M rows a day across 68 worlds, so they live a week, while the rollup
+      // carries one row per character per server-save day at a fortieth of that.
+      val createExperienceReadingTable =
+        s"""CREATE TABLE IF NOT EXISTS experience_reading (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |observed TIMESTAMP NOT NULL,
+           |char_level INT NOT NULL,
+           |experience BIGINT NOT NULL,
+           |PRIMARY KEY (world, name, observed)
+           |);""".stripMargin
+
+      val createExperienceDailyTable =
+        s"""CREATE TABLE IF NOT EXISTS experience_daily (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |experience BIGINT NOT NULL,
+           |PRIMARY KEY (world, name, save_day)
+           |);""".stripMargin
+
+      // The prunes delete by time across every world, and neither primary key
+      // leads with the column they filter on.
+      val createExperienceReadingIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_reading_observed
+           |ON experience_reading (observed);""".stripMargin
+
+      val createExperienceDailyIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
+           |ON experience_daily (save_day);""".stripMargin
+
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
@@ -278,6 +315,11 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createHighscoreValueTable)
       newStatement.executeUpdate(createHighscoreEventsTable)
       newStatement.executeUpdate(createHighscoreEventsIndex)
+
+      newStatement.executeUpdate(createExperienceReadingTable)
+      newStatement.executeUpdate(createExperienceDailyTable)
+      newStatement.executeUpdate(createExperienceReadingIndex)
+      newStatement.executeUpdate(createExperienceDailyIndex)
 
       newStatement.close()
     }
