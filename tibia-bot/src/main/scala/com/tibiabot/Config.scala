@@ -94,6 +94,44 @@ object Config {
     def settings(pollInterval: FiniteDuration): tibiadata.AgeCacheSettings =
       tibiadata.AgeCacheSettings(ttl, pollInterval, maxStale, canaryFraction, maxEntries)
   }
+  /** The highscores sweep — see [[com.tibiabot.highscores.HighscoreService]].
+   *
+   *  `enabled` is both rollout gate and rollback, in the shape of the respawn
+   *  system's own switch, and `worlds` narrows it further while the load is
+   *  being watched. Off with an empty allowlist means the sweep never runs at
+   *  all; on with an empty allowlist means every world this process tracks. */
+  object Highscores {
+    private val highscores = discord.getConfig("highscores")
+    private def dur(key: String): FiniteDuration = highscores.getDuration(key).toScala
+
+    val enabled: Boolean = highscores.getBoolean("enabled")
+
+    /** Empty means "every tracked world" rather than "no worlds" — an allowlist
+     *  nobody set should not silently disable a feature somebody turned on. */
+    val worlds: Set[String] = highscores.getString("worlds")
+      .split(",").map(_.trim).filter(_.nonEmpty).toSet
+
+    val probeInterval: FiniteDuration = dur("probe-interval")
+    val snapshotInterval: FiniteDuration = dur("snapshot-interval")
+    val windowFraction: Double = highscores.getDouble("window-fraction")
+    val workers: Int = math.max(1, highscores.getInt("workers"))
+    val minRequestGap: FiniteDuration = dur("min-request-gap")
+    val maxInFlight: Int = math.max(1, highscores.getInt("max-in-flight"))
+
+    val scoreRetention: FiniteDuration = dur("score-retention")
+    val eventRetention: FiniteDuration = dur("event-retention")
+    val experienceRawRetention: FiniteDuration = dur("experience-raw-retention")
+    val experienceDailyRetention: FiniteDuration = dur("experience-daily-retention")
+
+    /** The stretch of a snapshot the sweep may spread its requests over.
+     *  Clamped, because a fraction at or below zero would mean "fire it all at
+     *  once" and one above 1 would run the sweep into the next snapshot. */
+    val window: FiniteDuration = {
+      val fraction = math.max(0.05, math.min(1.0, windowFraction))
+      FiniteDuration((snapshotInterval.toMillis * fraction).toLong, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+  }
+
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
