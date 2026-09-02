@@ -6,13 +6,15 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /** One online-list message the bot believes it has posted in a channel, and the
- *  embed description it last put there. `id` is None while the send that
- *  creates the message is still in flight. */
-final case class OnlineListMessage(id: Option[String], description: String)
+ *  embed descriptions it last put there — several, since a message carries up to
+ *  the message-wide embed text budget rather than a single embed's worth (see
+ *  `OnlineListEmbeds.packMessages`). `id` is None while the send that creates the
+ *  message is still in flight. */
+final case class OnlineListMessage(id: Option[String], descriptions: List[String])
 
 sealed trait OnlineListAction
-final case class EditOnlineListMessage(index: Int, messageId: String, field: String) extends OnlineListAction
-final case class SendOnlineListMessage(index: Int, field: String) extends OnlineListAction
+final case class EditOnlineListMessage(index: Int, messageId: String, descriptions: List[String]) extends OnlineListAction
+final case class SendOnlineListMessage(index: Int, descriptions: List[String]) extends OnlineListAction
 final case class DeleteOnlineListMessages(messageIds: List[String]) extends OnlineListAction
 
 /** What the bot believes is posted in each online-list channel, and the diff to
@@ -51,39 +53,41 @@ final class OnlineListState(normalise: String => String = OnlineListEmbeds.witho
   /** Current believed state, for assertions and diagnostics. */
   def posted(channelId: String): Option[List[OnlineListMessage]] = lock.synchronized { state.get(channelId) }
 
-  /** Diff `fields` against the believed state, commit the believed state to
-   *  what those actions will produce, and return the actions.
+  /** Diff `messages` (each the embed descriptions for one message) against the
+   *  believed state, commit the believed state to what those actions will
+   *  produce, and return the actions.
    *
-   *  A message is only re-edited when its normalised description actually
+   *  A message is only re-edited when one of its normalised descriptions actually
    *  changed: the caller runs this every ~2 minutes per guild whether or not the
    *  online list moved at all, so without the guard it would rewrite every
-   *  message on every check.
+   *  message on every check. One changed embed rewrites the whole message, since
+   *  an edit replaces a message's embeds wholesale.
    *
    *  A slot whose send is still in flight (`id` empty) is left untouched for
    *  this cycle rather than being posted a second time; the next cycle picks up
    *  whatever changed once the id has landed. A send that never completes must
    *  therefore be reported by invalidating the channel, or that slot stays
    *  pending forever. */
-  def plan(channelId: String, fields: List[String]): List[OnlineListAction] = lock.synchronized {
+  def plan(channelId: String, messages: List[List[String]]): List[OnlineListAction] = lock.synchronized {
     val cached = state.getOrElse(channelId, Nil)
     val actions = ListBuffer.empty[OnlineListAction]
     val next = ListBuffer.empty[OnlineListMessage]
-    fields.zipWithIndex.foreach { case (field, index) =>
+    messages.zipWithIndex.foreach { case (descriptions, index) =>
       cached.lift(index) match {
         case Some(pending) if pending.id.isEmpty => next += pending
-        case Some(existing) if normalise(existing.description) == normalise(field) => next += existing
+        case Some(existing) if existing.descriptions.map(normalise) == descriptions.map(normalise) => next += existing
         case Some(existing) =>
-          actions += EditOnlineListMessage(index, existing.id.get, field)
-          next += existing.copy(description = field)
+          actions += EditOnlineListMessage(index, existing.id.get, descriptions)
+          next += existing.copy(descriptions = descriptions)
         case None =>
-          actions += SendOnlineListMessage(index, field)
-          next += OnlineListMessage(None, field)
+          actions += SendOnlineListMessage(index, descriptions)
+          next += OnlineListMessage(None, descriptions)
       }
     }
     // Left over from a previously longer list. A leftover whose own send is
     // still in flight has no id to delete by — invalidating on send failure is
     // what stops that from stranding a message.
-    val extra = cached.drop(fields.size).flatMap(_.id)
+    val extra = cached.drop(messages.size).flatMap(_.id)
     if (extra.nonEmpty) actions += DeleteOnlineListMessages(extra)
     state.update(channelId, next.toList)
     actions.toList

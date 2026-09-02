@@ -1491,7 +1491,7 @@ class TibiaBot(
     // hours, which is preferable to racing the timers across threads.
     val purgeDue = onlineListPurgeDue(purgeType, guildId)
     val channelId = channel.getId
-    val fields = presentation.OnlineListEmbeds.packFields(values)
+    val messages = presentation.OnlineListEmbeds.packMessages(values)
 
     // The steady-state path: we already know which messages we posted here and
     // what we last put in them, so the whole update is decided locally with no
@@ -1499,10 +1499,10 @@ class TibiaBot(
     // or after the cache was invalidated) or the 6-hourly purge falls through
     // to reading history.
     if (!purgeDue && onlineListState.isWarm(channelId)) {
-      dispatchOnlineListUpdate(channel, fields, guildId, guildName)
+      dispatchOnlineListUpdate(channel, messages, guildId, guildName)
     } else {
       resyncOnlineListCache(channel, purgeDue, guildId, guildName) { () =>
-        dispatchOnlineListUpdate(channel, fields, guildId, guildName)
+        dispatchOnlineListUpdate(channel, messages, guildId, guildName)
       }
     }
   }
@@ -1527,7 +1527,11 @@ class TibiaBot(
               Nil
             } else {
               existing.map { m =>
-                tracking.OnlineListMessage(Some(m.getId), m.getEmbeds.asScala.headOption.map(_.getDescription).getOrElse(""))
+                // Every embed, not just the first: one message carries several.
+                tracking.OnlineListMessage(
+                  Some(m.getId),
+                  m.getEmbeds.asScala.toList.map(e => Option(e.getDescription).getOrElse(""))
+                )
               }
             }
           onlineListState.seed(channel.getId, seeded)
@@ -1553,21 +1557,26 @@ class TibiaBot(
    *  pending update per message and keeps whatever sends current.
    *
    *  Also grouped by channel id, since Discord's limit is per-channel while the
-   *  lane's pace is bot-wide: a list packing into several embeds would otherwise
+   *  lane's pace is bot-wide: a list packing into several messages would otherwise
    *  drain back-to-back, putting 5+ edits into one channel in a second. */
-  private def dispatchOnlineListUpdate(channel: TextChannel, fields: List[String], guildId: String, guildName: String): Unit = {
+  private def dispatchOnlineListUpdate(channel: TextChannel, messages: List[List[String]], guildId: String, guildName: String): Unit = {
     val channelId = channel.getId
-    val lastIndex = fields.size - 1
+    val lastIndex = messages.size - 1
 
-    def buildEmbed(field: String, last: Boolean): net.dv8tion.jda.api.entities.MessageEmbed = {
-      val embed = new EmbedBuilder()
-      embed.setDescription(field)
-      embed.setColor(3092790)
-      if (last) {
-        embed.setFooter("Last updated")
-        embed.setTimestamp(OffsetDateTime.now())
+    def buildEmbeds(descriptions: List[String], last: Boolean): List[net.dv8tion.jda.api.entities.MessageEmbed] = {
+      val lastEmbed = descriptions.size - 1
+      descriptions.zipWithIndex.map { case (description, embedIndex) =>
+        val embed = new EmbedBuilder()
+        embed.setDescription(description)
+        embed.setColor(3092790)
+        // The stamp is the whole list's, so it goes on the final embed of the
+        // final message and nowhere else.
+        if (last && embedIndex == lastEmbed) {
+          embed.setFooter("Last updated")
+          embed.setTimestamp(OffsetDateTime.now())
+        }
+        embed.build()
       }
-      embed.build()
     }
     def failed(ex: Throwable): Unit = {
       // Whatever went wrong, our picture of the channel may no longer match
@@ -1576,18 +1585,18 @@ class TibiaBot(
       logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
     }
 
-    onlineListState.plan(channelId, fields).foreach {
-      case tracking.EditOnlineListMessage(index, messageId, field) =>
+    onlineListState.plan(channelId, messages).foreach {
+      case tracking.EditOnlineListMessage(index, messageId, descriptions) =>
         worldMetrics.incrementEdits()
         onlineListSender.enqueue("editmessage", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          try channel.editMessageEmbedsById(messageId, buildEmbed(field, index == lastIndex))
+          try channel.editMessageEmbedsById(messageId, buildEmbeds(descriptions, index == lastIndex).asJava)
             .queue(null, onlineListErrorHandler(channelId))
           catch { case ex: Throwable => failed(ex) }
         }
-      case tracking.SendOnlineListMessage(index, field) =>
+      case tracking.SendOnlineListMessage(index, descriptions) =>
         worldMetrics.incrementEdits()
         onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          try channel.sendMessageEmbeds(buildEmbed(field, index == lastIndex)).setSuppressedNotifications(true)
+          try channel.sendMessageEmbeds(buildEmbeds(descriptions, index == lastIndex).asJava).setSuppressedNotifications(true)
             .queue(
               message => onlineListState.recordMessageId(channelId, index, message.getId),
               // A send that never lands would otherwise leave its slot pending

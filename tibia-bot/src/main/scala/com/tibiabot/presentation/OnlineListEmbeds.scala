@@ -68,36 +68,83 @@ object OnlineListEmbeds {
     s"$world$spacer$allies$enemies"
   }
 
-  /** Pack online-list lines into the descriptions of one or more embeds, since a
-   *  Discord embed description caps near 4096 characters. Lines accumulate
-   *  (newline-joined) into the current embed until:
-   *    - adding the line would reach 4060 chars, or reach 3850 with the line a
-   *      guild header ("### ["), in which case the line starts a fresh embed; or
-   *    - the line is a section header ("### " not followed by "["), which starts
-   *      a fresh embed unless the current one is still empty.
+  /** How much embed text one message may carry. Discord caps the summed text of
+   *  every embed on a message (title + description + field text + footer) at
+   *  6000; this leaves room for the "Last updated" footer and a little slack. */
+  private val MessageBudget = 5900
+
+  /** How much one embed's description may carry. Half the message budget, so two
+   *  full embeds fit one message — which is the whole point of packing at two
+   *  levels. Well under Discord's own 4096-per-description cap, and nothing is
+   *  lost to the smaller figure: the message budget is what binds, and two
+   *  embeds of this size saturate it exactly. */
+  private val EmbedBudget = MessageBudget / 2
+
+  /** Headroom below `EmbedBudget` at which an incoming guild header starts a
+   *  fresh embed rather than being stranded above a line or two. Carried over
+   *  verbatim from the single-level packing (4060 - 3850), where it bought the
+   *  same thing at a whole message's cost; here an extra embed is free. */
+  private val HeaderHeadroom = 210
+
+  /** Discord's cap on embeds per message. */
+  private val MaxEmbedsPerMessage = 10
+
+  /** Pack online-list lines into messages, each holding one or more embed
+   *  descriptions.
    *
-   *  Always returns at least one element (the trailing embed), so an empty input
-   *  yields one empty description — matching the original, which always emitted a
-   *  final embed. Extracted verbatim from TibiaBot.updateMultiFields. */
-  def packFields(values: List[String]): List[String] = {
-    val fields = scala.collection.mutable.ListBuffer.empty[String]
+   *  Two levels, because Discord bounds both: a description caps near 4096, but
+   *  the summed text of a message's embeds caps at 6000. One embed per message
+   *  therefore wastes roughly a third of every message, and messages are the
+   *  unit Discord rate-limits edits on. Packing to the message budget and
+   *  splitting into embeds inside it cuts the message count by about the same
+   *  third, so a refresh spends that many fewer PATCHes.
+   *
+   *  Lines accumulate (newline-joined) into the current embed. A line starts a
+   *  fresh embed when it would take the current one to `EmbedBudget` (or to
+   *  within `HeaderHeadroom` of it, when the line is a guild header "### ["),
+   *  or when it is a section header ("### " not followed by "[") and the current
+   *  embed is not still empty. A fresh embed rolls over to a fresh message only
+   *  when this one has no room left for it — so the section and guild-header
+   *  breaks, which used to cost a whole message each, now usually cost nothing.
+   *
+   *  Always returns at least one message holding at least one description, so an
+   *  empty input yields one empty description — as the single-level packing did,
+   *  which always emitted a final embed. */
+  def packMessages(values: List[String]): List[List[String]] = {
+    val messages = scala.collection.mutable.ListBuffer.empty[List[String]]
+    var embeds = scala.collection.mutable.ListBuffer.empty[String]
     var field = ""
+    // Text already committed to closed embeds on the message being built; the
+    // live total is this plus `field`.
+    var messageUsed = 0
+
+    def closeMessage(): Unit = {
+      messages += embeds.toList
+      embeds = scala.collection.mutable.ListBuffer.empty[String]
+      messageUsed = 0
+    }
+
+    // Close the current embed and open a new one holding `line`, rolling over to
+    // a new message when this one cannot hold that line as well.
+    def startEmbed(line: String): Unit = {
+      embeds += field
+      messageUsed += field.length
+      if (embeds.size >= MaxEmbedsPerMessage || messageUsed + line.length >= MessageBudget) closeMessage()
+      field = line
+    }
+
     values.foreach { v =>
       val currentField = field + "\n" + v
-      if (currentField.length >= 4060 || (currentField.length >= 3850 && v.startsWith("### ["))) {
-        fields += field
-        field = v
-      } else if (v.matches("### [^\\[].*")) {
+      val embedFull = currentField.length >= EmbedBudget ||
+        (currentField.length >= EmbedBudget - HeaderHeadroom && v.startsWith("### ["))
+      if (messageUsed + currentField.length >= MessageBudget || embedFull) startEmbed(v)
+      else if (v.matches("### [^\\[].*")) {
         if (field == "") field = currentField
-        else {
-          fields += field
-          field = v
-        }
-      } else {
-        field = currentField
-      }
+        else startEmbed(v)
+      } else field = currentField
     }
-    fields += field
-    fields.toList
+    embeds += field
+    messages += embeds.toList
+    messages.toList
   }
 }

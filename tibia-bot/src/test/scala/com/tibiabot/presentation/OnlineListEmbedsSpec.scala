@@ -57,35 +57,81 @@ class OnlineListEmbedsSpec extends AnyFunSuite with Matchers {
     OnlineListEmbeds.categoryName("Antica", 0, 0) shouldBe "Antica"
   }
 
-  // --- packFields ---
+  // --- packMessages ---
 
-  test("packFields always returns at least one (empty) field") {
-    OnlineListEmbeds.packFields(Nil) shouldBe List("")
+  // Discord's own caps, which packMessages exists to stay under: a message's
+  // embed text summed, and any one description.
+  private val DiscordMessageCap = 6000
+  private val DiscordDescriptionCap = 4096
+
+  test("packMessages always returns at least one message holding one (empty) description") {
+    OnlineListEmbeds.packMessages(Nil) shouldBe List(List(""))
   }
 
-  test("packFields newline-joins short lines into a single field") {
-    OnlineListEmbeds.packFields(List("a", "b", "c")) shouldBe List("\na\nb\nc")
+  test("packMessages newline-joins short lines into a single description") {
+    OnlineListEmbeds.packMessages(List("a", "b", "c")) shouldBe List(List("\na\nb\nc"))
   }
 
-  test("packFields starts a new field at a section header, but not when the field is still empty") {
-    OnlineListEmbeds.packFields(List("a", "### Neutrals", "b")) shouldBe List("\na", "### Neutrals\nb")
-    OnlineListEmbeds.packFields(List("### Neutrals", "b")) shouldBe List("\n### Neutrals\nb")
+  test("a section header starts a new embed but stays on the same message") {
+    OnlineListEmbeds.packMessages(List("a", "### Neutrals", "b")) shouldBe List(List("\na", "### Neutrals\nb"))
   }
 
-  test("packFields keeps a guild header ('### [') with the preceding lines (no section break)") {
-    OnlineListEmbeds.packFields(List("a", "### [Guild](u)", "b")) shouldBe List("\na\n### [Guild](u)\nb")
+  test("a section header does not start a new embed while the current one is empty") {
+    OnlineListEmbeds.packMessages(List("### Neutrals", "b")) shouldBe List(List("\n### Neutrals\nb"))
   }
 
-  test("packFields breaks to a new field once a line would reach 4060 chars") {
-    val packed = OnlineListEmbeds.packFields(List("x" * 4000, "y" * 100))
+  test("a guild header ('### [') stays with the preceding lines") {
+    OnlineListEmbeds.packMessages(List("a", "### [Guild](u)", "b")) shouldBe List(List("\na\n### [Guild](u)\nb"))
+  }
+
+  test("a full embed starts a second embed on the same message, not a second message") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2900, "y" * 100))
+    packed should have size 1
+    packed.head shouldBe List("\n" + ("x" * 2900), "y" * 100)
+  }
+
+  test("a second full embed fills the message, so the next line rolls to a new one") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2900, "y" * 2900, "z" * 100))
     packed should have size 2
-    packed.head shouldBe "\n" + ("x" * 4000)
-    packed.last shouldBe "y" * 100
+    packed.head should have size 2
+    packed.last shouldBe List("z" * 100)
   }
 
-  test("packFields breaks earlier (3850) when the incoming line is a guild header") {
-    val packed = OnlineListEmbeds.packFields(List("x" * 3840, "### [G](u)"))
-    packed should have size 2
-    packed.last shouldBe "### [G](u)"
+  test("an incoming guild header breaks the embed early rather than being stranded") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2730, "### [G](u)"))
+    packed shouldBe List(List("\n" + ("x" * 2730), "### [G](u)"))
+  }
+
+  test("a message never carries more than Discord's ten embeds") {
+    val packed = OnlineListEmbeds.packMessages(List.fill(11)("### Section"))
+    packed.map(_.size) shouldBe List(10, 1)
+  }
+
+  test("a realistic roster stays inside both Discord caps and beats one embed per message") {
+    // Section headers, guild buckets and ~140-char rows, which is what a
+    // rendered row costs (emoji, level, name + character URL, guild icon,
+    // duration, flag).
+    def rows(from: Int, n: Int) = (from until from + n).map(i => s"$i" + ("r" * 139)).toList
+    val lines =
+      ("### Allies 40" :: rows(0, 40)) :::
+      ("### Enemies 60" :: rows(40, 60)) :::
+      (1 to 8).toList.flatMap { g =>
+        s"### [Guild $g](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=Guild+$g) 45" ::
+          rows(100 + g * 45, 45)
+      }
+    val packed = OnlineListEmbeds.packMessages(lines)
+
+    packed.foreach { descriptions =>
+      descriptions.map(_.length).sum should be < DiscordMessageCap
+      descriptions.size should be <= 10
+      descriptions.foreach(_.length should be < DiscordDescriptionCap)
+    }
+    // No line is dropped, duplicated or reordered on the way through.
+    packed.flatten.flatMap(_.split("\n").filter(_.nonEmpty)) shouldBe lines
+
+    // The single-level packing fitted ~4060 chars per message, and paid a whole
+    // message for each of the ten headers above; this fits ~5800 and pays none.
+    val totalChars = lines.map(_.length + 1).sum
+    packed.size should be < totalChars / 4060
   }
 }
