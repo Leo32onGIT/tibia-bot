@@ -10,7 +10,8 @@ class OnlineListRepostPolicySpec extends AnyFunSuite with Matchers {
 
   private val fifteenMinutes = 900000L
   private val fiveMinutes = 300000L
-  private val policy = OnlineListRepostPolicy(List(400 -> fifteenMinutes, 800 -> fiveMinutes))
+  private val dirtyFraction = 0.6 // the configured default
+  private val policy = OnlineListRepostPolicy(List(400 -> fifteenMinutes, 800 -> fiveMinutes), dirtyFraction)
 
   /** Every condition satisfied; each test below spoils exactly one. */
   private def shouldRepost(
@@ -35,7 +36,7 @@ class OnlineListRepostPolicySpec extends AnyFunSuite with Matchers {
   }
 
   test("tiers given out of order still read deepest-first") {
-    OnlineListRepostPolicy(List(800 -> fiveMinutes, 400 -> fifteenMinutes)).cooldownMs(800) shouldBe Some(fiveMinutes)
+    OnlineListRepostPolicy(List(800 -> fiveMinutes, 400 -> fifteenMinutes), dirtyFraction).cooldownMs(800) shouldBe Some(fiveMinutes)
   }
 
   test("a congested lane with a fully dirty list reposts") {
@@ -58,10 +59,19 @@ class OnlineListRepostPolicySpec extends AnyFunSuite with Matchers {
   }
 
   test("a list that is only partly dirty is edited, not reposted") {
-    // 80% of 5 is 4; of 3 it is 3, since a repost rewrites whole messages.
-    shouldRepost(messageCount = 5, editCount = 3) shouldBe false
-    shouldRepost(messageCount = 5, editCount = 4) shouldBe true
-    shouldRepost(messageCount = 3, editCount = 2) shouldBe false
+    // 60% of 5 is 3; of 3 it rounds up to 2, since a repost rewrites whole messages.
+    shouldRepost(messageCount = 5, editCount = 2) shouldBe false
+    shouldRepost(messageCount = 5, editCount = 3) shouldBe true
+    shouldRepost(messageCount = 3, editCount = 1) shouldBe false
+    shouldRepost(messageCount = 3, editCount = 2) shouldBe true
+  }
+
+  test("the dirty threshold is the configured one, not a constant") {
+    // The stable packing holds the dirty share down, so the gate that used to
+    // trip at 0.8 has to come with it — see OnlineListRepostPolicy.
+    val strict = OnlineListRepostPolicy(List(400 -> fifteenMinutes), 0.8)
+    strict.shouldRepost(5, 3, allIdsKnown = true, 400, fifteenMinutes) shouldBe false
+    policy.shouldRepost(5, 3, allIdsKnown = true, 400, fifteenMinutes) shouldBe true
   }
 
   test("a send still in flight has no id to delete by, so nothing is reposted") {
@@ -74,7 +84,7 @@ class OnlineListRepostPolicySpec extends AnyFunSuite with Matchers {
   }
 
   test("tiered is the disabled policy when reposting is switched off") {
-    OnlineListRepostPolicy.tiered(enabled = false, 400 -> fifteenMinutes) shouldBe OnlineListRepostPolicy.disabled
-    OnlineListRepostPolicy.tiered(enabled = true, 400 -> fifteenMinutes).cooldownMs(400) shouldBe Some(fifteenMinutes)
+    OnlineListRepostPolicy.tiered(enabled = false, dirtyFraction, 400 -> fifteenMinutes) shouldBe OnlineListRepostPolicy.disabled
+    OnlineListRepostPolicy.tiered(enabled = true, dirtyFraction, 400 -> fifteenMinutes).cooldownMs(400) shouldBe Some(fifteenMinutes)
   }
 }

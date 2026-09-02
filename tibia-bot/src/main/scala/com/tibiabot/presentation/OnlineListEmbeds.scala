@@ -89,6 +89,17 @@ object OnlineListEmbeds {
   /** Discord's cap on embeds per message. */
   private val MaxEmbedsPerMessage = 10
 
+  /** Would this line take the current embed past what it may hold? A guild
+   *  header ("### [") breaks `HeaderHeadroom` early rather than being stranded
+   *  above a line or two. */
+  private def embedFull(currentField: String, line: String): Boolean =
+    currentField.length >= EmbedBudget ||
+      (currentField.length >= EmbedBudget - HeaderHeadroom && line.startsWith("### ["))
+
+  /** "### " not followed by "[" — the allies/enemies/others section headings,
+   *  as opposed to a guild's own header. */
+  private def isSectionHeader(line: String): Boolean = line.matches("### [^\\[].*")
+
   /** Pack online-list lines into messages, each holding one or more embed
    *  descriptions.
    *
@@ -135,10 +146,8 @@ object OnlineListEmbeds {
 
     values.foreach { v =>
       val currentField = field + "\n" + v
-      val embedFull = currentField.length >= EmbedBudget ||
-        (currentField.length >= EmbedBudget - HeaderHeadroom && v.startsWith("### ["))
-      if (messageUsed + currentField.length >= MessageBudget || embedFull) startEmbed(v)
-      else if (v.matches("### [^\\[].*")) {
+      if (messageUsed + currentField.length >= MessageBudget || embedFull(currentField, v)) startEmbed(v)
+      else if (isSectionHeader(v)) {
         if (field == "") field = currentField
         else startEmbed(v)
       } else field = currentField
@@ -146,5 +155,112 @@ object OnlineListEmbeds {
     embeds += field
     messages += embeds.toList
     messages.toList
+  }
+
+  /** Pack lines into embed descriptions only, for a set of lines already known
+   *  to fit one message. Same break rules as [[packMessages]] without the
+   *  message budget, since the caller has already decided what goes together.
+   *
+   *  @param leadingNewline whether the first description opens with a newline.
+   *         [[packMessages]] gives one only to the very first message — it starts
+   *         accumulating from an empty string, while every later message starts
+   *         from the line that would not fit on the one before. Reproduced rather
+   *         than tidied away so a channel repacked this way is not rewritten
+   *         wholesale the first time. */
+  private def packEmbeds(lines: List[String], leadingNewline: Boolean): List[String] = {
+    val embeds = scala.collection.mutable.ListBuffer.empty[String]
+    var field = ""
+    var started = false
+    lines.foreach { v =>
+      val currentField = if (started || leadingNewline) field + "\n" + v else v
+      if (started && (embedFull(currentField, v) || isSectionHeader(v))) {
+        embeds += field
+        field = v
+      } else field = currentField
+      started = true
+    }
+    embeds += field
+    embeds.toList
+  }
+
+  /** The message this packing would put `lines` on, and whether that message is
+   *  over what Discord allows. */
+  private def overfull(embeds: List[String]): Boolean =
+    embeds.map(_.length).sum > MessageBudget || embeds.size > MaxEmbedsPerMessage
+
+  /** Pack lines into messages the way [[packMessages]] does, but keeping every
+   *  line on the message it is already posted on.
+   *
+   *  [[packMessages]] fills each message in turn, so inserting one line shifts
+   *  every boundary after it by about a line and every message from there down
+   *  has to be rewritten — one login costs roughly half the channel's messages.
+   *  Here a line that is already posted stays where it is, a new line joins the
+   *  message its neighbour is on, and a line that has gone simply leaves a
+   *  smaller message behind. Nothing is pulled backwards to fill that gap, so
+   *  the room a logout leaves is what the next login into that message uses: the
+   *  slack is earned by churn rather than reserved up front, which is why this
+   *  costs almost no extra messages.
+   *
+   *  Only a message that would pass the budget spills, and it spills one line at
+   *  a time into the next message, stopping at the first one with room.
+   *
+   *  The layout does drift — messages sit a little emptier than a fresh packing,
+   *  and a levelled-up character whose row has moved backwards is dragged forward
+   *  to keep the order. Both are bounded by packing from scratch periodically,
+   *  which the 6-hourly purge already does.
+   *
+   *  @param previous the embed descriptions currently posted, message by message.
+   *                  Matched against `values` with durations masked out (see
+   *                  [[withoutDurations]]), or every line would look new each
+   *                  time its duration ticked. */
+  def packMessagesStable(values: List[String], previous: List[List[String]]): List[List[String]] = {
+    // With nothing to stay put on, every line would land on message 0 and be
+    // spilled forward one at a time to reach the layout packMessages reaches
+    // directly.
+    if (previous.isEmpty) packMessages(values)
+    else packStable(values, previous)
+  }
+
+  private def packStable(values: List[String], previous: List[List[String]]): List[List[String]] = {
+    val where = scala.collection.mutable.Map.empty[String, Int]
+    previous.zipWithIndex.foreach { case (descriptions, index) =>
+      descriptions.foreach(_.split("\n").filter(_.nonEmpty).foreach { line =>
+        where.getOrElseUpdate(withoutDurations(line), index)
+      })
+    }
+
+    // Walk the new list, keeping each line on its own message. An index that
+    // would go backwards is clamped forward, so the messages stay in order
+    // whatever has moved.
+    val runs = scala.collection.mutable.ListBuffer.empty[scala.collection.mutable.ListBuffer[String]]
+    var current = scala.collection.mutable.ListBuffer.empty[String]
+    var currentIndex = 0
+    values.foreach { line =>
+      val wanted = math.max(where.getOrElse(withoutDurations(line), currentIndex), currentIndex)
+      if (wanted != currentIndex && current.nonEmpty) {
+        runs += current
+        current = scala.collection.mutable.ListBuffer.empty[String]
+      }
+      currentIndex = wanted
+      current += line
+    }
+    if (current.nonEmpty) runs += current
+
+    // Spill only what does not fit, and only as far as it takes to find room.
+    var i = 0
+    while (i < runs.size) {
+      while (runs(i).nonEmpty && overfull(packEmbeds(runs(i).toList, i == 0))) {
+        if (i + 1 == runs.size) runs += scala.collection.mutable.ListBuffer.empty[String]
+        val moved = runs(i).remove(runs(i).size - 1)
+        runs(i + 1).prepend(moved)
+      }
+      i += 1
+    }
+
+    val packed = runs.toList.filter(_.nonEmpty).zipWithIndex.map {
+      case (run, index) => packEmbeds(run.toList, index == 0)
+    }
+    // An empty roster still owes Discord one message, as packMessages does.
+    if (packed.isEmpty) packMessages(values) else packed
   }
 }

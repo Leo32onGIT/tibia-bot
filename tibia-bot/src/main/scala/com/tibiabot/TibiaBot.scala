@@ -68,6 +68,7 @@ class TibiaBot(
   // tracking.OnlineListState.
   private val onlineListState = new tracking.OnlineListState(policy = tracking.OnlineListRepostPolicy.tiered(
     Config.onlineListRepostEnabled,
+    Config.onlineListRepostDirtyFraction,
     Config.onlineListRepostQueueDepth -> Config.onlineListRepostCooldownMs,
     Config.onlineListRepostUrgentQueueDepth -> Config.onlineListRepostUrgentCooldownMs
   ))
@@ -1495,7 +1496,17 @@ class TibiaBot(
     // hours, which is preferable to racing the timers across threads.
     val purgeDue = onlineListPurgeDue(purgeType, guildId)
     val channelId = channel.getId
-    val messages = presentation.OnlineListEmbeds.packMessages(values)
+    // Packed against what is already posted, so a login lands on the message it
+    // belongs to instead of shunting every message after it along by a line —
+    // see packMessagesStable. The purge is what re-tightens that layout, so it
+    // packs from scratch, as does a channel not synced yet. Reading the state
+    // outside plan's own lock races only with a send reporting its id, which
+    // leaves descriptions alone: the worst case is one loose packing.
+    val previous = if (purgeDue) None else onlineListState.posted(channelId).filter(_.nonEmpty)
+    val messages = previous match {
+      case Some(posted) => presentation.OnlineListEmbeds.packMessagesStable(values, posted.map(_.descriptions))
+      case None => presentation.OnlineListEmbeds.packMessages(values)
+    }
 
     // The steady-state path: we already know which messages we posted here and
     // what we last put in them, so the whole update is decided locally with no

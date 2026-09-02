@@ -134,4 +134,148 @@ class OnlineListEmbedsSpec extends AnyFunSuite with Matchers {
     val totalChars = lines.map(_.length + 1).sum
     packed.size should be < totalChars / 4060
   }
+
+  // --- packMessagesStable ---
+
+  /** ~142 chars, the cost of a rendered row. */
+  private def rows(n: Int, from: Int = 0): List[String] =
+    (from until from + n).map(i => "%05d".format(i) + ("r" * 137)).toList
+
+  private def linesOf(message: List[String]): List[String] =
+    message.flatMap(_.split("\n").filter(_.nonEmpty))
+
+  test("with nothing posted yet it packs from scratch") {
+    val lines = rows(120)
+    OnlineListEmbeds.packMessagesStable(lines, Nil) shouldBe OnlineListEmbeds.packMessages(lines)
+  }
+
+  test("an unchanged list repacks to exactly what is already posted") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    OnlineListEmbeds.packMessagesStable(lines, posted) shouldBe posted
+  }
+
+  test("durations ticking up move nothing") {
+    val lines = List("Bubble `5min`", "Cip `1hr 2min`")
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val ticked = List("Bubble `9min`", "Cip `1hr 6min`")
+    OnlineListEmbeds.packMessagesStable(ticked, posted) shouldBe List(List("\nBubble `9min`\nCip `1hr 6min`"))
+  }
+
+  test("a logout shrinks its own message and leaves every later one alone") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    posted.size should be >= 4
+    val goneFrom = linesOf(posted(2)).head
+    val packed = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == goneFrom), posted)
+
+    packed.take(2) shouldBe posted.take(2)
+    packed.drop(3) shouldBe posted.drop(3)
+    linesOf(packed(2)) shouldBe linesOf(posted(2)).tail
+  }
+
+  test("a login joins the message it belongs to, once a logout has left room there") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val target = linesOf(posted(2))
+    val loosened = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == target.head), posted)
+
+    // a new row sorting into the middle of that same message
+    val withLogin = lines.filterNot(_ == target.head).flatMap { l =>
+      if (l == target(4)) List(l, "99999" + ("n" * 137)) else List(l)
+    }
+    val packed = OnlineListEmbeds.packMessagesStable(withLogin, loosened)
+
+    packed.take(2) shouldBe loosened.take(2)
+    packed.drop(3) shouldBe loosened.drop(3)
+    linesOf(packed(2)) should contain("99999" + ("n" * 137))
+  }
+
+  test("a full message spills one line forward, and only as far as room") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    posted.size should be >= 4
+    // make room on the third message, then log somebody in at the very front
+    val loosened = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == linesOf(posted(2)).head), posted)
+    val remaining = lines.filterNot(_ == linesOf(posted(2)).head)
+    val packed = OnlineListEmbeds.packMessagesStable(("00000" + ("n" * 137)) :: remaining, loosened)
+
+    // the first two messages absorbed and passed on a line; the third took it
+    // and stopped there, so nothing beyond moved
+    packed.drop(3) shouldBe loosened.drop(3)
+    packed.head should not be loosened.head
+  }
+
+  test("a message emptied of everything disappears") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val second = linesOf(posted(1)).toSet
+    val packed = OnlineListEmbeds.packMessagesStable(lines.filterNot(second.contains), posted)
+
+    packed.size shouldBe posted.size - 1
+    packed.head shouldBe posted.head
+    packed(1) shouldBe posted(2)
+  }
+
+  test("a line that has moved backwards is dragged forward, keeping the order") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val moved = linesOf(posted(2)).head
+    // that row now sorts to the very front, e.g. after a level-up
+    val reordered = moved :: lines.filterNot(_ == moved)
+    val packed = OnlineListEmbeds.packMessagesStable(reordered, posted)
+
+    packed.flatMap(linesOf) shouldBe reordered
+  }
+
+  test("a stably packed list still stays inside both Discord caps") {
+    var lines = rows(400)
+    var packed = OnlineListEmbeds.packMessages(lines)
+    // fifty refreshes of churn, packing against what the last one produced
+    (1 to 50).foreach { cycle =>
+      lines = lines.drop(3) ::: rows(3, 100000 + cycle * 3)
+      packed = OnlineListEmbeds.packMessagesStable(lines, packed)
+      packed.foreach { descriptions =>
+        descriptions.map(_.length).sum should be < DiscordMessageCap
+        descriptions.size should be <= 10
+        descriptions.foreach(_.length should be < DiscordDescriptionCap)
+      }
+      packed.flatMap(linesOf) shouldBe lines
+    }
+  }
+
+  test("staying put costs far fewer message rewrites than repacking each time") {
+    // The whole point of the function: pack fresh and one login shunts every
+    // message after it along by a line, so half the channel is rewritten.
+    val rng = new scala.util.Random(4)
+    var lines = rows(400)
+    var fresh = OnlineListEmbeds.packMessages(lines)
+    var stable = fresh
+    var freshEdits = 0
+    var stableEdits = 0
+
+    def changed(before: List[List[String]], after: List[List[String]]): Int =
+      (0 until math.max(before.size, after.size)).count(i => before.lift(i) != after.lift(i))
+
+    (1 to 60).foreach { cycle =>
+      // one logout and one login, both landing somewhere in the middle
+      lines = lines.patch(rng.nextInt(lines.size), Nil, 1)
+      lines = lines.patch(rng.nextInt(lines.size), rows(1, 900000 + cycle), 0)
+
+      val nextFresh = OnlineListEmbeds.packMessages(lines)
+      val nextStable = OnlineListEmbeds.packMessagesStable(lines, stable)
+      freshEdits += changed(fresh, nextFresh)
+      stableEdits += changed(stable, nextStable)
+      fresh = nextFresh
+      stable = nextStable
+    }
+
+    // Measured at roughly a third of the rewrites; asserted loosely so the
+    // figure can move without the guarantee going quietly missing.
+    info(s"fresh $freshEdits edits / ${fresh.size} msgs, stable $stableEdits edits / ${stable.size} msgs")
+    stableEdits.toDouble should be < (freshEdits * 0.75)
+    // and without buying that with a pile of extra messages
+    stable.size.toDouble should be < (fresh.size * 1.25)
+    stable.flatMap(linesOf) shouldBe lines
+  }
 }

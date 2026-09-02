@@ -20,8 +20,16 @@ package com.tibiabot.tracking
  *  @param tiers (lane queue depth, cooldown ms) pairs. The deepest tier the lane
  *               has reached decides the cooldown; below every tier, nothing is
  *               reposted at all. Empty disables reposting outright.
+ *  @param dirtyFraction share of a channel's messages that must already need
+ *               rewriting. Below it a repost would also rewrite messages nothing
+ *               had changed in, spending sends on work the edit path was not
+ *               going to do. Not a constant, because the stable packing (see
+ *               `OnlineListEmbeds.packMessagesStable`) deliberately holds this
+ *               fraction down: at a churn that used to leave 83% of a channel
+ *               dirty it now leaves about 68%, and a gate that no longer trips
+ *               costs more edits than the stable packing saves.
  */
-final case class OnlineListRepostPolicy(tiers: List[(Int, Long)]) {
+final case class OnlineListRepostPolicy(tiers: List[(Int, Long)], dirtyFraction: Double) {
 
   private val ordered = tiers.sortBy { case (depth, _) => depth }
 
@@ -48,7 +56,7 @@ final case class OnlineListRepostPolicy(tiers: List[(Int, Long)]) {
   ): Boolean =
     allIdsKnown &&
       messageCount >= OnlineListRepostPolicy.MinMessages &&
-      editCount >= math.ceil(OnlineListRepostPolicy.MinDirtyFraction * messageCount) &&
+      editCount >= math.ceil(dirtyFraction * messageCount) &&
       cooldownMs(queueDepth).exists(msSinceLastRepost >= _)
 }
 
@@ -59,15 +67,10 @@ object OnlineListRepostPolicy {
    *  to several messages. */
   val MinMessages = 3
 
-  /** Share of a channel's messages that must already need rewriting. Below it a
-   *  repost would also rewrite messages nothing had changed in, spending sends on
-   *  work the edit path was not going to do. */
-  val MinDirtyFraction = 0.8
-
   /** Never repost, whatever the lane is doing. */
-  val disabled: OnlineListRepostPolicy = OnlineListRepostPolicy(Nil)
+  val disabled: OnlineListRepostPolicy = OnlineListRepostPolicy(Nil, 1.0)
 
   /** The configured policy, or [[disabled]] when reposting is switched off. */
-  def tiered(enabled: Boolean, tiers: (Int, Long)*): OnlineListRepostPolicy =
-    if (enabled) OnlineListRepostPolicy(tiers.toList) else disabled
+  def tiered(enabled: Boolean, dirtyFraction: Double, tiers: (Int, Long)*): OnlineListRepostPolicy =
+    if (enabled) OnlineListRepostPolicy(tiers.toList, dirtyFraction) else disabled
 }

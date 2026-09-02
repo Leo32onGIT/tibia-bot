@@ -131,7 +131,7 @@ class OnlineListStateSpec extends AnyFunSuite with Matchers {
   private class Reposting {
     var nowMs: Long = 1000000L
     val state = new OnlineListState(
-      policy = OnlineListRepostPolicy(List(congested -> cooldownMs)),
+      policy = OnlineListRepostPolicy(List(congested -> cooldownMs), dirtyFraction = 0.6),
       now = () => nowMs
     )
     def seedThree(): Unit = state.seed(channel, List(posted("m1", "a"), posted("m2", "b"), posted("m3", "c")))
