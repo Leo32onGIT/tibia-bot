@@ -8,7 +8,7 @@ import akka.http.scaladsl.model.headers.HttpEncodings
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.pattern.after
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -23,12 +23,13 @@ import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `
 class TibiaDataClient(
   metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData,
   inFlight: InFlightLimit = InFlightLimit.tibiaData
-)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi {
+)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi with HighscoresApi {
 
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
-  private val characterUrl = "https://api.tibiadata.com/v4/character/"
-  private val guildUrl = "https://api.tibiadata.com/v4/guild/"
+  private val publicApi = "https://api.tibiadata.com"
+  private val characterUrl = s"$publicApi/v4/character/"
+  private val guildUrl = s"$publicApi/v4/guild/"
 
   private val retryPolicy = new RetryPolicy()
   private val maxRetries = 2
@@ -209,6 +210,29 @@ class TibiaDataClient(
           Future.successful(Left("No Date header in response"))
       }
     }
+  }
+
+  /** One page of one highscore list.
+   *
+   *  The host is the list's own choice, not this method's: only a
+   *  vocation-filtered list needs our instance, because the public API refuses
+   *  any vocation but `all` with a 400. Everything else goes to the public
+   *  endpoint, where it is Kong-cached and costs tibia.com nothing extra.
+   *
+   *  A 400 here parses as a Left rather than a `HighscoresResponse` — the error
+   *  body carries no `highscores` object at all — so the message names the list
+   *  and page, since the likeliest cause is our instance coming back up with
+   *  restriction mode on and refusing the vocation filter. */
+  def getHighscores(world: String, list: HighscoreList, page: Int): Future[Either[String, HighscoresResponse]] = {
+    val host = list.source match {
+      case HighscoreSource.Public => publicApi
+      case HighscoreSource.Local  => Config.tibiadataApi.stripSuffix("/")
+    }
+    val what = s"'$list' page $page for '$world'"
+    fetch[HighscoresResponse](
+      s"$host${list.path(world, page)}",
+      resp => s"Failed to get highscores $what with status: '${resp.status}'",
+      s"Failed to parse highscores $what")
   }
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
