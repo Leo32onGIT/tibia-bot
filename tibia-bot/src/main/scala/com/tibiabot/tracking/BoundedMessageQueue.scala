@@ -89,6 +89,24 @@ final class BoundedMessageQueue[T](capacity: Int = Int.MaxValue, dropNewest: Boo
     found
   }
 
+  /** Remove every queued item matching `pred`, returning how many went. Order
+   *  among the survivors is untouched.
+   *
+   *  Walks the whole queue, unlike everything else here, so it is for the rare
+   *  case where a caller learns that a batch of pending work has become
+   *  pointless — see [[com.tibiabot.discord.RateLimitedSender.cancelGroup]]. */
+  def removeAll(pred: T => Boolean): Int = {
+    val it = q.entrySet().iterator()
+    var removed = 0
+    while (it.hasNext) {
+      if (pred(it.next().getValue)) {
+        it.remove()
+        removed += 1
+      }
+    }
+    removed
+  }
+
   private def removeOldest(): T = {
     val it = q.entrySet().iterator()
     val head = it.next()

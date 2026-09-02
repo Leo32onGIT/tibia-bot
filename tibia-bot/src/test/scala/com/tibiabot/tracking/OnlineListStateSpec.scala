@@ -122,6 +122,93 @@ class OnlineListStateSpec extends AnyFunSuite with Matchers {
     )
   }
 
+  // --- reposting instead of editing ---
+
+  private val cooldownMs = 900000L
+  private val congested = 400
+
+  /** A state that will repost, with a clock the test drives by hand. */
+  private class Reposting {
+    var nowMs: Long = 1000000L
+    val state = new OnlineListState(
+      policy = OnlineListRepostPolicy(List(congested -> cooldownMs)),
+      now = () => nowMs
+    )
+    def seedThree(): Unit = state.seed(channel, List(posted("m1", "a"), posted("m2", "b"), posted("m3", "c")))
+    def elapse(ms: Long): Unit = nowMs += ms
+  }
+
+  test("a fully dirty list on a congested lane is reposted rather than edited") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true) shouldBe List(
+      RepostOnlineList(List("m1", "m2", "m3"), single("a2", "b2", "c2"))
+    )
+  }
+
+  test("a repost commits every message as awaiting an id, like a cold channel") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true)
+    r.state.posted(channel).map(_.map(_.id)) shouldBe Some(List(None, None, None))
+    // and nothing is planned again while those sends are in flight
+    r.state.plan(channel, single("a3", "b3", "c3"), congested, canDelete = true) shouldBe empty
+  }
+
+  test("without permission to bulk delete the messages are edited as before") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = false) should have size 3
+  }
+
+  test("a healthy lane keeps editing however dirty the list") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), queueDepth = 0, canDelete = true) should have size 3
+  }
+
+  test("seeding starts the cooldown, so a channel is not reposted the moment it syncs") {
+    val r = new Reposting
+    r.seedThree()
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true) should have size 3
+  }
+
+  test("a repost restarts the cooldown, so the next cycle edits again") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true) should have size 1
+    List("n1", "n2", "n3").zipWithIndex.foreach { case (id, i) => r.state.recordMessageId(channel, i, id) }
+    r.elapse(cooldownMs - 1)
+    r.state.plan(channel, single("a3", "b3", "c3"), congested, canDelete = true) shouldBe List(
+      EditOnlineListMessage(0, "n1", List("a3")),
+      EditOnlineListMessage(1, "n2", List("b3")),
+      EditOnlineListMessage(2, "n3", List("c3"))
+    )
+  }
+
+  test("invalidating a channel does not hand it a fresh cooldown") {
+    val r = new Reposting
+    r.seedThree()
+    r.elapse(cooldownMs)
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true) should have size 1
+    // A failed send drops the cache; the resync that follows reseeds it, and it
+    // is the reseed — not the invalidate — that is allowed to restart the clock.
+    r.state.invalidate(channel)
+    r.state.seed(channel, List(posted("m1", "a"), posted("m2", "b"), posted("m3", "c")))
+    r.state.plan(channel, single("a2", "b2", "c2"), congested, canDelete = true) should have size 3
+  }
+
+  test("the default state never reposts, whatever the lane is doing") {
+    val state = new OnlineListState()
+    state.seed(channel, List(posted("m1", "a"), posted("m2", "b"), posted("m3", "c")))
+    state.plan(channel, single("a2", "b2", "c2"), queueDepth = 100000, canDelete = true) should have size 3
+  }
+
   // --- in-flight sends ---
 
   test("a slot whose send is in flight is not sent again next cycle") {

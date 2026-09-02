@@ -17,6 +17,12 @@ final case class EditOnlineListMessage(index: Int, messageId: String, descriptio
 final case class SendOnlineListMessage(index: Int, descriptions: List[String]) extends OnlineListAction
 final case class DeleteOnlineListMessages(messageIds: List[String]) extends OnlineListAction
 
+/** Delete this channel's whole list and post it again, rather than editing the
+ *  messages in place — see [[OnlineListRepostPolicy]] for when that is the better
+ *  trade. The sends must not go out until the delete has landed, or a failed
+ *  delete leaves the channel holding the list twice over. */
+final case class RepostOnlineList(deleteIds: List[String], messages: List[List[String]]) extends OnlineListAction
+
 /** What the bot believes is posted in each online-list channel, and the diff to
  *  bring a channel in line with a freshly rendered list.
  *
@@ -34,18 +40,37 @@ final case class DeleteOnlineListMessages(messageIds: List[String]) extends Onli
  *  decide-and-commit must be atomic.
  *
  *  @param normalise applied to both sides of the "did this message change?"
- *                   comparison — see `OnlineListEmbeds.withoutDurations`. */
-final class OnlineListState(normalise: String => String = OnlineListEmbeds.withoutDurations) {
+ *                   comparison — see `OnlineListEmbeds.withoutDurations`.
+ *  @param policy    when to wipe and repost a channel instead of editing it.
+ *                   Defaults to never, which is the behaviour without it. */
+final class OnlineListState(
+  normalise: String => String = OnlineListEmbeds.withoutDurations,
+  policy: OnlineListRepostPolicy = OnlineListRepostPolicy.disabled,
+  now: () => Long = () => System.currentTimeMillis()
+) {
 
   private val lock = new Object()
   private val state = mutable.Map.empty[String, List[OnlineListMessage]]
+  // Kept apart from `state` so [[invalidate]] cannot reset it: an error-induced
+  // invalidate would otherwise clear the cooldown and let reposts stack up
+  // exactly when the channel is already misbehaving.
+  private val lastRepostAtMs = mutable.Map.empty[String, Long]
 
   /** Has this channel been synced with Discord at least once? */
   def isWarm(channelId: String): Boolean = lock.synchronized { state.contains(channelId) }
 
-  /** Replace this channel's believed state, e.g. after reading its history. */
+  /** Replace this channel's believed state, e.g. after reading its history.
+   *
+   *  Starts the repost cooldown too. A seed follows either a restart or the
+   *  6-hourly purge, and the purge is itself a wipe-and-repost — so in both cases
+   *  the channel has just been churned as much as a repost would churn it, and a
+   *  fresh cooldown is what that deserves. It also stops every congested channel
+   *  reposting at once on the first cycles after a restart. */
   def seed(channelId: String, posted: List[OnlineListMessage]): Unit =
-    lock.synchronized { state.update(channelId, posted) }
+    lock.synchronized {
+      state.update(channelId, posted)
+      lastRepostAtMs.update(channelId, now())
+    }
 
   /** Forget this channel, forcing the next cycle to rebuild from history. */
   def invalidate(channelId: String): Unit = lock.synchronized { state.remove(channelId); () }
@@ -67,8 +92,23 @@ final class OnlineListState(normalise: String => String = OnlineListEmbeds.witho
    *  this cycle rather than being posted a second time; the next cycle picks up
    *  whatever changed once the id has landed. A send that never completes must
    *  therefore be reported by invalidating the channel, or that slot stays
-   *  pending forever. */
-  def plan(channelId: String, messages: List[List[String]]): List[OnlineListAction] = lock.synchronized {
+   *  pending forever.
+   *
+   *  When `policy` says this channel is better reposted than edited, the whole
+   *  plan collapses to a single [[RepostOnlineList]] instead.
+   *
+   *  @param queueDepth the online-list lane's backlog, which decides how much
+   *                    churn a repost is worth; 0 leaves the incremental path.
+   *  @param canDelete  whether the bot may bulk-delete here. Without
+   *                    MESSAGE_MANAGE the delete degrades to one request per
+   *                    message on the tightest route Discord has, which is worse
+   *                    than the edits it set out to avoid. */
+  def plan(
+    channelId: String,
+    messages: List[List[String]],
+    queueDepth: Int = 0,
+    canDelete: Boolean = false
+  ): List[OnlineListAction] = lock.synchronized {
     val cached = state.getOrElse(channelId, Nil)
     val actions = ListBuffer.empty[OnlineListAction]
     val next = ListBuffer.empty[OnlineListMessage]
@@ -89,8 +129,25 @@ final class OnlineListState(normalise: String => String = OnlineListEmbeds.witho
     // what stops that from stranding a message.
     val extra = cached.drop(messages.size).flatMap(_.id)
     if (extra.nonEmpty) actions += DeleteOnlineListMessages(extra)
-    state.update(channelId, next.toList)
-    actions.toList
+
+    val edits = actions.count(_.isInstanceOf[EditOnlineListMessage])
+    val repost = canDelete && policy.shouldRepost(
+      messageCount = messages.size,
+      editCount = edits,
+      allIdsKnown = cached.nonEmpty && cached.forall(_.id.isDefined),
+      queueDepth = queueDepth,
+      msSinceLastRepost = now() - lastRepostAtMs.getOrElse(channelId, 0L)
+    )
+    if (repost) {
+      // Everything posted here is about to go, so every message is back to
+      // awaiting an id — the same state a cold channel commits to.
+      state.update(channelId, messages.map(OnlineListMessage(None, _)))
+      lastRepostAtMs.update(channelId, now())
+      List(RepostOnlineList(cached.flatMap(_.id), messages))
+    } else {
+      state.update(channelId, next.toList)
+      actions.toList
+    }
   }
 
   /** Fill in the id of a message that has just been posted. No-op if the slot

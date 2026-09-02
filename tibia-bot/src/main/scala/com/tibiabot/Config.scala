@@ -164,6 +164,11 @@ object Config {
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
   val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")
   val onlineListPerChannelMinGapMs: Long = discord.getLong("online-list-per-channel-min-gap-ms")
+  val onlineListRepostEnabled: Boolean = discord.getBoolean("online-list-repost-enabled")
+  val onlineListRepostQueueDepth: Int = discord.getInt("online-list-repost-queue-depth")
+  val onlineListRepostCooldownMs: Long = discord.getLong("online-list-repost-cooldown-ms")
+  val onlineListRepostUrgentQueueDepth: Int = discord.getInt("online-list-repost-urgent-queue-depth")
+  val onlineListRepostUrgentCooldownMs: Long = discord.getLong("online-list-repost-urgent-cooldown-ms")
 
   /** Monitoring dashboard: Discord OAuth2 + session signing + reverse-proxy domain. */
   object Web {

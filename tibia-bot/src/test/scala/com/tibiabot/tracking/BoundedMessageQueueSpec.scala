@@ -102,4 +102,28 @@ class BoundedMessageQueueSpec extends AnyFunSuite with Matchers {
     q.superseded shouldBe 1
     List.fill(2)(q.dequeueOption()).flatten shouldBe List(2, 3)
   }
+
+  test("removeAll drops matching items and leaves the rest in order") {
+    val q = new BoundedMessageQueue[Int]()
+    (1 to 6).foreach(q.enqueue)
+    q.removeAll(_ % 2 == 0) shouldBe 3
+    q.size shouldBe 3
+    List.fill(3)(q.dequeueOption()).flatten shouldBe List(1, 3, 5)
+  }
+
+  test("removeAll matching nothing leaves the queue alone") {
+    val q = new BoundedMessageQueue[Int]()
+    (1 to 3).foreach(q.enqueue)
+    q.removeAll(_ > 10) shouldBe 0
+    q.size shouldBe 3
+  }
+
+  test("a removed key is free to be enqueued again rather than superseding") {
+    val q = new BoundedMessageQueue[String]()
+    q.enqueue("first", Some("k"))
+    q.removeAll(_ => true) shouldBe 1
+    q.enqueue("second", Some("k"))
+    q.superseded shouldBe 0
+    q.dequeueOption() shouldBe Some("second")
+  }
 }

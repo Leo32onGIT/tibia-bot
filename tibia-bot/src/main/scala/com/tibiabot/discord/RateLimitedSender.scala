@@ -93,6 +93,14 @@ final class RateLimitedSender(
       picked
     }
 
+  /** Drop every pending item for `group`, returning how many went.
+   *
+   *  For work a caller has just made pointless: an online-list repost deletes the
+   *  very messages this channel's queued edits target, so sending them would
+   *  spend the edits the repost exists to save and then fail on a message that no
+   *  longer exists. Thread-safe. */
+  def cancelGroup(group: String): Int = synchronized { queue.removeAll(_.group.contains(group)) }
+
   /** Current backlog depth (items waiting to be sent). */
   def queueDepth: Int = synchronized { queue.size }
 

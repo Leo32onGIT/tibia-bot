@@ -8,7 +8,7 @@ import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, h
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
@@ -25,7 +25,7 @@ import scala.concurrent.{Await, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Random, Success}
 import java.time.OffsetDateTime
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap}
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
@@ -66,7 +66,11 @@ class TibiaBot(
   // What the bot believes is currently posted in each online-list channel, so
   // the steady-state refresh needs no read of Discord at all — see
   // tracking.OnlineListState.
-  private val onlineListState = new tracking.OnlineListState
+  private val onlineListState = new tracking.OnlineListState(policy = tracking.OnlineListRepostPolicy.tiered(
+    Config.onlineListRepostEnabled,
+    Config.onlineListRepostQueueDepth -> Config.onlineListRepostCooldownMs,
+    Config.onlineListRepostUrgentQueueDepth -> Config.onlineListRepostUrgentCooldownMs
+  ))
 
   // Owned by the online-list sweep, which never overlaps itself — see
   // tracking.BountyPresence for why a login needs remembering rather than
@@ -1585,7 +1589,26 @@ class TibiaBot(
       logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
     }
 
-    onlineListState.plan(channelId, messages).foreach {
+    def enqueueSend(index: Int, descriptions: List[String]): Unit = {
+      worldMetrics.incrementEdits()
+      onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
+        try channel.sendMessageEmbeds(buildEmbeds(descriptions, index == lastIndex).asJava).setSuppressedNotifications(true)
+          .queue(
+            message => onlineListState.recordMessageId(channelId, index, message.getId),
+            // A send that never lands would otherwise leave its slot pending
+            // forever (see OnlineListState.plan), so this must invalidate.
+            (ex: Throwable) => failed(ex)
+          )
+        catch { case ex: Throwable => failed(ex) }
+      }
+    }
+
+    // Whether a repost is even open to this channel. Without MESSAGE_MANAGE the
+    // bulk delete degrades to one request per message on the tightest route
+    // Discord has, which is worse than the edits it set out to avoid.
+    val canDelete = channel.getGuild.getSelfMember.hasPermission(channel, Permission.MESSAGE_MANAGE)
+
+    onlineListState.plan(channelId, messages, onlineListSender.queueDepth, canDelete).foreach {
       case tracking.EditOnlineListMessage(index, messageId, descriptions) =>
         worldMetrics.incrementEdits()
         onlineListSender.enqueue("editmessage", Some(s"$channelId:$index"), Some(channelId)) { () =>
@@ -1594,21 +1617,29 @@ class TibiaBot(
           catch { case ex: Throwable => failed(ex) }
         }
       case tracking.SendOnlineListMessage(index, descriptions) =>
-        worldMetrics.incrementEdits()
-        onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          try channel.sendMessageEmbeds(buildEmbeds(descriptions, index == lastIndex).asJava).setSuppressedNotifications(true)
-            .queue(
-              message => onlineListState.recordMessageId(channelId, index, message.getId),
-              // A send that never lands would otherwise leave its slot pending
-              // forever (see OnlineListState.plan), so this must invalidate.
-              (ex: Throwable) => failed(ex)
-            )
-          catch { case ex: Throwable => failed(ex) }
-        }
+        enqueueSend(index, descriptions)
       case tracking.DeleteOnlineListMessages(messageIds) =>
         // Left over from a previously longer list.
         try channel.purgeMessagesById(messageIds.asJava)
         catch { case ex: Throwable => failed(ex) }
+      case tracking.RepostOnlineList(deleteIds, reposted) =>
+        logger.info(s"Reposting the online list in channel $channelId (${deleteIds.size} messages, " +
+          s"lane depth ${onlineListSender.queueDepth}) for Guild ID: '$guildId' Guild Name: '$guildName'")
+        // Anything still queued for this channel edits a message about to be
+        // deleted: it would spend the very edits this is avoiding and then fail
+        // on a message that is gone, dropping the cache with it.
+        onlineListSender.cancelGroup(channelId)
+        try {
+          val deletions: Array[CompletableFuture[_]] = channel.purgeMessagesById(deleteIds.asJava).asScala.toArray
+          // Posted only once the delete has landed. Posting over a list that is
+          // still there would leave the channel holding it twice, with the bot
+          // aware of only the new half until the next 6-hourly purge.
+          CompletableFuture.allOf(deletions: _*).whenComplete { (_: Void, ex: Throwable) =>
+            if (ex != null) failed(ex)
+            else reposted.zipWithIndex.foreach { case (descriptions, index) => enqueueSend(index, descriptions) }
+          }
+          ()
+        } catch { case ex: Throwable => failed(ex) }
     }
   }
 
