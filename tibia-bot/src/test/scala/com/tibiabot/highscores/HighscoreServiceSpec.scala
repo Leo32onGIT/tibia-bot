@@ -55,7 +55,6 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
   private def service(
       api: HighscoresApi,
       worlds: List[String] = List("Antica"),
-      allowlist: Set[String] = Set.empty,
       announced: mutable.ListBuffer[(String, HighscoreList, Int)] = mutable.ListBuffer.empty
   ) = {
     val pace = new HighscoreGap(1.milli)
@@ -65,7 +64,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
       pace = pace,
       trackedWorlds = () => worlds,
       announce = (world, list, advances) => announced += ((world, list, advances.size)),
-      settings = HighscoreSettings(allowlist, 1.second, workers = 2, minRequestGap = 1.milli)
+      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
     )
   }
 
@@ -117,17 +116,14 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     svc.snapshotSeen shouldBe Some(Instant.parse("2026-09-02T06:40:00Z"))
   }
 
-  test("the allowlist narrows the sweep without disabling it") {
+  test("every tracked world is swept, in a stable order") {
     val api = new StubApi()
-    val svc = service(api, worlds = List("Antica", "Secura", "Refugia"), allowlist = Set("secura"))
-    svc.worlds() shouldBe List("Secura")
+    val svc = service(api, worlds = List("Secura", "Antica", "Antica", "Refugia"))
+    // Deduplicated and sorted, so two sweeps' logs line up against each other.
+    svc.worlds() shouldBe List("Antica", "Refugia", "Secura")
 
     await(svc.tick())
-    api.seen.map(_._1) shouldBe Set("Secura")
-  }
-
-  test("an empty allowlist means every tracked world, not none") {
-    service(new StubApi(), worlds = List("Antica", "Secura")).worlds() shouldBe List("Antica", "Secura")
+    api.seen.map(_._1) shouldBe Set("Antica", "Refugia", "Secura")
   }
 
   test("no tracked worlds means no requests at all, not a crash") {
@@ -196,7 +192,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
       pace = pace,
       trackedWorlds = () => List("Antica"),
       announce = (world, list, advances) => announced.synchronized { announced += ((world, list, advances.size)) },
-      settings = HighscoreSettings(Set.empty, 1.second, workers = 2, minRequestGap = 1.milli)
+      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
     )
     await(svc.tick())
 

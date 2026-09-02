@@ -1155,7 +1155,6 @@ object BotApp extends App with StrictLogging {
     trackedWorlds = () => streamSupervisor.activeWorlds.toList,
     announce = highscoreAnnouncer.announce,
     settings = highscores.HighscoreSettings(
-      worlds = Config.Highscores.worlds,
       window = Config.Highscores.window,
       workers = Config.Highscores.workers,
       minRequestGap = Config.Highscores.minRequestGap
@@ -1165,8 +1164,7 @@ object BotApp extends App with StrictLogging {
   if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
     actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, Config.Highscores.probeInterval)(
       () => { highscoreService.tick(); () })(ex)
-    val scope = if (Config.Highscores.worlds.isEmpty) "every tracked world" else Config.Highscores.worlds.mkString(", ")
-    logger.info(s"Highscores sweep enabled for $scope, probing every ${Config.Highscores.probeInterval}")
+    logger.info(s"Highscores sweep enabled for every tracked world, probing every ${Config.Highscores.probeInterval}")
   }
 
   // run the scheduler to clean cache and update dashboard every hour.

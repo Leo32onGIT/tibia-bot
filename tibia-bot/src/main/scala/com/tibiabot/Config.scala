@@ -96,21 +96,17 @@ object Config {
   }
   /** The highscores sweep — see [[com.tibiabot.highscores.HighscoreService]].
    *
-   *  `enabled` is both rollout gate and rollback, in the shape of the respawn
-   *  system's own switch, and `worlds` narrows it further while the load is
-   *  being watched. Off with an empty allowlist means the sweep never runs at
-   *  all; on with an empty allowlist means every world this process tracks. */
+   *  One switch, in the shape of the respawn system's own: on means every world
+   *  this process tracks. There is deliberately no per-world allowlist, because
+   *  the pacing already scales with the world count — the gap between requests
+   *  is the window divided by the work, so seventy worlds is a longer walk
+   *  rather than a bigger burst, and a knob that only ever moves once is a knob
+   *  to get wrong later. */
   object Highscores {
     private val highscores = discord.getConfig("highscores")
     private def dur(key: String): FiniteDuration = highscores.getDuration(key).toScala
 
     val enabled: Boolean = highscores.getBoolean("enabled")
-
-    /** Empty means "every tracked world" rather than "no worlds" — an allowlist
-     *  nobody set should not silently disable a feature somebody turned on. */
-    val worlds: Set[String] = highscores.getString("worlds")
-      .split(",").map(_.trim).filter(_.nonEmpty).toSet
-
     val probeInterval: FiniteDuration = dur("probe-interval")
     val snapshotInterval: FiniteDuration = dur("snapshot-interval")
     val windowFraction: Double = highscores.getDouble("window-fraction")

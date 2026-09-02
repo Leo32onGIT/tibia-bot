@@ -22,7 +22,6 @@ final class HighscoreGap(initial: FiniteDuration) {
 }
 
 final case class HighscoreSettings(
-    worlds: Set[String],
     window: FiniteDuration,
     workers: Int,
     minRequestGap: FiniteDuration
@@ -65,13 +64,11 @@ final class HighscoreService(
   def snapshotSeen: Option[Instant] = lastSnapshot
   def lastSweep: Option[SweepSummary] = lastSummary
 
-  /** The worlds this sweep covers: everything the process tracks, narrowed by
-   *  the rollout allowlist when one is set. */
-  def worlds(): List[String] = {
-    val tracked = trackedWorlds().distinct.sorted
-    if (settings.worlds.isEmpty) tracked
-    else tracked.filter(world => settings.worlds.exists(_.equalsIgnoreCase(world)))
-  }
+  /** The worlds this sweep covers: everything the process tracks.
+   *
+   *  Sorted so a snapshot's work is enumerated in the same order every time,
+   *  which makes two sweeps' logs comparable. */
+  def worlds(): List[String] = trackedWorlds().distinct.sorted
 
   /** One probe, and a full sweep behind it if the data is new. Safe to call on a
    *  schedule far shorter than a snapshot: the probe is a single request, and
