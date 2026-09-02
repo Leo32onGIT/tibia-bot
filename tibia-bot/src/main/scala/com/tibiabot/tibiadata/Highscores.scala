@@ -9,7 +9,19 @@ import java.net.URLEncoder
  *  (achievements, charm points, boss points, drome, loyalty, fishing, ...), but
  *  none of them is a skill advancement and each one costs another 20 pages per
  *  world per snapshot, so they are deliberately absent rather than unlisted. */
-sealed abstract class HighscoreCategory(val slug: String, val label: String)
+sealed abstract class HighscoreCategory(val slug: String, val label: String) {
+
+  /** How an advance in this category reads in a Levels post.
+   *
+   *  Magic level already carries "level" in its name, so the weapon skills get
+   *  the word appended and it does not — "advanced to magic level 108", not
+   *  "advanced to magic level level 108". */
+  def advancement(score: Long): String = this match {
+    case HighscoreCategory.MagicLevel => s"magic level **$score**"
+    case HighscoreCategory.Experience => s"**$score** experience"
+    case other                        => s"${other.label} level **$score**"
+  }
+}
 
 object HighscoreCategory {
   case object Experience extends HighscoreCategory("experience", "experience")

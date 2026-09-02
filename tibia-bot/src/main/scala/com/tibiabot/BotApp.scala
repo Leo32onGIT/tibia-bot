@@ -126,6 +126,10 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
     new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+  private val highscoreRepository: persistence.HighscoreRepository =
+    new persistence.jdbc.JdbcHighscoreRepository(connectionProvider)
+  private val experienceRepository: persistence.ExperienceRepository =
+    new persistence.jdbc.JdbcExperienceRepository(connectionProvider)
   // Temporary, for the move of announced transfers from guild scope to world
   // scope — see JdbcLegacyWorldTransferMigration.
   private val legacyWorldTransferMigration =
@@ -1058,6 +1062,113 @@ object BotApp extends App with StrictLogging {
     logger.info(s"Respawn claim system enabled — sweeping every ${Config.Respawn.sweepInterval}")
   }
 
+  // ---------------------------------------------------------------------------
+  // The highscores sweep: skill advances into the Levels channel, and the
+  // experience history the statistics channel will read later.
+  //
+  // Primary-only. Blue and red share a database, so one bot writing these tables
+  // is enough for both to read them, and two bots sweeping would mean scraping
+  // every page twice from the same address for nothing.
+  // ---------------------------------------------------------------------------
+  private lazy val highscoreGap = new highscores.HighscoreGap(Config.Highscores.minRequestGap)
+
+  /** Its own client, and so its own in-flight ceiling. A highscores sweep is
+   *  thousands of requests an hour on a schedule nobody is waiting for; sharing
+   *  the character poll's permits would let it sit in front of a death. */
+  private lazy val highscoresApi: tibiadata.HighscoresApi =
+    new TibiaDataClient(inFlight = new tibiadata.InFlightLimit(Config.Highscores.maxInFlight))(actorSystem)
+
+  /** The guild a character is in, for the ally/enemy classification.
+   *
+   *  A highscore row does not carry one, and the guild decides more than the
+   *  icon: a server showing enemy level-ups but not neutral ones would miss an
+   *  enemy's skill advance entirely if we guessed neutral. So it is fetched —
+   *  but only for characters that actually advanced (a handful per list, not the
+   *  thousand we read), and only when some server tracking the world has guild
+   *  lists at all. A failure degrades to neutral rather than dropping the post.
+   */
+  private def resolveAdvanceGuilds(world: String, advances: List[domain.HighscoreEvent]): Future[Map[String, String]] = {
+    val names = advances.map(_.displayName).distinct
+    Future.traverse(names) { name =>
+      tibiaDataClient.getCharacter(name).map {
+        case Right(sheet) if sheet.character.character.world.equalsIgnoreCase(world) =>
+          Some(highscores.HighscoreDiff.key(name) -> sheet.character.character.guild.map(_.name).getOrElse(""))
+        case _ => None
+      }.recover { case _ => None }
+    }.map(_.flatten.toMap)
+  }
+
+  /** The Levels channels that want this world's advances, with the settings that
+   *  decide which ones. Reads exactly what the level-up path reads, so a skill
+   *  advance obeys the switches a server already set rather than new ones. */
+  private def highscoreAudience(world: String): List[highscores.HighscoreTarget] =
+    discordsData.getOrElse(world, Nil).flatMap { discord =>
+      val guildId = discord.id
+      if (!paywallService.isActive(guildId, world)) None
+      else worldsData.getOrElse(guildId, Nil).find(_.name.equalsIgnoreCase(world)).flatMap { worldConfig =>
+        val channelId = worldConfig.levelsChannel
+        if (channelId.isEmpty || channelId == "0") None
+        else Some(highscores.HighscoreTarget(
+          guildId = guildId,
+          guildLabel = Option(discordGateway.guildById(guildId)).map(_.getName).getOrElse(guildId),
+          channelId = channelId,
+          showNeutral = worldConfig.showNeutralLevels,
+          showAllies = worldConfig.showAlliesLevels,
+          showEnemies = worldConfig.showEnemiesLevels,
+          minimumLevel = worldConfig.levelsMin,
+          alliedGuilds = alliedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          huntedGuilds = huntedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          alliedPlayers = alliedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          huntedPlayers = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+        ))
+      }
+    }
+
+  private lazy val highscoreAnnouncer = new highscores.HighscoreAnnouncer(
+    audience = highscoreAudience,
+    resolveGuilds = resolveAdvanceGuilds,
+    channelFor = (guildId, channelId) =>
+      Option(discordGateway.guildById(guildId))
+        .flatMap(guild => Option(guild.getTextChannelById(channelId)))
+        .filter(channel => channel.canTalk() || !Config.prod),
+    send = (channel, message) =>
+      outboundSender.enqueue("skill-up") { () =>
+        channel.sendMessage(message).setSuppressedNotifications(true).queue(null, null)
+      },
+    onPosted = (world, count, guildLabel) => {
+      val summary = if (count == 1) "1 player advanced a skill" else s"$count players advanced a skill"
+      recentEventsRegistry.forWorld(world).record(
+        "skill-up", s"""$summary <span class="muted">&middot; $guildLabel</span>""")
+    }
+  )(ex)
+
+  private lazy val highscoreService = new highscores.HighscoreService(
+    api = highscoresApi,
+    sweep = new highscores.HighscoreSweep(
+      api = highscoresApi,
+      repository = highscoreRepository,
+      experience = experienceRepository,
+      gap = () => highscoreGap.get,
+      delay = wait => akka.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex)
+    )(ex),
+    pace = highscoreGap,
+    trackedWorlds = () => streamSupervisor.activeWorlds.toList,
+    announce = highscoreAnnouncer.announce,
+    settings = highscores.HighscoreSettings(
+      worlds = Config.Highscores.worlds,
+      window = Config.Highscores.window,
+      workers = Config.Highscores.workers,
+      minRequestGap = Config.Highscores.minRequestGap
+    )
+  )(ex)
+
+  if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, Config.Highscores.probeInterval)(
+      () => { highscoreService.tick(); () })(ex)
+    val scope = if (Config.Highscores.worlds.isEmpty) "every tracked world" else Config.Highscores.worlds.mkString(", ")
+    logger.info(s"Highscores sweep enabled for $scope, probing every ${Config.Highscores.probeInterval}")
+  }
+
   // run the scheduler to clean cache and update dashboard every hour.
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
   // body makes blocking API calls at server save — can't pile up behind itself.
@@ -1425,7 +1536,29 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => {
     try pruneInactiveGuilds()
     catch { case ex: Throwable => logger.warn("Failed to run the inactive-guild prune sweep", ex) }
+    try pruneHighscoreHistory()
+    catch { case ex: Throwable => logger.warn("Failed to run the highscore history prune", ex) }
   })(ex)
+
+  /** Retention for the highscore tables.
+   *
+   *  Only the raw experience readings really need this — a thousand rows per
+   *  world per snapshot is 1.63M a day across the fleet, and the disk is at
+   *  80%. The rest is housekeeping: a stale score is already harmless, because
+   *  a character who comes back after that long is re-baselined in silence
+   *  either way, and the retention is set far outside the baseline window so
+   *  pruning can never turn a real advance into a first sighting. */
+  private def pruneHighscoreHistory(): Unit =
+    if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
+      val now = Instant.now()
+      experienceRepository.removeExpiredReadings(now.minusSeconds(Config.Highscores.experienceRawRetention.toSeconds))
+      experienceRepository.removeExpiredDaily(
+        now.minusSeconds(Config.Highscores.experienceDailyRetention.toSeconds)
+          .atZone(domain.time.Clock.Berlin).toLocalDate)
+      highscoreRepository.removeExpiredEvents(now.minusSeconds(Config.Highscores.eventRetention.toSeconds))
+      val staleBefore = now.minusSeconds(Config.Highscores.scoreRetention.toSeconds)
+      streamSupervisor.activeWorlds.foreach(world => highscoreRepository.removeStale(world, staleBefore))
+    }
 
   /** A guild with no worlds tracked (its own per-guild database may not even
    *  exist yet, if /setup has never run there — see checkConfigDatabase)
