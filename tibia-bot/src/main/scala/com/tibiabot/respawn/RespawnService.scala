@@ -1086,10 +1086,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           // claim on the spawn. A rule is visible to the next booker as soon as it
           // is written, so nothing is lost by letting go early.
           repository.withRespawnLock(guildId, respawn.id) {
+            // One read of the spawn's booked evenings, used by both halves of the
+            // check: which of them this booking runs over, and which days their
+            // rules have therefore stopped speaking for.
+            val booked = repository.reservationsFor(guildId, respawn.id, now)
             val schedules = repository.schedulesForRespawn(guildId, respawn.id)
               .filter(overlaps(_, candidate))
-              .filterNot(surrendered(guildId, _, candidate, now))
-            val slots = clashingReservations(guildId, respawn.id, candidate, now)
+              .filterNot(surrendered(guildId, booked, _, candidate, now))
+            val slots = clashingReservations(booked, candidate, now)
             if (schedules.isEmpty && slots.isEmpty)
               Right(repository.addSchedule(guildId, respawn.id, userId, userName, nickname,
                 characterName, firstStart, RespawnSchedule.Daily, durationMinutes, daysOfWeek))
@@ -1181,11 +1185,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  Checked alongside the schedule-to-schedule rule, not instead of it: a slot
    *  handed to an asker has no schedule behind it, and a rule beyond the
    *  look-ahead has no slot yet, so either check alone misses one of them. */
-  private def clashingReservations(guildId: String, respawnId: Long, candidate: RespawnSchedule,
+  private def clashingReservations(booked: List[RespawnClaim], candidate: RespawnSchedule,
                                    now: ZonedDateTime): List[RespawnClaim] = {
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
-    repository.reservationsFor(guildId, respawnId, now)
-      .filter(candidate.overlapsSlot(_, now, horizon))
+    booked.filter(candidate.overlapsSlot(_, now, horizon))
   }
 
   /** Whether two bookings on the same spawn ever run at the same time. The rule
@@ -1193,19 +1196,30 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   private[respawn] def overlaps(a: RespawnSchedule, b: RespawnSchedule): Boolean =
     RespawnSchedule.clash(a, b)
 
-  /** Whether `schedule` has given up every day it would contest with `candidate`.
+  /** Whether `schedule` has stopped deciding every day it would contest with
+   *  `candidate`.
    *
    *  A rule speaks for every day, but what became of one day lives in that day's
    *  row — so comparing rules alone leaves a surrendered rule still defending an
-   *  evening nobody will hunt. All-or-nothing: a rule that gave up one Thursday
-   *  still owns the rest, and a day too far ahead to have a row has settled
-   *  nothing, which keeps `TooFarAhead` from quietly becoming a yes. */
-  private def surrendered(guildId: String, schedule: RespawnSchedule,
+   *  evening nobody will hunt. Two ways a day stops being the rule's to speak
+   *  for: it was given up, or it has been written down as a slot. A written-down
+   *  day is whatever its row now says — the length can have been edited since —
+   *  and that row is checked directly by `clashingReservations`, so leaving the
+   *  rule to defend it as well is how an evening shortened from three hours to
+   *  two still refused the hour it had let go.
+   *
+   *  All-or-nothing: a rule that settled one Thursday still owns the rest, and a
+   *  day too far ahead to have a row has settled nothing, which keeps
+   *  `TooFarAhead` from quietly becoming a yes. */
+  private def surrendered(guildId: String, booked: List[RespawnClaim], schedule: RespawnSchedule,
                           candidate: RespawnSchedule, now: ZonedDateTime): Boolean = {
     val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
     val settled = daysGivenUp(guildId, now, Some(horizon), Some(schedule.respawnId))
       .getOrElse(schedule.id, Set.empty)
-    RespawnSchedule.surrendered(schedule, candidate, settled, now, horizon)
+    val written = booked.collect {
+      case slot if slot.scheduleId.contains(schedule.id) => slot.startsAt.map(_.toInstant)
+    }.flatten.toSet
+    RespawnSchedule.surrendered(schedule, candidate, settled ++ written, now, horizon)
   }
 
   /** Drop every booking one member holds anywhere in the guild. Each spawn's card

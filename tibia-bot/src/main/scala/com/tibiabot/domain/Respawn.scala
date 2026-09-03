@@ -483,26 +483,29 @@ object RespawnSchedule {
     }
   }
 
-  /** Whether `schedule` has given up every day it would contest with `candidate`.
+  /** Whether `schedule` has stopped speaking for every day it would contest with
+   *  `candidate`.
    *
    *  [[clash]] compares two rules, and a rule speaks for every day; what became of
-   *  one day lives in that day's row, and `settled` holds the starts of the days
-   *  whose rows say they are over. Without this, giving a Thursday away left the
-   *  rule still defending it.
+   *  one day lives in that day's row, and `decided` holds the starts of the days
+   *  a row has taken over — given away or otherwise finished, or written down as
+   *  a booking that is now whatever its own row says, however it has been edited
+   *  since. Without this, giving a Thursday away left the rule still defending
+   *  it, and shortening one still refused the hour it had let go.
    *
    *  All-or-nothing: a rule that gave up one Thursday still owns the rest, and a
    *  day too far ahead to have a row has settled nothing — which keeps
    *  [[ClashVerdict.TooFarAhead]] from quietly becoming a yes, and is why no
    *  contested day inside the window is false rather than true. */
   def surrendered(schedule: RespawnSchedule, candidate: RespawnSchedule,
-                  settled: Set[java.time.Instant],
+                  decided: Set[java.time.Instant],
                   from: ZonedDateTime, to: ZonedDateTime): Boolean = {
     val theirs = candidate.occurrencesBetween(from, to)
     val contested = schedule.occurrencesBetween(from, to).filter { start =>
       val end = schedule.endOf(start)
       theirs.exists(other => other.isBefore(end) && start.isBefore(candidate.endOf(other)))
     }
-    contested.nonEmpty && contested.forall(start => settled.contains(start.toInstant))
+    contested.nonEmpty && contested.forall(start => decided.contains(start.toInstant))
   }
 
   /** What a clashing booking should do about it, given the rules and the booked

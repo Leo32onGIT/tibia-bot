@@ -421,6 +421,29 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     hasGivenUp(standing, wanted, anchor) shouldBe false
   }
 
+  test("a rule stands aside on an evening already written down as a booking") {
+    // The day the rule speaks for has a row of its own, and that row — not the
+    // rule — says how long it runs. A three-hour evening shortened to two used
+    // to be defended by the rule at its old length, so the hour its owner had
+    // let go was still refused to whoever asked for it next.
+    val standing = schedule(durationMinutes = 180)
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusHours(2),
+      RespawnSchedule.Daily, 60, active = true, anchor, RespawnSchedule.OneOff)
+    hasGivenUp(standing, wanted) shouldBe false
+    hasGivenUp(standing, wanted, anchor) shouldBe true
+  }
+
+  test("a slot shortened on the day does not reach what starts where it used to end") {
+    // The other half of the same fix: once the rule has stood aside, the booked
+    // row is what the newcomer is checked against, and two hours no longer
+    // reaches half past the second.
+    val shortened = slot(anchor, durationMinutes = 120)
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusMinutes(150),
+      RespawnSchedule.Daily, 60, active = true, anchor, RespawnSchedule.OneOff)
+    wanted.overlapsSlot(shortened, anchor, anchor.plusDays(1)) shouldBe false
+    wanted.overlapsSlot(slot(anchor, durationMinutes = 180), anchor, anchor.plusDays(1)) shouldBe true
+  }
+
   test("a rule that contests nothing inside the window has surrendered nothing") {
     // Different times of day, so the two never meet. Answering "yes, given up"
     // here would read as permission drawn from an absence of evidence.
