@@ -54,7 +54,8 @@ Supporting packages:
 | `web/` | The monitoring dashboard: Discord-OAuth-gated `/status`, log capture, Patreon admin routes. |
 | `wiki/` | Fandom wiki client and HTML parser. |
 | `domain/` | Core case classes; game-time cycles in `domain/time/`. |
-| `respawn/` | Respawn claim system: catalogue + seed loader, the claim/queue/stamina rules, and the forum-thread lifecycle. Gated behind `RESPAWN_ENABLED`. |
+| `respawn/` | Respawn claim system: catalogue + seed loader, the claim/queue/stamina rules, and the forum-thread lifecycle. On by default; `RESPAWN_ENABLED=false` withdraws it cleanly. |
+| `highscores/` | Skill advances into the Levels channel, and the experience history behind the statistics channel. The primary sweeps the highscore lists at a paced walk and files what advanced; every bot posts from that table for its own guilds. On by default; `HIGHSCORES_ENABLED=false` stops both halves. |
 | `setup/`, `worldsettings/`, `hunted/`, `customsort/`, `galthen/`, `boosted/`, `admin/`, `patreonapi/` | Feature services extracted from `BotApp`. |
 
 **Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),

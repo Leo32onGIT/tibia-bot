@@ -100,8 +100,12 @@ object Config {
   }
   /** The highscores sweep — see [[com.tibiabot.highscores.HighscoreService]].
    *
-   *  One switch, in the shape of the respawn system's own: on means every world
-   *  this process tracks. There is deliberately no per-world allowlist, because
+   *  One switch, in the shape of the respawn system's own, and on by default for
+   *  the same reason: a feature that has finished rolling out should not need an
+   *  env var on every host to exist. On means every world this process tracks,
+   *  and it covers posting as well as sweeping — see
+   *  [[com.tibiabot.highscores.HighscoreFeed]], which runs on every bot rather
+   *  than the primary alone. There is deliberately no per-world allowlist, because
    *  the pacing already scales with the world count — the gap between requests
    *  is the window divided by the work, so seventy worlds is a longer walk
    *  rather than a bigger burst, and a knob that only ever moves once is a knob
