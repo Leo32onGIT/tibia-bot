@@ -13,7 +13,7 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.pattern.after
 import com.tibiabot.fansiteapi.response.FansiteCharacterResponse
 import com.tibiabot.tibiadata.response._
-import com.tibiabot.tibiadata.{InFlightLimit, RetryDecision, RetryPolicy, TibiaApi}
+import com.tibiabot.tibiadata.{InFlightLimit, RequestPacer, RetryDecision, RetryPolicy, TibiaApi}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.DeserializationException
 import spray.json.JsonParser.ParsingException
@@ -52,6 +52,8 @@ final class FansiteApiClient(
     userAgent: String = Config.FansiteApi.userAgent,
     metrics: tracking.ApiCallMetrics = tracking.ApiMetrics.fansiteApi,
     inFlight: InFlightLimit = InFlightLimit.fansiteApi,
+    pacer: RequestPacer = RequestPacer.fansiteApi,
+    maxQueueDelay: FiniteDuration = Config.FansiteApi.maxQueueDelay,
     breaker: FansiteCircuitBreaker = new FansiteCircuitBreaker(Config.FansiteApi.circuitOpenFor)
 )(implicit val system: ActorSystem)
     extends FansiteJsonSupport with StrictLogging with TibiaApi {
@@ -106,6 +108,30 @@ final class FansiteApiClient(
    *  TibiaData on a Left. */
   private val blockedResponse: Future[Either[String, CharacterResponse]] =
     Future.successful(Left("Fansite API circuit is open — not sending"))
+
+  /** A fetch refused before it was sent, because the pacer's queue already
+   *  reaches past the point where an answer would still be worth having. */
+  private val pacedOutResponse: Future[Either[String, CharacterResponse]] =
+    Future.successful(Left("Fansite API pacer is saturated — not sending"))
+
+  /** Wait for this lane's turn, then fetch.
+   *
+   *  Admission sits out here rather than inside [[requestWithRetry]] because
+   *  this is where a refusal can still be said in the caller's own language: a
+   *  Left, which every caller already answers by falling back to TibiaData. A
+   *  rejection deeper down would have to be a failed Future, and would then be
+   *  counted as a request that failed rather than one never sent.
+   *
+   *  Retries are not paced, and do not need to be. The poll's fetch declines
+   *  them outright, and the one caller that keeps them is a rare one-shot whose
+   *  own jittered backoff already starts well above this floor. */
+  private def paced(name: String, callerRetriesSoon: Boolean): Future[Either[String, CharacterResponse]] =
+    pacer.tryReserve(maxQueueDelay) match {
+      case None => pacedOutResponse
+      case Some(wait) =>
+        after(wait, system.scheduler)(requestWithRetry(name, callerRetriesSoon = callerRetriesSoon))
+          .flatMap(unmarshalCharacter(_, name))
+    }
 
   private def requestWithRetry(name: String, attempt: Int = 0, callerRetriesSoon: Boolean = false): Future[HttpResponse] =
     inFlight(Http().singleRequest(request(name))).flatMap { response =>
@@ -189,17 +215,17 @@ final class FansiteApiClient(
    *  during whatever is already going wrong. */
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] =
     if (breaker.isOpen) blockedResponse
-    else requestWithRetry(name, callerRetriesSoon = true).flatMap(unmarshalCharacter(_, name))
+    else paced(name, callerRetriesSoon = true)
 
   /** A one-shot lookup with nobody polling behind it, so it keeps the inline
    *  retry — there is no "next cycle" to defer to. */
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] =
     if (breaker.isOpen) blockedResponse
-    else requestWithRetry(name).flatMap(unmarshalCharacter(_, name))
+    else paced(name, callerRetriesSoon = false)
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
     val (name, reason, reasonText) = input
-    val result = if (breaker.isOpen) blockedResponse else requestWithRetry(name).flatMap(unmarshalCharacter(_, name))
+    val result = if (breaker.isOpen) blockedResponse else paced(name, callerRetriesSoon = false)
     result.map((_, name, reason, reasonText))
   }
 

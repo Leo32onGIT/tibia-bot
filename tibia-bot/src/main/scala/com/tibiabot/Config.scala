@@ -57,6 +57,10 @@ object Config {
     val baseUrl: String = fansite.getString("base-url").stripSuffix("/")
     val userAgent: String = fansite.getString("user-agent")
     val maxInFlight: Int = fansite.getInt("max-in-flight")
+    val minRequestGap: FiniteDuration = fansite.getDuration("min-request-gap").toScala
+    val requestGapJitter: Double = fansite.getDouble("request-gap-jitter")
+    val burst: Int = fansite.getInt("burst")
+    val maxQueueDelay: FiniteDuration = fansite.getDuration("max-queue-delay").toScala
     val phaseOffsetTicks: Int = fansite.getInt("phase-offset-ticks")
     val circuitOpenFor: java.time.Duration = fansite.getDuration("circuit-open-for")
     val secondaryGrace: FiniteDuration = fansite.getDuration("secondary-grace").toScala
