@@ -22,7 +22,7 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with BeforeAndAfter
   private implicit val ec: ExecutionContext = ExecutionContext.global
   private def await[A](f: Future[A]): A = Await.result(f, 5.seconds)
 
-  private val system = akka.actor.ActorSystem("dual-character-api-spec")
+  private val system = org.apache.pekko.actor.ActorSystem("dual-character-api-spec")
   override def afterAll(): Unit = { Await.result(system.terminate(), 10.seconds); () }
 
   private val payload: FansiteCharacterResponse = {

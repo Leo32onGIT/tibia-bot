@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import akka.actor.ActorSystem
+import org.apache.pekko.actor.ActorSystem
 import com.tibiabot.persistence.RedisCache
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures

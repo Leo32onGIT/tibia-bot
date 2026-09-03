@@ -1,12 +1,12 @@
 package com.tibiabot.web
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.HttpCookie
-import akka.http.scaladsl.server.{Directive, Directive0, StandardRoute}
-import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.unmarshalling.Unmarshal
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.model._
+import org.apache.pekko.http.scaladsl.model.headers.HttpCookie
+import org.apache.pekko.http.scaladsl.server.{Directive, Directive0, StandardRoute}
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import com.tibiabot.persistence.{NoopRedisCache, RedisCache}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
@@ -240,8 +240,8 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
   private def fetchGuildIds(accessToken: String): Future[Set[String]] = {
     val request = HttpRequest(
       uri = "https://discord.com/api/users/@me/guilds",
-      headers = List(akka.http.scaladsl.model.headers.Authorization(
-        akka.http.scaladsl.model.headers.OAuth2BearerToken(accessToken)))
+      headers = List(org.apache.pekko.http.scaladsl.model.headers.Authorization(
+        org.apache.pekko.http.scaladsl.model.headers.OAuth2BearerToken(accessToken)))
     )
     Http().singleRequest(request).flatMap { response =>
       if (response.status.isSuccess()) {
@@ -290,8 +290,8 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
             case Success(accessToken) =>
               val userRequest = HttpRequest(
                 uri = "https://discord.com/api/users/@me",
-                headers = List(akka.http.scaladsl.model.headers.Authorization(
-                  akka.http.scaladsl.model.headers.OAuth2BearerToken(accessToken)))
+                headers = List(org.apache.pekko.http.scaladsl.model.headers.Authorization(
+                  org.apache.pekko.http.scaladsl.model.headers.OAuth2BearerToken(accessToken)))
               )
               Http().singleRequest(userRequest).flatMap { userResponse =>
                 if (userResponse.status.isSuccess()) {
@@ -475,7 +475,7 @@ final class DiscordAuth(clientId: String, clientSecret: String, sessionSecret: S
    *  that ends at Discord. */
   private[web] def resumableForTest(target: String): Boolean = isOurs(target)
 
-  val routes: akka.http.scaladsl.server.Route =
+  val routes: org.apache.pekko.http.scaladsl.server.Route =
     path("auth" / "login") {
       get {
         parameter("next".optional, "to".optional) { (next, to) =>

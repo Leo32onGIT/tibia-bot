@@ -1,16 +1,16 @@
 package com.tibiabot
 package fansiteapi
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.coding.Coders
-import akka.http.scaladsl.model.headers.{
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.coding.Coders
+import org.apache.pekko.http.scaladsl.model.headers.{
   Authorization, HttpEncodingRange, HttpEncodings, OAuth2BearerToken, RetryAfterDateTime, RetryAfterDuration,
   `Accept-Encoding`, `Last-Modified`, `Retry-After`, `User-Agent`
 }
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
-import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.pattern.after
+import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
+import org.apache.pekko.pattern.after
 import com.tibiabot.fansiteapi.response.FansiteCharacterResponse
 import com.tibiabot.tibiadata.response._
 import com.tibiabot.tibiadata.{InFlightLimit, RequestPacer, RetryDecision, RetryPolicy, TibiaApi}
@@ -36,7 +36,7 @@ import scala.util.control.NonFatal
  *  '''Two request headers are load-bearing.''' Cloudflare answers 403 — not 401,
  *  not 429 — to a request missing either `Accept-Encoding` or a plausible
  *  `User-Agent`, confirmed to fail independently. `br` is deliberately absent:
- *  akka-http's `Coders` implements only gzip and deflate, so advertising brotli
+ *  pekko-http's `Coders` implements only gzip and deflate, so advertising brotli
  *  would earn a body this client cannot decode.
  *
  *  '''The request shape must stay byte-stable per character.''' The upstream
@@ -212,7 +212,7 @@ final class FansiteApiClient(
       Unmarshal(decoded).to[FansiteCharacterResponse]
         .map(payload => Right(CharacterMapping.toCharacterResponse(payload, origin)))
         .recover {
-          case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+          case e: org.apache.pekko.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
             decoded.discardEntityBytes()
             val message = s"Failed to get character: '$name' with status: '${response.status}'"
             logger.warn(s"$message: ${e.getMessage}")

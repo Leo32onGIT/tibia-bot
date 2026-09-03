@@ -68,14 +68,14 @@ dockerCommands := dockerCommands.value.flatMap {
   case other => Seq(other)
 }
 
-val AkkaVersion = "2.8.8"
-val AkkaHttpVersion = "10.5.3"
+val PekkoVersion = "1.7.0"
+val PekkoHttpVersion = "1.4.0"
 
 libraryDependencies += "com.typesafe" % "config" % "1.4.9"
-libraryDependencies += "com.typesafe.akka" %% "akka-stream" % AkkaVersion
-libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % AkkaVersion
-libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
-libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-stream" % PekkoVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-slf4j" % PekkoVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-http" % PekkoHttpVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-http-spray-json" % PekkoHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.6"
 // 1.3.x rather than 1.5/1.6: those are compiled for Java 11 and the image is
 // `eclipse-temurin:8-jre`. 1.3.16 is the last release on the Java 8 line.
@@ -97,9 +97,9 @@ libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
 // Lets web.DiscordAuthSpec drive the OAuth routes as real requests — the login
 // and callback-failure branches are all cookie and redirect behaviour, which is
 // only meaningful end to end.
-libraryDependencies += "com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-stream-testkit" % AkkaVersion % Test
+libraryDependencies += "org.apache.pekko" %% "pekko-http-testkit" % PekkoHttpVersion % Test
+libraryDependencies += "org.apache.pekko" %% "pekko-testkit" % PekkoVersion % Test
+libraryDependencies += "org.apache.pekko" %% "pekko-stream-testkit" % PekkoVersion % Test
 // 3.5.x rather than 3.6+: 3.6.0 moved to Java 11 bytecode, and the image is
 // `eclipse-temurin:8-jre`.
 libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.5.2"

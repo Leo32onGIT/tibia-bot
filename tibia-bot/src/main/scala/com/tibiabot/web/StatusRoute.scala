@@ -1,8 +1,8 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
-import akka.http.scaladsl.server.{Directive0, Route}
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
+import org.apache.pekko.http.scaladsl.server.{Directive0, Route}
+import org.apache.pekko.http.scaladsl.server.Directives._
 import com.tibiabot.domain.PatreonMember
 import com.tibiabot.{app, discord, fansiteapi, paywall, persistence, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging

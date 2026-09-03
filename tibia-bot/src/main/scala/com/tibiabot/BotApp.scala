@@ -1,6 +1,6 @@
 package com.tibiabot
 
-import akka.actor.ActorSystem
+import org.apache.pekko.actor.ActorSystem
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{BoostedResponse, CreatureResponse}
 import com.tibiabot.scheduler.ServerSaveSchedule
@@ -478,7 +478,7 @@ object BotApp extends App with StrictLogging {
    *  The walk is one blocking database read per guild. On the default dispatcher
    *  it shared eight-odd threads with every world stream, every scheduled job here
    *  and the HTTP server, so a walk stalled on a slow borrow (fifteen seconds
-   *  before the pool refuses) stalled all of them. Akka IO is the visible
+   *  before the pool refuses) stalled all of them. Pekko IO is the visible
    *  casualty — a log full of undelivered `Tcp$Register` dead letters is an
    *  outgoing connection missing its five-second registration deadline.
    *
@@ -655,14 +655,14 @@ object BotApp extends App with StrictLogging {
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
   if (Config.BotRole.current != Config.BotRole.Secondary) {
-    import akka.http.scaladsl.server.Directives._
+    import org.apache.pekko.http.scaladsl.server.Directives._
     // The auth routes stay under /dashboard, where their redirect URI already
     // points; /status reaches them via the session cookie set for both paths.
     val routes = concat(
       pathPrefix("dashboard") { concat(discordAuth.routes, respawnDashboardRoute.routes) },
       pathPrefix("status") { concat(statusRoute.routes, patreonAdminRoute.routes) }
     )
-    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
+    org.apache.pekko.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
     logger.info(s"Dashboards listening internally on port ${Config.Web.statusPort}: " +
       s"members at $dashboardMountPath, owner at $adminMountPath")
   } else {
@@ -708,7 +708,7 @@ object BotApp extends App with StrictLogging {
         world, api, TibiaBot.PollInterval,
         firstPollDelay = TibiaBot.fleetFetchFirstDelay(scala.util.Random.nextInt),
         fanOut = Config.BotRole.fleetFetchFanOut
-      )(actorSystem, ex, akka.stream.Materializer.matFromSystem(actorSystem)).start()
+      )(actorSystem, ex, org.apache.pekko.stream.Materializer.matFromSystem(actorSystem)).start()
     },
     enabled = Config.BotRole.fleetFetchActive
   )(ex)
@@ -959,7 +959,7 @@ object BotApp extends App with StrictLogging {
   // them, and warn claimants whose time is nearly up.
   //
   // Its own single-threaded scheduler, not the shared actorSystem one: the body
-  // blocks on JDA forum-thread calls, and the Akka dispatcher also runs every
+  // blocks on JDA forum-thread calls, and the Pekko dispatcher also runs every
   // world's poll stream. A single thread also stops a slow sweep overlapping
   // itself. Nothing is scheduled per claim, so this is restart-safe by
   // construction.
@@ -1162,7 +1162,7 @@ object BotApp extends App with StrictLogging {
       repository = highscoreRepository,
       experience = experienceRepository,
       gap = () => highscoreGap.get,
-      delay = wait => akka.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex)
+      delay = wait => org.apache.pekko.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex)
     )(ex),
     pace = highscoreGap,
     trackedWorlds = () => streamSupervisor.activeWorlds.toList,

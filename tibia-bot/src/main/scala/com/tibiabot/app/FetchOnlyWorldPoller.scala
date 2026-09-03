@@ -1,9 +1,9 @@
 package com.tibiabot
 package app
 
-import akka.actor.{ActorSystem, Cancellable}
-import akka.stream.Materializer
-import akka.stream.scaladsl.{Sink, Source}
+import org.apache.pekko.actor.{ActorSystem, Cancellable}
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import com.tibiabot.tibiadata.TibiaApi
 import com.tibiabot.tibiadata.response.OnlinePlayers
 import com.typesafe.scalalogging.StrictLogging

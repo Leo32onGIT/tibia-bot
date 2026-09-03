@@ -1,9 +1,9 @@
 package com.tibiabot
 
-import akka.actor.{ActorSystem, Cancellable}
-import akka.stream.ActorAttributes.supervisionStrategy
-import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
-import akka.stream.{Attributes, Materializer, Supervision}
+import org.apache.pekko.actor.{ActorSystem, Cancellable}
+import org.apache.pekko.stream.ActorAttributes.supervisionStrategy
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
+import org.apache.pekko.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}

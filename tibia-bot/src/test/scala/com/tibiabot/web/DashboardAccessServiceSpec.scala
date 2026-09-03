@@ -215,7 +215,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     }
 
     // A wedged Discord call has no timeout of its own, so before the backstop
-    // it held the request until akka gave up. Reported as unreachable rather
+    // it held the request until pekko gave up. Reported as unreachable rather
     // than as a visitor with fewer servers than they have.
     "report guilds as unanswered rather than hanging on a lookup that never returns" in {
       val pool = scala.concurrent.ExecutionContext.fromExecutorService(
@@ -248,7 +248,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
         worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
         moderatorRoleOf = _ => "0",
         remote = Some(new RemoteGuildAccess(
-          com.tibiabot.persistence.NoopRedisCache, akka.actor.ActorSystem(
+          com.tibiabot.persistence.NoopRedisCache, org.apache.pekko.actor.ActorSystem(
             "access-in-spec", com.typesafe.config.ConfigFactory.defaultReference()).scheduler,
           isLocal = _ => { asked = true; false })(scala.concurrent.ExecutionContext.global)))
 
@@ -297,7 +297,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     // considered, so a visitor whose cache had aged out still saw their board.
     // Each candidate costs a blocking member lookup, though, and after a restart
     // every visitor's list is empty at once — which took GET /dashboard past
-    // akka's request timeout in production. The narrowing is what makes this
+    // pekko's request timeout in production. The narrowing is what makes this
     // affordable, so an empty list resolves to no access and the cache going
     // empty is fixed where it happens instead.
     "skip every guild when the visitor's list is missing" in {

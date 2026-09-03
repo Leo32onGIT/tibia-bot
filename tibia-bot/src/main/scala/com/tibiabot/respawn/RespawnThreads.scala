@@ -23,7 +23,7 @@ import scala.util.{Failure, Success, Try}
  *
  *  Anything whose result is needed to carry on blocks (`.complete()`), so callers
  *  must be on the slash-command pool or the sweep's own thread, never JDA's event
- *  thread or the Akka dispatcher. The three that merely *tell Discord about a
+ *  thread or the Pekko dispatcher. The three that merely *tell Discord about a
  *  change* — card, tag, archive — are handed over (`.queue()`) instead, since
  *  nothing reads their result and they made a button press wait through two or
  *  three round trips after it was acknowledged. Failures are logged from the

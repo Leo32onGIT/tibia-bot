@@ -228,7 +228,7 @@ final class DashboardAccessService(
    *  An empty list resolves to no access, deliberately. Treating it as "no hint"
    *  and considering every guild costs one blocking member lookup per candidate,
    *  and after a restart *every* visitor's list is empty at once — which pushed
-   *  `GET /dashboard` past akka's request timeout in production. The cache going
+   *  `GET /dashboard` past pekko's request timeout in production. The cache going
    *  empty wants fixing where it happens, by outliving a restart. */
   def accessFor(userId: String, userGuildIds: Set[String]): List[GuildAccess] =
     accessReportFor(userId, userGuildIds).granted
@@ -344,7 +344,7 @@ final class DashboardAccessService(
           case scala.util.control.NonFatal(e) =>
             // A backstop against a Discord call that never returns - JDA's
             // blocking form has no timeout of its own, so before this a wedged
-            // lookup held the request until akka gave up on it. Nothing here
+            // lookup held the request until pekko gave up on it. Nothing here
             // knows which of them was slow, so all are reported unanswered:
             // true of at least one, and the page says so rather than quietly
             // showing a visitor fewer servers than they have.

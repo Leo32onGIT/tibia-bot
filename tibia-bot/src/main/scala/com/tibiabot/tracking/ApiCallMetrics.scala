@@ -38,7 +38,7 @@ final case class ApiCallSnapshot(
  *
  *  A bucket ages out by being zeroed as the clock passes it, so a quiet counter
  *  reports zero rather than stale counts. All access is synchronised: writers are
- *  akka and JDA threads, the reader is the dashboard's HTTP thread. */
+ *  pekko and JDA threads, the reader is the dashboard's HTTP thread. */
 private[tracking] final class RollingCounter(now: () => Long) {
   import RollingCounter.BucketCount
 

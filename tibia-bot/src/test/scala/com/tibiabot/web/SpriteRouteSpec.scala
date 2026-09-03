@@ -1,9 +1,9 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.StatusCodes
-import akka.http.scaladsl.model.headers.`Cache-Control`
-import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.testkit.ScalatestRouteTest
+import org.apache.pekko.http.scaladsl.model.StatusCodes
+import org.apache.pekko.http.scaladsl.model.headers.`Cache-Control`
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.testkit.ScalatestRouteTest
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -35,7 +35,7 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   /** Runs the cache's background fetch on the calling thread. Without this the
    *  fetch really is asynchronous, and "404 now, served next time" becomes a
-   *  race against akka's dispatcher — which passed alone and failed under the
+   *  race against pekko's dispatcher — which passed alone and failed under the
    *  full suite's load. */
   private val sameThread: ExecutionContext = new ExecutionContext {
     def execute(runnable: Runnable): Unit = runnable.run()
@@ -103,14 +103,14 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val mac = javax.crypto.Mac.getInstance("HmacSHA256")
     mac.init(new javax.crypto.spec.SecretKeySpec("session-secret".getBytes("UTF-8"), "HmacSHA256"))
     val sig = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(mac.doFinal(payload.getBytes("UTF-8")))
-    akka.http.scaladsl.model.headers.Cookie("vb_session", s"$payload.$sig")
+    org.apache.pekko.http.scaladsl.model.headers.Cookie("vb_session", s"$payload.$sig")
   }
 
   test("a cached sprite is served as a gif") {
     Files.write(dir.resolve("Dragon.gif"), gif)
     Get("/dashboard/sprites/Dragon.gif") ~> signedIn ~> routes(_ => Future.successful(None)) ~> check {
       status shouldBe StatusCodes.OK
-      contentType.mediaType shouldBe akka.http.scaladsl.model.MediaTypes.`image/gif`
+      contentType.mediaType shouldBe org.apache.pekko.http.scaladsl.model.MediaTypes.`image/gif`
       responseAs[Array[Byte]].toList shouldBe gif.toList
     }
   }

@@ -33,7 +33,7 @@ god-objects. The top-level entry points stay thin:
 
 - `BotApp` — application state and orchestration (wires the collaborators below).
 - `BotListener` — a thin JDA event dispatcher; routes each event to a handler.
-- `TibiaBot` — the per-world Akka stream that polls TibiaData and detects deaths/levels.
+- `TibiaBot` — the per-world Pekko stream that polls TibiaData and detects deaths/levels.
 
 Supporting packages:
 
@@ -58,7 +58,7 @@ Supporting packages:
 | `highscores/` | Skill advances into the Levels channel, and the experience history behind the statistics channel. The primary sweeps the highscore lists at a paced walk and files what advanced; every bot posts from that table for its own guilds. On by default; `HIGHSCORES_ENABLED=false` stops both halves. |
 | `setup/`, `worldsettings/`, `hunted/`, `customsort/`, `galthen/`, `boosted/`, `admin/`, `patreonapi/` | Feature services extracted from `BotApp`. |
 
-**Concurrency:** one independent Akka stream per world (held by `StreamSupervisor`),
+**Concurrency:** one independent Pekko stream per world (held by `StreamSupervisor`),
 all sharing a single `ActorSystem`/dispatcher and HTTP pool. Each world ticks every
 60s through a back-pressured `mapAsync(1)` pipeline with a `mapAsyncUnordered(32)`
 fan-out for per-character lookups, and per-stage `Supervision.Resume` so a single bad
@@ -119,7 +119,7 @@ flowchart TB
     OLQ --> JDA
     JDA --> D([Discord])
 
-    WA -.->|run concurrently on| AS[/"shared ActorSystem dispatcher + akka-http pool"/]
+    WA -.->|run concurrently on| AS[/"shared ActorSystem dispatcher + pekko-http pool"/]
     WB -.-> AS
     WN -.-> AS
 ```

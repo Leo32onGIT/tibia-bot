@@ -1,13 +1,13 @@
 package com.tibiabot
 package tibiadata
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.coding.Coders
-import akka.http.scaladsl.model.headers.HttpEncodings
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
-import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.pattern.after
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.coding.Coders
+import org.apache.pekko.http.scaladsl.model.headers.HttpEncodings
+import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse}
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
+import org.apache.pekko.pattern.after
 import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
@@ -16,7 +16,7 @@ import scala.util.control.NonFatal
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 import spray.json.DeserializationException
-import akka.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
+import org.apache.pekko.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 
 /** `metrics` defaults to the process-wide counter so the dashboard sees one
  *  figure for the process, not one per construction site. Tests pass their own. */
@@ -114,7 +114,7 @@ class TibiaDataClient(
    *  free the pool connection; parse failures already read it. Both log and yield
    *  Left; unmatched throwables propagate. */
   private def recoverUnmarshal[T](decoded: HttpResponse, contentTypeMessage: => String, parseMessage: => String): PartialFunction[Throwable, Either[String, T]] = {
-    case e: akka.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
+    case e: org.apache.pekko.http.scaladsl.unmarshalling.Unmarshaller.UnsupportedContentTypeException =>
       decoded.discardEntityBytes()
       val errorMessage = contentTypeMessage
       logger.warn(s"$errorMessage: ${e.getMessage}")
@@ -128,7 +128,7 @@ class TibiaDataClient(
   /** GET, decode (possibly gzipped) and unmarshal to T, recovering failures into a
    *  logged Left. `contentTypeMessage` receives the response so it can name the status. */
   private def fetch[T](uri: String, contentTypeMessage: HttpResponse => String, parseMessage: => String)
-                      (implicit um: akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
+                      (implicit um: org.apache.pekko.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
     for {
       response <- requestWithRetry(HttpRequest(uri = uri))
       decoded = decodeResponse(response)

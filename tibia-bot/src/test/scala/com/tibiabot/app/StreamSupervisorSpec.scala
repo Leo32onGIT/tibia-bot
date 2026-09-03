@@ -6,7 +6,7 @@ import org.scalatest.matchers.should.Matchers
 
 class StreamSupervisorSpec extends AnyFunSuite with Matchers {
 
-  private class FakeCancellable extends akka.actor.Cancellable {
+  private class FakeCancellable extends org.apache.pekko.actor.Cancellable {
     var cancelled = false
     def cancel(): Boolean = { cancelled = true; true }
     def isCancelled: Boolean = cancelled

@@ -1,6 +1,6 @@
 package com.tibiabot.fansiteapi
 
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import com.tibiabot.fansiteapi.response._
 import spray.json.{DefaultJsonProtocol, RootJsonFormat}
 

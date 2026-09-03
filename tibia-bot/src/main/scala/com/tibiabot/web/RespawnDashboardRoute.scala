@@ -1,10 +1,10 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, MediaTypes, StatusCodes}
-import akka.http.scaladsl.model.headers.CacheDirectives.{`max-age`, `private`, `public`}
-import akka.http.scaladsl.model.headers.{`Cache-Control`, `If-None-Match`, ETag, EntityTag}
-import akka.http.scaladsl.server.Route
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, MediaTypes, StatusCodes}
+import org.apache.pekko.http.scaladsl.model.headers.CacheDirectives.{`max-age`, `private`, `public`}
+import org.apache.pekko.http.scaladsl.model.headers.{`Cache-Control`, `If-None-Match`, ETag, EntityTag}
+import org.apache.pekko.http.scaladsl.server.Route
+import org.apache.pekko.http.scaladsl.server.Directives._
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -41,7 +41,7 @@ final class RespawnDashboardRoute(
   import RespawnDashboardRoute.{esc, serverChip}
 
   /** Runs blocking work somewhere it cannot hurt. Everything this route reads
-   *  blocks — Discord REST calls, database round trips — and akka's HTTP
+   *  blocks — Discord REST calls, database round trips — and pekko's HTTP
    *  dispatcher is a small pool shared with every request, so one slow call there
    *  takes a server thread out of circulation for everybody. */
   private def read[A](work: => A)(inner: A => Route): Route =
@@ -200,7 +200,7 @@ final class RespawnDashboardRoute(
       // which is a question about whether the thing exists rather than about
       // this particular answer, so it is not treated as a hit.
       val known = presented.exists {
-        case `If-None-Match`(akka.http.scaladsl.model.headers.EntityTagRange.Default(tags)) =>
+        case `If-None-Match`(org.apache.pekko.http.scaladsl.model.headers.EntityTagRange.Default(tags)) =>
           tags.exists(_.tag == tag.tag)
         case _ => false
       }

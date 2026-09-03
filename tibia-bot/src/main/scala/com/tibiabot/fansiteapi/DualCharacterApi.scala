@@ -5,8 +5,8 @@ import com.tibiabot.tibiadata.response._
 import com.tibiabot.tibiadata.{OriginTimestamp, TibiaApi}
 import com.typesafe.scalalogging.StrictLogging
 
-import akka.actor.Scheduler
-import akka.pattern.after
+import org.apache.pekko.actor.Scheduler
+import org.apache.pekko.pattern.after
 
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap

@@ -6,7 +6,7 @@ import scala.concurrent.Future
 
 /** Port over the TibiaData HTTP API, implemented by TibiaDataClient. Lets
  *  callers depend on the interface (and be given stubs in tests) rather than
- *  the concrete Akka-HTTP client. */
+ *  the concrete Pekko HTTP client. */
 trait TibiaApi {
   def getWorld(world: String): Future[Either[String, WorldResponse]]
   def getWorlds(): Future[Either[String, WorldsResponse]]

@@ -19,7 +19,7 @@ trait RespawnActionPort {
   /* Writes answer with a Future because one implementation does not perform them
    * at all: a guild another bot runs has its writes relayed through Redis, and the
    * answer arrives once that process has done the work. Blocking a request thread
-   * would park an akka dispatcher for as long as another process takes to notice.
+   * would park an pekko dispatcher for as long as another process takes to notice.
    *
    * The two reads below stay synchronous: they go to the per-guild database every
    * bot shares, so they never need relaying. */

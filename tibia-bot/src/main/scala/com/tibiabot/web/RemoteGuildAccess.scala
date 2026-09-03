@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import akka.actor.Scheduler
+import org.apache.pekko.actor.Scheduler
 import com.tibiabot.persistence.RedisCache
 import com.typesafe.scalalogging.StrictLogging
 

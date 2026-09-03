@@ -1,7 +1,7 @@
 package com.tibiabot
 package app
 
-import akka.actor.Cancellable
+import org.apache.pekko.actor.Cancellable
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 

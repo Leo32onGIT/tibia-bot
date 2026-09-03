@@ -1,10 +1,10 @@
 package com.tibiabot.app
 
-import akka.actor.Cancellable
+import org.apache.pekko.actor.Cancellable
 import com.tibiabot.domain.Discords
 import com.typesafe.scalalogging.StrictLogging
 
-/** A running per-world Akka stream and the guilds it serves. */
+/** A running per-world Pekko stream and the guilds it serves. */
 final case class WorldStream(stream: Cancellable, usedBy: List[Discords])
 
 /**

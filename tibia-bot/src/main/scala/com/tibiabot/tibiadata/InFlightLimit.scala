@@ -7,7 +7,7 @@ import scala.util.control.NonFatal
 
 /** A ceiling on how many things run at once, where waiting for a turn costs no
  *  thread. A plain semaphore would block, which is wrong here: the callers are
- *  akka dispatcher threads serving every other world's stream. A caller with no
+ *  pekko dispatcher threads serving every other world's stream. A caller with no
  *  permit gets a Future that completes when one frees up.
  *
  *  The waiter queue is unbounded, safe only because what feeds it is not: each

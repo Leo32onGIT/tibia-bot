@@ -1,10 +1,10 @@
 package com.tibiabot.patreonapi
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
-import akka.http.scaladsl.model.{FormData, HttpMethods, HttpRequest}
-import akka.http.scaladsl.unmarshalling.Unmarshal
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
+import org.apache.pekko.http.scaladsl.model.{FormData, HttpMethods, HttpRequest}
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import com.tibiabot.Config
 import com.tibiabot.domain.PatreonMember
 import com.typesafe.scalalogging.StrictLogging

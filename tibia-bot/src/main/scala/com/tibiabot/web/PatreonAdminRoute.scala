@@ -1,8 +1,8 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
-import akka.http.scaladsl.server.{Directive0, Route}
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
+import org.apache.pekko.http.scaladsl.server.{Directive0, Route}
+import org.apache.pekko.http.scaladsl.server.Directives._
 import com.tibiabot.paywall
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._

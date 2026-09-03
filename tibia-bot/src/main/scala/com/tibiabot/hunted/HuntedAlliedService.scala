@@ -1,7 +1,7 @@
 package com.tibiabot.hunted
 
-import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import com.tibiabot.Config
 import com.tibiabot.domain.{Guilds, ListCache, PlayerCache, Players, Worlds}
 import com.tibiabot.persistence.{ActivityRepository, CacheRepository, HuntedAlliedRepository}

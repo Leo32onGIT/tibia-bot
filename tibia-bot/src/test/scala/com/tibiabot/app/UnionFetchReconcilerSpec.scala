@@ -1,6 +1,6 @@
 package com.tibiabot.app
 
-import akka.actor.Cancellable
+import org.apache.pekko.actor.Cancellable
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import spray.json._

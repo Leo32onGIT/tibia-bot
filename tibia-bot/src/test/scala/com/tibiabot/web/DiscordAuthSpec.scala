@@ -1,9 +1,9 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.StatusCodes
-import akka.http.scaladsl.model.headers.{Cookie, `Set-Cookie`}
-import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.testkit.ScalatestRouteTest
+import org.apache.pekko.http.scaladsl.model.StatusCodes
+import org.apache.pekko.http.scaladsl.model.headers.{Cookie, `Set-Cookie`}
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.testkit.ScalatestRouteTest
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -15,7 +15,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   /** The app's own config is off-limits here: discord.conf substitutes in
    *  POSTGRES_HOST and friends from the environment and fails to resolve
-   *  without them. Akka's reference defaults are all the test actor system
+   *  without them. Pekko's reference defaults are all the test actor system
    *  needs. */
   override def testConfig: com.typesafe.config.Config =
     com.typesafe.config.ConfigFactory.defaultReference()
@@ -98,7 +98,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   /** The destination read back out of a login redirect. */
   private def decoded(location: String): String =
     new String(java.util.Base64.getUrlDecoder.decode(
-      akka.http.scaladsl.model.Uri(location).query().get("to").get), "UTF-8")
+      org.apache.pekko.http.scaladsl.model.Uri(location).query().get("to").get), "UTF-8")
 
   /** The nonce the login redirect just minted, read back out of the two places
    *  it has to agree — the authorize URL's `state` and the cookie. */
@@ -107,7 +107,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Get(s"$mountPath/auth/login") ~> routes ~> check {
       status shouldBe StatusCodes.Found
       val location = header("Location").get.value()
-      val fromUrl = akka.http.scaladsl.model.Uri(location).query().get("state").get
+      val fromUrl = org.apache.pekko.http.scaladsl.model.Uri(location).query().get("state").get
       val fromCookie = header[`Set-Cookie`].get.cookie
       fromCookie.name shouldBe "vb_oauth_state"
       pair = (fromUrl, fromCookie.value)
@@ -241,7 +241,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   test("login carries a checked destination through as a third part of the state") {
     Get(s"$mountPath/auth/login?next=%2Fdashboard&to=${encodeTo(s"$mountPath/g/1?spawn=415")}") ~>
       routes ~> check {
-      val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+      val state = org.apache.pekko.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
       state.split('.') should have length 3
       new String(java.util.Base64.getUrlDecoder.decode(state.split('.')(2)), "UTF-8") shouldBe
         s"$mountPath/g/1?spawn=415"
@@ -263,7 +263,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     refused.foreach { target =>
       withClue(s"$target: ") {
         Get(s"$mountPath/auth/login?to=${encodeTo(target)}") ~> routes ~> check {
-          val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+          val state = org.apache.pekko.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
           state.split('.') should have length 2
         }
       }
@@ -273,7 +273,7 @@ class DiscordAuthSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   test("a destination that is not even Base64 is dropped rather than erroring") {
     Get(s"$mountPath/auth/login?to=not-base-64-at-all!!") ~> routes ~> check {
       status shouldBe StatusCodes.Found
-      val state = akka.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
+      val state = org.apache.pekko.http.scaladsl.model.Uri(header("Location").get.value()).query().get("state").get
       state.split('.') should have length 2
     }
   }

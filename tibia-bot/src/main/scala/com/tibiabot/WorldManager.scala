@@ -10,7 +10,7 @@ import java.time.{Duration, ZonedDateTime}
 
 object WorldManager extends StrictLogging {
 
-  implicit private val system: akka.actor.ActorSystem = akka.actor.ActorSystem()
+  implicit private val system: org.apache.pekko.actor.ActorSystem = org.apache.pekko.actor.ActorSystem()
 
   private val tibiaDataClient: tibiadata.TibiaApi =
     new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)(scala.concurrent.ExecutionContext.global)

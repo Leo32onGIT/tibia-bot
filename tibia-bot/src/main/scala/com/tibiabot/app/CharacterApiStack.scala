@@ -1,7 +1,7 @@
 package com.tibiabot
 package app
 
-import akka.actor.ActorSystem
+import org.apache.pekko.actor.ActorSystem
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 
 import scala.concurrent.ExecutionContext
