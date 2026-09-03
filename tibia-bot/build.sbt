@@ -68,39 +68,43 @@ dockerCommands := dockerCommands.value.flatMap {
   case other => Seq(other)
 }
 
-val AkkaHttpVersion = "10.5.0"
+val AkkaVersion = "2.8.8"
+val AkkaHttpVersion = "10.5.3"
 
-libraryDependencies += "com.typesafe" % "config" % "1.4.2"
-libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.7.0"
-libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % "2.7.0"
+libraryDependencies += "com.typesafe" % "config" % "1.4.9"
+libraryDependencies += "com.typesafe.akka" %% "akka-stream" % AkkaVersion
+libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % AkkaVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
 libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
-libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
+libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.6"
+// 1.3.x rather than 1.5/1.6: those are compiled for Java 11 and the image is
+// `eclipse-temurin:8-jre`. 1.3.16 is the last release on the Java 8 line.
 libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.3.16"
-libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.6"
+libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.12"
 libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
 libraryDependencies += "net.dv8tion" % "JDA" % "6.5.0"
-libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
-libraryDependencies += "org.apache.commons" % "commons-text" % "1.10.0"
-libraryDependencies += "org.postgresql" % "postgresql" % "42.5.4"
+libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.4"
+libraryDependencies += "org.apache.commons" % "commons-text" % "1.15.0"
+libraryDependencies += "org.postgresql" % "postgresql" % "42.7.13"
 // Connection pooling in front of that driver — see PooledConnectionProvider.
 // 4.x rather than 5.x: 5 needs Java 11 and the image is `eclipse-temurin:8-jre`.
 libraryDependencies += "com.zaxxer" % "HikariCP" % "4.0.3"
-libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
-libraryDependencies += "io.lettuce" % "lettuce-core" % "6.2.6.RELEASE"
+libraryDependencies += "io.lettuce" % "lettuce-core" % "6.8.2.RELEASE"
 
-libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.15"
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
+libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.20"
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % Test
 libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
 // Lets web.DiscordAuthSpec drive the OAuth routes as real requests — the login
 // and callback-failure branches are all cookie and redirect behaviour, which is
 // only meaningful end to end.
 libraryDependencies += "com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.7.0" % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-stream-testkit" % "2.7.0" % Test
-libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.3.18"
-libraryDependencies += "org.jsoup" % "jsoup" % "1.17.2"
-libraryDependencies += "io.circe" %% "circe-core" % "0.14.10"
-libraryDependencies += "io.circe" %% "circe-parser" % "0.14.10"
+libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test
+libraryDependencies += "com.typesafe.akka" %% "akka-stream-testkit" % AkkaVersion % Test
+// 3.5.x rather than 3.6+: 3.6.0 moved to Java 11 bytecode, and the image is
+// `eclipse-temurin:8-jre`.
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.5.2"
+libraryDependencies += "org.jsoup" % "jsoup" % "1.23.2"
+libraryDependencies += "io.circe" %% "circe-core" % "0.14.16"
+libraryDependencies += "io.circe" %% "circe-parser" % "0.14.16"
 
 resolvers += "jitpack" at "https://jitpack.io"
