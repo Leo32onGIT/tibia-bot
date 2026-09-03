@@ -110,6 +110,45 @@ class HighscoreRepositoryIntegrationSpec extends AnyFunSuite with Matchers with 
     repo.events(world, snapshot).map(_.score) shouldBe List(116)
   }
 
+  test("the feed reads events by id and each bot keeps its own cursor") {
+    val repo = freshRepo()
+    val start = repo.maxEventId()
+
+    repo.recordEvents(List(
+      HighscoreEvent(world, category, "bubble", "Bubble", "Elite Knight", 400, 114, 115, snapshot),
+      HighscoreEvent(world, category, "zmek", "Zmek", "Elite Knight", 700, 117, 118, snapshot)
+    ))
+
+    val filed = repo.eventsAfter(start, 10)
+    filed.map(_.event.displayName) shouldBe List("Bubble", "Zmek")
+    // Oldest first and strictly increasing, which is what a cursor needs: a
+    // snapshot files every advance under the same instant, so a timestamp could
+    // not tell these two apart.
+    filed.map(_.id) shouldBe filed.map(_.id).sorted
+    repo.maxEventId() shouldBe filed.map(_.id).max
+
+    repo.feedCursor("blue-bot") shouldBe None
+    repo.setFeedCursor("blue-bot", filed.head.id)
+    repo.feedCursor("blue-bot") shouldBe Some(filed.head.id)
+    // The other bot is untouched by that, and is still to read both.
+    repo.feedCursor("red-bot") shouldBe None
+
+    repo.eventsAfter(filed.head.id, 10).map(_.event.displayName) shouldBe List("Zmek")
+    repo.setFeedCursor("blue-bot", filed.last.id)
+    repo.feedCursor("blue-bot") shouldBe Some(filed.last.id)
+    repo.eventsAfter(filed.last.id, 10) shouldBe empty
+  }
+
+  test("the read honours its limit, so a backlog drains a page at a time") {
+    val repo = freshRepo()
+    val start = repo.maxEventId()
+    repo.recordEvents((1 to 5).toList.map(i =>
+      HighscoreEvent(world, category, s"char$i", s"Char$i", "Elite Knight", 400, 100L + i, 101L + i, snapshot)))
+
+    repo.eventsAfter(start, 2).map(_.event.displayName) shouldBe List("Char1", "Char2")
+    repo.eventsAfter(start, 10) should have size 5
+  }
+
   test("stale scores prune by world without touching a world still being tracked") {
     val repo = freshRepo()
     val other = s"${world}Two"

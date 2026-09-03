@@ -1,6 +1,5 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.HighscoreEvent
 import com.tibiabot.tibiadata.{HighscoreList, HighscoreSnapshot, Highscores, HighscoresApi}
 import com.typesafe.scalalogging.StrictLogging
 
@@ -41,6 +40,9 @@ final case class SweepSummary(
 /** Drives the highscore sweep: notices when tibia.com has rebuilt the
  *  highscores, then walks every tracked world's lists at a deliberate pace.
  *
+ *  Sweeping only; the posting is [[HighscoreFeed]]'s, since a bot can only
+ *  write to its own guilds and this runs on the primary alone.
+ *
  *  Two things it will not do. It never overlaps itself — a sweep still running
  *  when the next probe fires means the pacing was too slow for the work, and
  *  starting a second one would double the request rate at exactly the wrong
@@ -52,7 +54,6 @@ final class HighscoreService(
     sweep: HighscoreSweep,
     pace: HighscoreGap,
     trackedWorlds: () => List[String],
-    announce: (String, HighscoreList, List[HighscoreEvent]) => Unit,
     settings: HighscoreSettings,
     now: () => Instant = () => Instant.now()
 )(implicit ec: ExecutionContext) extends StrictLogging {
@@ -150,10 +151,10 @@ final class HighscoreService(
   private def runLane(items: List[(String, HighscoreList)], snapshotAt: Instant): Future[List[ListSweep]] =
     items.foldLeft(Future.successful(List.empty[ListSweep])) { case (acc, (world, list)) =>
       acc.flatMap { done =>
-        sweep.sweepList(world, list, snapshotAt).map { result =>
-          if (result.advances.nonEmpty) announce(world, list, result.advances)
-          result :: done
-        }.recover { case error =>
+        // Nothing is announced here. The advances are filed, and every bot in
+        // the fleet — this one included — posts them from that table, because
+        // each can only write to the guilds it is itself in.
+        sweep.sweepList(world, list, snapshotAt).map(_ :: done).recover { case error =>
           logger.warn(s"Highscores: sweeping '$list' for '$world' failed: ${error.getMessage}")
           done
         }

@@ -11,6 +11,14 @@ import java.net.URLEncoder
  *  world per snapshot, so they are deliberately absent rather than unlisted. */
 sealed abstract class HighscoreCategory(val slug: String, val label: String) {
 
+  /** Whether an increase in this category is announced in the Levels channel.
+   *
+   *  Experience is recorded and never posted: level-ups already reach that
+   *  channel within about a minute from the online-list comparison in
+   *  [[com.tibiabot.TibiaBot]], and a highscores-derived one would be the same
+   *  event, duplicated, an hour late. */
+  def postsAdvances: Boolean = this != HighscoreCategory.Experience
+
   /** How an advance in this category reads in a Levels post.
    *
    *  Magic level already carries "level" in its name, so the weapon skills get
@@ -37,6 +45,11 @@ object HighscoreCategory {
     Experience, MagicLevel, Shielding, SwordFighting,
     AxeFighting, ClubFighting, DistanceFighting, FistFighting
   )
+
+  /** The category a stored slug names. None for anything this bot no longer
+   *  fetches, so a row filed by an older build cannot crash the feed reading
+   *  it — it is simply not announced. */
+  def fromSlug(slug: String): Option[HighscoreCategory] = all.find(_.slug == slug)
 }
 
 /** The vocation filter, by path slug.
@@ -90,13 +103,9 @@ final case class HighscoreList(category: HighscoreCategory, vocation: HighscoreV
   def source: HighscoreSource =
     if (vocation == HighscoreVocation.All) HighscoreSource.Public else HighscoreSource.Local
 
-  /** Whether an increase in this list is announced in the Levels channel.
-   *
-   *  Experience is recorded and never posted: level-ups already reach that
-   *  channel within about a minute from the online-list comparison in
-   *  [[com.tibiabot.TibiaBot]], and a highscores-derived one would be the same
-   *  event, duplicated, an hour late. */
-  def postsAdvances: Boolean = category != HighscoreCategory.Experience
+  /** Whether an increase in this list is announced — a fact about the category,
+   *  not about the vocation filter it was read through. */
+  def postsAdvances: Boolean = category.postsAdvances
 
   /** The endpoint path for one page of this list on one world.
    *

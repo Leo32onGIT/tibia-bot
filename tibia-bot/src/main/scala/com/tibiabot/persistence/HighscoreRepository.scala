@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
 import java.time.Instant
@@ -47,6 +47,27 @@ trait HighscoreRepository {
   /** A world's advances since `since`, most recent first. For the dashboard and
    *  for answering "why did that not post?". */
   def events(world: String, since: Instant): List[HighscoreEvent]
+
+  /** Advances filed after `afterId`, oldest first, at most `limit` of them.
+   *
+   *  How every bot in the fleet learns what to post. The sweep runs on the
+   *  primary alone, but each bot is a different Discord user in its own set of
+   *  guilds and can only post to those, so announcing cannot be the primary's
+   *  job — it reads this table instead and posts what belongs to the worlds it
+   *  serves. */
+  def eventsAfter(afterId: Long, limit: Int): List[FiledEvent]
+
+  /** The highest event id filed, or 0 when the table is empty. What a bot with
+   *  no cursor starts from, so a first run announces nothing rather than the
+   *  whole retention window. */
+  def maxEventId(): Long
+
+  /** How far through the events this bot has posted, or None if it has never
+   *  posted. Per bot, because each serves different guilds and may have been
+   *  down while another was not. */
+  def feedCursor(botId: String): Option[Long]
+
+  def setFeedCursor(botId: String, eventId: Long): Unit
 
   /** Drop scores for characters not seen since `before` — the ones that have
    *  fallen out of the top thousand for good.

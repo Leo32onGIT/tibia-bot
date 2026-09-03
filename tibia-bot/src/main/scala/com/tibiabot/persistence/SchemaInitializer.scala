@@ -267,6 +267,17 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |observed TIMESTAMP NOT NULL
            |);""".stripMargin
 
+      // How far through the advances each bot has posted. Per bot, not per
+      // world: the sweep runs on the primary alone, but every bot is a
+      // different Discord user in its own guilds and can only post to those, so
+      // each reads the shared events table at its own pace.
+      val createHighscoreFeedCursorTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_feed_cursor (
+           |bot_id VARCHAR(255) NOT NULL,
+           |last_event_id BIGINT NOT NULL,
+           |PRIMARY KEY (bot_id)
+           |);""".stripMargin
+
       val createHighscoreEventsIndex =
         s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
            |ON highscore_events (world, observed);""".stripMargin
@@ -315,6 +326,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createHighscoreValueTable)
       newStatement.executeUpdate(createHighscoreEventsTable)
       newStatement.executeUpdate(createHighscoreEventsIndex)
+      newStatement.executeUpdate(createHighscoreFeedCursorTable)
 
       newStatement.executeUpdate(createExperienceReadingTable)
       newStatement.executeUpdate(createExperienceDailyTable)

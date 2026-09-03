@@ -2,7 +2,7 @@ package com.tibiabot.highscores
 
 import com.tibiabot.domain.HighscoreEvent
 import com.tibiabot.presentation.ListEmbeds
-import com.tibiabot.tibiadata.HighscoreList
+import com.tibiabot.tibiadata.HighscoreCategory
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 
@@ -26,11 +26,11 @@ final class HighscoreAnnouncer(
     onPosted: (String, Int, String) => Unit
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
-  def announce(world: String, list: HighscoreList, advances: List[HighscoreEvent]): Unit = {
+  def announce(world: String, category: HighscoreCategory, advances: List[HighscoreEvent]): Unit = {
     // Experience never reaches here — HighscoreDiff yields no advances for a
-    // list that does not post — but the channel is shared with level-ups, so
-    // this stays explicit rather than relying on that from a distance.
-    if (advances.nonEmpty && list.postsAdvances) {
+    // category that does not post — but the channel is shared with level-ups,
+    // so this stays explicit rather than relying on that from a distance.
+    if (advances.nonEmpty && category.postsAdvances) {
       val targets = audience(world)
       if (targets.nonEmpty) {
         // Only worth a request if some server's answer could actually change.
@@ -42,7 +42,7 @@ final class HighscoreAnnouncer(
           logger.warn(s"Highscores: could not resolve guilds for '$world', posting as neutral: ${error.getMessage}")
           Map.empty[String, String]
         }.foreach { resolved =>
-          targets.foreach(post(_, world, list, advances, name => resolved.getOrElse(name, "")))
+          targets.foreach(post(_, world, category, advances, name => resolved.getOrElse(name, "")))
         }
       }
     }
@@ -51,11 +51,11 @@ final class HighscoreAnnouncer(
   private def post(
       target: HighscoreTarget,
       world: String,
-      list: HighscoreList,
+      category: HighscoreCategory,
       advances: List[HighscoreEvent],
       guildOf: String => String
   ): Unit = {
-    val lines = HighscoreAnnouncement.linesFor(target, list.category, advances, guildOf)
+    val lines = HighscoreAnnouncement.linesFor(target, category, advances, guildOf)
     if (lines.nonEmpty) {
       channelFor(target.guildId, target.channelId) match {
         case Some(channel) =>

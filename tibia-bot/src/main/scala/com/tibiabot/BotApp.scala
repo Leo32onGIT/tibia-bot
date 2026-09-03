@@ -1166,7 +1166,6 @@ object BotApp extends App with StrictLogging {
     )(ex),
     pace = highscoreGap,
     trackedWorlds = () => streamSupervisor.activeWorlds.toList,
-    announce = highscoreAnnouncer.announce,
     settings = highscores.HighscoreSettings(
       window = Config.Highscores.window,
       workers = Config.Highscores.workers,
@@ -1174,10 +1173,34 @@ object BotApp extends App with StrictLogging {
     )
   )(ex)
 
-  if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
-    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, Config.Highscores.probeInterval)(
-      () => { highscoreService.tick(); () })(ex)
-    logger.info(s"Highscores sweep enabled for every tracked world, probing every ${Config.Highscores.probeInterval}")
+  /** Posts what the sweep filed, for this bot's own guilds. Runs everywhere the
+   *  feature is on, unlike the sweep. */
+  private lazy val highscoreFeed = new highscores.HighscoreFeed(
+    repository = highscoreRepository,
+    botId = discordGateway.selfUserId,
+    serves = world => discordsData.contains(world),
+    announce = highscoreAnnouncer.announce
+  )
+
+  if (Config.Highscores.enabled) {
+    // Sweeping is fleet-wide work and belongs to one bot: two bots reading the
+    // same pages from two addresses through the same TibiaData instance would
+    // only double the load on tibia.com for identical rows.
+    if (Config.BotRole.current != Config.BotRole.Secondary) {
+      actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, Config.Highscores.probeInterval)(
+        () => { highscoreService.tick(); () })(ex)
+      logger.info(s"Highscores sweep enabled for every tracked world, probing every ${Config.Highscores.probeInterval}")
+    }
+
+    // Posting is the opposite: every bot is a different Discord user in its own
+    // guilds and can only write to those, so each reads the shared events table
+    // and posts what belongs to it. A secondary that skipped this would leave
+    // every guild it serves without a single skill advance.
+    actorSystem.scheduler.scheduleWithFixedDelay(3.minutes, 1.minute)(() => {
+      try highscoreFeed.tick()
+      catch { case error: Throwable => logger.warn("Failed to post highscore advances", error) }
+    })(ex)
+    logger.info("Highscores advance feed enabled for this bot's guilds")
   }
 
   // run the scheduler to clean cache and update dashboard every hour.

@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -40,6 +40,10 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
+    def maxEventId(): Long = 0L
+    def feedCursor(botId: String): Option[Long] = None
+    def setFeedCursor(botId: String, eventId: Long): Unit = ()
     def removeStale(world: String, before: Instant): Unit = ()
     def removeExpiredEvents(before: Instant): Unit = ()
   }
@@ -52,18 +56,13 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
-  private def service(
-      api: HighscoresApi,
-      worlds: List[String] = List("Antica"),
-      announced: mutable.ListBuffer[(String, HighscoreList, Int)] = mutable.ListBuffer.empty
-  ) = {
+  private def service(api: HighscoresApi, worlds: List[String] = List("Antica")) = {
     val pace = new HighscoreGap(1.milli)
     new HighscoreService(
       api = api,
       sweep = new HighscoreSweep(api, NoopRepo, NoopExperience, () => pace.get, _ => Future.unit),
       pace = pace,
       trackedWorlds = () => worlds,
-      announce = (world, list, advances) => announced += ((world, list, advances.size)),
       settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
     )
   }
@@ -165,13 +164,18 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     svc.snapshotSeen shouldBe None
   }
 
-  test("advances reach the announcer per list rather than in one lump at the end") {
+  test("advances are filed for the feed to post, never announced from the sweep") {
     val previous = Map("bubble" -> HighscoreRecord("bubble", "Bubble", "Elite Knight", 400, 1, Instant.parse("2026-09-02T05:00:00Z")))
+    val filed = mutable.ListBuffer.empty[HighscoreEvent]
     val repo = new HighscoreRepository {
       def load(world: String, category: String): Map[String, HighscoreRecord] = previous
       def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
-      def recordEvents(events: List[HighscoreEvent]): Unit = ()
+      def recordEvents(events: List[HighscoreEvent]): Unit = filed.synchronized { filed ++= events }
       def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+      def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
+      def maxEventId(): Long = 0L
+      def feedCursor(botId: String): Option[Long] = None
+      def setFeedCursor(botId: String, eventId: Long): Unit = ()
       def removeStale(world: String, before: Instant): Unit = ()
       def removeExpiredEvents(before: Instant): Unit = ()
     }
@@ -184,21 +188,21 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
           Information(Api(4, "4.10.0", "abc"), Some("2026-09-02T06:00:00Z"), Status(200))
         )))
     }
-    val announced = mutable.ListBuffer.empty[(String, HighscoreList, Int)]
     val pace = new HighscoreGap(1.milli)
     val svc = new HighscoreService(
       api = api,
       sweep = new HighscoreSweep(api, repo, NoopExperience, () => pace.get, _ => Future.unit),
       pace = pace,
       trackedWorlds = () => List("Antica"),
-      announce = (world, list, advances) => announced.synchronized { announced += ((world, list, advances.size)) },
       settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
     )
     await(svc.tick())
 
-    // One call per skill list, never for experience.
-    announced.map(_._2).toSet shouldBe HighscoreLists.skills.toSet
-    announced.map(_._3).distinct.toList shouldBe List(1)
+    // One advance per skill list, never for experience. The sweep posts none of
+    // them itself — a bot can only write to its own guilds, so announcing is
+    // HighscoreFeed's job on every bot rather than the primary's on everyone's
+    // behalf.
     svc.lastSweep.map(_.advances) shouldBe Some(HighscoreLists.skills.size)
+    filed.map(_.category).distinct.toSet shouldBe HighscoreLists.skills.map(_.category.slug).toSet
   }
 }

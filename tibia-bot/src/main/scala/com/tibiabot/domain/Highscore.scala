@@ -60,3 +60,11 @@ final case class ExperiencePoint(
     experience: Long,
     saveDay: LocalDate
 )
+
+/** A [[HighscoreEvent]] as the table holds it, with the identity the feed
+ *  advances its cursor by.
+ *
+ *  The id rather than the timestamp is what a cursor tracks: a snapshot files
+ *  every advance under the same `observed` instant, so a timestamp cursor
+ *  cannot tell which of a hundred simultaneous rows it has already read. */
+final case class FiledEvent(id: Long, event: HighscoreEvent)

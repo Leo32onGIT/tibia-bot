@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -48,6 +48,10 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
       upserts += ((world, category, entries, snapshotAt))
     def recordEvents(events: List[HighscoreEvent]): Unit = filed ++= events
     def events(world: String, since: Instant): List[HighscoreEvent] = filed.toList
+    def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
+    def maxEventId(): Long = 0L
+    def feedCursor(botId: String): Option[Long] = None
+    def setFeedCursor(botId: String, eventId: Long): Unit = ()
     def removeStale(world: String, before: Instant): Unit = ()
     def removeExpiredEvents(before: Instant): Unit = ()
   }

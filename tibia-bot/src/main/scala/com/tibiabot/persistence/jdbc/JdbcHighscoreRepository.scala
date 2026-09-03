@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.{HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.highscores.HighscoreDiff
 import com.tibiabot.persistence.{ConnectionProvider, HighscoreRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
@@ -149,6 +149,75 @@ final class JdbcHighscoreRepository(connectionProvider: ConnectionProvider) exte
 
       statement.close()
       rows.toList
+    }
+
+  def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT id,world,category,name,display_name,vocation,char_level,previous_score,score,observed
+           |FROM highscore_events
+           |WHERE id > ?
+           |ORDER BY id ASC
+           |LIMIT ?;
+           |""".stripMargin
+      )
+      statement.setLong(1, afterId)
+      statement.setInt(2, limit)
+      val result = statement.executeQuery()
+
+      val rows = new ListBuffer[FiledEvent]()
+      while (result.next()) {
+        rows += FiledEvent(result.getLong("id"), HighscoreEvent(
+          world = Option(result.getString("world")).getOrElse(""),
+          category = Option(result.getString("category")).getOrElse(""),
+          name = Option(result.getString("name")).getOrElse(""),
+          displayName = Option(result.getString("display_name")).getOrElse(""),
+          vocation = Option(result.getString("vocation")).getOrElse(""),
+          level = result.getInt("char_level"),
+          previousScore = result.getLong("previous_score"),
+          score = result.getLong("score"),
+          observed = result.getTimestamp("observed").toInstant
+        ))
+      }
+
+      statement.close()
+      rows.toList
+    }
+
+  def maxEventId(): Long =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement("SELECT COALESCE(MAX(id), 0) AS max_id FROM highscore_events;")
+      val result = statement.executeQuery()
+      val id = if (result.next()) result.getLong("max_id") else 0L
+      statement.close()
+      id
+    }
+
+  def feedCursor(botId: String): Option[Long] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement("SELECT last_event_id FROM highscore_feed_cursor WHERE bot_id = ?;")
+      statement.setString(1, botId)
+      val result = statement.executeQuery()
+      val cursor = if (result.next()) Some(result.getLong("last_event_id")) else None
+      statement.close()
+      cursor
+    }
+
+  def setFeedCursor(botId: String, eventId: Long): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |INSERT INTO highscore_feed_cursor(bot_id, last_event_id)
+           |VALUES (?,?)
+           |ON CONFLICT (bot_id)
+           |DO UPDATE SET last_event_id = excluded.last_event_id;
+           |""".stripMargin
+      )
+      statement.setString(1, botId)
+      statement.setLong(2, eventId)
+      statement.executeUpdate()
+      statement.close()
     }
 
   def removeStale(world: String, before: Instant): Unit =
