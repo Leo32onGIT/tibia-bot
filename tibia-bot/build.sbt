@@ -12,13 +12,13 @@ scalaVersion := "2.13.18"
 //
 // Deliberately not -Xlint: it finds another hundred things in code that already
 // works, which is a separate piece of work from keeping the build quiet.
-// -release pins the JDK API this compiles against, which matters because the
-// runtime is fixed at Java 8 (`dockerBaseImage` below) while developers build
-// on newer JDKs. Without it, calling something like `java.time.Duration.toSeconds`
-// — added in Java 9 — compiles clean locally and fails on the deploy box, which
-// is the worst possible place to find out. With it, the local build fails
-// immediately and says which method.
-scalacOptions ++= Seq("-deprecation", "-feature", "-release:8")
+// -release pins the JDK API this compiles against to the one the image ships
+// (`dockerBaseImage` below), which matters because a developer may build on any
+// JDK they happen to have. Without it, calling a method newer than the runtime
+// compiles clean locally and fails on the deploy box, which is the worst
+// possible place to find out. With it, the local build fails immediately and
+// says which method. Keep this and `dockerBaseImage` on the same number.
+scalacOptions ++= Seq("-deprecation", "-feature", "-release:25")
 
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
@@ -32,7 +32,16 @@ dockerExposedPorts += 443
 // Status dashboard: internal-only, reached via Caddy on the docker-compose
 // network — never published to the host directly (see docker-compose.yml).
 dockerExposedPorts += 8080
-dockerBaseImage := "eclipse-temurin:8-jre"
+// Pekko 1.7 still reaches for `sun.misc.Unsafe::objectFieldOffset`, which JDK 24
+// marked terminally deprecated, so every start prints four WARNING lines about it
+// before any of our own logging. They go to stderr from the JVM itself, not
+// through logback, so they reach `docker logs` and stop there — the dashboard
+// never sees them. Left visible on purpose: the method is slated for removal and
+// that would be a hard startup failure, not a warning. Pekko 2.x is where the
+// usage goes away; until it is out of milestones, this is the cost of a current
+// JDK. `--sun-misc-unsafe-memory-access=allow` would silence it, at the price of
+// hiding the thing that will one day break the bot.
+dockerBaseImage := "eclipse-temurin:25-jre"
 // The respawn board is drawn with Java2D (presentation.RespawnBoardImage). A
 // JVM with no DISPLAY infers this on its own, so this is insurance rather than a
 // fix: it states the intent, and keeps the board rendering if a future base
@@ -77,9 +86,7 @@ libraryDependencies += "org.apache.pekko" %% "pekko-slf4j" % PekkoVersion
 libraryDependencies += "org.apache.pekko" %% "pekko-http" % PekkoHttpVersion
 libraryDependencies += "org.apache.pekko" %% "pekko-http-spray-json" % PekkoHttpVersion
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.6"
-// 1.3.x rather than 1.5/1.6: those are compiled for Java 11 and the image is
-// `eclipse-temurin:8-jre`. 1.3.16 is the last release on the Java 8 line.
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.3.16"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.6.3"
 libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.12"
 libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
 libraryDependencies += "net.dv8tion" % "JDA" % "6.5.0"
@@ -87,22 +94,18 @@ libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.4"
 libraryDependencies += "org.apache.commons" % "commons-text" % "1.15.0"
 libraryDependencies += "org.postgresql" % "postgresql" % "42.7.13"
 // Connection pooling in front of that driver — see PooledConnectionProvider.
-// 4.x rather than 5.x: 5 needs Java 11 and the image is `eclipse-temurin:8-jre`.
-libraryDependencies += "com.zaxxer" % "HikariCP" % "4.0.3"
-libraryDependencies += "io.lettuce" % "lettuce-core" % "6.8.2.RELEASE"
+libraryDependencies += "com.zaxxer" % "HikariCP" % "7.1.0"
+libraryDependencies += "io.lettuce" % "lettuce-core" % "7.7.0.RELEASE"
 
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.20"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % Test
-libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
 // Lets web.DiscordAuthSpec drive the OAuth routes as real requests — the login
 // and callback-failure branches are all cookie and redirect behaviour, which is
 // only meaningful end to end.
 libraryDependencies += "org.apache.pekko" %% "pekko-http-testkit" % PekkoHttpVersion % Test
 libraryDependencies += "org.apache.pekko" %% "pekko-testkit" % PekkoVersion % Test
 libraryDependencies += "org.apache.pekko" %% "pekko-stream-testkit" % PekkoVersion % Test
-// 3.5.x rather than 3.6+: 3.6.0 moved to Java 11 bytecode, and the image is
-// `eclipse-temurin:8-jre`.
-libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.5.2"
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.11.0"
 libraryDependencies += "org.jsoup" % "jsoup" % "1.23.2"
 libraryDependencies += "io.circe" %% "circe-core" % "0.14.16"
 libraryDependencies += "io.circe" %% "circe-parser" % "0.14.16"

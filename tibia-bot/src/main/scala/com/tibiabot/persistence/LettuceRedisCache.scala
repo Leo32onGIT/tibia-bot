@@ -36,9 +36,12 @@ final class LettuceRedisCache(host: String, port: Int, password: String)(implici
     }
 
   def setEx(key: String, value: String, ttl: FiniteDuration): Future[Unit] =
-    commands.psetex(key, ttl.toMillis, value).asScala.map(_ => ()).recover {
-      case NonFatal(e) => logger.warn(s"redis PSETEX failed for '$key': ${e.getMessage}"); ()
-    }
+    // SET .. PX rather than PSETEX, which lettuce deprecated in 7.x. Same one
+    // round trip and the same millisecond TTL, and it matches setIfAbsent below.
+    commands.set(key, value, io.lettuce.core.SetArgs.Builder.px(ttl.toMillis))
+      .asScala.map(_ => ()).recover {
+        case NonFatal(e) => logger.warn(s"redis SET PX failed for '$key': ${e.getMessage}"); ()
+      }
 
   def setIfAbsent(key: String, value: String, ttl: FiniteDuration): Future[Boolean] =
     // SET .. NX PX, which is one round trip and genuinely atomic. Lettuce

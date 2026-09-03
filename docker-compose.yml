@@ -60,7 +60,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     # Only with the `local-cache` profile. Absent on a secondary, which has no
     # use for its own Redis.
     profiles: ["local-cache"]
@@ -86,8 +86,15 @@ services:
   # Optional bundled Postgres — only with the `local-db` profile. For an existing
   # database, omit the profile and set POSTGRES_HOST. The bot hardcodes port 5432,
   # so an external database must listen there.
+  #
+  # ⚠️ Postgres refuses to start against a data directory written by a different
+  # major version, so raising this number is a migration and not a version bump.
+  # A `pgdata` volume created by 16 will not open under 18 — the container exits
+  # with "database files are incompatible with server" and the bot then restarts
+  # in a loop against a database that never comes up. See "Upgrading Postgres" in
+  # the README for the dump-and-restore before changing this.
   postgres:
-    image: postgres:16
+    image: postgres:18
     profiles: ["local-db"]
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

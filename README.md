@@ -182,76 +182,176 @@ You will need to change this to point to your emojis.
 3. Point to `emoji ids` to ones that exist on _your_ discord server - the ones you uploaded in step 1.
 
 #### Prepare your machine to host the bot
-1. Ensure `docker` (with the **Compose** plugin) is installed.
-2. Ensure you can build the bot image — either `sbt` + `Java JDK 8` locally
+1. Install `docker`, including the **Compose** plugin.
+2. Optionally install `sbt` and a **JDK 25** to build the bot image locally. If you
+   would rather not, every build and test command below has a container form that
+   needs nothing but docker.
 
-## Deployment Steps   
-**Config and start the Postgres database first:**    
+## Deployment Steps
 
-1. Create a `.env` file and fill out it out:    
-
-   ```env
-   TOKEN=XXXXXXXXXXXXXXXXXXXXXX
-   POSTGRES_HOST=sqlhost
-   POSTGRES_USER=postgres
-   POSTGRES_PASSWORD=XXXXXXXXXX
-   TIBIADATA_HOST=https://api.tibiadata.com/
-   REDIS_HOST=redis
-   REDIS_PORT=6379
-   REDIS_PASSWORD=XXXXXXXXXXXX
-   ```
-2. Create the docker volume for the postgres database:    
+1. **Fill in the environment.** `.env.example` documents every variable, which
+   ones are required, and what changes when you leave one out:
 
    ```bash
-   docker volume create --name pgdata
+   cp .env.example .env
    ```
-3. Create the docker network for the `postgres database` and `violent bot` to communicate over:    
+
+2. **Create the shared docker network.** One-off. `docker-compose.yml` declares
+   this network as external rather than creating it, so containers the compose
+   file does not manage — a local TibiaData instance, pgAdmin — can join the same
+   network by name and reach the bot:
 
    ```bash
    docker network create violentbot
    ```
-4. Run the postgres docker image:    
+
+3. **Build the bot image**, tagged `violent-bot-dedicated:latest`:
 
    ```bash
-   docker run --rm -d -t --env-file .env --hostname sqlhost --network=violentbot --name postgres -p 5432:5432 -v pgdata:/var/lib/postgresql postgres
+   sbt Docker/publishLocal
    ```
 
-The repository ships a `docker-compose.yml` that runs the bot together with a
-Redis cache.
+   <details><summary>No local sbt or JDK?</summary>
 
-5. **Build the bot image** (tags `violent-bot-dedicated:latest`):    
-
-   ```bash
-   sbt docker:publishLocal
-   ```
-   <details><summary>⚠️ No local sbt?</summary>Stage the image with the dockerized build, then `docker build`:    
+   Stage the image definition in a container, then build it with docker. The
+   image only fixes the JDK — the sbt and Scala versions come from
+   `project/build.properties` and `build.sbt`, so this cannot drift from them:
 
    ```bash
    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
-   -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
-   sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch docker:stage
+     -v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
+     sbtscala/scala-sbt:eclipse-temurin-25_1.x sbt -batch Docker/stage
    docker build -t violent-bot-dedicated:latest tibia-bot/target/docker/stage
    ```
+
+   `Docker/stage` prints a block of warnings about being unable to identify the
+   docker version, because there is no docker CLI inside the build container.
+   Expected and harmless — staging only writes the `Dockerfile` and the files
+   beside it, and the `docker build` above is what actually reads them.
    </details>
 
-6. **Start the stack**:    
+4. **Start the stack.** Which services come up is driven by `COMPOSE_PROFILES`
+   in `.env`, so this one command covers every deployment shape:
 
-     ```bash
-     docker compose up -d
-     ```
+   ```bash
+   docker compose up -d
+   ```
 
-To run **without** caching, unset `REDIS_HOST=` in `.env`.
+   | Profile | Adds | When you want it |
+   |---|---|---|
+   | `local-db` | bundled Postgres | No database of your own. Omit it and set `POSTGRES_HOST` to point at an existing one — it must listen on 5432. |
+   | `local-cache` | bundled Redis | Caching on this host. A secondary bot leaves this off and points `REDIS_HOST` at the primary. |
+   | `own-dashboard` | Caddy, with automatic HTTPS | This host serves the dashboard. Needs `STATUS_DOMAIN`'s DNS pointed here and ports 80/443 reachable — 80 is required for the certificate challenge. |
+
+   The shipped `.env.example` sets `COMPOSE_PROFILES=local-cache,own-dashboard`,
+   which is a primary bot using an external database.
+
+### Updating a running deployment
+
+Rebuilding the image and calling `up -d` again is the whole update. Compose
+recreates only the containers whose image actually changed, so the database and
+Redis are left running:
+
+```bash
+git pull && sbt Docker/publishLocal && docker compose up -d
+```
+
+### Upgrading Postgres
+
+Postgres will not open a data directory written by a different major version, so
+changing the `postgres:` image tag in `docker-compose.yml` is a migration rather
+than a version bump. Skipping this leaves the container exiting with `database
+files are incompatible with server` and the bot restart-looping against a
+database that never comes up.
+
+Only applies to the bundled `local-db` Postgres. An external database is your
+provider's business.
+
+1. With the **old** version still running, dump everything. `pg_dumpall` covers
+   all of the bot's databases — `bot_cache`, `premium`, and the `_<guildId>` one
+   per guild — plus the roles:
+
+   ```bash
+   docker compose --profile local-db exec -T postgres pg_dumpall -U postgres > pgdump.sql
+   ```
+
+2. Stop the stack and confirm the dump is not empty before destroying anything:
+
+   ```bash
+   docker compose --profile local-db down
+   ```
+
+3. Delete the old data volume. Compose prefixes it with the project directory
+   name, so check the exact name first:
+
+   ```bash
+   docker volume ls | grep pgdata
+   docker volume rm tibia-bot_pgdata
+   ```
+
+4. Change the `postgres:` tag in `docker-compose.yml`, then bring up **only**
+   the database and restore into it:
+
+   ```bash
+   docker compose --profile local-db up -d postgres
+   cat pgdump.sql | docker compose --profile local-db exec -T postgres psql -U postgres
+   ```
+
+5. Start everything else:
+
+   ```bash
+   docker compose up -d
+   ```
 
 ## Building & Testing
 
-The project targets Java 8 and builds with sbt. If you don't have a JDK 8 / sbt
-toolchain locally, build and test in Docker:
+The project builds with sbt on **JDK 25** and Scala 2.13. The full suite is unit
+tests plus integration specs that round-trip against a real Postgres; those
+specs cancel themselves rather than fail when no database is reachable, so a
+green run without one is not the same as a green run.
+
+Start a throwaway database and point the suite at it:
 
 ```bash
-docker run --rm -u "$(id -u):$(id -g)" -e HOME=/cache \
--v "$HOME/.cache/tibiabot-build:/cache" -v "$PWD:/work" -w /work/tibia-bot \
-sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
+docker run -d --rm --name vb-test-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:18
 ```
+
+```bash
+cd tibia-bot && PGHOST=localhost PGPASSWORD=postgres \
+  TOKEN=dummy POSTGRES_HOST=localhost POSTGRES_PASSWORD=postgres TIBIADATA_HOST=http://localhost:8081 \
+  sbt -batch clean compile Test/compile doc test
+```
+
+`PGHOST`/`PGPASSWORD` are what the integration specs look for. The other four
+are substituted into `discord.conf` with no defaults, so any suite that loads the
+real application config aborts without them — they are placeholders, and nothing
+in the suite talks to Discord or TibiaData. `doc` is included because scaladoc
+catches malformed comments that plain compilation does not. The build is expected
+to be free of `[warn]` lines; treat a new one as a failure.
+
+Tear the database down when you are done:
+
+```bash
+docker rm -f vb-test-pg
+```
+
+<details><summary>No local sbt or JDK?</summary>
+
+Run the same suite in a container. Both need to be on one docker network for the
+build to reach the database:
+
+```bash
+docker network create vb-build
+docker run -d --rm --name vb-test-pg --network vb-build -e POSTGRES_PASSWORD=postgres postgres:18
+docker run --rm --network vb-build \
+  -v "$HOME/.cache/tibiabot-build:/root/.cache" -v "$PWD:/work" -w /work/tibia-bot \
+  -e PGHOST=vb-test-pg -e PGPASSWORD=postgres \
+  -e TOKEN=dummy -e POSTGRES_HOST=vb-test-pg -e POSTGRES_PASSWORD=postgres \
+  -e TIBIADATA_HOST=http://localhost:8081 \
+  sbtscala/scala-sbt:eclipse-temurin-25_1.x sbt -batch clean compile Test/compile doc test
+docker rm -f vb-test-pg && docker network rm vb-build
+```
+</details>
 
 ## Debugging
 
@@ -259,5 +359,7 @@ sbtscala/scala-sbt:eclipse-temurin-8u352-b08_1.8.2_2.13.10 sbt -batch test
 2. See what's running: `docker compose ps`.
 3. To visualise the databases, run pgAdmin on the compose network:
    ```bash
-   docker run -t --name pgadmin -p 82:80 --network violentbot -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' -d dpage/pgadmin4
+   docker run -d --rm --name pgadmin -p 82:80 --network violentbot \
+     -e 'PGADMIN_DEFAULT_EMAIL=you@example.com' -e 'PGADMIN_DEFAULT_PASSWORD=changeme' \
+     dpage/pgadmin4:9
    ```
