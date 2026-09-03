@@ -173,6 +173,19 @@ class TibiaBot(
       // Best-effort, fire-and-forget: piggybacks on this world's existing poll
       // cadence instead of a separate schedule (see OnlineDurationPersistence).
       onlineDurationPersistence.save(onlineWithVocLvlAndDuration)
+
+      // Offer this world's watched characters to the fansite budget, which ranks
+      // them against every other world's and keeps the highest levels it can
+      // afford. Skipped outright when there is no second source to ration, so a
+      // bot running on TibiaData alone pays nothing for this.
+      if (Config.FansiteApi.enabled) {
+        val huntedHere = BotApp.huntedNamesForWorld(world)
+        fansiteapi.FansiteRoster.shared.publish(
+          world,
+          onlineWithVocLvlAndDuration.collect {
+            case player if huntedHere.contains(player.name.toLowerCase) => (player.name, player.level)
+          })
+      }
       // battleye_date is the literal string "release" for a world protected since
       // launch (green BattlEye); any actual date means protection was added later
       // (yellow BattlEye) — confirmed against the live TibiaData API, not documented.

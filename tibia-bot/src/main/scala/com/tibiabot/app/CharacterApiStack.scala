@@ -90,7 +90,10 @@ object CharacterApiStack {
         phaseOffset = pollInterval * Config.FansiteApi.phaseOffsetTicks.toLong,
         maxStale = Config.CharacterCache.maxStale,
         secondaryGrace = Config.FansiteApi.secondaryGrace,
-        scheduler = system.scheduler)
+        scheduler = system.scheduler,
+        // Only the characters somebody asked to watch, and only as many of
+        // those as the paced lane can afford — see fansiteapi.FansiteRoster.
+        fansiteEligible = fansiteapi.FansiteRoster.shared.admits)
     } else tibiaDataSource
   }
 }

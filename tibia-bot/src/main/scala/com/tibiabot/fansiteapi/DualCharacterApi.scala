@@ -44,7 +44,8 @@ final class DualCharacterApi(
     maxStale: FiniteDuration,
     secondaryGrace: FiniteDuration,
     scheduler: Scheduler,
-    now: () => Instant = () => Instant.now()
+    now: () => Instant = () => Instant.now(),
+    fansiteEligible: String => Boolean = _ => true
 )(implicit ec: ExecutionContext)
     extends TibiaApi with StrictLogging {
 
@@ -134,8 +135,10 @@ final class DualCharacterApi(
     val cacheKey = key(name)
     val entry = seen.computeIfAbsent(cacheKey, _ => Seen(firstSeen = at, lastServed = None))
 
-    if (!secondaryDue(entry, at)) {
-      // Still holding the second source back so its window opens out of phase.
+    if (!fansiteEligible(name) || !secondaryDue(entry, at)) {
+      // Either this character has not earned a place in the paced budget (see
+      // FansiteRoster), or the second source is still being held back so its
+      // window opens out of phase. Same path either way: one source, no cost.
       tibiaData.getCharacter(name)
     } else {
       // Both are launched together; only the primary is ever waited on.
