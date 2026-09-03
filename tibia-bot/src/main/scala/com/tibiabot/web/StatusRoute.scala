@@ -4,7 +4,7 @@ import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResp
 import akka.http.scaladsl.server.{Directive0, Route}
 import akka.http.scaladsl.server.Directives._
 import com.tibiabot.domain.PatreonMember
-import com.tibiabot.{app, discord, paywall, persistence, tracking, Config}
+import com.tibiabot.{app, discord, fansiteapi, paywall, persistence, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -144,6 +144,8 @@ final class StatusRoute(
         "deathDetections15m" -> JsNumber(snap.deathDetections),
         "deathLagAvg15m" -> JsNumber(snap.deathLagAvgSeconds),
         "deathLagMax15m" -> JsNumber(snap.deathLagMaxSeconds),
+        "fansiteDeathDetections15m" -> JsNumber(snap.fansiteDeathDetections),
+        "fansiteDeathLagAvg15m" -> JsNumber(snap.fansiteDeathLagAvgSeconds),
         "battleyeGreen" -> JsBoolean(snap.battleyeGreen),
         "pvpType" -> JsString(snap.pvpType),
         "discords" -> JsArray(discordsJson.toVector),
@@ -180,7 +182,28 @@ final class StatusRoute(
       // say. Always published, so a row that reads zero is itself the answer
       // when the fansite source is off or failing.
       "fansiteapi" -> apiThroughputJson(tracking.ApiMetrics.fansiteApi)
+    ),
+    // The second source's own health, none of which appears above: that subtree
+    // counts requests that actually left, and everything interesting about a
+    // rationed lane is what it decided not to send.
+    "fansite" -> JsObject(
+      "enabled" -> JsBoolean(Config.FansiteApi.enabled),
+      "refused" -> apiThroughputJson(tracking.ApiMetrics.fansiteRefused),
+      "circuitOpenUntil" -> fansiteapi.FansiteCircuitBreaker.shared.openUntilInstant
+        .map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
+      "roster" -> rosterJson(fansiteapi.FansiteRoster.shared.snapshot)
     )
+  )
+
+  /** How the fansite budget is currently being spent. `saturated` is the field
+   *  worth watching: while it is false every hunted character online is covered
+   *  and the level ranking is inert, so `cutoffLevel` means nothing yet. */
+  private def rosterJson(roster: fansiteapi.RosterSnapshot): JsObject = JsObject(
+    "offered" -> JsNumber(roster.offered),
+    "admitted" -> JsNumber(roster.admitted),
+    "cutoffLevel" -> JsNumber(roster.cutoffLevel),
+    "saturated" -> JsBoolean(roster.saturated),
+    "worlds" -> JsNumber(roster.worlds)
   )
 
   /** Any secondary's published status, fetched raw — see
@@ -530,7 +553,10 @@ object StatusRoute {
         // Absent, not empty, for a secondary still running a build from before
         // these counters existed — the dashboard renders that as "no data"
         // rather than a confident 0/s that looks like a dead bot.
-        "apiThroughput" -> status.fields.getOrElse("apiThroughput", JsNull)
+        "apiThroughput" -> status.fields.getOrElse("apiThroughput", JsNull),
+        // Same absent-not-empty treatment: a secondary on an older build has no
+        // second source to report on, which is not the same as one sitting idle.
+        "fansite" -> status.fields.getOrElse("fansite", JsNull)
       )
     }
     JsArray((summarize(own) +: secondaries.map(summarize)).toVector)

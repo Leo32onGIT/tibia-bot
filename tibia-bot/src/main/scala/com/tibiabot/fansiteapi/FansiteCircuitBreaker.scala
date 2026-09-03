@@ -1,5 +1,6 @@
 package com.tibiabot.fansiteapi
 
+import com.tibiabot.Config
 import com.typesafe.scalalogging.StrictLogging
 
 import java.time.Instant
@@ -71,7 +72,21 @@ final class FansiteCircuitBreaker(
    *  behind a breaker. */
   def blocks(status: Int): Boolean = status == 403 || status == 429
 
-  /** Test/diagnostic only. */
-  private[fansiteapi] def openUntilInstant: Option[Instant] =
+  /** When the breaker reopens, or `None` while it is closed. Read by the
+   *  dashboard as well as by tests: a source that has gone silent behind a
+   *  block is exactly the state worth being able to see without reading logs. */
+  def openUntilInstant: Option[Instant] =
     Option(openUntil.get()).filterNot(_ == Instant.EPOCH)
+}
+
+object FansiteCircuitBreaker {
+
+  /** One breaker for the process, because what trips it is one IP being
+   *  blocked rather than one world being unlucky.
+   *
+   *  Per-instance would mean every world stack has to learn the block for
+   *  itself -- on a fleet that is dozens more requests into an edge that has
+   *  already said stop, each one deepening it, and dozens of separate WARN
+   *  lines for a single event. */
+  lazy val shared: FansiteCircuitBreaker = new FansiteCircuitBreaker(Config.FansiteApi.circuitOpenFor)
 }

@@ -13,6 +13,8 @@ final case class WorldSnapshot(
   deathDetections: Long,
   deathLagAvgSeconds: Double,
   deathLagMaxSeconds: Long,
+  fansiteDeathDetections: Long,
+  fansiteDeathLagAvgSeconds: Double,
   battleyeGreen: Boolean,
   pvpType: String
 )
@@ -22,7 +24,7 @@ object WorldSnapshot {
    *  every counter zero. Named rather than spelled out positionally at the
    *  call site so adding a field here can't quietly land in the wrong slot. */
   val empty: WorldSnapshot =
-    WorldSnapshot(0, None, None, 0, 0, 0, 0, 0.0, 0, battleyeGreen = true, pvpType = "")
+    WorldSnapshot(0, None, None, 0, 0, 0, 0, 0.0, 0, 0, 0.0, battleyeGreen = true, pvpType = "")
 }
 
 /** Per-world counters and poll timing for the monitoring dashboard. Population
@@ -49,6 +51,8 @@ final class WorldMetrics {
   private var deathDetections: Long = 0
   private var deathLagTotalSeconds: Long = 0
   private var deathLagMaxSeconds: Long = 0
+  private var fansiteDeathDetections: Long = 0
+  private var fansiteDeathLagTotalSeconds: Long = 0
 
   def recordPoll(currentPopulation: Int, polledAt: Instant, nextPollAt_ : Instant, battleyeGreen_ : Boolean, pvpType_ : String): Unit = {
     population = currentPopulation
@@ -74,10 +78,20 @@ final class WorldMetrics {
    *  scraping it, the upstream cache holding the sheet. The absolute figure is
    *  therefore large and uninteresting; it is for comparison, since little but a
    *  change to fetch scheduling moves it. */
-  def recordDeathDetected(lagSeconds: Long): Unit = synchronized {
+  def recordDeathDetected(lagSeconds: Long, fansiteBacked: Boolean = false): Unit = synchronized {
     deathDetections += 1
     deathLagTotalSeconds += lagSeconds
     if (lagSeconds > deathLagMaxSeconds) deathLagMaxSeconds = lagSeconds
+    // Counted a second time for the subset the fansite budget was spent on, so
+    // the two averages can be read against each other. That comparison is the
+    // only evidence that the second source buys anything; without it the lane
+    // is a cost with no measured benefit. `fansiteBacked` means the character
+    // held a roster slot, not that a fansite answer actually won the race --
+    // the looser question, but the one that matches what the budget decides.
+    if (fansiteBacked) {
+      fansiteDeathDetections += 1
+      fansiteDeathLagTotalSeconds += lagSeconds
+    }
   }
 
   def resetCounters(): Unit = synchronized {
@@ -87,6 +101,8 @@ final class WorldMetrics {
     deathDetections = 0
     deathLagTotalSeconds = 0
     deathLagMaxSeconds = 0
+    fansiteDeathDetections = 0
+    fansiteDeathLagTotalSeconds = 0
   }
 
   def snapshot(): WorldSnapshot = synchronized {
@@ -95,6 +111,8 @@ final class WorldMetrics {
       deathDetections,
       if (deathDetections == 0) 0.0 else deathLagTotalSeconds.toDouble / deathDetections,
       deathLagMaxSeconds,
+      fansiteDeathDetections,
+      if (fansiteDeathDetections == 0) 0.0 else fansiteDeathLagTotalSeconds.toDouble / fansiteDeathDetections,
       battleyeGreen, pvpType)
   }
 }

@@ -47,6 +47,7 @@ final class FansiteRoster(
 
   private val byWorld = new ConcurrentHashMap[String, Published]()
   @volatile private var admitted: Set[String] = Set.empty
+  @volatile private var current: RosterSnapshot = RosterSnapshot.empty
 
   /** Replace what `world` is offering: its hunted characters currently online,
    *  with the level the online list just reported for each. */
@@ -60,7 +61,10 @@ final class FansiteRoster(
   def admits(name: String): Boolean = admitted.contains(name.toLowerCase)
 
   /** How many characters currently hold a slot. Diagnostic. */
-  def admittedCount: Int = admitted.size
+  def admittedCount: Int = current.admitted
+
+  /** What the last recompute decided, for the dashboard. */
+  def snapshot: RosterSnapshot = current
 
   /** A world whose stream has stopped keeps its last offering in the map, and
    *  would otherwise hold budget for characters nobody is polling any more. Its
@@ -69,15 +73,31 @@ final class FansiteRoster(
    *  simply publishes over the top. */
   private def recompute(): Unit = {
     val cutoff = now().minusSeconds(staleAfter.toSeconds)
-    val live = byWorld.asScala.values.filter(_.at.isAfter(cutoff))
-    admitted = live
-      .flatMap(_.candidates)
-      .toList
-      .sortBy { case (_, level) => -level }
-      .take(budget)
-      .map { case (name, _) => name }
-      .toSet
+    val live = byWorld.asScala.values.filter(_.at.isAfter(cutoff)).toList
+    val ranked = live.flatMap(_.candidates).sortBy { case (_, level) => -level }
+    val kept = ranked.take(budget)
+    admitted = kept.map { case (name, _) => name }.toSet
+    // `cutoffLevel` is the lowest level still holding a slot, which only means
+    // anything while saturated: below the budget nothing is competing and the
+    // figure is just the weakest character anybody happens to watch.
+    current = RosterSnapshot(
+      offered = ranked.size,
+      admitted = kept.size,
+      cutoffLevel = kept.lastOption.map { case (_, level) => level }.getOrElse(0),
+      saturated = ranked.size > budget,
+      worlds = live.size)
   }
+}
+
+/** What the roster last decided, for the dashboard.
+ *
+ *  `saturated` is the one to watch: false means every hunted character online
+ *  is getting fansite coverage and the ranking is doing nothing. Once it turns
+ *  true, `cutoffLevel` says where the line fell. */
+final case class RosterSnapshot(offered: Int, admitted: Int, cutoffLevel: Int, saturated: Boolean, worlds: Int)
+
+object RosterSnapshot {
+  val empty: RosterSnapshot = RosterSnapshot(0, 0, 0, saturated = false, worlds = 0)
 }
 
 object FansiteRoster {

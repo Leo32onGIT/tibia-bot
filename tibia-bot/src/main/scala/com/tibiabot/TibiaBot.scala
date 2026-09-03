@@ -750,7 +750,7 @@ class TibiaBot(
             // world starting cold has no dedup history and briefly records
             // whatever it finds, up to deathRecentDuration old; the 15-minute
             // window this lands in clears that on its own.
-            worldMetrics.recordDeathDetected(deathAge)
+            worldMetrics.recordDeathDetected(deathAge, fansiteapi.FansiteRoster.shared.admits(charName))
             BotApp.addDeathsCache(world, char.character.character.name, deathTime.toString)
             Some(CharDeath(char, death))
           }

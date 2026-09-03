@@ -124,6 +124,42 @@ class FansiteRosterSpec extends AnyFunSuite with Matchers {
     roster().admits("Anyone") shouldBe false
   }
 
+  test("the snapshot says nothing is being dropped while there is room") {
+    val r = roster(budget = 3)
+    r.publish("Antica", Seq("A" -> 300, "B" -> 200))
+
+    val snap = r.snapshot
+    snap.offered shouldBe 2
+    snap.admitted shouldBe 2
+    snap.saturated shouldBe false
+    snap.worlds shouldBe 1
+  }
+
+  test("once saturated the snapshot says where the line fell") {
+    val r = roster(budget = 2)
+    r.publish("Antica", Seq("Top" -> 900, "Mid" -> 500, "Low" -> 100))
+
+    val snap = r.snapshot
+    snap.offered shouldBe 3
+    snap.admitted shouldBe 2
+    snap.saturated shouldBe true
+    // The lowest level still holding a slot, so everyone under it is TibiaData only.
+    snap.cutoffLevel shouldBe 500
+  }
+
+  test("the snapshot counts worlds still publishing, not worlds ever seen") {
+    val clock = new Clock()
+    val r = roster(clock, budget = 10, staleAfter = 3.minutes)
+    r.publish("Gone", Seq("Ghost" -> 900))
+    r.publish("Live", Seq("Present" -> 100))
+    r.snapshot.worlds shouldBe 2
+
+    clock.advance(4.minutes)
+    r.publish("Live", Seq("Present" -> 100))
+    r.snapshot.worlds shouldBe 1
+    r.snapshot.offered shouldBe 1
+  }
+
   test("nonsense settings are refused at construction") {
     an[IllegalArgumentException] should be thrownBy roster(budget = 0)
     an[IllegalArgumentException] should be thrownBy roster(staleAfter = Duration.Zero)

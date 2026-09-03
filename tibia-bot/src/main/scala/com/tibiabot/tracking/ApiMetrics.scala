@@ -40,4 +40,20 @@ object ApiMetrics {
    *  dashboard has to answer while both are running is "which one is
    *  struggling", which one merged total cannot. */
   val fansiteApi = new ApiCallMetrics()
+
+  /** Fansite character fetches this process decided not to make.
+   *
+   *  Deliberately not folded into `fansiteApi`: every record there increments a
+   *  total that means "requests we put on their IP", which is the number that
+   *  decides whether we get blocked. A refusal is the opposite of that, and
+   *  counting it in the same place would inflate the one figure whose value
+   *  comes from being literally true.
+   *
+   *  Only the refusals that mean something is wrong. A character passed over
+   *  because it did not make the roster is not counted here -- that is the
+   *  design working, happens tens of thousands of times a tick, and is reported
+   *  as a gauge by [[com.tibiabot.fansiteapi.FansiteRoster]] instead.
+   *
+   *  Dimension: `reason`. */
+  val fansiteRefused = new ApiCallMetrics()
 }

@@ -54,7 +54,8 @@ final class FansiteApiClient(
     inFlight: InFlightLimit = InFlightLimit.fansiteApi,
     pacer: RequestPacer = RequestPacer.fansiteApi,
     maxQueueDelay: FiniteDuration = Config.FansiteApi.maxQueueDelay,
-    breaker: FansiteCircuitBreaker = new FansiteCircuitBreaker(Config.FansiteApi.circuitOpenFor)
+    breaker: FansiteCircuitBreaker = FansiteCircuitBreaker.shared,
+    refusals: tracking.ApiCallMetrics = tracking.ApiMetrics.fansiteRefused
 )(implicit val system: ActorSystem)
     extends FansiteJsonSupport with StrictLogging with TibiaApi {
 
@@ -106,13 +107,27 @@ final class FansiteApiClient(
   /** A refusal that costs no request. Shaped like any other failure so callers
    *  need no special case — [[DualCharacterApi]] already falls back to
    *  TibiaData on a Left. */
-  private val blockedResponse: Future[Either[String, CharacterResponse]] =
+  private val circuitOpenLeft: Future[Either[String, CharacterResponse]] =
     Future.successful(Left("Fansite API circuit is open — not sending"))
 
   /** A fetch refused before it was sent, because the pacer's queue already
    *  reaches past the point where an answer would still be worth having. */
-  private val pacedOutResponse: Future[Either[String, CharacterResponse]] =
+  private val pacerSaturatedLeft: Future[Either[String, CharacterResponse]] =
     Future.successful(Left("Fansite API pacer is saturated — not sending"))
+
+  /** Counted, because a refusal is invisible otherwise: it becomes a Left that
+   *  [[DualCharacterApi]] quietly covers with TibiaData, so the bot looks
+   *  perfectly healthy while the second source contributes nothing. Kept out of
+   *  the request counter on purpose -- see [[com.tibiabot.tracking.ApiMetrics]]. */
+  private def blockedResponse: Future[Either[String, CharacterResponse]] = {
+    refusals.record("reason" -> "circuit-open")
+    circuitOpenLeft
+  }
+
+  private def pacedOutResponse: Future[Either[String, CharacterResponse]] = {
+    refusals.record("reason" -> "paced-out")
+    pacerSaturatedLeft
+  }
 
   /** Wait for this lane's turn, then fetch.
    *
