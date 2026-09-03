@@ -19,13 +19,41 @@ class HighscoreRepositoryIntegrationSpec extends AnyFunSuite with Matchers with 
   private def entry(name: String, value: Long, level: Int = 400) =
     HighscoreEntry(rank = 1, name = name, vocation = "Elite Knight", world = world, level = level, value = value)
 
+  /** The bots the cursor test reads and writes. Never a real bot id, which is a
+   *  Discord snowflake, so clearing these cannot disturb a bot running against
+   *  the same database. */
+  private val blueBot = "blue-bot"
+  private val redBot = "red-bot"
+  private val botIds = List(blueBot, redBot)
+
   private def freshRepo(): HighscoreRepository = {
     val provider = pgOrCancel()
     ensureCacheSchema(provider)
     val repo = new JdbcHighscoreRepository(provider)
     repo.removeStale(world, snapshot.plus(Duration.ofDays(3650)))
     repo.removeExpiredEvents(snapshot.plus(Duration.ofDays(3650)))
+    clearFeedCursors(provider)
     repo
+  }
+
+  /** Cursors survive the two prunes above, which reach the scores and the events
+   *  and nothing else. CI starts a fresh postgres per run and never notices, but
+   *  a developer running twice against a long-lived local one would find the
+   *  cursor left behind by the first run and "has never posted" already false.
+   *
+   *  Raw SQL rather than a repository method: nothing in the bot ever deletes a
+   *  cursor, and the port should not grow an operation only a test wants. */
+  private def clearFeedCursors(provider: JdbcConnectionProvider): Unit = {
+    val conn = provider.cache()
+    try {
+      val statement = conn.prepareStatement("DELETE FROM highscore_feed_cursor WHERE bot_id = ?;")
+      botIds.foreach { botId =>
+        statement.setString(1, botId)
+        statement.addBatch()
+      }
+      statement.executeBatch()
+      statement.close()
+    } finally conn.close()
   }
 
   test("scores round-trip, keyed case-insensitively, keeping the displayed casing") {
@@ -127,15 +155,15 @@ class HighscoreRepositoryIntegrationSpec extends AnyFunSuite with Matchers with 
     filed.map(_.id) shouldBe filed.map(_.id).sorted
     repo.maxEventId() shouldBe filed.map(_.id).max
 
-    repo.feedCursor("blue-bot") shouldBe None
-    repo.setFeedCursor("blue-bot", filed.head.id)
-    repo.feedCursor("blue-bot") shouldBe Some(filed.head.id)
+    repo.feedCursor(blueBot) shouldBe None
+    repo.setFeedCursor(blueBot, filed.head.id)
+    repo.feedCursor(blueBot) shouldBe Some(filed.head.id)
     // The other bot is untouched by that, and is still to read both.
-    repo.feedCursor("red-bot") shouldBe None
+    repo.feedCursor(redBot) shouldBe None
 
     repo.eventsAfter(filed.head.id, 10).map(_.event.displayName) shouldBe List("Zmek")
-    repo.setFeedCursor("blue-bot", filed.last.id)
-    repo.feedCursor("blue-bot") shouldBe Some(filed.last.id)
+    repo.setFeedCursor(blueBot, filed.last.id)
+    repo.feedCursor(blueBot) shouldBe Some(filed.last.id)
     repo.eventsAfter(filed.last.id, 10) shouldBe empty
   }
 
