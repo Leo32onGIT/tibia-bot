@@ -176,6 +176,14 @@ final class StatusRoute(
     "apiThroughput" -> JsObject(
       "discord" -> apiThroughputJson(tracking.ApiMetrics.discord),
       "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData),
+      // The instance we run ourselves, split out because `/v4/highscores` is
+      // served by both and the endpoint breakdown collapses them onto one row.
+      // What it costs us is not what the public API costs us — this is the
+      // traffic that lands on our own IP and our own CPU — and only a counter
+      // of its own can be crossed with `status` to say whether it is coping.
+      // Always published, so a bot with no instance of its own reads zero
+      // rather than disappearing.
+      "tibiadataLocal" -> apiThroughputJson(tracking.ApiMetrics.tibiaDataLocal),
       // Its own subtree rather than another endpoint row under tibiadata: while
       // both character upstreams are running, the question this panel exists to
       // answer is which of the two is struggling, and one merged total cannot

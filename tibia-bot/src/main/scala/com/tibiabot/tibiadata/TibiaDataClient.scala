@@ -18,16 +18,24 @@ import scala.concurrent.duration._
 import spray.json.DeserializationException
 import org.apache.pekko.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 
-/** `metrics` defaults to the process-wide counter so the dashboard sees one
- *  figure for the process, not one per construction site. Tests pass their own. */
+/** The counters default to the process-wide ones so the dashboard sees one
+ *  figure for the process, not one per construction site. Tests pass their own.
+ *
+ *  Two of them because this client talks to two upstreams: `metrics` counts
+ *  api.tibiadata.com and `localMetrics` counts the instance we run ourselves.
+ *  Which one a call lands in is decided per request from the host it actually
+ *  went to, not from configuration — `TIBIADATA_HOST` points at the public API
+ *  in local development, and a config-derived label would file every dev
+ *  request as local traffic we are not in fact generating. */
 class TibiaDataClient(
   metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData,
+  localMetrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaDataLocal,
   inFlight: InFlightLimit = InFlightLimit.tibiaData
 )(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi with HighscoresApi {
 
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
-  private val publicApi = "https://api.tibiadata.com"
+  private val publicApi = s"https://${TibiaDataClient.PublicHost}"
   private val characterUrl = s"$publicApi/v4/character/"
   private val guildUrl = s"$publicApi/v4/guild/"
 
@@ -69,6 +77,14 @@ class TibiaDataClient(
     if (segments.isEmpty) "/" else segments.mkString("/", "/", "")
   }
 
+  /** The counter this request belongs to, by the host it is going to.
+   *
+   *  Host rather than endpoint, because `/v4/highscores` is the one path served
+   *  by both instances — the vocation-filtered lists go to ours and the rest to
+   *  the public API, and [[endpointOf]] collapses them onto the same label. */
+  private def metricsFor(request: HttpRequest): com.tibiabot.tracking.ApiCallMetrics =
+    if (TibiaDataClient.isPublicHost(request.uri)) metrics else localMetrics
+
   /** Issue a GET, retrying only when [[RetryPolicy]] says it is worth it: a
    *  transient upstream failure (500/502/503/504) or a connection-level one.
    *  Anything else is returned as-is and degrades to the logged-Left path.
@@ -80,7 +96,7 @@ class TibiaDataClient(
       val status = response.status.intValue
       // Per attempt, not per logical fetch — a retry really is a second call,
       // and hiding it would understate our load during an upstream wobble.
-      metrics.record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
+      metricsFor(request).record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt, callerRetriesSoon) match {
         case RetryDecision.RetryIn(delay) =>
@@ -100,7 +116,7 @@ class TibiaDataClient(
       case NonFatal(ex) =>
         // A call that never got a status still left this process, so it counts;
         // "failed" keeps timeouts and resets visible instead of shrinking the total.
-        metrics.record("endpoint" -> endpointOf(request), "status" -> "failed")
+        metricsFor(request).record("endpoint" -> endpointOf(request), "status" -> "failed")
         retryPolicy.onConnectionFailure(attempt, callerRetriesSoon) match {
           case RetryDecision.RetryIn(delay) =>
             logger.warn(s"Request to '${request.uri}' failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay.toMillis}ms: ${ex.getMessage}")
@@ -139,14 +155,14 @@ class TibiaDataClient(
   def getWorld(world: String): Future[Either[String, WorldResponse]] = {
     val encodedName = URLEncoder.encode(world, "UTF-8").replaceAll("\\+", "%20")
     fetch[WorldResponse](
-      s"https://api.tibiadata.com/v4/world/$encodedName",
+      s"$publicApi/v4/world/$encodedName",
       resp => s"Failed to get world: '${encodedName.replaceAll("%20", " ")}' with status: '${resp.status}'",
       s"Failed to parse world: '${encodedName.replaceAll("%20", " ")}'")
   }
 
   def getWorlds(): Future[Either[String, WorldsResponse]] =
     fetch[WorldsResponse](
-      s"https://api.tibiadata.com/v4/worlds",
+      s"$publicApi/v4/worlds",
       resp => s"Failed to get worlds with status: '${resp.status}'",
       s"Failed to parse worlds response")
 
@@ -262,6 +278,20 @@ class TibiaDataClient(
 }
 
 object TibiaDataClient {
+  /** The shared, Kong-cached instance. Every other host this client is pointed
+   *  at is one we run, so this single name is the whole of the split. */
+  val PublicHost = "api.tibiadata.com"
+
+  /** Whether `uri` is going to the public API rather than to our own instance.
+   *
+   *  A missing host reads as public: a relative URI is not something this
+   *  client builds, and guessing "ours" for one would inflate the figure whose
+   *  only value is being literally true. */
+  def isPublicHost(uri: org.apache.pekko.http.scaladsl.model.Uri): Boolean = {
+    val host = uri.authority.host.address()
+    host.isEmpty || host.equalsIgnoreCase(PublicHost)
+  }
+
   /** Bucket width, and the age past which buckets stop splitting. 60s against a
    *  300s TTL gives five rows plus an overflow — the shape, without a wall of rows. */
   private[tibiadata] val CacheAgeBucketSeconds = 60L

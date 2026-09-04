@@ -24,12 +24,31 @@ object ApiMetrics {
    *  [[com.tibiabot.discord.DiscordApiRoute]]) and `status`. */
   val discord = new ApiCallMetrics()
 
-  /** Every TibiaData request, counted at
+  /** Every request to api.tibiadata.com, counted at
    *  [[com.tibiabot.tibiadata.TibiaDataClient]]'s single request choke point,
    *  so retries count as the separate calls they are.
    *
-   *  Dimensions: `endpoint` and `status`, each summing to the total. */
+   *  Dimensions: `endpoint`, `status` and `cacheAge`, each summing to the total. */
   val tibiaData = new ApiCallMetrics()
+
+  /** Every request to the TibiaData instance we run ourselves, counted at the
+   *  same choke point and split by the host actually called.
+   *
+   *  Its own counter rather than a `host` dimension on `tibiaData`, for the
+   *  reason `fansiteApi` has one: the same software behind two hosts is still
+   *  two upstreams. The public one is Kong-cached, shared with everyone and
+   *  costs tibia.com nothing extra from us; ours scrapes tibia.com from the VPS
+   *  IP, on our own CPU, and what it risks is being blocked. A `host` dimension
+   *  would show how much traffic each carries but could never cross that with
+   *  `status`, since dimensions are independent and each sums to the whole
+   *  total — so "is our own instance erroring" would stay unanswerable, which
+   *  is the question the split exists to answer.
+   *
+   *  Only the vocation-filtered highscore lists and the two boosted endpoints
+   *  come here; see [[com.tibiabot.tibiadata.HighscoreSource]].
+   *
+   *  Dimensions: as `tibiaData`. */
+  val tibiaDataLocal = new ApiCallMetrics()
 
   /** Every request to CipSoft's fansite API, counted at
    *  [[com.tibiabot.fansiteapi.FansiteApiClient]]'s choke point.

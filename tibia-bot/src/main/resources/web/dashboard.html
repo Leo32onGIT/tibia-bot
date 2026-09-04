@@ -727,10 +727,16 @@ function sparklineSvg(history, color) {
 // same approach as expandedSupporters on the Patreon panel.
 const expandedApiRows = new Set();
 
+// The two TibiaData rows are the same software behind two hosts, and the row
+// that was simply "TibiaData" is now only half the story — so both carry the
+// qualifier rather than leaving the familiar one to be read as the whole.
+// `roll` is the same label for the multi-bot summary, where five columns of
+// full names would not fit.
 const API_SOURCES = [
-  { key: 'discord', label: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
-  { key: 'tibiadata', label: 'TibiaData', icon: 'ti-api', color: '#5b8cff' },
-  { key: 'fansiteapi', label: 'Fansite API', icon: 'ti-api', color: '#3fb98f' }
+  { key: 'discord', label: 'Discord', roll: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
+  { key: 'tibiadata', label: 'TibiaData · public', roll: 'TD public', icon: 'ti-api', color: '#5b8cff' },
+  { key: 'tibiadataLocal', label: 'TibiaData · local', roll: 'TD local', icon: 'ti-server', color: '#22d3ee' },
+  { key: 'fansiteapi', label: 'Fansite API', roll: 'Fansite', icon: 'ti-api', color: '#3fb98f' }
 ];
 
 // One breakdown table. `share` is normally computed within the group, which is
@@ -830,7 +836,7 @@ function renderFansiteGroup(fansite) {
         dimensionRows(fansite.refused || {}, 'reason'), 'var(--warn)');
 }
 
-function renderApiDetail(sourceKey, throughput, lanes, fansite) {
+function renderApiDetail(sourceKey, throughput, lanes, fansite, color) {
   if (sourceKey === 'discord') {
     // Catch-all dropped from the view (see DiscordApiRoute.Other): it is
     // gateway/user GETs, reaction PUTs and channel creation, all a rounding
@@ -844,10 +850,13 @@ function renderApiDetail(sourceKey, throughput, lanes, fansite) {
       + renderRateLimitedGroup(throughput, operations);
   }
   const secondSource = sourceKey === 'fansiteapi' ? renderFansiteGroup(fansite) : '';
+  // Drawn in the source's own colour rather than a hardcoded blue: three
+  // sources share this branch now, and identical bars under differently
+  // coloured headline rows read as one merged figure.
   return secondSource
-    + renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
+    + renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), color)
     + renderDetailGroup('By response', '', 'Status',
-        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff');
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), color);
 }
 
 // Which call Discord actually throttled. The two groups above cannot answer
@@ -906,7 +915,7 @@ function renderApiSourceRow(bot, source, throughput, lanes) {
 
   const detail = document.createElement('div');
   detail.className = 'api-detail';
-  detail.innerHTML = renderApiDetail(source.key, throughput, lanes, bot.fansite);
+  detail.innerHTML = renderApiDetail(source.key, throughput, lanes, bot.fansite, source.color);
   row.appendChild(detail);
   return row;
 }
@@ -994,9 +1003,7 @@ function renderApiThroughput(bots) {
         <span class="bot-meta" title="${bot.bot.userId} &middot; ${fmtCount(bot.population)} tracked players">&middot; ${bot.worldCount} worlds &middot; ${bot.discordCount} discords &middot; ${timeAgo(bot.publishedAt)}</span>
       </div>
       <div class="bot-roll">
-        <div class="r"><div class="v">${rollFor('discord')}</div><div class="k">Discord</div></div>
-        <div class="r"><div class="v">${rollFor('tibiadata')}</div><div class="k">TibiaData</div></div>
-        <div class="r"><div class="v">${rollFor('fansiteapi')}</div><div class="k">Fansite</div></div>
+        ${API_SOURCES.map(s => `<div class="r"><div class="v">${rollFor(s.key)}</div><div class="k">${s.roll}</div></div>`).join('')}
         <div class="r"><div class="v">${combinedTotal}</div><div class="k">Total</div></div>
       </div>
       <i class="ti ti-chevron-down bot-chevron" aria-hidden="true"></i>
