@@ -28,10 +28,11 @@ import scala.util.control.NonFatal
  *  [[com.tibiabot.tibiadata.TibiaApi]] so the rest of the bot cannot tell which
  *  upstream answered.
  *
- *  Only the three character methods are served here — this API has two endpoints,
- *  `status` and `GetCharacter` — so worlds, guilds and boosted pass through to
- *  `delegate`. This splits the character firehose away from TibiaData rather than
- *  replacing it; the online-list poll goes where it always went.
+ *  Only the polled character methods are served here — this API has two endpoints,
+ *  `status` and `GetCharacter` — so worlds, guilds, boosted and killer-level
+ *  lookups pass through to `delegate`. This splits the character firehose away
+ *  from TibiaData rather than replacing it; the online-list poll goes where it
+ *  always went.
  *
  *  '''Two request headers are load-bearing.''' Cloudflare answers 403 — not 401,
  *  not 429 — to a request missing either `Accept-Encoding` or a plausible
@@ -232,11 +233,12 @@ final class FansiteApiClient(
     if (breaker.isOpen) blockedResponse
     else paced(name, callerRetriesSoon = true)
 
-  /** A one-shot lookup with nobody polling behind it, so it keeps the inline
-   *  retry — there is no "next cycle" to defer to. */
+  /** Killer-level lookups do not belong on this API — see
+   *  [[DualCharacterApi.getKillerFallback]] for why. Routed to the delegate
+   *  here as well as there so the rule holds for anything holding this client
+   *  directly, rather than resting on the router above it. */
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] =
-    if (breaker.isOpen) blockedResponse
-    else paced(name, callerRetriesSoon = false)
+    delegate.getKillerFallback(name)
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = {
     val (name, reason, reasonText) = input

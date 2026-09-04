@@ -184,18 +184,22 @@ final class DualCharacterApi(
       after(secondaryGrace, scheduler)(Future.successful(None))
     ))
 
-  /** A one-shot level lookup with no schedule behind it, so there is no phase
-   *  to protect and nothing to compare against: ask the source least likely to
-   *  refuse. The fansite API answers a missing character with a clean 404 where
-   *  TibiaData serves a 502 page, and it is not the upstream carrying the
-   *  online-list poll, so it goes first and TibiaData covers a failure. */
+  /** A one-shot level lookup, and the one character path that stays on
+   *  TibiaData whatever the mode.
+   *
+   *  Sending it to the fansite API is tempting — it answers a missing character
+   *  with a clean 404 where TibiaData serves a 502 page — and it was written
+   *  that way first. Two things make it the wrong lane. Nothing rations it: no
+   *  roster, no age cache, one request per unknown killer per death batch, so a
+   *  busy hour would spend a budget sized for hunted characters on whoever
+   *  happened to do the killing. And it is the one character path that passes
+   *  straight through
+   *  [[com.tibiabot.tibiadata.SharedWorldTibiaApi]] without a role check, so it
+   *  would call out from every bot in the fleet — including the consume-only
+   *  secondaries that exist precisely so only the primary's address reaches an
+   *  upstream. */
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] =
-    if (mode == Config.FansiteApi.Off) tibiaData.getKillerFallback(name)
-    else
-      fansite.getKillerFallback(name).flatMap {
-        case right @ Right(_) => Future.successful(right)
-        case Left(_)          => tibiaData.getKillerFallback(name)
-      }
+    tibiaData.getKillerFallback(name)
 
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] =
     getCharacter(input._1).map((_, input._1, input._2, input._3))

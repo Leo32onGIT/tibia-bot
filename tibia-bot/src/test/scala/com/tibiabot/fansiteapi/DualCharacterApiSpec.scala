@@ -184,18 +184,16 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with BeforeAndAfter
     f.get().isLeft shouldBe true
   }
 
-  test("the killer-level lookup prefers the fansite API and falls back") {
-    // A one-shot lookup with no schedule behind it. The fansite API answers a
-    // missing character with a 404 where TibiaData serves a 502 page, and it is
-    // not the upstream carrying the online-list poll.
+  test("the killer-level lookup never reaches the fansite API") {
+    // Nothing rations this path — no roster, no age cache, one request per
+    // unknown killer per death batch — and it is the one character path that
+    // skips the shared-cycle role check, so it would call out from secondaries
+    // too. It stays on TibiaData in every mode.
     val f = new Fixture(Config.FansiteApi.Race)
     f.fansite.result = Right(sheetFrom(t0, level = 700))
-    f.levelOf(await(f.api.getKillerFallback("Someone"))) shouldBe 700
-    f.tibiaData.calls shouldBe 0
-
-    f.fansite.result = Left("404")
     f.tibiaData.result = Right(sheetFrom(t0, level = 800))
     f.levelOf(await(f.api.getKillerFallback("Someone"))) shouldBe 800
+    f.fansite.calls shouldBe 0
     f.tibiaData.calls shouldBe 1
   }
 
