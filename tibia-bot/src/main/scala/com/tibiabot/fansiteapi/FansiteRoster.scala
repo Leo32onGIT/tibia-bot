@@ -8,11 +8,11 @@ import scala.jdk.CollectionConverters._
 
 /** Which characters are worth spending a fansite request on.
  *
- *  The paced lane passes roughly one poll interval's worth of requests per poll
- *  interval — around 800 against a 75ms gap — and a saturated fleet has tens of
- *  thousands of characters online. Something has to choose, and leaving it to
- *  arrival order would mean the choice is made by whichever world's stream
- *  happened to tick first, which is no choice at all.
+ *  The paced lane carries a few thousand characters at most — see `budgetFor`
+ *  for where that number comes from — and a saturated fleet has tens of
+ *  thousands online. Something has to choose, and leaving it to arrival order
+ *  would mean the choice is made by whichever world's stream happened to tick
+ *  first, which is no choice at all.
  *
  *  '''Hunted only.''' A fansite sheet buys nothing but freshness: both sources
  *  are raced and the newer answer wins, so the prize is seeing an event a couple
@@ -107,15 +107,53 @@ object FansiteRoster {
   /** One world's last offering, and when it made it. */
   private final case class Published(candidates: Map[String, Int], at: Instant)
 
-  /** One roster for the process, because the budget it rations is one IP's.
+  /** How much of the sustainable rate the budget actually claims.
    *
-   *  `budget` is derived rather than configured: it is exactly what the pacer
-   *  will let through in a poll interval, so the two cannot drift apart and
-   *  there is no second number to keep honest. */
+   *  The rest is headroom, and both things that eat it are shaped rather than
+   *  random. Characters skipped together come due together — see
+   *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]] for why that clustering is
+   *  deliberate and not worth smoothing — so the lane has to absorb cohorts
+   *  well above the mean. And a cold start asks for every admitted name inside
+   *  one tick. Running the mean at the ceiling would pay for both in refusals. */
+  private val ClaimedFraction = 0.6
+
+  /** How many characters the paced lane can carry.
+   *
+   *  Derived rather than configured, so it follows the numbers that actually
+   *  bound the lane instead of being a third one to keep honest.
+   *
+   *  An admitted character does not cost a request a tick: its own age cache
+   *  skips the fetch until the upstream copy turns over, so it costs one per
+   *  `ttl`. What the pacer sustains is therefore `ttl / gap` names — 4000
+   *  against a 300s window and a 75ms gap — rather than the 800 that a poll
+   *  interval's worth of requests suggests, and `ClaimedFraction` of that is
+   *  taken: 2400 as configured today.
+   *
+   *  With the age cache off there is no window to spread the cost over and an
+   *  admitted character really does cost a request a tick, so the budget falls
+   *  back to what the pacer passes in one. */
+  private[fansiteapi] def budgetFor(
+      pollInterval: FiniteDuration,
+      minRequestGap: FiniteDuration,
+      characterTtl: FiniteDuration,
+      ageCacheEnabled: Boolean
+  ): Int = {
+    val gapMillis = math.max(1L, minRequestGap.toMillis)
+    val sustained =
+      if (ageCacheEnabled) (characterTtl.toMillis / gapMillis * ClaimedFraction).toLong
+      else pollInterval.toMillis / gapMillis
+    math.max(1L, sustained).toInt
+  }
+
+  /** One roster for the process, because the budget it rations is one IP's. */
   // Lazy so that merely touching this object -- which publishing does, for the
   // Published type above -- does not force Config to resolve.
   lazy val shared: FansiteRoster = new FansiteRoster(
-    budget = math.max(1, (TibiaBot.PollInterval.toMillis / Config.FansiteApi.minRequestGap.toMillis).toInt),
+    budget = budgetFor(
+      TibiaBot.PollInterval,
+      Config.FansiteApi.minRequestGap,
+      Config.CharacterCache.ttl,
+      Config.CharacterCache.enabled),
     staleAfter = TibiaBot.PollInterval * 3L
   )
 }

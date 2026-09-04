@@ -164,4 +164,21 @@ class FansiteRosterSpec extends AnyFunSuite with Matchers {
     an[IllegalArgumentException] should be thrownBy roster(budget = 0)
     an[IllegalArgumentException] should be thrownBy roster(staleAfter = Duration.Zero)
   }
+
+  test("the budget is what the lane sustains over a cache window, not over a tick") {
+    // The mistake this arithmetic exists to avoid: an admitted character costs
+    // one request per cache window, not one per poll, so sizing the roster on a
+    // tick's worth of requests rations five times harder than the pacer needs.
+    FansiteRoster.budgetFor(60.seconds, 75.milliseconds, 300.seconds, ageCacheEnabled = true) shouldBe 2400
+  }
+
+  test("with no age cache a character costs a request a tick, and the budget says so") {
+    // Nothing spreads the cost then, so admitting more than a tick's worth would
+    // only hand the pacer refusals to make.
+    FansiteRoster.budgetFor(60.seconds, 75.milliseconds, 300.seconds, ageCacheEnabled = false) shouldBe 800
+  }
+
+  test("a budget can never round down to nothing") {
+    FansiteRoster.budgetFor(60.seconds, 10.minutes, 1.second, ageCacheEnabled = true) shouldBe 1
+  }
 }
