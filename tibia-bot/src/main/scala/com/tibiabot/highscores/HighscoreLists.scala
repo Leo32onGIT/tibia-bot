@@ -64,6 +64,8 @@ object HighscoreLists {
 
   val public: List[HighscoreList] = all.filter(_.source == HighscoreSource.Public)
 
-  /** Page requests one world costs per snapshot, for load arithmetic. */
+  /** The most page requests one world can cost per snapshot, for load
+   *  arithmetic. An upper bound, not a count: a list that ends before page 20
+   *  is not read past its end. */
   def pagesPerWorld(lists: List[HighscoreList]): Int = lists.size * Highscores.MaxPages
 }

@@ -125,12 +125,17 @@ object Highscores {
   /** Rows per page. */
   val PageSize: Int = 50
 
-  /** Pages per list. Page 21 is refused with HTTP 400 / error 11008. */
+  /** The most pages a list can have. Page 21 is refused with HTTP 400 /
+   *  error 11008, and so is any page past a short list's end — see below. */
   val MaxPages: Int = 20
 
-  /** The whole list, and the ceiling on how deep this feature can ever see.
-   *  tibia.com reports exactly this for every world, category and vocation
-   *  tried, including small and new worlds. */
+  /** The ceiling on how deep this feature can ever see, not the size of every
+   *  list. tibia.com reports the full 20 pages / 1000 records for every
+   *  unfiltered list tried, small and new worlds included, because the
+   *  unfiltered list holds the whole world. A vocation filter can run out
+   *  first: Penumbra's `magiclevel/monks` reported 11 pages and 517 records in
+   *  September 2026, a young world and a young vocation. Read `total_pages`
+   *  off the response rather than assuming this. */
   val MaxRecords: Int = PageSize * MaxPages
 
   /** Every page of a list, in order. */

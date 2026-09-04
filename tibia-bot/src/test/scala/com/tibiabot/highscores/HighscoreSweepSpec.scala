@@ -26,10 +26,12 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
   private def entry(name: String, value: Long, level: Int = 400) =
     HighscoreEntry(1, name, "Elite Knight", world, level, value)
 
-  private def response(entries: List[HighscoreEntry], page: Int) = HighscoresResponse(
-    HighscoreData(world, "swordfighting", "all", 20, entries, HighscorePage(page, Highscores.MaxPages, Highscores.MaxRecords)),
-    Information(Api(4, "4.10.0", "abc"), Some("2026-09-02T06:00:00Z"), Status(200))
-  )
+  private def response(entries: List[HighscoreEntry], page: Int,
+                       totalPages: Int = Highscores.MaxPages, totalRecords: Int = Highscores.MaxRecords) =
+    HighscoresResponse(
+      HighscoreData(world, "swordfighting", "all", 20, entries, HighscorePage(page, totalPages, totalRecords)),
+      Information(Api(4, "4.10.0", "abc"), Some("2026-09-02T06:00:00Z"), Status(200))
+    )
 
   /** Serves page N from `pages`, and a Left for anything not in it. */
   private class StubApi(pages: Map[Int, List[HighscoreEntry]]) extends HighscoresApi {
@@ -37,6 +39,19 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     def getHighscores(world: String, list: HighscoreList, page: Int): Future[Either[String, HighscoresResponse]] = {
       requested += ((world, list.toString, page))
       Future.successful(pages.get(page).map(entries => response(entries, page)).toRight("boom"))
+    }
+  }
+
+  /** A list that ends before page 20, the way a vocation-filtered list does on a
+   *  young world: the pages up to `length` answer, and every page past it is
+   *  refused exactly as the endpoint refuses page 21. */
+  private class ShortListApi(length: Int) extends HighscoresApi {
+    val requested = mutable.ListBuffer.empty[Int]
+    def getHighscores(world: String, list: HighscoreList, page: Int): Future[Either[String, HighscoresResponse]] = {
+      requested += page
+      Future.successful(
+        if (page > length) Left("the provided page is larger than max amount of pages")
+        else Right(response(List(entry(s"Monk $page", 40)), page, totalPages = length, totalRecords = length * 50)))
     }
   }
 
@@ -82,6 +97,19 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     api.requested.map(_._3).toList shouldBe Highscores.pages
     result.pagesRead shouldBe Highscores.MaxPages
     result.pagesFailed shouldBe 0
+  }
+
+  test("a list shorter than 20 pages is read to its end and no further") {
+    // Penumbra's monk magic level is 11 pages. Asking for page 12 is refused
+    // with the same 400 that page 21 gets, so walking to 20 regardless would
+    // report nine failed pages and warn about a list that is complete.
+    val api = new ShortListApi(length = 11)
+    val result = await(sweeper(api, new StubRepo).sweepList(world, sword, snapshot))
+
+    api.requested.toList shouldBe (1 to 11).toList
+    result.pagesRead shouldBe 11
+    result.pagesFailed shouldBe 0
+    result.characters shouldBe 11
   }
 
   test("what came back is written against the snapshot, not the time of writing") {
