@@ -264,8 +264,37 @@ than a version bump. Skipping this leaves the container exiting with `database
 files are incompatible with server` and the bot restart-looping against a
 database that never comes up.
 
-Only applies to the bundled `local-db` Postgres. An external database is your
-provider's business.
+**Going to 18 specifically also changes where the data lives.** The 18 image puts
+the cluster in a version-named subdirectory so `pg_upgrade` can see two versions
+at once, so the mount must be `/var/lib/postgresql` and no longer
+`/var/lib/postgresql/data`. Left at the old path the container does not report a
+version mismatch — it says it found data in an "unused mount/volume" and restarts
+in a loop, which reads like a corrupt volume rather than a wrong mount point.
+`docker-compose.yml` is already correct; a hand-rolled `docker run` is not.
+
+The steps below are for the bundled `local-db` Postgres. If yours is a standalone
+container instead — started by hand with `--hostname sqlhost` and pointed at by
+`POSTGRES_HOST` — the shape is the same but the commands are `docker exec` and
+`docker run` rather than `docker compose`, and the volume is plain `pgdata` with
+no project-name prefix:
+
+```bash
+docker stop <bot container on every host that writes to this database>
+docker exec postgres pg_dumpall -U postgres | gzip > pgdump.sql.gz
+gunzip -t pgdump.sql.gz && gzip -dc pgdump.sql.gz | grep -c '^CREATE DATABASE'
+docker pull postgres:18
+docker stop postgres && docker volume rm pgdata
+docker run -d -t --restart unless-stopped --env-file /path/to/.env \
+  --hostname sqlhost --name postgres -p 5432:5432 \
+  -v pgdata:/var/lib/postgresql --network violentbot postgres:18
+gzip -dc pgdump.sql.gz | docker exec -i postgres psql -U postgres
+```
+
+`role "postgres" already exists` during the restore is expected and harmless —
+`pg_dumpall` always emits it and a fresh cluster already has that role. Verify by
+comparing the database list and a few row counts against the old cluster. Note
+that the total role count legitimately grows across a major version, because
+Postgres ships more built-in `pg_*` roles than it used to.
 
 1. With the **old** version still running, dump everything. `pg_dumpall` covers
    all of the bot's databases — `bot_cache`, `premium`, and the `_<guildId>` one
