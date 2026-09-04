@@ -572,9 +572,20 @@ object RespawnButtons extends StrictLogging {
         val ends = claim.endsAt.map(e => s"<t:${e.toInstant.getEpochSecond}:R>").getOrElse("soon")
         s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends."
 
-      case ClaimOutcome.Queued(respawn, _, position) =>
-        s"${Config.yesEmoji} You're **#$position** in the queue for ${RespawnEmbeds.spawnLink(respawn)}. " +
-          "I'll DM you when it's your turn."
+      case ClaimOutcome.BookedNext(respawn, startsAt, booked) =>
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is taken, so the next " +
+          s"**${RespawnEmbeds.humanDuration(booked)}** on it is booked for you from " +
+          s"<t:${startsAt.toInstant.getEpochSecond}:t> (<t:${startsAt.toInstant.getEpochSecond}:R>). " +
+          "I'll DM you before it starts."
+
+      case ClaimOutcome.BookAsked(respawn, _, deadline) =>
+        s"${Config.yesEmoji} The next window on ${RespawnEmbeds.spawnLink(respawn)} is somebody else's " +
+          s"booking. I've asked whether they're hunting it — they have until " +
+          s"<t:${deadline.toInstant.getEpochSecond}:R> to answer, and I'll DM you either way."
+
+      case ClaimOutcome.BookRefused(respawn, reason) =>
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is taken, and I couldn't book the " +
+          s"window after it: $reason"
 
       case ClaimOutcome.AlreadyHolding(respawn, claim) =>
         if (claim.isActive) s"${Config.noEmoji} You're already on ${RespawnEmbeds.spawnLink(respawn)}."
@@ -595,14 +606,11 @@ object RespawnButtons extends StrictLogging {
       case ClaimOutcome.Reserved(respawn, from) =>
         s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is booked from " +
           s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
-          "starting a hunt now. Press **Next** to line up for it instead."
+          "starting a hunt now. Press **Next** to book the window after it instead."
 
       case ClaimOutcome.JustTaken(respawn) =>
         s"${Config.noEmoji} Somebody claimed ${RespawnEmbeds.spawnLink(respawn)} a moment before you. " +
-          "Press **Next** to line up behind them."
-
-      case ClaimOutcome.QueueFull(respawn, limit) =>
-        s"${Config.noEmoji} The queue for ${RespawnEmbeds.spawnLink(respawn)} is full ($limit waiting)."
+          "Press **Next** to book the window after them."
 
       case ClaimOutcome.NoStamina(respawn, needed, tank, resetsAt) =>
         s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} needs **${RespawnEmbeds.humanDuration(needed)}** but you " +

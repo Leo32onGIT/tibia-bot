@@ -32,9 +32,22 @@ object RespawnActions {
     case ClaimOutcome.Claimed(respawn, claim) =>
       ActionResult(ok = true, s"${respawn.displayName} is yours for ${minutes(claim.durationMinutes)}.")
 
-    case ClaimOutcome.Queued(respawn, _, position) =>
-      // Not a refusal: they asked for a spawn and got a place in line for it.
-      ActionResult(ok = true, s"${respawn.displayName} is taken — you are number $position in the queue.")
+    case ClaimOutcome.BookedNext(respawn, startsAt, booked) =>
+      // Not a refusal: they asked for a spawn and got the first window on it
+      // nobody else had. A time, not a place in a line — the whole reason this
+      // books rather than queues is that it can say exactly when.
+      ActionResult(ok = true,
+        s"${respawn.displayName} is taken — ${minutes(booked)} on it is booked for you from ${clock(startsAt)}.")
+
+    case ClaimOutcome.BookAsked(respawn, _, deadline) =>
+      // Also not a refusal: the same question a hand-picked booking over
+      // somebody's slot raises, and their answer decides it.
+      ActionResult(ok = true,
+        s"The next window on ${respawn.displayName} is somebody else's booking. They have been asked " +
+          s"whether they are hunting it, and have until ${clock(deadline)} to answer.")
+
+    case ClaimOutcome.BookRefused(respawn, reason) =>
+      ActionResult(ok = false, s"${respawn.displayName} is taken, and the window after it could not be booked: $reason")
 
     case ClaimOutcome.Shortened(respawn, claim, requested, reservedFrom) =>
       val until = reservedFrom.map(from => s" — booked from ${clock(from)}").getOrElse("")
@@ -51,9 +64,6 @@ object RespawnActions {
 
     case ClaimOutcome.AlreadyHolding(respawn, _) =>
       ActionResult(ok = false, s"You already hold ${respawn.displayName}.")
-
-    case ClaimOutcome.QueueFull(respawn, limit) =>
-      ActionResult(ok = false, s"The queue for ${respawn.displayName} is full at $limit.")
 
     case ClaimOutcome.NoStamina(respawn, needed, stamina, resetsAt) =>
       ActionResult(ok = false,

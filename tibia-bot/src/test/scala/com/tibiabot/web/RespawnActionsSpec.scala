@@ -26,12 +26,27 @@ class RespawnActionsSpec extends AnyWordSpec with Matchers {
       result.message should include("2h")
     }
 
-    // Being queued is a good answer to a well-formed request, not a refusal —
-    // the page uses `ok` only to pick a tone.
-    "treat being queued as a success, and say the position" in {
-      val result = RespawnActions.describe(ClaimOutcome.Queued(spawn, claim(), 3))
+    // Booking the window after the holder is a good answer to a well-formed
+    // request, not a refusal — the page uses `ok` only to pick a tone.
+    "treat a booked next window as a success, and say when it starts" in {
+      val result = RespawnActions.describe(ClaimOutcome.BookedNext(spawn, now.plusHours(2), 90))
       result.ok shouldBe true
-      result.message should include("number 3")
+      result.message should include("1h30")
+      result.message should include(now.plusHours(2).toInstant.toString)
+    }
+
+    // The clash question is not a refusal either: nothing has been taken from
+    // the asker, and the slot's owner decides.
+    "treat an asked-for window as a success, and say when the answer is due" in {
+      val result = RespawnActions.describe(ClaimOutcome.BookAsked(spawn, claim(), now.plusMinutes(30)))
+      result.ok shouldBe true
+      result.message.toLowerCase should include("asked")
+    }
+
+    "pass a booking refusal through in the booker's own words" in {
+      val result = RespawnActions.describe(ClaimOutcome.BookRefused(spawn, "A slot has to be shorter than a day."))
+      result.ok shouldBe false
+      result.message should include("shorter than a day")
     }
 
     "explain a shortened claim and that the shortfall is not charged" in {
@@ -77,10 +92,11 @@ class RespawnActionsSpec extends AnyWordSpec with Matchers {
     "cover every claim outcome without falling through" in {
       val stamina = Stamina("u1", 0, 240, now)
       val all: List[ClaimOutcome] = List(
-        ClaimOutcome.Claimed(spawn, claim()), ClaimOutcome.Queued(spawn, claim(), 1),
+        ClaimOutcome.Claimed(spawn, claim()), ClaimOutcome.BookedNext(spawn, now, 60),
+        ClaimOutcome.BookAsked(spawn, claim(), now), ClaimOutcome.BookRefused(spawn, "no"),
         ClaimOutcome.Shortened(spawn, claim(), 180, None), ClaimOutcome.JustTaken(spawn),
         ClaimOutcome.Reserved(spawn, now), ClaimOutcome.AlreadyHolding(spawn, claim()),
-        ClaimOutcome.QueueFull(spawn, 5), ClaimOutcome.NoStamina(spawn, 60, stamina, now),
+        ClaimOutcome.NoStamina(spawn, 60, stamina, now),
         ClaimOutcome.UnknownSpawn("x"), ClaimOutcome.BadDuration(300, 240), ClaimOutcome.NotConfigured)
       all.foreach { outcome =>
         val result = RespawnActions.describe(outcome)

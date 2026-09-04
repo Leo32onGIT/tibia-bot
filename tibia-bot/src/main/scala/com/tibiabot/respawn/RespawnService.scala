@@ -21,8 +21,13 @@ sealed trait ClaimOutcome
 object ClaimOutcome {
   /** The caller now holds the spawn. */
   final case class Claimed(respawn: Respawn, claim: RespawnClaim) extends ClaimOutcome
-  /** The spawn was taken, so the caller is in line behind it. */
-  final case class Queued(respawn: Respawn, claim: RespawnClaim, position: Int) extends ClaimOutcome
+  /** The spawn was taken, so the next window on it was booked instead. */
+  final case class BookedNext(respawn: Respawn, startsAt: ZonedDateTime, minutes: Int) extends ClaimOutcome
+  /** The next window is somebody else's booking, and they have been asked for it
+   *  — the same question a hand-picked booking over their slot would raise. */
+  final case class BookAsked(respawn: Respawn, slot: RespawnClaim, deadline: ZonedDateTime) extends ClaimOutcome
+  /** The next window could not be booked, in the booker's own words. */
+  final case class BookRefused(respawn: Respawn, reason: String) extends ClaimOutcome
   /** Granted but cut short by a booking: `requested` is what they asked for,
    *  `reservedFrom` when the booking takes over. */
   final case class Shortened(respawn: Respawn, claim: RespawnClaim, requested: Int,
@@ -33,7 +38,6 @@ object ClaimOutcome {
   final case class Reserved(respawn: Respawn, from: ZonedDateTime) extends ClaimOutcome
   /** The caller already holds or is queued for this spawn. */
   final case class AlreadyHolding(respawn: Respawn, claim: RespawnClaim) extends ClaimOutcome
-  final case class QueueFull(respawn: Respawn, limit: Int) extends ClaimOutcome
   /** Not enough stamina left today for a claim this long. */
   final case class NoStamina(respawn: Respawn, needed: Int, stamina: Stamina, resetsAt: ZonedDateTime) extends ClaimOutcome
   final case class UnknownSpawn(query: String) extends ClaimOutcome
@@ -612,9 +616,18 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                            now: ZonedDateTime = ZonedDateTime.now()): Option[ZonedDateTime] =
     repository.reservationsFor(guildId, respawnId, now).flatMap(_.startsAt).headOption
 
-  /** Claim a spawn, or join its queue if someone already holds it. The claim is
-   *  committed before any Discord side effect runs, so a Discord failure leaves a
-   *  valid claim with a stale-looking post rather than losing the claim. */
+  /** Claim a spawn, or book the next free window on it if someone already holds
+   *  it. The claim is committed before any Discord side effect runs, so a Discord
+   *  failure leaves a valid claim with a stale-looking post rather than losing the
+   *  claim.
+   *
+   *  '''Taken means booked, not queued.''' A queue place was invisible on the
+   *  calendar and could only ever say roughly when a turn might come, because a
+   *  projection off the hunt in front is all a queue has. Booking the window
+   *  after the holder says exactly when, draws it beside every other booking,
+   *  and needs no second mechanism to explain. The queue still exists for the
+   *  one case that cannot be a booking — a holder overrunning the slot somebody
+   *  booked, which `startSlot` turns back into a queue place. */
   def claim(guild: Guild, userId: String, userName: String, nickname: String, characterName: String,
             query: String, requestedMinutes: Option[Int],
             now: ZonedDateTime = ZonedDateTime.now()): ClaimOutcome =
@@ -641,7 +654,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   val tank = repository.stamina(guildId, userId, config.staminaMinutes, boundary)
                   // Not affording the whole hunt is no refusal — beginClaim
                   // shortens it. Only an empty tank is refused, and here, so
-                  // nobody joins a queue they could never take a turn in.
+                  // nobody books a window they could not start today. Judged on
+                  // today's tank even for a window past the next server save,
+                  // which is the conservative side of a guess: the alternative
+                  // is booking on a refill that has not happened.
                   if (!tank.unlimited && tank.remainingMinutes < MinimumClaimMinutes)
                     ClaimOutcome.NoStamina(respawn, minutes, tank, ServerSaveSchedule.nextServerSave(now))
                   // An outstanding offer means the spawn is spoken for even if its
@@ -649,7 +665,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                   // would leave two live claims once the offer was accepted.
                   else if (repository.activeClaim(guildId, respawn.id).isDefined ||
                            repository.offeredClaim(guildId, respawn.id).isDefined)
-                    enqueue(guild, respawn, config, userId, userName, nickname, characterName, minutes)
+                    bookNextFree(guild, respawn, userId, userName, nickname, characterName, minutes, now)
                   else
                     beginClaim(guild, respawn, config, userId, userName, nickname, characterName, minutes,
                       RespawnClaim.KindAdHoc, now)
@@ -716,21 +732,30 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
-  private def enqueue(guild: Guild, respawn: Respawn, config: RespawnSettings, userId: String,
-                      userName: String, nickname: String, characterName: String, minutes: Int): ClaimOutcome = {
-    // Queueing deliberately does NOT reserve stamina, or people could park their
-    // whole tank in queues that never reach the front. Reserved at promotion
-    // instead; anyone who can't afford it by then is skipped (see sweepGuild).
-    repository.enqueueClaim(guild.getId, respawn.id, userId, userName, nickname, characterName, minutes,
-      config.queueLimit, RespawnClaim.KindAdHoc) match {
-      case None =>
-        repository.openClaimsForUser(guild.getId, userId).find(_.respawnId == respawn.id) match {
-          case Some(existing) => ClaimOutcome.AlreadyHolding(respawn, existing)
-          case None           => ClaimOutcome.QueueFull(respawn, config.queueLimit)
-        }
-      case Some(queued) =>
-        refreshThread(guild, respawn, config)
-        ClaimOutcome.Queued(respawn, queued, queued.queuePosition)
+  /** Take the first window on a held spawn that nothing else has, as an ordinary
+   *  one-off booking.
+   *
+   *  Everything a hand-picked booking gets, because it goes through the same
+   *  door: a row on the calendar, the clash check, the reminder, and the start
+   *  that reserves stamina only when the hunt actually begins. The single
+   *  difference is that the time is worked out rather than chosen, which is the
+   *  whole point of the button — nobody pressing it wants to negotiate a slot,
+   *  they want the spawn as soon as it is free. */
+  private def bookNextFree(guild: Guild, respawn: Respawn, userId: String, userName: String,
+                           nickname: String, characterName: String, minutes: Int,
+                           now: ZonedDateTime): ClaimOutcome = {
+    val guildId = guild.getId
+    val start = RespawnService.nextFreeStart(
+      heldUntil = repository.activeClaim(guildId, respawn.id).flatMap(_.endsAt),
+      offeredUntil = repository.offeredClaim(guildId, respawn.id).flatMap(_.endsAt),
+      booked = repository.reservationsFor(guildId, respawn.id, now),
+      minutes = minutes,
+      now = now)
+    addSchedule(guild, respawn, userId, userName, nickname, characterName, start, minutes,
+      RespawnSchedule.OneOff, now) match {
+      case Right(ScheduleResult.Booked(saved))               => ClaimOutcome.BookedNext(respawn, saved.anchorAt, minutes)
+      case Right(ScheduleResult.Requested(spawn, slot, due)) => ClaimOutcome.BookAsked(spawn, slot, due)
+      case Left(reason)                                      => ClaimOutcome.BookRefused(respawn, reason)
     }
   }
 
@@ -2334,6 +2359,39 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 }
 
 object RespawnService {
+
+  /** The first moment a hunt of `minutes` could have the spawn to itself.
+   *
+   *  The floor is whoever has it now: the live hunt's end, or the end of a claim
+   *  already being handed over, whichever is later — a spawn mid-handover is
+   *  still spoken for. From there the walk steps over every booking that would
+   *  overlap the window, so pressing this twice puts the second person after the
+   *  first rather than asking the first to give up the slot they just took.
+   *
+   *  `booked` is expected soonest-first, as `reservationsFor` returns it; one
+   *  pass is then enough, because a booking that starts before the cursor has
+   *  already been stepped over by the one that pushed the cursor past it.
+   *
+   *  Never in the past: a claim whose end has gone by but that no sweep has
+   *  closed yet would otherwise produce a start `addSchedule` refuses outright.
+   *  A minute out is close enough — the sweep will have moved by then. */
+  private[respawn] def nextFreeStart(
+      heldUntil: Option[ZonedDateTime],
+      offeredUntil: Option[ZonedDateTime],
+      booked: List[RespawnClaim],
+      minutes: Int,
+      now: ZonedDateTime
+  ): ZonedDateTime = {
+    def later(a: ZonedDateTime, b: ZonedDateTime): ZonedDateTime = if (a.isAfter(b)) a else b
+    val held = List(heldUntil, offeredUntil).flatten.foldLeft(now.plusMinutes(1))(later)
+    booked.foldLeft(held) { (cursor, slot) =>
+      (slot.startsAt, slot.bookedEnd) match {
+        case (Some(from), Some(to)) if from.isBefore(cursor.plusMinutes(minutes.toLong)) && to.isAfter(cursor) =>
+          later(cursor, to)
+        case _ => cursor
+      }
+    }
+  }
 
   /** [[RespawnService.resolve]] against rows already in hand — code first, then
    *  the ladder below — for a caller holding the guild's catalogue already. The

@@ -3322,18 +3322,18 @@ function primaryAction(spawn) {
   if (!canClaimNow(spawn)) return null;
 
   // Wording follows what will actually happen, so nobody presses "Claim" and is
-  // surprised to find themselves in a queue. Only a *live hunt* produces a
-  // queue: booked and confirmed both mean nobody is on it right now, so claiming
-  // succeeds — cut short by the booking, which the answer explains.
-  const joining = spawn.state === 'claimed';
-  const claim = button(joining ? 'Join queue' : 'Claim', joining ? 'btn' : 'btn claim',
-    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
-      if (joining) {
-        // Behind whoever is on it. The position is theirs to know, so the count
-        // moves and nothing claims to know where in the line they are.
-        s.queued = true;
-        s.queueLength = (s.queueLength || 0) + 1;
-      } else {
+  // surprised by what they get. Only a *live hunt* is in the way: booked and
+  // confirmed both mean nobody is on it right now, so claiming succeeds — cut
+  // short by the booking, which the answer explains.
+  //
+  // On a held spawn the same call books the first window nobody else has, which
+  // is the Book button's outcome by another route — so it wears Book's face and,
+  // like doBook, guesses nothing. Only the server knows which window that is, and
+  // a made-up block on the calendar would be a worse answer than a moment's wait.
+  const booking = spawn.state === 'claimed';
+  const claim = button(booking ? 'Book next' : 'Claim', booking ? 'btn' : 'btn claim',
+    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration },
+      booking ? null : s => {
         // Theirs from now until the duration runs out — subject to a booking or
         // a tank the server knows more about, which the answer corrects.
         s.state = 'claimed';
@@ -3344,10 +3344,10 @@ function primaryAction(spawn) {
         s.startsAt = new Date().toISOString();
         s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
         s.lastActivity = s.startsAt;
-      }
-    }));
-  // Joining a queue is not the claim action and does not borrow its face.
-  if (!joining) {
+      }),
+    booking ? 'ti-calendar-plus' : undefined);
+  // Booking a window is not the claim action and does not borrow its face.
+  if (!booking) {
     const face = claimEmojiImg();
     if (face) claim.insertBefore(face, claim.firstChild);
   }
