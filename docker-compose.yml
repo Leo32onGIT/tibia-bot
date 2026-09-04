@@ -1,6 +1,6 @@
 # Violent Bot — Docker Compose
 #
-# Quick start (see README "Running with Docker Compose"):
+# Quick start (see README "Deployment"):
 #   1. sbt docker:publishLocal     -> violent-bot-dedicated:latest
 #   2. cp .env.example .env        and fill it in
 #   3. bundled Postgres:  docker compose --profile local-db up -d
@@ -90,8 +90,9 @@ services:
   # ⚠️ Postgres refuses to start against a data directory written by a different
   # major version, so raising this number is a migration and not a version bump.
   # A `pgdata` volume created by 16 will not open under 18, and the bot then
-  # restarts in a loop against a database that never comes up. See "Upgrading
-  # Postgres" in the README for the dump-and-restore before changing this.
+  # restarts in a loop against a database that never comes up. Before changing it:
+  # `pg_dumpall` the old cluster, `docker volume rm` the pgdata volume, bring up
+  # only postgres on the new tag, then restore the dump into it.
   #
   # The mount is `/var/lib/postgresql`, NOT the `/var/lib/postgresql/data` that
   # every pre-18 example uses. The 18 image puts the cluster in a version-named
