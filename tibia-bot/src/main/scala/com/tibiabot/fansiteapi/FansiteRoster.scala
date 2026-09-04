@@ -17,8 +17,10 @@ import scala.jdk.CollectionConverters._
  *  '''Hunted only.''' A fansite sheet buys nothing but freshness: both sources
  *  are raced and the newer answer wins, so the prize is seeing an event a couple
  *  of minutes sooner. That is worth paying for on the characters somebody
- *  deliberately asked to watch and nowhere else — a neutral player's death is
- *  announced on the next poll either way.
+ *  deliberately asked to watch — named on a hunted list, or in a guild on one —
+ *  and nowhere else: a neutral player's death is announced on the next poll
+ *  either way. Who that covers is
+ *  [[com.tibiabot.state.StreamState.huntedNamesForWorld]]'s answer.
  *
  *  '''Ranked by level, fleet-wide.''' Hunted lists are long, so most of what is
  *  eligible still cannot be afforded, and level is the honest proxy for which

@@ -754,18 +754,10 @@ object BotApp extends App with StrictLogging {
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
 
-  /** Every hunted name any discord tracking `world` has asked about, lowercased.
-   *
-   *  Unioned across discords rather than kept per discord because what reads it
-   *  is per world: two discords watching the same world and hunting the same
-   *  character are one character to fetch, not two. */
-  def huntedNamesForWorld(world: String): Set[String] = {
-    val hunted = huntedPlayersData
-    worldsData.iterator.collect {
-      case (guildId, worlds) if worlds.exists(_.name.equalsIgnoreCase(world)) =>
-        hunted.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase)
-    }.flatten.toSet
-  }
+  /** See [[com.tibiabot.state.StreamState.huntedNamesForWorld]] — it reads four
+   *  of that class's maps, so it lives there and is delegated to here like the
+   *  accessors above. */
+  def huntedNamesForWorld(world: String): Set[String] = streamState.huntedNamesForWorld(world)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
