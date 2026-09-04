@@ -32,15 +32,34 @@ dockerExposedPorts += 443
 // Status dashboard: internal-only, reached via Caddy on the docker-compose
 // network — never published to the host directly (see docker-compose.yml).
 dockerExposedPorts += 8080
-// Pekko 1.7 still reaches for `sun.misc.Unsafe::objectFieldOffset`, which JDK 24
-// marked terminally deprecated, so every start prints four WARNING lines about it
-// before any of our own logging. They go to stderr from the JVM itself, not
-// through logback, so they reach `docker logs` and stop there — the dashboard
-// never sees them. Left visible on purpose: the method is slated for removal and
-// that would be a hard startup failure, not a warning. Pekko 2.x is where the
-// usage goes away; until it is out of milestones, this is the cost of a current
-// JDK. `--sun-misc-unsafe-memory-access=allow` would silence it, at the price of
-// hiding the thing that will one day break the bot.
+// Pekko 1.7 reaches for `sun.misc.Unsafe`, which JDK 24 marked terminally
+// deprecated, so every start prints four WARNING lines before any of our own
+// logging. They come from the JVM on stderr rather than through logback, so they
+// reach `docker logs` and stop there — the dashboard never sees them.
+//
+// Do not go looking at the class the warning names. It reports whichever call
+// lands first, which is `org.apache.pekko.util.Unsafe` reading a field offset off
+// `String.value` to run a hash fast-path — the harmless one. What would actually
+// kill the bot is `pekko.dispatch.AbstractNodeQueue`, whose lock-free mailbox
+// queues are built on compareAndSwap: run with
+// `--sun-misc-unsafe-memory-access=deny` and it fails in that class's static
+// initialiser while ActorSystem is being constructed, i.e. at BotApp.scala's
+// first line of work, with nothing started.
+//
+// Not urgent, and not silenced. Both JDK 25 and JDK 26 default to `warn` (checked
+// against the shipped 26 binary, which contradicts the widely repeated claim that
+// 26 throws), so nothing flips under us while this image pins its own JDK — and
+// `--sun-misc-unsafe-memory-access=allow` is a one-line reprieve if a later JDK
+// does deny by default before the real fix is available. It stays visible because
+// a suppressed warning is one nobody acts on.
+//
+// The real fix is verified, not hoped for: Pekko moved these 21 classes to
+// VarHandle, and `pekko 2.0.0-M4` + `pekko-http 2.0.0-M1` builds this project
+// with ZERO source changes, passes all 1828 tests warning-free, and starts
+// cleanly under `=deny`. It is not taken yet only because pekko-http's 2.x line
+// has sat at its first milestone since Jan 2026 while core reached M4 — and
+// pekko-http is this bot's hot path. When 2.0.0 goes final this is a two-line
+// version bump; re-run the suite and drop this comment.
 dockerBaseImage := "eclipse-temurin:25-jre"
 // The respawn board is drawn with Java2D (presentation.RespawnBoardImage). A
 // JVM with no DISPLAY infers this on its own, so this is insurance rather than a
