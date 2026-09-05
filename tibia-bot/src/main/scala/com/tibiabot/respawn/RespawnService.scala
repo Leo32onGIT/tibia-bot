@@ -46,6 +46,17 @@ object ClaimOutcome {
   case object NotConfigured extends ClaimOutcome
 }
 
+/** What retiming a live claim through Config settled on.
+ *
+ *  `minutes` is what the claim now runs for, which is not always what was asked:
+ *  a hunt already longer than the new figure keeps the length it has reached, and
+ *  one reaching over somebody's booking is cut back to where that booking starts.
+ *  `reservedFrom` says which of the two happened — present only for the booking —
+ *  because the caller has to explain the difference and the two explanations are
+ *  not interchangeable. Mirrors [[ClaimOutcome.Shortened]], which says the same
+ *  thing about a claim being made rather than one being retimed. */
+final case class Retimed(respawn: Respawn, minutes: Int, reservedFrom: Option[ZonedDateTime])
+
 sealed trait ReleaseOutcome
 object ReleaseOutcome {
   /** Gave up an active claim. `offered` is the handover offer that went out to
@@ -585,16 +596,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     repository.stamina(guildId, userId, settings.staminaMinutes, boundary)
   }
 
-  /** When a claim starting at `startsAt` for `minutes` should end, stopping short
-   *  of `nextReservation` rather than running into it. The single place that
-   *  truncation happens, so no call site has to repeat it. */
-  def endsAtFor(startsAt: ZonedDateTime, minutes: Int,
-                nextReservation: Option[ZonedDateTime] = None): ZonedDateTime = {
-    val wanted = startsAt.plusMinutes(minutes.toLong)
-    // Taking the reservation as a parameter keeps this pure and testable.
-    nextReservation.filter(_.isBefore(wanted)).getOrElse(wanted)
-  }
-
   /** The shortest claim worth granting. Below this, truncating against a booked
    *  slot gives somebody a hunt that is over before they have walked there, so
    *  the claim is refused with an explanation instead. */
@@ -688,7 +689,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     // would truncate against itself.
     val reservation =
       if (kind == RespawnClaim.KindScheduled) None else nextReservationStart(guildId, respawn.id, now)
-    val untilBooking = endsAtFor(now, minutes, reservation)
+    val untilBooking = RespawnService.endsAtFor(now, minutes, reservation)
     val allowedByBooking = math.max(0, java.time.Duration.between(now, untilBooking).toMinutes).toInt
     if (allowedByBooking < MinimumClaimMinutes)
       return ClaimOutcome.Reserved(respawn, reservation.getOrElse(untilBooking))
@@ -886,7 +887,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  that point simply ends the hunt as soon as the next sweep runs.
    */
   def setClaimDuration(guild: Guild, userId: String, respawnId: Long, newTotalMinutes: Int,
-                       now: ZonedDateTime = ZonedDateTime.now()): Either[String, (Respawn, Int)] =
+                       now: ZonedDateTime = ZonedDateTime.now()): Either[String, Retimed] =
     settings(guild.getId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
@@ -905,11 +906,42 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // just a stored number until they start.
               repository.setClaimDuration(guildId, claim.id, newTotalMinutes, None)
               respawn.foreach(refreshThread(guild, _, config))
-              respawn.map(r => Right((r, newTotalMinutes))).getOrElse(Left("That respawn is gone."))
+              respawn.map(r => Right(Retimed(r, newTotalMinutes, None))).getOrElse(Left("That respawn is gone."))
             } else {
               val start = claim.startsAt.getOrElse(claim.claimedAt)
               val elapsed = math.max(0L, java.time.Duration.between(start, now).toMinutes).toInt
-              val total = math.max(newTotalMinutes, elapsed)
+              val asked = math.max(newTotalMinutes, elapsed)
+
+              // A booked slot cuts this claim short exactly as it cuts a new one
+              // short — see beginClaim, which has always done this. Config was the
+              // one door onto a spawn that did not: a holder could extend straight
+              // over somebody's booked window, and the sweep would then find a real
+              // collision when that window came due, cancel the booking, drop its
+              // owner in the queue and DM them that their slot was taken. That is
+              // precisely the "holder overrunning the slot somebody booked" the
+              // queue is documented to exist for — and with the front door capped,
+              // this button was the only way left to cause it.
+              //
+              // Their own hunt is never what truncates them: a reservation stops
+              // being one the moment it starts, so what is left ahead is somebody
+              // else's. Shortening is unaffected, since endsAtFor only ever pulls
+              // an end earlier.
+              val reservation = nextReservationStart(guildId, respawnId, now)
+              val (total, cappedBy) = RespawnService.retimedTo(start, asked, reservation)
+
+              // Asked for more, and the booking leaves nothing past what the hunt
+              // has already used. Refused rather than silently held at its current
+              // length, so the answer names what is in the way — as
+              // ClaimOutcome.Reserved does for the same situation reached by
+              // claiming rather than by retiming.
+              cappedBy match {
+                case Some(from) if total <= elapsed && asked > elapsed =>
+                  return Left(s"${respawn.map(_.displayName).getOrElse("That respawn")} is booked from " +
+                    s"<t:${from.toInstant.getEpochSecond}:t>, so there's no room to run on past it. " +
+                    "Book the window after it instead.")
+                case _ => ()
+              }
+
               val delta = total - claim.durationMinutes
               val boundary = resetBoundary(now)
 
@@ -926,7 +958,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                 if (delta < 0) repository.refundStamina(guildId, userId, -delta, boundary)
                 repository.setClaimDuration(guildId, claim.id, total, Some(start.plusMinutes(total.toLong)))
                 respawn.foreach(refreshThread(guild, _, config))
-                respawn.map(r => Right((r, total))).getOrElse(Left("That respawn is gone."))
+                respawn.map(r => Right(Retimed(r, total, cappedBy))).getOrElse(Left("That respawn is gone."))
               }
             }
         }
@@ -2518,6 +2550,38 @@ object RespawnService {
    *  stops being requestable once it starts. */
   def answerDeadline(slotStart: ZonedDateTime, graceMinutes: Int): ZonedDateTime =
     slotStart.plusMinutes(graceMinutes.toLong)
+
+  /** When a claim starting at `startsAt` for `minutes` should end, stopping short
+   *  of `nextReservation` rather than running into it. The single place that
+   *  truncation happens, so no call site has to repeat it.
+   *
+   *  Taking the reservation as a parameter keeps this pure and testable, which is
+   *  why it sits here rather than on the class. */
+  def endsAtFor(startsAt: ZonedDateTime, minutes: Int,
+                nextReservation: Option[ZonedDateTime] = None): ZonedDateTime = {
+    val wanted = startsAt.plusMinutes(minutes.toLong)
+    nextReservation.filter(_.isBefore(wanted)).getOrElse(wanted)
+  }
+
+  /** What retiming a live claim settles on: how long it runs to, and the booking
+   *  that cut it short if one did.
+   *
+   *  The same truncation a new claim gets from [[endsAtFor]], expressed as a
+   *  length because that is what a claim stores. `asked` has already been floored
+   *  at whatever has elapsed, so this never hands back less time than a hunt has
+   *  already used; the caller decides what to do when that is all it gets.
+   *
+   *  Split out and pure because it is the whole of the rule that Config used to
+   *  be missing — a holder could extend straight over somebody's booked window —
+   *  and a rule that lives inside a method needing a Guild and a database is one
+   *  nothing can check. */
+  def retimedTo(start: ZonedDateTime, asked: Int,
+                reservation: Option[ZonedDateTime]): (Int, Option[ZonedDateTime]) = {
+    val wanted = start.plusMinutes(asked.toLong)
+    val end = endsAtFor(start, asked, reservation)
+    val minutes = math.max(0L, java.time.Duration.between(start, end).toMinutes).toInt
+    (minutes, if (end.isBefore(wanted)) reservation else None)
+  }
 
   /** How long a claim actually runs, given what a booking leaves and what is in
    *  the tank. Both limits shorten rather than refuse — refusing left the spawn

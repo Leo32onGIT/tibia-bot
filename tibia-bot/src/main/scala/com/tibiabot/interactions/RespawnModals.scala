@@ -752,16 +752,26 @@ object RespawnModals extends StrictLogging {
               case Some((userId, userName)) =>
                 service.setClaimDuration(event.getGuild, userId, respawnId, minutes) match {
                   case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
-                  case Right((respawn, applied)) =>
+                  case Right(retimed) =>
+                    val respawn = retimed.respawn
+                    val applied = retimed.minutes
                     val whose =
                       if (forHolder && userId != event.getUser.getId) s" for ${Names.user(userName)}" else ""
                     val moved = movedTo.map { case (_, name) => s"\nIt's ${Names.user(name)}'s hunt now." }
                       .getOrElse("")
-                    val note =
-                      if (applied != minutes)
+                    // Two ways to get less than was asked for, and they need
+                    // different sentences: a hunt already past that length ends
+                    // now, while one reaching over a booking simply stops where
+                    // the booking starts and the spawn carries on without them.
+                    val note = retimed.reservedFrom match {
+                      case Some(from) =>
+                        s"\nIt's booked from <t:${from.toInstant.getEpochSecond}:t>, so the hunt is cut to " +
+                          s"${RespawnEmbeds.humanDuration(applied)} and ends there."
+                      case None if applied != minutes =>
                         s"\nThe hunt had already run longer than that, so it's set to " +
                           s"${RespawnEmbeds.humanDuration(applied)} and ends now."
-                      else ""
+                      case None => ""
+                    }
                     reply(event, s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)}$whose is now set to " +
                       s"${RespawnEmbeds.humanDuration(applied)}.$moved$note")
                 }
