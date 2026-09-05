@@ -29,6 +29,16 @@ object SlashRouting {
     "boosted"      -> (BoostedCommands.handle _),
     "patreon"      -> (PatreonCommands.handle _),
     "stamina"      -> (RespawnCommands.handle _),
-    "bookings"     -> (RespawnCommands.bookings _)
+    "bookings"     -> (RespawnCommands.bookings _),
+    "lootsplit"    -> (LootSplitCommands.handle _)
   )
+
+  /** Commands that answer with a form rather than a message.
+   *
+   *  `replyModal` has to be an interaction's first response, so BotListener must
+   *  know before it dispatches that this one cannot be deferred — and cannot wait
+   *  for a worker either, since nothing has acknowledged Discord yet. Kept here
+   *  rather than in the handler because that is too late to be asked.
+   */
+  val opensModal: Set[String] = Set("lootsplit")
 }

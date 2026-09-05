@@ -1874,11 +1874,19 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
 
   /** Tell a holder their claim is over. Only for claims that ended on their own —
-   *  by running out, or by being taken over once the handover window closed. */
+   *  by running out, or by being taken over once the handover window closed.
+   *
+   *  Carries the Loot Split form, because this DM lands at the one moment a party
+   *  has a hunt to split and is looking at their phone: the hunt has just finished.
+   *  It has nothing to do with the claim — the form reads pasted text and does
+   *  arithmetic on it — so pressing it changes no state here, and it retires itself
+   *  once it has produced a split (see [[com.tibiabot.lootsplit.LootSplitIds]]).
+   *  `/lootsplit` is the way back to it afterwards. */
   private def notifyClaimEnded(guild: Guild, respawn: Respawn, claim: RespawnClaim): Unit =
     RespawnThreads.dm(guild, claim.userId,
       RespawnEmbeds.dmEmbed("Claim ended", RespawnEmbeds.claimEnded(respawn),
-        imageFor(respawn), RespawnEmbeds.RedColor))
+        imageFor(respawn), RespawnEmbeds.RedColor),
+      Some(com.tibiabot.lootsplit.LootSplitIds.buttonRow))
 
   /** Rewrite a spawn's post to match the database — the one function keeping
    *  Discord and claim state in step, called after every mutation. Creates the

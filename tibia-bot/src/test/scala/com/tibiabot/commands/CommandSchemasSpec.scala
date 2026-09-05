@@ -10,7 +10,8 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
   test("registered commands have the expected names") {
     CommandSchemas.commands.map(_.getName) should contain theSameElementsAs List(
       "setup", "remove", "hunted", "allies", "neutral", "fullbless",
-      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "stamina", "bookings")
+      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "stamina", "bookings",
+      "lootsplit")
   }
 
   test("admin command list adds /admin to the normal set") {
@@ -36,7 +37,7 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
 
   test("initialCommands is the minimal set visible before any world is configured") {
     CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
-      List("setup", "help", "galthen", "boosted", "patreon")
+      List("setup", "help", "galthen", "boosted", "patreon", "lootsplit")
   }
 
   test("commands is exactly initialCommands plus worldConfigCommands") {
