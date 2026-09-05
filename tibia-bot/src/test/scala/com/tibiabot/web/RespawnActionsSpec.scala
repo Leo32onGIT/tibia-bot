@@ -148,4 +148,35 @@ class RespawnActionsSpec extends AnyWordSpec with Matchers {
       message should not include "forbidden"
     }
   }
+
+  /** A live hunt stretched past the next booking is allowed to overrun, so this
+   *  sentence is the whole of what a moderator is told before it happens. It said
+   *  the booking would be "cut short", which is not what the sweep does to it. */
+  "overrunNote" should {
+
+    "say nothing when the hunt reaches nobody" in {
+      RespawnActions.overrunNote(None, owner = "Nubbz") shouldBe ""
+    }
+
+    "say the booking is cancelled and its owner queued, not shortened" in {
+      val note = RespawnActions.overrunNote(Some("Arkedy"), owner = "Nubbz")
+      note should include("cancelled")
+      note should include("queue")
+      note should not include "cut short"
+    }
+
+    // Reaching your own next booking folds into the hunt you are already having
+    // — nobody is cancelled and nobody is queued, so it must not say they are.
+    "not threaten the holder with their own booking" in {
+      val note = RespawnActions.overrunNote(Some("Nubbz"), owner = "Nubbz")
+      note should include("fold")
+      note should not include "cancelled"
+      note should not include "queue"
+    }
+
+    "start with a space, since it is appended to the sentence before it" in {
+      RespawnActions.overrunNote(Some("Arkedy"), owner = "Nubbz") should startWith(" ")
+      RespawnActions.overrunNote(Some("Nubbz"), owner = "Nubbz") should startWith(" ")
+    }
+  }
 }

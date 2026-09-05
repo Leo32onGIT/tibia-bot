@@ -382,12 +382,10 @@ final class JdaRespawnActions(
               // past rather than left to be discovered: the write has happened,
               // and this is the one moment somebody is looking at the answer.
               //
-              // Whose booking is not. The panel answers about the slot that was
-              // selected, and the grid beside the message already says whose
-              // every block on it is.
-              val overrun = edit.cutInto
-                .map(_ => " It now runs into the next booking, which will be cut short.")
-                .getOrElse("")
+              // The wording lives in RespawnActions with the rest of the sentences
+              // somebody reads, so it can be checked without standing up JDA — see
+              // overrunNote for what it has to get right.
+              val overrun = RespawnActions.overrunNote(edit.cutInto, edit.owner)
               // Which of the two it was, because the panel acts on both and
               // "the booking" and "the claim" are the words the grid and the
               // card already use for them.
