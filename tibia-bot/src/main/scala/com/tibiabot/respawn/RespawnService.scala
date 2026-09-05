@@ -1483,13 +1483,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
       }
 
-      // Slots whose time has come.
-      repository.dueReservations(guildId, now).foreach { slot =>
-        Try(startSlot(guild, config, slot, now)).failed.foreach { error =>
-          logger.warn(s"Failed to start respawn slot ${slot.id} in guild '$guildId'", error)
-        }
-      }
-
       // Lapsed handover offers first. The offer and the outgoing claim's limbo
       // window are the same length, so they elapse on the same sweep; clearing the
       // offer here lets the claim below move straight on to the next person.
@@ -1554,6 +1547,33 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           }
         }.failed.foreach { error =>
           logger.warn(s"Failed to give up unconfirmed respawn claim ${claim.id} in guild '$guildId'", error)
+        }
+      }
+
+      // Slots whose time has come — and last, after everything above has let go
+      // of a spawn it had finished with.
+      //
+      // The order is the whole point, not housekeeping. Back-to-back bookings
+      // share an instant: one ends at 14:00 and the next begins at 14:00, and
+      // both come due on the same pass. Started first, `startSlot` read the
+      // outgoing claim — expired seconds ago but not yet closed, because closing
+      // it is below — as somebody still on the spawn, and took its collision
+      // branch: it cancelled the booking as taken-over, put its owner in the
+      // queue, and DM'd them "your slot is taken" about a spawn that was free
+      // moments later. The queue then promoted them, and a promotion is a fresh
+      // stopwatch rather than the window they booked — so the hunt ran
+      // `now + duration` instead of to its booked end and overran into whoever
+      // was booked next, who had been holding a clean boundary all along.
+      // Observed on 5 Sep 2026 as a 17-second overlap: two bookings drawn as one
+      // pile on the dashboard calendar, which was reporting it accurately.
+      //
+      // Run last, the spawn is already free by the time the booking is due, so
+      // `startSlot` starts it in place and keeps `bookedEnd`. A spawn still held
+      // by somebody whose claim has *not* expired is a real collision and still
+      // takes the branch it always did.
+      repository.dueReservations(guildId, now).foreach { slot =>
+        Try(startSlot(guild, config, slot, now)).failed.foreach { error =>
+          logger.warn(s"Failed to start respawn slot ${slot.id} in guild '$guildId'", error)
         }
       }
 
