@@ -41,6 +41,31 @@ import scala.util.control.NonFatal
  *  racing that sweep may hold a just-closed pool; it asks for a new one and
  *  retries, which is cheaper than reasoning about it.
  *
+ *  ==Pools that come and go must not be pinned by the threads that used them==
+ *  Everything above adds up to a process that builds and tears down pools
+ *  continuously — measured on blue at 0.7 a second, ninety thousand of them
+ *  against a hundred and twenty-five databases in a day and a half. HikariCP is
+ *  built for the opposite: a pool made once and held for the life of the process.
+ *
+ *  Its `ConcurrentBag` caches the entries a thread has borrowed in a
+ *  `ThreadLocal<List<Object>>`, and `ConcurrentBag.close()` only sets a flag — it
+ *  never clears them. Those references are strong unless
+ *  `com.zaxxer.hikari.useWeakReferences` says otherwise, so every
+ *  long-lived worker thread's `ThreadLocalMap` goes on holding
+ *  `PoolEntry -> HikariPool -> HikariDataSource` for every pool it ever borrowed
+ *  from, long after the pool was closed and forgotten here. The `ThreadLocal` key
+ *  dies with the pool and the entry goes stale, but a stale entry's *value* is
+ *  only dropped by `ThreadLocalMap`'s opportunistic cleanup, which does not keep
+ *  up with thousands of them.
+ *
+ *  Hikari turns weak references on by itself when it is loaded by something other
+ *  than the system classloader — an application server, where pools are undeployed
+ *  while threads live on. That is exactly the situation here, and a bot on a plain
+ *  `-cp` classpath is the one shape of it Hikari cannot detect. So we say so
+ *  ourselves, in this class's constructor — see `enableWeakThreadLocals` on the
+ *  companion. It also means the leak cannot reproduce under sbt, whose test
+ *  classloader trips Hikari's own detection.
+ *
  *  ==What is deliberately not pooled==
  *  [[admin]] and [[premium]] are maintenance connections used a handful of times,
  *  where a pool is machinery for nothing. [[guildUnpooled]] has its own reason —
@@ -55,6 +80,12 @@ final class PooledConnectionProvider(
   maxPools: Int = PooledConnectionProvider.MaxPools,
   unpooled: ConnectionProvider = null
 ) extends ConnectionProvider with StrictLogging {
+
+  // Before anything can build a pool, since a bag reads the property when it is
+  // constructed and a bag built without it pins its pool forever. This provider
+  // is the only thing in the bot that makes a HikariDataSource, and its own
+  // constructor is the last moment that is true.
+  PooledConnectionProvider.enableWeakThreadLocals()
 
   /** Where the unpooled connections come from. Injectable so a test can watch
    *  what actually reaches the driver; ordinary construction builds the plain
@@ -267,6 +298,30 @@ final class PooledConnectionProvider(
 }
 
 object PooledConnectionProvider {
+
+  /** HikariCP's own switch for "pools here do not live as long as the threads
+   *  that borrow from them" — see the class comment for what it costs to leave
+   *  off. Hikari sets it itself when it detects an application server's
+   *  classloader; a bot on a plain classpath has to ask. */
+  private[persistence] val WeakReferencesProperty: String = "com.zaxxer.hikari.useWeakReferences"
+
+  /** Ask for it, unless whoever started the JVM has already said either way.
+   *
+   *  A process-wide property rather than something on [[HikariConfig]], because
+   *  that is the only place Hikari reads it from. Set here rather than in each
+   *  host's `JAVA_OPTS` so it travels with the code that needs it: the two are
+   *  edited by different hands on different days, and a deploy that carried the
+   *  pool churn without the property would put the heap back where it was.
+   *
+   *  An explicit `-D` still wins, so a host can turn it off to reproduce the old
+   *  behaviour without a build.
+   */
+  private[persistence] def enableWeakThreadLocals(): Unit =
+    if (System.getProperty(WeakReferencesProperty) eq null) {
+      System.setProperty(WeakReferencesProperty, "true")
+      ()
+    }
+
   /** How many connections one guild's database may have at once.
    *
    *  A ceiling rather than a target: the pool holds none when nothing is
