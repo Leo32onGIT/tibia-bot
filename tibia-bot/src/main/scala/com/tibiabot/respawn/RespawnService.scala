@@ -302,9 +302,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(value) if value < MinimumClaimMinutes =>
             Left(s"A claim ceiling has to be at least " +
               s"${RespawnEmbeds.humanDuration(MinimumClaimMinutes)}.")
-          case Some(value) if value > MaxSpawnCeilingMinutes =>
+          // The look-ahead binds as well as the flat ceiling — see spawnCeilingLimit.
+          case Some(value) if value > RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes) =>
             Left(s"A claim ceiling can be at most " +
-              s"${RespawnEmbeds.humanDuration(MaxSpawnCeilingMinutes)}.")
+              s"${RespawnEmbeds.humanDuration(RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes))}.")
           case _ =>
             repository.setRespawnMaxDuration(guildId, respawn.id, minutes)
             val updated = respawn.copy(maxDurationMinutes = minutes)
@@ -605,11 +606,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  claim length, which deliberately does not apply here (see [[editSlot]]) —
    *  only a guard against a number that could not be a hunt. */
   val MaxModeratorSlotMinutes: Int = 12 * 60
-
-  /** The longest ceiling a single spawn may be given. A day, matching
-   *  `RespawnSchedule.Daily`: `addSchedule` refuses anything longer, so a higher
-   *  ceiling would be usable from one door and not the other. */
-  val MaxSpawnCeilingMinutes: Int = RespawnSchedule.Daily
 
 
   /** When the next booked slot on a spawn starts, if there is one. */
@@ -2550,6 +2546,35 @@ object RespawnService {
    *  stops being requestable once it starts. */
   def answerDeadline(slotStart: ZonedDateTime, graceMinutes: Int): ZonedDateTime =
     slotStart.plusMinutes(graceMinutes.toLong)
+
+  /** The longest ceiling a single spawn may be given. A day, matching
+   *  `RespawnSchedule.Daily`: `addSchedule` refuses anything longer, so a higher
+   *  ceiling would be usable from one door and not the other.
+   *
+   *  Not the whole answer on its own — see [[spawnCeilingLimit]], which is what
+   *  the setter actually enforces. */
+  val MaxSpawnCeilingMinutes: Int = RespawnSchedule.Daily
+
+  /** The ceiling a spawn may actually be given, which is this or the window its
+   *  bookings are written in, whichever is smaller.
+   *
+   *  A claim is cut short against the next *booked* slot, and a repeating rule's
+   *  slots are only written once they come within `schedule-look-ahead-minutes`.
+   *  So a claim able to outlive that window can be started while tonight's slot
+   *  does not exist yet, be capped against nothing, and still be running when the
+   *  slot is written and comes due — which the sweep then reads as a collision,
+   *  cancelling the booking and queueing its owner. Every other way of causing
+   *  that has been closed; this is the arithmetic that keeps the last one shut.
+   *
+   *  Latent rather than live when it was found on 5 Sep 2026: `MaxSpawnCeilingMinutes`
+   *  is a day against a twelve-hour look-ahead, so the code permitted it, but the
+   *  longest ceiling set anywhere in the fleet was 150 minutes. Taking the smaller
+   *  of the two costs nothing anybody is using and stops it being reachable at all.
+   *
+   *  Takes the look-ahead rather than reading Config, so the relationship can be
+   *  checked without a populated environment — see ScheduleHorizonSpec. */
+  def spawnCeilingLimit(lookAheadMinutes: Int): Int =
+    math.min(MaxSpawnCeilingMinutes, lookAheadMinutes)
 
   /** When a claim starting at `startsAt` for `minutes` should end, stopping short
    *  of `nextReservation` rather than running into it. The single place that

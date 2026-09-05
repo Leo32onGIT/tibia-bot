@@ -207,7 +207,10 @@ object RespawnModals extends StrictLogging {
         // interaction outright rather than merely looking cramped.
         label("Maximum claim length (minutes)",
           s"${respawn.displayName}. Empty follows the server ($serverMax). " +
-            s"${service.MinimumClaimMinutes} to ${service.MaxSpawnCeilingMinutes}.",
+            // The limit the setter actually enforces, not the flat ceiling — a form
+            // offering a number that comes back refused is worse than a lower one.
+            s"${service.MinimumClaimMinutes} to " +
+            s"${com.tibiabot.respawn.RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes)}.",
           field.build())
       )
       .build()
