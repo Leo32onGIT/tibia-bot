@@ -27,8 +27,9 @@ import net.dv8tion.jda.api.modals.Modal
  *  only button being on a respawn DM: a split has to arrive as an ordinary message,
  *  since the whole use of it is copying three lines out an hour later, while a paste
  *  that failed to read should be ephemeral so a guild channel is not left holding
- *  somebody's typo. `RespawnModals` also refuses anything submitted with no guild,
- *  which is every submission from a DM.
+ *  somebody's typo. That same hour is why a split carries the analyser text back
+ *  as a file — see [[LootSplitEmbeds.paste]]. `RespawnModals` also refuses anything
+ *  submitted with no guild, which is every submission from a DM.
  */
 object LootSplit extends StrictLogging {
 
@@ -65,7 +66,12 @@ object LootSplit extends StrictLogging {
         // and the fix is to paste again.
         event.replyEmbeds(Embeds.response(s"${Config.noEmoji} $problem")).setEphemeral(true).queue()
       case Right(hunt) =>
-        event.replyEmbeds(LootSplitEmbeds.session(hunt, Config.goldEmoji)).queue()
+        // The paste goes up with the split rather than instead of it: the modal
+        // that carried it is gone as soon as this returns, and the embed is a
+        // reading rather than a copy.
+        event.replyEmbeds(LootSplitEmbeds.session(hunt, Config.goldEmoji))
+          .addFiles(LootSplitEmbeds.paste(pasted))
+          .queue()
         spendButton(event)
     }
   }

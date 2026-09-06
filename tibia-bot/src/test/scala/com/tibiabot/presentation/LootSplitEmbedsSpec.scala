@@ -6,6 +6,7 @@ import org.scalatest.OptionValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
 import scala.jdk.CollectionConverters._
 
@@ -145,5 +146,18 @@ class LootSplitEmbedsSpec extends AnyFunSuite with Matchers with OptionValues {
     val crowd = (1 to 40).map(index =>
       member(s"Party Member Number $index", balance = 0L, damage = index * 1000L, healing = 1L)).toList
     field(split(Hunt.copy(members = crowd)), "Damage").getValue should include("more")
+  }
+
+  test("the paste comes back byte for byte, under a name a reader will recognise") {
+    val analyser =
+      """Session data: From 2026-09-06, 09:54:08 to 2026-09-06, 10:49:12
+        |Session: 00:55h
+        |  Loot: 3,350,380
+        |""".stripMargin
+    val upload = LootSplitEmbeds.paste(analyser)
+    upload.getName shouldBe "session.txt"
+    // Verbatim, down to the trailing newline and the spaces the client indents
+    // with — the file is the paste, not a tidied copy of it.
+    new String(upload.getData.readAllBytes(), StandardCharsets.UTF_8) shouldBe analyser
   }
 }

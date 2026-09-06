@@ -3,7 +3,9 @@ package com.tibiabot.presentation
 import com.tibiabot.lootsplit.{HuntMember, HuntSession, HuntTransfer}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.utils.FileUpload
 
+import java.nio.charset.StandardCharsets
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 
@@ -15,6 +17,9 @@ import java.util.Locale
  *  rather than a text selection, and so an amount can never run into the name
  *  beside it. Everything above them is a reading of the session, and reads as
  *  prose.
+ *
+ *  The paste itself rides along as [[paste]], since a reading is not the thing
+ *  it was read from.
  */
 object LootSplitEmbeds {
 
@@ -55,6 +60,30 @@ object LootSplitEmbeds {
     footer(hunt).foreach(text => embed.setFooter(text))
     embed.build()
   }
+
+  /** What Discord calls the paste once it is a file. Fixed rather than named
+   *  after the session: the same word sits under every split, so the eye learns
+   *  it, and nothing downstream matches on it. */
+  val PasteFileName: String = "session.txt"
+
+  /** The analyser text the split was read from, as an attachment for the same
+   *  message.
+   *
+   *  The embed is a reading, and a reading drops things: what each member looted
+   *  and spent, the exact window the session covers, anyone the columns or the
+   *  field limits had to cut. The paste is the only copy of all of it, and it
+   *  arrived inside a modal that is gone the moment it is submitted — so an hour
+   *  later, when somebody wants the numbers behind a transfer or wants to split
+   *  the same session again with a name corrected, there is nothing to go back
+   *  to. Attaching it costs a few kilobytes and keeps the source beside the
+   *  answer.
+   *
+   *  A `.txt` because that is what makes Discord preview it inline and let the
+   *  reader fold it away again, rather than offering a download of something
+   *  they cannot see first. Sent verbatim, whitespace and all: it is evidence,
+   *  and the parser's opinion of it is already in the embed. */
+  def paste(analyser: String): FileUpload =
+    FileUpload.fromData(analyser.getBytes(StandardCharsets.UTF_8), PasteFileName)
 
   private def title(hunt: HuntSession): String =
     hunt.members.size match {
