@@ -23,7 +23,11 @@ final class HighscoreAnnouncer(
     resolveGuilds: (String, List[HighscoreEvent]) => Future[Map[String, String]],
     channelFor: (String, String) => Option[TextChannel],
     send: (TextChannel, String) => Unit,
-    onPosted: (String, Int, String) => Unit
+    onPosted: (String, Int, String) => Unit,
+    // Injected like everything else here, so this class needs no configuration
+    // to construct — the default renders the lines exactly as they read before
+    // any emoji existed.
+    skillIcon: HighscoreCategory => String = _ => ""
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
   def announce(world: String, category: HighscoreCategory, advances: List[HighscoreEvent]): Unit = {
@@ -55,7 +59,7 @@ final class HighscoreAnnouncer(
       advances: List[HighscoreEvent],
       guildOf: String => String
   ): Unit = {
-    val lines = HighscoreAnnouncement.linesFor(target, category, advances, guildOf)
+    val lines = HighscoreAnnouncement.linesFor(target, category, advances, guildOf, skillIcon(category))
     if (lines.nonEmpty) {
       channelFor(target.guildId, target.channelId) match {
         case Some(channel) =>

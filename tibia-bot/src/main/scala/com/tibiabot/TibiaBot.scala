@@ -703,7 +703,12 @@ class TibiaBot(
                   val guildIcon = presentation.GuildIcons.guildIcon(guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck)
                   val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.equalsIgnoreCase(world))
                   val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
-                  val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
+                  // Config.levelUpEmoji sits where the skill advances put theirs
+                  // (see presentation.SkillEmojis), so the two kinds of line in
+                  // this channel keep reading as one kind of message. It is the
+                  // same emoji this path already flags the online list with a few
+                  // lines below, which is the point: one mark for "levelled".
+                  val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to ${Config.levelUpEmoji} level **${onlinePlayer.level}** $guildIcon"
                   val levelsTextChannel = guild.getTextChannelById(levelsChannel)
                   if (levelsTextChannel != null) {
                     if (levelsTextChannel.canTalk() || (!Config.prod)) {

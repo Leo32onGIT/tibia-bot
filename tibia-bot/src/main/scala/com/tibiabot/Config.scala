@@ -202,6 +202,14 @@ object Config {
  val masslogEmoji: String = discord.getString("masslog-emoji")
  val bountyEmoji: String = discord.getString("bounty-emoji")
  val dromeEmoji: String = discord.getString("drome-emoji")
+ // Skill advances — see com.tibiabot.presentation.SkillEmojis.
+ val swordEmoji: String = discord.getString("sword-emoji")
+ val clubEmoji: String = discord.getString("club-emoji")
+ val axeEmoji: String = discord.getString("axe-emoji")
+ val bowEmoji: String = discord.getString("bow-emoji")
+ val shieldEmoji: String = discord.getString("shield-emoji")
+ val fistEmoji: String = discord.getString("fist-emoji")
+ val mlvlEmoji: String = discord.getString("mlvl-emoji")
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
   val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")

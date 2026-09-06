@@ -70,10 +70,22 @@ object HighscoreAnnouncement {
   }
 
   /** One line, in the shape the Levels channel already uses for level-ups, so a
-   *  reader sees one kind of message rather than two. */
-  def line(event: HighscoreEvent, category: HighscoreCategory, icon: String): String =
+   *  reader sees one kind of message rather than two.
+   *
+   *  `skillIcon` names what advanced and sits where the level-up path puts its
+   *  own — between "advanced to" and the figure — while `icon` stays at the end
+   *  saying whether the character is an ally or an enemy. Passed in rather than
+   *  looked up, like `icon` already is, so this object stays Config-free; see
+   *  [[com.tibiabot.presentation.SkillEmojis]]. Empty renders as nothing, so a
+   *  category with no emoji configured reads exactly as it did before. */
+  def line(event: HighscoreEvent, category: HighscoreCategory, icon: String, skillIcon: String = ""): String =
     s"${Emojis.vocEmoji(event.vocation)} **[${event.displayName}](${Urls.charUrl(event.displayName)})** " +
-      s"advanced to ${category.advancement(event.score)} $icon"
+      s"advanced to ${prefixed(skillIcon)}${category.advancement(event.score)} $icon"
+
+  /** A separator only when there is something to separate, so an unconfigured
+   *  emoji cannot leave a double space in the middle of the sentence. */
+  private def prefixed(skillIcon: String): String =
+    if (skillIcon.isEmpty) "" else s"$skillIcon "
 
   /** Every line this target should see from one batch of advances, in rank
    *  order. Empty when the target's settings suppress all of them. */
@@ -81,11 +93,13 @@ object HighscoreAnnouncement {
       target: HighscoreTarget,
       category: HighscoreCategory,
       advances: List[HighscoreEvent],
-      guildOf: String => String
+      guildOf: String => String,
+      skillIcon: String = ""
   ): List[String] =
     advances.flatMap { event =>
       val guildName = guildOf(event.name)
-      if (shouldPost(target, event, guildName)) Some(line(event, category, GuildIcons.icon(relation(target, event, guildName))))
+      if (shouldPost(target, event, guildName))
+        Some(line(event, category, GuildIcons.icon(relation(target, event, guildName)), skillIcon))
       else None
     }
 

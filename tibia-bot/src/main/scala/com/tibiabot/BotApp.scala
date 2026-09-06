@@ -1144,7 +1144,8 @@ object BotApp extends App with StrictLogging {
       val summary = if (count == 1) "1 player advanced a skill" else s"$count players advanced a skill"
       recentEventsRegistry.forWorld(world).record(
         "skill-up", s"""$summary <span class="muted">&middot; $guildLabel</span>""")
-    }
+    },
+    skillIcon = presentation.SkillEmojis.icon
   )(ex)
 
   private lazy val highscoreService = new highscores.HighscoreService(

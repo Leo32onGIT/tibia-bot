@@ -71,6 +71,36 @@ class HighscoreAnnouncementSpec extends AnyFunSuite with Matchers {
       include("advanced to magic level **108**")
   }
 
+  test("the skill emoji lands between 'advanced to' and the figure") {
+    // Where the level-up path puts its own, so the two kinds of line in this
+    // channel read as one kind of message.
+    HighscoreAnnouncement.line(event(score = 26), HighscoreCategory.MagicLevel, "", "<a:mlvl:1>") should
+      include("advanced to <a:mlvl:1> magic level **26**")
+  }
+
+  test("no emoji reads exactly as it did before there were any") {
+    // The default, and what an unconfigured category falls back to — it must not
+    // leave a double space in the middle of the sentence.
+    HighscoreAnnouncement.line(event(score = 116), HighscoreCategory.SwordFighting, "", "") should
+      include("advanced to sword fighting level **116**")
+  }
+
+  test("the skill emoji reaches every line of a batch") {
+    val lines = HighscoreAnnouncement.linesFor(
+      target(), HighscoreCategory.Shielding, List(event("First"), event("Second")), _ => "", "<a:shield:2>")
+
+    lines should have size 2
+    all(lines) should include("advanced to <a:shield:2> shielding level")
+  }
+
+  test("the guild icon still ends the line, with the skill emoji inside it") {
+    // Two different facts: what advanced, and whether this is an ally or an
+    // enemy. They must not collapse into one another.
+    val line = HighscoreAnnouncement.line(event("Bubble"), HighscoreCategory.SwordFighting, ":crossed_swords:", "<a:sword:3>")
+    line should include("advanced to <a:sword:3> sword fighting")
+    line should endWith(":crossed_swords:")
+  }
+
   test("the line links the character and carries the vocation emoji and icon") {
     val line = HighscoreAnnouncement.line(event("Bubble"), HighscoreCategory.SwordFighting, ":crossed_swords:")
     line should include("[Bubble](https://www.tibia.com/community/?name=Bubble)")
