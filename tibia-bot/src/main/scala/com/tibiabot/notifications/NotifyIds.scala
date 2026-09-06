@@ -27,9 +27,22 @@ object NotifyIds {
    *  happens to be watching there, which is not known until they press. */
   sealed trait Control
   /** Turn a mass-log subscription off (`enable = false`) or back on. */
+  /** Kept for the DMs already sitting in people's inboxes, whose Disable button
+   *  still points here. New alerts carry [[MasslogDrop]] instead. */
   final case class MasslogToggle(id: Long, enable: Boolean) extends Control
   final case class MasslogMute(id: Long) extends Control
   final case class MasslogThreshold(id: Long) extends Control
+  /** Be rid of this subscription: the row goes, and the role with it. Named to
+   *  match [[BountyDrop]], and for the same reason — the subscription it means
+   *  is the one that just woke the reader up, so nothing has to be picked. */
+  final case class MasslogDrop(id: Long) extends Control
+  /** Put back what a [[MasslogDrop]] just removed.
+   *
+   *  Carries state rather than a key, like [[BountyTrackAgain]] and for the same
+   *  reason: after the delete there is no row to point at, and a DM has no guild
+   *  of its own to fall back on. A guild id is digits, a world is letters, and a
+   *  threshold is a number — none of them the colon this splits on. */
+  final case class MasslogAgain(guildId: String, world: String, threshold: Int) extends Control
   final case class BountyToggle(id: Long, enable: Boolean) extends Control
   final case class BountyMute(id: Long) extends Control
   /** Stop watching, from under the alert itself. Named apart from
@@ -53,6 +66,9 @@ object NotifyIds {
   def masslogToggle(id: Long, enable: Boolean): String = s"${Prefix}ml:${if (enable) "on" else "off"}:$id"
   def masslogMute(id: Long): String = s"${Prefix}ml:mute:$id"
   def masslogThreshold(id: Long): String = s"${Prefix}ml:threshold:$id"
+  def masslogDrop(id: Long): String = s"${Prefix}ml:drop:$id"
+  def masslogAgain(guildId: String, world: String, threshold: Int): String =
+    s"${Prefix}ml:back:$guildId:$world:$threshold"
   def bountyToggle(id: Long, enable: Boolean): String = s"${Prefix}bt:${if (enable) "on" else "off"}:$id"
   def bountyMute(id: Long): String = s"${Prefix}bt:mute:$id"
   def bountyDrop(id: Long): String = s"${Prefix}bt:drop:$id"
@@ -82,6 +98,9 @@ object NotifyIds {
       case "notify" :: "ml" :: "off" :: id :: Nil       => id.toLongOption.map(MasslogToggle(_, enable = false))
       case "notify" :: "ml" :: "mute" :: id :: Nil      => id.toLongOption.map(MasslogMute)
       case "notify" :: "ml" :: "threshold" :: id :: Nil => id.toLongOption.map(MasslogThreshold)
+      case "notify" :: "ml" :: "drop" :: id :: Nil      => id.toLongOption.map(MasslogDrop)
+      case "notify" :: "ml" :: "back" :: guild :: world :: threshold :: Nil =>
+        threshold.toIntOption.map(MasslogAgain(guild, world, _))
       case "notify" :: "bt" :: "on" :: id :: Nil        => id.toLongOption.map(BountyToggle(_, enable = true))
       case "notify" :: "bt" :: "off" :: id :: Nil       => id.toLongOption.map(BountyToggle(_, enable = false))
       case "notify" :: "bt" :: "mute" :: id :: Nil      => id.toLongOption.map(BountyMute)

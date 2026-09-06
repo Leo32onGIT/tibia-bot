@@ -44,15 +44,41 @@ object NotifyEmbeds {
         s"**$zapCount** enemies have logged in within the last **$windowMinutes** minutes " +
         s"on **$world** — that's over your alert of **$threshold**.\n\n" +
         s"There are **$enemiesOnline** enemies online in total.")
-      .setFooter(s"$guildName • you're getting this because you have the Mass Log role")
+      .setFooter(s"$guildName • you asked for mass log alerts on this world")
       .build()
 
-  def masslogControls(sub: MasslogSub): ActionRow =
-    ActionRow.of(
-      toggleButton(sub.enabled, NotifyIds.masslogToggle(sub.id, enable = !sub.enabled)),
+  /** The row under a mass-log alert: be rid of it, quieten it for a while, or
+   *  change what counts as a mass log.
+   *
+   *  Remove rather than Disable, matching a bounty alert. Switching off left a
+   *  row behind that said "off" while the Mass Log role stayed the only visible
+   *  sign of the subscription — two half-states for one answer. Removing deletes
+   *  the row and takes the role with it, and the DM keeps the way back.
+   *
+   *  Enable only ever appears on a subscription already switched off, which no
+   *  new alert can be: a disabled one does not send. It is here for the DMs
+   *  sitting in inboxes from before Remove existed, whose Disable button still
+   *  works — pressing it must not leave someone switched off with nothing
+   *  offering to turn them back on. */
+  def masslogControls(sub: MasslogSub): ActionRow = {
+    val row = List(
+      Button.danger(NotifyIds.masslogDrop(sub.id), "Remove"),
       muteButton(NotifyIds.masslogMute(sub.id), sub.mutedUntil),
-      Button.primary(NotifyIds.masslogThreshold(sub.id), s"Alert at ${sub.threshold}")
-    )
+      Button.primary(NotifyIds.masslogThreshold(sub.id), s"Alert at ${sub.threshold}"))
+    ActionRow.of(
+      (if (sub.enabled) row
+       else Button.success(NotifyIds.masslogToggle(sub.id, enable = true), "Enable") :: row).asJava)
+  }
+
+  /** What Remove leaves behind: the way back.
+   *
+   *  The threshold rides in the button so pressing it restores the alert the
+   *  reader had rather than the default — the number they chose is the whole
+   *  content of the subscription, and losing it would make Remove destructive in
+   *  a way a single press should not be. */
+  def masslogRestoreControls(sub: MasslogSub): ActionRow =
+    ActionRow.of(
+      Button.success(NotifyIds.masslogAgain(sub.guildId, sub.world, sub.threshold), "Turn back on"))
 
   /** The ephemeral reply to pressing the Mass Log button, and to adjusting the
    *  threshold from a DM. Same controls as a real alert carries, so the settings

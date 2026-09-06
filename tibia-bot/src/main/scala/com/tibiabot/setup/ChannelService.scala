@@ -270,7 +270,13 @@ final class ChannelService(
       .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
       .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
       .setColor(BrandColor)
-      .setFooter("Add or remove yourself from the role using the buttons below:")
+      // Not "add or remove yourself from the role": three of the five buttons do
+      // that, and the last two open a form that sets up a DM subscription (the
+      // role follows it). Saying the first thing for all five is what leaves
+      // somebody adding the Mass Log role by hand and waiting for a DM that is
+      // not coming — nothing reads the role, and without the privileged members
+      // intent nothing can.
+      .setFooter("Use the buttons below to set these up:")
       .setDescription(
         s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
         s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +

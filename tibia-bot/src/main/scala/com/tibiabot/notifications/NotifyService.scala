@@ -148,6 +148,22 @@ final class NotifyService(
       }
     }
 
+  /** Same contract as [[removeBounty]], for the one mass-log subscription a user
+   *  holds on a world. Deleted rather than switched off, so that "I do not want
+   *  this" leaves nothing behind claiming otherwise — the role comes off with it
+   *  and the DM offers the way back. */
+  def removeMasslog(id: Long): Option[MasslogSub] =
+    masslogSubs.get(id).flatMap { _ =>
+      try {
+        repository.deleteMasslog(id)
+        masslogSubs.remove(id)
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Failed to delete mass-log subscription $id", ex)
+          None
+      }
+    }
+
   def forgetGuild(guildId: String): Unit = {
     try repository.deleteGuild(guildId)
     catch { case ex: Throwable => logger.warn(s"Failed to delete notification subscriptions for guild '$guildId'", ex) }

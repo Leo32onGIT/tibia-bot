@@ -165,6 +165,9 @@ final class JdbcNotifyRepository(connectionProvider: ConnectionProvider) extends
   def deleteBounty(id: Long): Unit =
     update("DELETE FROM bounty_notifications WHERE id = ?;")(_.setLong(1, id))
 
+  def deleteMasslog(id: Long): Unit =
+    update("DELETE FROM masslog_notifications WHERE id = ?;")(_.setLong(1, id))
+
   def deleteGuild(guildId: String): Unit = {
     update("DELETE FROM masslog_notifications WHERE guildid = ?;")(_.setString(1, guildId))
     update("DELETE FROM bounty_notifications WHERE guildid = ?;")(_.setString(1, guildId))

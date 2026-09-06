@@ -10,6 +10,9 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
     NotifyIds.parseControl(NotifyIds.masslogToggle(7, enable = true)) shouldBe Some(NotifyIds.MasslogToggle(7, enable = true))
     NotifyIds.parseControl(NotifyIds.masslogMute(7)) shouldBe Some(NotifyIds.MasslogMute(7))
     NotifyIds.parseControl(NotifyIds.masslogThreshold(7)) shouldBe Some(NotifyIds.MasslogThreshold(7))
+    NotifyIds.parseControl(NotifyIds.masslogDrop(7)) shouldBe Some(NotifyIds.MasslogDrop(7))
+    NotifyIds.parseControl(NotifyIds.masslogAgain("1234", "Antica", 5)) shouldBe
+      Some(NotifyIds.MasslogAgain("1234", "Antica", 5))
     NotifyIds.parseControl(NotifyIds.bountyToggle(9, enable = false)) shouldBe Some(NotifyIds.BountyToggle(9, enable = false))
     NotifyIds.parseControl(NotifyIds.bountyMute(9)) shouldBe Some(NotifyIds.BountyMute(9))
     NotifyIds.parseControl(NotifyIds.bountyDrop(9)) shouldBe Some(NotifyIds.BountyDrop(9))
@@ -82,5 +85,30 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
    *  reached from a button on that panel instead. */
   test("the bounty button answers with a panel, not a form") {
     NotifyIds.opensModal("bounty") shouldBe false
+  }
+
+  /** Removing a mass-log subscription and switching one off are different
+   *  answers, and the DMs already in people's inboxes still carry the old one —
+   *  so both have to keep parsing, as themselves. */
+  test("mass-log remove and the older disable do not parse as each other") {
+    NotifyIds.parseControl(NotifyIds.masslogDrop(7)) shouldBe Some(NotifyIds.MasslogDrop(7))
+    NotifyIds.parseControl(NotifyIds.masslogToggle(7, enable = false)) shouldBe
+      Some(NotifyIds.MasslogToggle(7, enable = false))
+  }
+
+  test("turning mass log back on carries its threshold and stays under the id cap") {
+    // The threshold is the whole content of the subscription, so a Remove that
+    // lost it would be destructive in a way one press should not be.
+    NotifyIds.parseControl(NotifyIds.masslogAgain("1234", "Antica", 12)) shouldBe
+      Some(NotifyIds.MasslogAgain("1234", "Antica", 12))
+    val longest = NotifyIds.masslogAgain("1" * 20, "Wintera", 999)
+    longest.length should be <= NotifyIds.MaxCustomId
+  }
+
+  /** Both edit the message they were pressed on, so neither may skip the early
+   *  acknowledgement the way a form-opening press must. */
+  test("neither mass-log button opens a modal") {
+    NotifyIds.opensModal(NotifyIds.masslogDrop(7)) shouldBe false
+    NotifyIds.opensModal(NotifyIds.masslogAgain("1234", "Antica", 5)) shouldBe false
   }
 }

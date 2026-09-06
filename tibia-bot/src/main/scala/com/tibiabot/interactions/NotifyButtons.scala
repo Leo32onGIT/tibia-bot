@@ -48,6 +48,9 @@ object NotifyButtons extends StrictLogging {
           case Some(NotifyIds.MasslogMute(id))           => openMuteForm(event, id, bounty = false)
           case Some(NotifyIds.BountyMute(id))            => openMuteForm(event, id, bounty = true)
           case Some(NotifyIds.BountyDrop(id))            => dropBounty(event, id)
+          case Some(NotifyIds.MasslogDrop(id))           => dropMasslog(event, id)
+          case Some(NotifyIds.MasslogAgain(guildId, world, threshold)) =>
+            masslogAgain(event, guildId, world, threshold)
           case Some(NotifyIds.BountyTrackAgain(guildId, world, character, cooldown)) =>
             trackAgain(event, guildId, world, character, cooldown)
           case Some(NotifyIds.MasslogThreshold(id))      => openThresholdForm(event, id)
@@ -240,6 +243,31 @@ object NotifyButtons extends StrictLogging {
    *  step there is one more thing between the reader and quiet. The row it
    *  leaves is the undo — Mute and a second Remove would both mean nothing once
    *  the subscription is gone. */
+  /** Be rid of a mass-log subscription: the row goes and the role goes with it,
+   *  which is the whole point — the role is the only visible sign of this
+   *  subscription, so leaving it on somebody who just said "remove" would be the
+   *  bot disagreeing with them in the one place they can see. */
+  private def dropMasslog(event: ButtonInteractionEvent, id: Long): Unit =
+    ownedMasslog(event, id).flatMap(sub => BotApp.notifyService.removeMasslog(id).map(_ => sub)) match {
+      case None => refuse(event, gone)
+      case Some(removed) =>
+        syncRole(event.getJDA, event.getUser.getId, removed.guildId, removed.world, "masslog_role", subscribed = false)
+        event.getHook.editOriginalComponents(NotifyEmbeds.masslogRestoreControls(removed)).queue(_ => (), _ => ())
+    }
+
+  /** Turn it back on, from a DM whose subscription has been removed. Everything
+   *  needed is in the button, since the row it stood for is gone — but the
+   *  presser is not taken from it: it is whoever is holding the DM, which is the
+   *  one thing a forwarded id cannot fake.
+   *
+   *  An upsert, so pressing it twice, or after setting the alert up again by
+   *  hand, settles on one subscription rather than a second. */
+  private def masslogAgain(event: ButtonInteractionEvent, guildId: String, world: String, threshold: Int): Unit = {
+    val restored = BotApp.notifyService.subscribeMasslog(guildId, world, event.getUser.getId, threshold)
+    syncRole(event.getJDA, event.getUser.getId, guildId, world, "masslog_role", subscribed = true)
+    event.getHook.editOriginalComponents(NotifyEmbeds.masslogControls(restored)).queue(_ => (), _ => ())
+  }
+
   private def dropBounty(event: ButtonInteractionEvent, id: Long): Unit =
     ownedBounty(event, id).flatMap(_ => BotApp.notifyService.removeBounty(id)) match {
       case None => refuse(event, gone)

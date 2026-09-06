@@ -32,6 +32,7 @@ trait NotifyRepository {
   def bountyById(id: Long): Option[BountySub]
 
   def setMasslogEnabled(id: Long, enabled: Boolean): Unit
+  def deleteMasslog(id: Long): Unit
   def setBountyEnabled(id: Long, enabled: Boolean): Unit
 
   def muteMasslog(id: Long, until: Instant): Unit
