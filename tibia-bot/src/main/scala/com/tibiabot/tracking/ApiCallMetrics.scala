@@ -179,6 +179,19 @@ final class ApiCallMetrics(now: () => Long = () => System.currentTimeMillis()) {
     counters.foreach(_.record())
   }
 
+  /** Record a call under one dimension only, leaving the overall total alone.
+   *
+   *  For a value that cannot be known while the call is being counted — the age
+   *  of a body that has not been parsed yet, say. The call itself is counted by
+   *  [[record]] at the choke point as usual; this adds the late-arriving
+   *  breakdown afterwards without counting the call twice.
+   *
+   *  Such a dimension sums to the subset it was supplied for rather than to the
+   *  overall total, exactly like one supplied on only some [[record]] calls —
+   *  see [[ApiCallSnapshot]] for what that means when reading a share. */
+  def recordDimension(dimension: String, value: String): Unit =
+    synchronized { counterFor(dimension, value) }.record()
+
   def snapshot(): ApiCallSnapshot = {
     val dims = synchronized { dimensions }
     ApiCallSnapshot(

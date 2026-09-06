@@ -803,12 +803,32 @@ function renderLaneGroup(lanes) {
   </div>`;
 }
 
-// Cache-age buckets read as a lifecycle, not a leaderboard: the request that
-// refilled the upstream entry, then that entry ageing out bucket by bucket,
-// then the responses that never had an age to report. Sorting these by size
-// (the default for detail groups) would scramble a histogram, so they keep
-// this order instead. Anything unrecognised sorts to the end rather than
-// silently vanishing.
+// Cache-age buckets read as a lifecycle, not a leaderboard: a character sheet
+// ageing out bucket by bucket, then the sheets that could not say how old they
+// were. Sorting these by size (the default for detail groups) would scramble a
+// histogram, so they keep this order instead. Anything unrecognised sorts to
+// the end rather than silently vanishing.
+const CACHE_AGE_ORDER = ['0-59s', '60-119s', '120-179s', '180-239s', '240-299s', '300-359s', '360s+', 'unknown'];
+
+// The whole point of the breakdown is the tail. A copy can legitimately be
+// observed at any age up to the upstream TTL, so the buckets below it are just
+// what a cache does and stay uncoloured — but a sheet handed to us at 300s+ is
+// older than character-cache.ttl assumes it can be, which means the bot is
+// reusing sheets past the point the copy behind them turned over. Those rows
+// warn. 'unknown' warns too: it is a sheet that arrived with no origin
+// timestamp, so it is not evidence of anything either way.
+function cacheAgeColor(name) {
+  if (name === '300-359s' || name === '360s+' || name === 'unknown') return 'var(--warn)';
+  return null;
+}
+
+function cacheAgeRows(throughput) {
+  const rank = (n) => { const i = CACHE_AGE_ORDER.indexOf(n); return i === -1 ? CACHE_AGE_ORDER.length : i; };
+  return dimensionRows(throughput, 'cacheAge')
+    .sort((a, b) => rank(a.name) - rank(b.name))
+    .map(r => ({ ...r, color: cacheAgeColor(r.name) }));
+}
+
 // The second character source's own health. None of it is in the throughput
 // numbers above, which count only requests that actually left: on a rationed
 // lane the interesting figure is what it decided not to send, and a refusal
@@ -856,7 +876,14 @@ function renderApiDetail(sourceKey, throughput, lanes, fansite, color) {
   return secondSource
     + renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), color)
     + renderDetailGroup('By response', '', 'Status',
-        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), color);
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), color)
+    // Shared within the group rather than against the call total: this dimension
+    // counts character sheets parsed, not requests sent, so a share of all
+    // traffic would silently fold in every other endpoint and every error and
+    // stop reading as a distribution. Empty groups render as nothing, so the
+    // sources that never parse a character sheet simply do not show this.
+    + renderDetailGroup('By cache age', 'how old the sheet was when we got it', 'Age',
+        cacheAgeRows(throughput), color, undefined, true);
 }
 
 // Which call Discord actually throttled. The two groups above cannot answer

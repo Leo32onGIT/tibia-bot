@@ -64,6 +64,25 @@ class ApiCallMetricsSpec extends AnyWordSpec with Matchers {
       snap.dimensions("ratelimited")("PATCH channel").total shouldBe 1
     }
 
+    "file a late-arriving dimension without counting the call a second time" in {
+      // How TibiaDataClient files `cacheAge`: the request is counted at the
+      // choke point, but how old the sheet was is only known once the body has
+      // been parsed, which is later and may never happen. Recording that with
+      // `record` would count every parsed character twice and inflate every
+      // total on the panel — the figure the whole throughput view rests on.
+      val clock = new TestClock
+      val metrics = new ApiCallMetrics(clock.now)
+      metrics.record("endpoint" -> "/v4/character", "status" -> "200")
+      metrics.recordDimension("cacheAge", "240-299s")
+      metrics.record("endpoint" -> "/v4/character", "status" -> "503")
+
+      val snap = metrics.snapshot()
+      snap.total shouldBe 2
+      snap.dimensions("endpoint").values.map(_.total).sum shouldBe 2
+      snap.dimensions("cacheAge").values.map(_.total).sum shouldBe 1
+      snap.dimensions("cacheAge")("240-299s").total shouldBe 1
+    }
+
     "carry no entry at all for a partial dimension nothing has triggered" in {
       // The healthy case, and the one the dashboard has to render without
       // blowing up: no 429s means no `ratelimited` key, not a key of zeroes.

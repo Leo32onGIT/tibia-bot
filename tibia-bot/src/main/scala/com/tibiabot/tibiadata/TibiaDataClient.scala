@@ -4,19 +4,20 @@ package tibiadata
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.http.scaladsl.Http
 import org.apache.pekko.http.scaladsl.coding.Coders
-import org.apache.pekko.http.scaladsl.model.headers.HttpEncodings
+import org.apache.pekko.http.scaladsl.model.headers.{HttpEncodingRange, HttpEncodings}
 import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse}
 import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import org.apache.pekko.pattern.after
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse, Information}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
+import java.time.Instant
 import scala.util.control.NonFatal
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 import spray.json.DeserializationException
-import org.apache.pekko.http.scaladsl.model.headers.{Age => AgeHeader, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
+import org.apache.pekko.http.scaladsl.model.headers.{`Accept-Encoding`, Date => DateHeader, `Retry-After`, RetryAfterDuration, RetryAfterDateTime}
 
 /** The counters default to the process-wide ones so the dashboard sees one
  *  figure for the process, not one per construction site. Tests pass their own.
@@ -53,22 +54,36 @@ class TibiaDataClient(
       }
     }
 
-  /** Which slice of the upstream cache's life this response came from, for the
-   *  dashboard's cache-age breakdown. Kong stamps `Age` with how long the entry
-   *  has sat there (300s TTL on `/v4/character`, 60s on the world endpoints), so
-   *  it is the one header saying whether a request learned anything.
+  /** How old the data in a parsed response actually was, for the dashboard's
+   *  cache-age breakdown.
    *
-   *  `fresh` is a 2xx with no `Age` — a cold entry this request refilled from the
-   *  origin, which is also everything a self-hosted instance serves. `error`
-   *  keeps non-2xx out of the picture, since a 503 carries no `Age` either.
-   *  Buckets deliberately run past the 300s TTL so longer-cached entries get
-   *  their own row instead of hiding in a catch-all. */
-  private def cacheAgeOf(response: HttpResponse, status: Int): String =
-    if (status / 100 != 2) "error"
-    else response.header[AgeHeader] match {
-      case Some(age) => TibiaDataClient.cacheAgeBucket(age.deltaSeconds)
-      case None      => "fresh"
-    }
+   *  Read from `information.timestamp` in the body rather than the `Age` header.
+   *  `Age` used to be the answer, and when present it still is — measured equal
+   *  to `Date - information.timestamp` in every one of 200 samples. But TibiaData
+   *  moved endpoint caching to Cloudflare in September 2026 and `Age` did not
+   *  survive the move for the traffic this bot actually sends: probing 16
+   *  characters taken from a live online list, every one came back
+   *  `cf-cache-status: HIT` carrying data 15-292s old and not one carried an
+   *  `Age`. It lingers only on keys being hammered often enough to stay in the
+   *  older layer, which is nothing like the poll's spread over a world's
+   *  population. Reading `None` as "refilled from the origin", as this did, would
+   *  now file essentially the whole character poll as fresh.
+   *
+   *  The remaining headers are no better: `x-cache-status` is frozen at `Miss` on
+   *  every response, hit or not, and `last-modified` is restamped per response
+   *  (`Date - Last-Modified` was 0 on every sample, including hits of 191s-old
+   *  data). `information.timestamp` is the one value still pinned to when the
+   *  origin built the copy, which is why [[AgeCachedTibiaApi]] already schedules
+   *  against it.
+   *
+   *  Buckets deliberately run past the 300s TTL. That is the point of the
+   *  breakdown: a copy can be observed at any age up to the TTL, so anything
+   *  landing at 300s+ says the real TTL is longer than `character-cache.ttl`
+   *  assumes, which is the one thing this measurement exists to catch. */
+  private def dataAgeOf(response: HttpResponse, information: Information): String =
+    TibiaDataClient.dataAgeBucket(
+      response.header[DateHeader].map(_.date.clicks / 1000L),
+      OriginTimestamp.of(information))
 
   /** The first two path segments, so `/v4/character/Bubble` collapses onto
    *  `/v4/character` instead of becoming one counter per character. */
@@ -85,6 +100,18 @@ class TibiaDataClient(
   private def metricsFor(request: HttpRequest): com.tibiabot.tracking.ApiCallMetrics =
     if (TibiaDataClient.isPublicHost(request.uri)) metrics else localMetrics
 
+  /** Every request this client makes, built the one way.
+   *
+   *  [[decodeResponse]] has always been able to gunzip a reply, but nothing ever
+   *  asked for one — pekko does not add `Accept-Encoding` itself, so the server
+   *  kept sending identity and the decoder kept having nothing to do. Measured on
+   *  a character sheet: 1627 bytes uncompressed against 648 asking for gzip, on
+   *  the endpoint that is ~99% of this process's requests. `FansiteApiClient`
+   *  already sends the header; this is the same one line. */
+  private def get(uri: String): HttpRequest =
+    HttpRequest(uri = uri).withHeaders(
+      `Accept-Encoding`(HttpEncodingRange(HttpEncodings.gzip), HttpEncodingRange(HttpEncodings.deflate)))
+
   /** Issue a GET, retrying only when [[RetryPolicy]] says it is worth it: a
    *  transient upstream failure (500/502/503/504) or a connection-level one.
    *  Anything else is returned as-is and degrades to the logged-Left path.
@@ -96,7 +123,7 @@ class TibiaDataClient(
       val status = response.status.intValue
       // Per attempt, not per logical fetch — a retry really is a second call,
       // and hiding it would understate our load during an upstream wobble.
-      metricsFor(request).record("endpoint" -> endpointOf(request), "status" -> status.toString, "cacheAge" -> cacheAgeOf(response, status))
+      metricsFor(request).record("endpoint" -> endpointOf(request), "status" -> status.toString)
       val retryAfter = retryAfterOf(response)
       retryPolicy.onResponse(status, retryAfter, attempt, callerRetriesSoon) match {
         case RetryDecision.RetryIn(delay) =>
@@ -146,7 +173,7 @@ class TibiaDataClient(
   private def fetch[T](uri: String, contentTypeMessage: HttpResponse => String, parseMessage: => String)
                       (implicit um: org.apache.pekko.http.scaladsl.unmarshalling.FromEntityUnmarshaller[T]): Future[Either[String, T]] =
     for {
-      response <- requestWithRetry(HttpRequest(uri = uri))
+      response <- requestWithRetry(get(uri))
       decoded = decodeResponse(response)
       unmarshalled <- Unmarshal(decoded).to[T].map(Right(_))
         .recover(recoverUnmarshal(decoded, contentTypeMessage(response), parseMessage))
@@ -197,10 +224,26 @@ class TibiaDataClient(
       .map(unmarshalled => (unmarshalled, guild, reason))
   }
 
-  /** Decode + unmarshal a character response, recovering failures to a logged Left. */
+  /** Decode + unmarshal a character response, recovering failures to a logged Left.
+   *
+   *  A parse that succeeds also files the sheet's age under `cacheAge` — see
+   *  [[dataAgeOf]] for why that has to happen here rather than at the request
+   *  choke point. `recordDimension` rather than `record`, because the call was
+   *  already counted there and counting it again would inflate every total on
+   *  the panel. The dimension therefore sums to the character sheets actually
+   *  parsed, not to all TibiaData traffic.
+   *
+   *  This covers `getCharacter` — the poll, ~99% of this process's requests and
+   *  the only caller [[AgeCachedTibiaApi]] gates — and `getKillerFallback`. The
+   *  slash-command path goes through `fetch` and is deliberately left out: it is
+   *  a handful of calls whose timing is a user typing, and mixing them in would
+   *  bias the very histogram the poll's canary keeps unbiased. */
   private def unmarshalCharacter(response: HttpResponse, encodedName: String): Future[Either[String, CharacterResponse]] = {
     val decoded = decodeResponse(response)
-    Unmarshal(decoded).to[CharacterResponse].map(Right(_)).recover(recoverUnmarshal(
+    Unmarshal(decoded).to[CharacterResponse].map { parsed =>
+      metrics.recordDimension("cacheAge", dataAgeOf(response, parsed.information))
+      Right(parsed)
+    }.recover(recoverUnmarshal(
       decoded,
       s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${response.status}'",
       s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'"))
@@ -210,13 +253,13 @@ class TibiaDataClient(
    *  caller with its own retry: the next poll is a minute away, so no inline retry. */
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName"), callerRetriesSoon = true)
+    requestWithRetry(get(s"$characterUrl$encodedName"), callerRetriesSoon = true)
       .flatMap(unmarshalCharacter(_, encodedName))
   }
 
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
-    val responseFuture = requestWithRetry(HttpRequest(uri = s"$characterUrl$encodedName"))
+    val responseFuture = requestWithRetry(get(s"$characterUrl$encodedName"))
     responseFuture.flatMap { response =>
       response.header[DateHeader] match {
         case Some(_) =>
@@ -303,5 +346,23 @@ object TibiaDataClient {
     else {
       val floor = (math.max(0L, seconds) / CacheAgeBucketSeconds) * CacheAgeBucketSeconds
       s"$floor-${floor + CacheAgeBucketSeconds - 1}s"
+    }
+
+  /** How old the data was when it reached us, from the two clocks in the
+   *  response: `servedAt` is its `Date` header in epoch seconds, `builtAt` the
+   *  `information.timestamp` the origin stamped into the body.
+   *
+   *  Both sides come from the server, so a skewed or wrong local clock cannot
+   *  move this figure — which matters for a measurement whose whole job is to
+   *  say whether the upstream TTL is what we think it is.
+   *
+   *  Either one missing yields "unknown" rather than a guess: a sheet that
+   *  cannot say when it was built is not evidence about the TTL in either
+   *  direction, and quietly filing it as young would be the same mistake the
+   *  `Age` header's absence already caused once. */
+  private[tibiadata] def dataAgeBucket(servedAt: Option[Long], builtAt: Option[Instant]): String =
+    (servedAt, builtAt) match {
+      case (Some(served), Some(built)) => cacheAgeBucket(served - built.getEpochSecond)
+      case _                           => "unknown"
     }
 }

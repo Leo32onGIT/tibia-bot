@@ -28,7 +28,10 @@ object ApiMetrics {
    *  [[com.tibiabot.tibiadata.TibiaDataClient]]'s single request choke point,
    *  so retries count as the separate calls they are.
    *
-   *  Dimensions: `endpoint`, `status` and `cacheAge`, each summing to the total. */
+   *  Dimensions: `endpoint` and `status`, each summing to the total, plus
+   *  `cacheAge` — how old the sheet in a parsed character response was, filed
+   *  after the parse and so summing to the character sheets read rather than to
+   *  all traffic. See [[com.tibiabot.tibiadata.TibiaDataClient]]. */
   val tibiaData = new ApiCallMetrics()
 
   /** Every request to the TibiaData instance we run ourselves, counted at the
