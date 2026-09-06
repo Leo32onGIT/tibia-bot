@@ -77,7 +77,19 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN show_neutral_activity VARCHAR(255) DEFAULT 'true'")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,show_neutral_activity FROM worlds")
+    // 0, meaning no floor, so a world that picks these columns up shows exactly
+    // the online list it showed before them. Unlike the show_ columns above,
+    // there is no sensible default to opt a server into: what counts as a
+    // throwaway character is a judgement about that server's enemies.
+    List("online_allies_min", "online_enemies_min", "online_neutrals_min").foreach { column =>
+      val existsQuery = statement.executeQuery(
+        s"SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = '$column'")
+      val exists = existsQuery.next()
+      existsQuery.close()
+      if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
+    }
+
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,show_neutral_activity,online_allies_min,online_enemies_min,online_neutrals_min FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -109,10 +121,13 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
       val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
       val showNeutralActivity = Option(result.getString("show_neutral_activity")).getOrElse("true")
+      val onlineAlliesMin = Option(result.getInt("online_allies_min")).getOrElse(0)
+      val onlineEnemiesMin = Option(result.getInt("online_enemies_min")).getOrElse(0)
+      val onlineNeutralsMin = Option(result.getInt("online_neutrals_min")).getOrElse(0)
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, showNeutralActivity)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, showNeutralActivity, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin)
       }
     }
 

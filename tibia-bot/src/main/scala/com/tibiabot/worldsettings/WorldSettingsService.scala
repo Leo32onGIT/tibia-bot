@@ -70,6 +70,15 @@ final class WorldSettingsService(
     worldConfigRepository.updateWorldInt(guild.getId, world, columnName, level)
   }
 
+  private def onlineMinLevelToDatabase(guild: Guild, world: String, level: Int, category: String): Unit = {
+    val columnName = category match {
+      case "allies"   => "online_allies_min"
+      case "neutrals" => "online_neutrals_min"
+      case _          => "online_enemies_min"
+    }
+    worldConfigRepository.updateWorldInt(guild.getId, world, columnName, level)
+  }
+
   /** Generic guarded update for a single per-world setting stored on `Worlds`.
    *  Returns notConfiguredMessage if the world isn't set up (currentValue
    *  yields None), alreadySetMessage if the value is unchanged, otherwise
@@ -226,6 +235,50 @@ final class WorldSettingsService(
       nowSetMessage = s":gear: The minimum level for the **$levelsOrDeaths channel**\nis now set to `$level` for the world **$worldFormal**.",
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
       adminLogMessage = s"${Names.user(event.getUser.getName)} changed the minimum level for the **$levelsOrDeaths channel**\nto `$level` for the world **$worldFormal**.",
+      adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif"
+    )
+  }
+
+  /** The level floor for one category of the online list.
+   *
+   *  Its own setting rather than a reuse of `levels_min`, because the two answer
+   *  different questions: that one decides whether an event is worth announcing,
+   *  this one decides whether a character is worth a row in a roster you are
+   *  reading at a glance. A guild that wants to hear about every death still does
+   *  not want forty level-8 alts filling its enemies list.
+   *
+   *  0 turns it off, which is where every world starts. */
+  def onlineMinLevel(event: SlashCommandInteractionEvent, world: String, level: Int, category: String): MessageEmbed = {
+    val worldFormal = com.tibiabot.domain.WorldName.formal(world)
+    val guild = event.getGuild
+    val commandUser = event.getUser.getId
+    val label = category match {
+      case "allies"   => "allies"
+      case "neutrals" => "neutrals"
+      case _          => "enemies"
+    }
+    val shown =
+      if (level <= 0) s"no minimum — every $label character is listed"
+      else s"level `$level` and above"
+    def current(w: Worlds): Int = category match {
+      case "allies"   => w.onlineAlliesMin
+      case "neutrals" => w.onlineNeutralsMin
+      case _          => w.onlineEnemiesMin
+    }
+    def applied(w: Worlds, v: Int): Worlds = category match {
+      case "allies"   => w.copy(onlineAlliesMin = v)
+      case "neutrals" => w.copy(onlineNeutralsMin = v)
+      case _          => w.copy(onlineEnemiesMin = v)
+    }
+    updateWorldSetting[Int](
+      guild, world, level,
+      currentValue = w => Some(current(w)),
+      applyValue = applied,
+      persist = v => onlineMinLevelToDatabase(guild, worldFormal, v, category),
+      alreadySetMessage = s"${Config.noEmoji} The **$label online list** for **$worldFormal**\nalready shows $shown.",
+      nowSetMessage = s":gear: The **$label online list** for **$worldFormal**\nnow shows $shown.",
+      notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} set the **$label online list** to show $shown for the world **$worldFormal**.",
       adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Royal_Fanfare.gif"
     )
   }

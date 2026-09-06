@@ -34,7 +34,19 @@ case class Worlds(name: String,
    *  transferring in. On by default, like its show_neutral_ siblings: the level
    *  bar keeps the volume to a handful, and a server that does not want it has
    *  `/neutral activity hide`. */
-  showNeutralActivity: String
+  showNeutralActivity: String,
+  /** Level floors for the online list, per tracked category. A character below
+   *  its category's floor is left out of that list entirely.
+   *
+   *  Separate from `levelsMin`/`deathsMin`, which gate the levels and deaths
+   *  *channels*: this one is about who is worth looking at in a roster, and the
+   *  answer differs — a level 8 dying is worth a line, a level 8 sitting in the
+   *  online list all day is the thing being hidden.
+   *
+   *  0 means no floor, which is what every world had before these existed. */
+  onlineAlliesMin: Int = 0,
+  onlineEnemiesMin: Int = 0,
+  onlineNeutralsMin: Int = 0
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

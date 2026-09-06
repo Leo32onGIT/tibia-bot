@@ -22,6 +22,14 @@ object FilterCommands {
       case channel @ ("levels" | "deaths") =>
         val embed = BotApp.worldSettingsService.minLevel(event, worldOption, levelOption, channel)
         event.getHook.sendMessageEmbeds(embed).queue()
+      case "online" =>
+        // Read straight rather than through parseLevel: its DefaultLevel of 8 is
+        // the floor these lists exist to get rid of, and 0 — turn the filter off
+        // — is a real answer here that must not be mistaken for "absent".
+        val level = options.get("level").map(_.toInt).getOrElse(0)
+        val embed = BotApp.worldSettingsService.onlineMinLevel(
+          event, worldOption, level, options.getOrElse("list", "enemies"))
+        event.getHook.sendMessageEmbeds(embed).queue()
       case other =>
         val embed = new EmbedBuilder()
           .setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/filter`.").build()

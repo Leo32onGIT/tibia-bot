@@ -1277,6 +1277,28 @@ class TibiaBot(
     val alliedPlayerNames = alliedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
     val huntedPlayerNames = huntedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
 
+    // The online-list floors, per category. 0 is off, which is where every world
+    // starts and what every world had before these existed.
+    val worldConfig = worldsData.getOrElse(guildId, Nil).find(_.name.equalsIgnoreCase(world))
+    val alliesMin = worldConfig.map(_.onlineAlliesMin).getOrElse(0)
+    val enemiesMin = worldConfig.map(_.onlineEnemiesMin).getOrElse(0)
+    val neutralsMin = worldConfig.map(_.onlineNeutralsMin).getOrElse(0)
+
+    // Who belongs in each list, floor included. Named once because the same
+    // three questions are asked in six places below — the counts, the combined
+    // channel, and the three separate channels — and a floor applied to some of
+    // them would show a channel a count that disagrees with the rows under it.
+    //
+    // Membership is per list rather than per character: nothing stops an allied
+    // player being in a hunted guild, and such a character has always appeared
+    // in both lists. Each list therefore applies its own floor rather than one
+    // "is this character shown" answer deciding for both.
+    def visibleAllies(c: CharSort): Boolean = (c.allyPlayer || c.allyGuild) && c.level >= alliesMin
+    def visibleEnemies(c: CharSort): Boolean = (c.huntedPlayer || c.huntedGuild) && c.level >= enemiesMin
+    def visibleNeutrals(c: CharSort): Boolean =
+      !c.huntedPlayer && !c.huntedGuild && !c.allyPlayer && !c.allyGuild && c.level >= neutralsMin
+    def visibleAnywhere(c: CharSort): Boolean = visibleAllies(c) || visibleEnemies(c) || visibleNeutrals(c)
+
     val sortedList = onlineData.sortWith(_.level > _.level)
     var zapCount = 0
     sortedList.foreach { player =>
@@ -1296,7 +1318,14 @@ class TibiaBot(
       // less than tracking.MasslogDetector.RecentLoginSeconds. That constant is
       // shared with the per-user mass-log DM below, whose threshold is a count
       // of exactly these people.
-      val justLogged = durationInSec < tracking.MasslogDetector.RecentLoginSeconds && (huntedGuildCheck || huntedPlayerCheck)
+      // Filtered on the same floor as the list itself, so a wave of level-8
+      // throwaways cannot trip a mass-log alert about an enemy list they are no
+      // longer part of. Leaving them in the numerator while the floor took them
+      // out of the denominator would make the alert fire far more readily than
+      // before the filter, not less — a shrinking enemy count raises the
+      // required fraction (see tracking.MasslogDetector.basePercentage).
+      val justLogged = durationInSec < tracking.MasslogDetector.RecentLoginSeconds &&
+        (huntedGuildCheck || huntedPlayerCheck) && player.level.toInt >= enemiesMin
       val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
       vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
@@ -1308,15 +1337,15 @@ class TibiaBot(
 
     // default online list
     val alliesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+      .flatMap(_.filter(visibleAllies))
       .map(_.message)
       .toList
     val enemiesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+      .flatMap(_.filter(visibleEnemies))
       .map(_.message)
       .toList
     val neutralsList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+      .flatMap(_.filter(visibleNeutrals))
       .map(_.message)
       .toList
 
@@ -1348,9 +1377,14 @@ class TibiaBot(
       if (combinedTextChannel != null) {
         if (combinedTextChannel.canTalk() || (!Config.prod)) {
 
-          // neutrals grouped by Guild
+          // neutrals grouped by Guild.
+          //
+          // Counted over who is actually shown, so the "fewer than three online
+          // folds into no-guild" rule below is about the rows on screen. Counting
+          // hidden characters would leave a guild header standing over one
+          // visible name, which is the header this rule exists to prevent.
           val guildNameCounts: Map[String, Int] = vocationBuffers.values
-            .flatMap(_.map(_.guildName))
+            .flatMap(_.filter(visibleAnywhere).map(_.guildName))
             .groupBy(identity)
             .view.mapValues(_.size)
             .toMap
@@ -1368,7 +1402,7 @@ class TibiaBot(
 
           val neutralsGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
             updatedVocationBuffers.values.flatten
-              .filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild)
+              .filter(visibleNeutrals)
               .map(charSort => charSort.guildName -> charSort.message))
 
           val flattenedNeutralsList: List[String] =
@@ -1422,7 +1456,7 @@ class TibiaBot(
       // allies grouped by Guild
       val alliesGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => charSort.allyPlayer || charSort.allyGuild)
+          .filter(visibleAllies)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedAlliesList: List[String] =
@@ -1445,7 +1479,7 @@ class TibiaBot(
       // neutrals grouped by Guild
       val neutralsGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild)
+          .filter(visibleNeutrals)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedNeutralsList: List[String] =
@@ -1468,7 +1502,7 @@ class TibiaBot(
       // enemies grouped by Guild
       val enemiesGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => charSort.huntedPlayer || charSort.huntedGuild)
+          .filter(visibleEnemies)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedEnemiesList: List[String] =

@@ -433,6 +433,9 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |exiva_list VARCHAR(255) NOT NULL,
               |online_combined VARCHAR(255) NOT NULL,
               |show_neutral_activity VARCHAR(255) NOT NULL DEFAULT 'true',
+              |online_allies_min INT NOT NULL DEFAULT 0,
+              |online_enemies_min INT NOT NULL DEFAULT 0,
+              |online_neutrals_min INT NOT NULL DEFAULT 0,
               |PRIMARY KEY (name)
               |);""".stripMargin
 

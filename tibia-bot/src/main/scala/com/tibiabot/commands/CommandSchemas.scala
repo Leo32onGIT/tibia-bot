@@ -176,6 +176,21 @@ object CommandSchemas {
         new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
           .setMinValue(1)
           .setMaxValue(4000)
+      ),
+      // Minimum 0 rather than 1, because 0 is how the filter is turned back off
+      // — there is no level 0, so it cannot collide with a real floor.
+      new SubcommandData("online", "Hide players from an online list if they are below a certain level")
+      .addOptions(
+        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+        new OptionData(OptionType.STRING, "list", "Which online list to filter").setRequired(true)
+          .addChoices(
+            new Choice("enemies", "enemies"),
+            new Choice("allies", "allies"),
+            new Choice("neutrals", "neutrals")
+          ),
+        new OptionData(OptionType.INTEGER, "level", "The minimum level to show; 0 shows everyone again").setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(4000)
       )
     )
 
