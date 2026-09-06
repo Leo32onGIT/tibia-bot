@@ -220,6 +220,7 @@ object Config {
   val onlineListRepostCooldownMs: Long = discord.getLong("online-list-repost-cooldown-ms")
   val onlineListRepostUrgentQueueDepth: Int = discord.getInt("online-list-repost-urgent-queue-depth")
   val onlineListRepostUrgentCooldownMs: Long = discord.getLong("online-list-repost-urgent-cooldown-ms")
+  val onlineListFooterMaxStaleMs: Long = discord.getLong("online-list-footer-max-stale-ms")
 
   /** Monitoring dashboard: Discord OAuth2 + session signing + reverse-proxy domain. */
   object Web {

@@ -66,12 +66,15 @@ class TibiaBot(
   // What the bot believes is currently posted in each online-list channel, so
   // the steady-state refresh needs no read of Discord at all — see
   // tracking.OnlineListState.
-  private val onlineListState = new tracking.OnlineListState(policy = tracking.OnlineListRepostPolicy.tiered(
-    Config.onlineListRepostEnabled,
-    Config.onlineListRepostDirtyFraction,
-    Config.onlineListRepostQueueDepth -> Config.onlineListRepostCooldownMs,
-    Config.onlineListRepostUrgentQueueDepth -> Config.onlineListRepostUrgentCooldownMs
-  ))
+  private val onlineListState = new tracking.OnlineListState(
+    policy = tracking.OnlineListRepostPolicy.tiered(
+      Config.onlineListRepostEnabled,
+      Config.onlineListRepostDirtyFraction,
+      Config.onlineListRepostQueueDepth -> Config.onlineListRepostCooldownMs,
+      Config.onlineListRepostUrgentQueueDepth -> Config.onlineListRepostUrgentCooldownMs
+    ),
+    footerMaxStaleMs = Config.onlineListFooterMaxStaleMs
+  )
 
   // Owned by the online-list sweep, which never overlaps itself — see
   // tracking.BountyPresence for why a login needs remembering rather than

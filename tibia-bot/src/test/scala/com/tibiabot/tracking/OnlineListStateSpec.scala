@@ -257,4 +257,108 @@ class OnlineListStateSpec extends AnyFunSuite with Matchers {
     state.plan("a", single("x")) shouldBe empty
     state.plan("b", single("x")) shouldBe List(SendOnlineListMessage(0, List("x")))
   }
+
+  /** A clock the test moves by hand, so the cap can be crossed without waiting it
+   *  out. Its own value below, deliberately not the configured default — what is
+   *  pinned here is the mechanism, not the number a deploy happens to run. */
+  private class Clock(var millis: Long = 1_700_000_000_000L) {
+    def now: () => Long = () => millis
+    def advance(ms: Long): Unit = millis += ms
+  }
+
+  private val cap = 300000L
+
+  private def stamped(clock: Clock) =
+    new OnlineListState(now = clock.now, footerMaxStaleMs = cap)
+
+  test("an unchanged list still corrects a stamp that has gone stale") {
+    // The point of the cap: the roster really is current and only the footer
+    // says otherwise, so the last message is rewritten to say so.
+    val clock = new Clock
+    val state = stamped(clock)
+    state.seed(channel, List(posted("m1", "a"), posted("m2", "b")))
+
+    clock.advance(cap - 1)
+    state.plan(channel, single("a", "b")) shouldBe empty
+
+    clock.advance(1)
+    state.plan(channel, single("a", "b")) shouldBe List(EditOnlineListMessage(1, "m2", List("b")))
+  }
+
+  test("correcting the stamp restarts the window rather than repeating every cycle") {
+    val clock = new Clock
+    val state = stamped(clock)
+    state.seed(channel, List(posted("m1", "a")))
+
+    clock.advance(cap)
+    state.plan(channel, single("a")) should have size 1
+    state.plan(channel, single("a")) shouldBe empty
+  }
+
+  test("a message written for its own sake also restarts the window") {
+    // A busy channel rewrites that message anyway, so it must never pay for the
+    // footer on top of what it was already sending.
+    val clock = new Clock
+    val state = stamped(clock)
+    state.seed(channel, List(posted("m1", "a")))
+
+    clock.advance(cap - 1)
+    state.plan(channel, single("b")) shouldBe List(EditOnlineListMessage(0, "m1", List("b")))
+
+    clock.advance(1)
+    state.plan(channel, single("b")) shouldBe empty
+  }
+
+  test("the cap is off by default, leaving a footer as fresh as the last change") {
+    val clock = new Clock
+    val state = new OnlineListState(now = clock.now)
+    state.seed(channel, List(posted("m1", "a")))
+
+    clock.advance(cap * 10)
+    state.plan(channel, single("a")) shouldBe empty
+  }
+
+  test("a list that got shorter puts the stamp back on the message that is now last") {
+    // Not a question of freshness: the stamp was on a message that has just been
+    // deleted, so without this the channel shows no footer at all until that
+    // message's own content happens to change.
+    val clock = new Clock
+    val state = stamped(clock)
+    state.seed(channel, List(posted("m1", "a"), posted("m2", "b")))
+
+    state.plan(channel, single("a")) shouldBe List(
+      EditOnlineListMessage(0, "m1", List("a")),
+      DeleteOnlineListMessages(List("m2"))
+    )
+  }
+
+  test("a list that got longer takes the stamp off the message that used to be last") {
+    // Otherwise two footers show at once, the older one claiming a refresh that
+    // is no longer the list's.
+    val clock = new Clock
+    val state = stamped(clock)
+    state.seed(channel, List(posted("m1", "a")))
+
+    state.plan(channel, single("a", "b")) shouldBe List(
+      SendOnlineListMessage(1, List("b")),
+      EditOnlineListMessage(0, "m1", List("a"))
+    )
+  }
+
+  test("a stamp correction is not churn, so it cannot tip a channel into reposting") {
+    // The repost policy trades edits for one wipe-and-repost. A rewrite that
+    // changes nothing but the footer must not count towards that, or a quiet
+    // channel would periodically churn itself wholesale.
+    val clock = new Clock
+    val state = new OnlineListState(
+      policy = OnlineListRepostPolicy.tiered(enabled = true, dirtyFraction = 0.5, 0 -> 0L),
+      now = clock.now,
+      footerMaxStaleMs = cap
+    )
+    state.seed(channel, List(posted("m1", "a")))
+
+    clock.advance(cap)
+    state.plan(channel, single("a"), queueDepth = 1000, canDelete = true) shouldBe
+      List(EditOnlineListMessage(0, "m1", List("a")))
+  }
 }

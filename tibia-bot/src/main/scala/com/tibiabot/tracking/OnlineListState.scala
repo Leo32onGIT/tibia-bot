@@ -42,11 +42,15 @@ final case class RepostOnlineList(deleteIds: List[String], messages: List[List[S
  *  @param normalise applied to both sides of the "did this message change?"
  *                   comparison — see `OnlineListEmbeds.withoutDurations`.
  *  @param policy    when to wipe and repost a channel instead of editing it.
- *                   Defaults to never, which is the behaviour without it. */
+ *                   Defaults to never, which is the behaviour without it.
+ *  @param footerMaxStaleMs how long the "Last updated" stamp may be wrong for
+ *                   before the last message is rewritten to correct it — see
+ *                   [[plan]]. 0 disables it, which is the behaviour without it. */
 final class OnlineListState(
   normalise: String => String = OnlineListEmbeds.withoutDurations,
   policy: OnlineListRepostPolicy = OnlineListRepostPolicy.disabled,
-  now: () => Long = () => System.currentTimeMillis()
+  now: () => Long = () => System.currentTimeMillis(),
+  footerMaxStaleMs: Long = 0L
 ) {
 
   private val lock = new Object()
@@ -55,6 +59,10 @@ final class OnlineListState(
   // invalidate would otherwise clear the cooldown and let reposts stack up
   // exactly when the channel is already misbehaving.
   private val lastRepostAtMs = mutable.Map.empty[String, Long]
+  // When the "Last updated" stamp on this channel's last message was last
+  // written. Kept out of `state` for the same reason as the cooldown: an
+  // invalidate is a bad moment to promise every channel a fresh footer at once.
+  private val lastStampedAtMs = mutable.Map.empty[String, Long]
 
   /** Has this channel been synced with Discord at least once? */
   def isWarm(channelId: String): Boolean = lock.synchronized { state.contains(channelId) }
@@ -70,6 +78,10 @@ final class OnlineListState(
     lock.synchronized {
       state.update(channelId, posted)
       lastRepostAtMs.update(channelId, now())
+      // Same argument for the footer: a restart would otherwise find every
+      // channel's stamp infinitely old and owe all of them an edit on the first
+      // cycle — the one moment the lane can least afford a burst of them.
+      lastStampedAtMs.update(channelId, now())
     }
 
   /** Forget this channel, forcing the next cycle to rebuild from history. */
@@ -93,6 +105,11 @@ final class OnlineListState(
    *  whatever changed once the id has landed. A send that never completes must
    *  therefore be reported by invalidating the channel, or that slot stays
    *  pending forever.
+   *
+   *  The one exception to "only when it changed" is the "Last updated" stamp,
+   *  which is a claim about the refresh rather than about the roster and so goes
+   *  wrong by standing still — see `footerActions`, and `footerMaxStaleMs` for
+   *  turning it off.
    *
    *  When `policy` says this channel is better reposted than edited, the whole
    *  plan collapses to a single [[RepostOnlineList]] instead.
@@ -124,12 +141,6 @@ final class OnlineListState(
           next += OnlineListMessage(None, descriptions)
       }
     }
-    // Left over from a previously longer list. A leftover whose own send is
-    // still in flight has no id to delete by — invalidating on send failure is
-    // what stops that from stranding a message.
-    val extra = cached.drop(messages.size).flatMap(_.id)
-    if (extra.nonEmpty) actions += DeleteOnlineListMessages(extra)
-
     val edits = actions.count(_.isInstanceOf[EditOnlineListMessage])
     val repost = canDelete && policy.shouldRepost(
       messageCount = messages.size,
@@ -138,16 +149,81 @@ final class OnlineListState(
       queueDepth = queueDepth,
       msSinceLastRepost = now() - lastRepostAtMs.getOrElse(channelId, 0L)
     )
+
     if (repost) {
       // Everything posted here is about to go, so every message is back to
       // awaiting an id — the same state a cold channel commits to.
       state.update(channelId, messages.map(OnlineListMessage(None, _)))
       lastRepostAtMs.update(channelId, now())
+      lastStampedAtMs.update(channelId, now())
       List(RepostOnlineList(cached.flatMap(_.id), messages))
     } else {
+      // Decided after the repost check, and never counted into `edits`: a
+      // rewrite that changes nothing but the stamp is not churn, and letting it
+      // push a channel over the dirty-fraction would trade one edit for a whole
+      // channel's worth.
+      footerActions(channelId, messages, next.toList, actions.toList, cached.size).foreach(actions += _)
+      // Left over from a previously longer list. A leftover whose own send is
+      // still in flight has no id to delete by — invalidating on send failure is
+      // what stops that from stranding a message.
+      val extra = cached.drop(messages.size).flatMap(_.id)
+      if (extra.nonEmpty) actions += DeleteOnlineListMessages(extra)
       state.update(channelId, next.toList)
       actions.toList
     }
+  }
+
+  /** Extra edits owed purely to the "Last updated" stamp, and the commit of when
+   *  it was last written.
+   *
+   *  The stamp goes on the final embed of the final message and nowhere else, so
+   *  it is only rewritten when that message is. Two ways that leaves it lying:
+   *
+   *  1. '''Nothing changed for a long time.''' The list really is current and the
+   *     footer says otherwise, which is the case this exists for. Capped by
+   *     `footerMaxStaleMs`, so a quiet channel pays one edit per window and a
+   *     busy one pays nothing, having rewritten that message anyway. The rewrite
+   *     also refreshes the online durations, which are masked out of the change
+   *     comparison (see `OnlineListEmbeds.withoutDurations`) and so are otherwise
+   *     only as current as the last roster change.
+   *  2. '''The list changed length.''' A shorter list leaves the stamp on a
+   *     message that has been deleted, so the channel shows none at all until
+   *     that message's content happens to change; a longer one leaves the old
+   *     last message holding a stamp that is no longer the list's. Both are
+   *     corrected here rather than waiting out the cap, since neither is a
+   *     question of freshness — the footer is simply in the wrong place.
+   *
+   *  Both go with `footerMaxStaleMs` when it is off, so that one switch means one
+   *  thing: the stamp is left exactly where the change comparison puts it. */
+  private def footerActions(
+    channelId: String,
+    messages: List[List[String]],
+    committed: List[OnlineListMessage],
+    planned: List[OnlineListAction],
+    previousCount: Int
+  ): List[OnlineListAction] = if (footerMaxStaleMs <= 0) Nil else {
+    val lastIndex = messages.size - 1
+    val previousLast = previousCount - 1
+    val alreadyWritten = planned.collect {
+      case EditOnlineListMessage(index, _, _) => index
+      case SendOnlineListMessage(index, _)    => index
+    }.toSet
+
+    // A pending slot has no id to edit by, and the send it is waiting on will
+    // carry the stamp itself.
+    def editable(index: Int): Option[EditOnlineListMessage] =
+      if (index < 0 || alreadyWritten.contains(index)) None
+      else committed.lift(index).flatMap(_.id).map(EditOnlineListMessage(index, _, messages(index)))
+
+    val stale = footerMaxStaleMs > 0 && now() - lastStampedAtMs.getOrElse(channelId, 0L) >= footerMaxStaleMs
+    val moved = previousLast != lastIndex
+    val refresh = if (stale || moved) editable(lastIndex) else None
+    // Only when the list grew: a message that used to be last and now is not
+    // still renders its old stamp.
+    val orphan = if (moved && previousLast < lastIndex) editable(previousLast) else None
+
+    if (alreadyWritten.contains(lastIndex) || refresh.isDefined) lastStampedAtMs.update(channelId, now())
+    refresh.toList ++ orphan.toList
   }
 
   /** Fill in the id of a message that has just been posted. No-op if the slot
