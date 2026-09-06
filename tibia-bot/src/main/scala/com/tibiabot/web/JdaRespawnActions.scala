@@ -104,9 +104,13 @@ final class JdaRespawnActions(
         respawnService.claim(guild, userId, name, nickname, characterName, code, minutes))
     }
 
+  /** `notifyHolder`, because this is the one release path that says nothing in
+   *  Discord: the answer goes back to the browser, so without the DM a hunt ends
+   *  with no notice anywhere and no way to reach the Loot Split form. */
   def release(guildId: String, userId: String, code: Option[String]): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
-      RespawnActions.describe(respawnService.release(guild, userId, code))
+      RespawnActions.describe(
+        respawnService.release(guild, userId, code, notifyHolder = true))
     }
 
   def extend(guildId: String, userId: String, extraMinutes: Int): Future[ActionResult] =

@@ -96,8 +96,8 @@ object RespawnButtons extends StrictLogging {
               case None => respond.text(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
               case Some(respawn) => action match {
                 case "leave" =>
-                  respond.text(renderRelease(
-                    BotApp.respawnService.release(dmGuild, event.getUser.getId, Some(respawn.code))))
+                  respondRelease(respond,
+                    BotApp.respawnService.release(dmGuild, event.getUser.getId, Some(respawn.code)))
                 case other =>
                   logger.warn(s"Unknown respawn DM button action '$other' in guild '$guildId'")
                   respond.text(s"${Config.noEmoji} That button doesn't do anything.")
@@ -513,7 +513,7 @@ object RespawnButtons extends StrictLogging {
                 }
 
               case "leave" | "release" =>
-                respond.text(renderRelease(service.release(guild, user.getId, Some(respawn.code))))
+                respondRelease(respond, service.release(guild, user.getId, Some(respawn.code)))
 
               case other =>
                 logger.warn(s"Unknown respawn button action '$other' in guild '$guildId'")
@@ -631,6 +631,27 @@ object RespawnButtons extends StrictLogging {
     Embeds.response(text)
   }
 
+  /** Answer a Leave press, carrying the Loot Split form when a hunt actually
+   *  ended.
+   *
+   *  Same reasoning as the "Claim ended" DM in
+   *  [[com.tibiabot.respawn.RespawnService]]: leaving a spawn is the moment a
+   *  party has a hunt to split and is already looking at their phone. Pressing it
+   *  changes nothing about the claim — the form reads pasted text and does
+   *  arithmetic on it — and it retires itself once it has produced a split, with
+   *  `/lootsplit` the way back to it.
+   *
+   *  Only on `Released`. Giving up a queue place is not the end of a hunt, there
+   *  is nothing to split, and the refusals have no hunt behind them at all. */
+  private def respondRelease(respond: Responder, outcome: ReleaseOutcome): Unit =
+    respond.embed(Embeds.response(renderRelease(outcome)), lootSplitRowFor(outcome))
+
+  private[interactions] def lootSplitRowFor(outcome: ReleaseOutcome): Option[ActionRow] =
+    outcome match {
+      case _: ReleaseOutcome.Released => Some(com.tibiabot.lootsplit.LootSplitIds.buttonRow)
+      case _                          => None
+    }
+
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
       val refund = if (refunded > 0) s"\nYou got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
@@ -648,7 +669,11 @@ object RespawnButtons extends StrictLogging {
       s"${Config.noEmoji} The respawn claim system isn't set up here."
   }
 
-  private val notModeratorText: String =
+  // Lazy so that touching anything in this object does not load the whole
+  // configuration: it is the only eager reference to Config here, and forcing it
+  // at class-init put every pure decision in this file out of reach of a test
+  // that has no discord.conf to resolve.
+  private lazy val notModeratorText: String =
     s"${Config.noEmoji} That needs the **Manage Server** permission, " +
       s"or the **${com.tibiabot.commands.Permissions.ModeratorRoleName}** role."
 

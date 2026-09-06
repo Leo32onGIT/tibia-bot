@@ -762,7 +762,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               now: ZonedDateTime = ZonedDateTime.now(),
               // What the audit log should say. Overridden by forceLeave, which is
               // the same operation performed by somebody else.
-              outcome: String = RespawnClaim.Outcome.Released): ReleaseOutcome =
+              outcome: String = RespawnClaim.Outcome.Released,
+              // For a caller with no Discord surface of its own. The Leave button
+              // answers in Discord already and carries the Loot Split form on that
+              // reply, so a DM there would say the same thing twice; the dashboard
+              // answers in the browser, and without this a hunt ends with nothing
+              // in Discord at all — no notice, and no way to reach the form.
+              notifyHolder: Boolean = false): ReleaseOutcome =
     settings(guild.getId) match {
       case None => ReleaseOutcome.NotConfigured
       case Some(config) =>
@@ -803,6 +809,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
               // snipe it. beginHandover finishes the claim if nobody is waiting.
               val offered = respawn.flatMap(
                 beginHandover(guild, _, config, now, outgoing = Some(claim), outgoingOutcome = outcome))
+              // Only the branch where a hunt actually ended. Leaving a queue is
+              // not the end of one, and the limbo branch above has already been
+              // through here once.
+              if (notifyHolder) respawn.foreach(notifyClaimEnded(guild, _, claim))
               respawn.map(ReleaseOutcome.Released(_, refunded, offered)).getOrElse(ReleaseOutcome.NothingHeld)
             }
         }
@@ -1808,7 +1818,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           outgoing.foreach { claim =>
             repository.finishClaim(guildId, claim.id, outgoingOutcome)
             // Only when the claim ran out on its own — someone who pressed Leave
-            // does not need telling that it ended.
+            // was answered where they pressed it. Where that answer is not in
+            // Discord, `release` sends the DM itself rather than turning this on:
+            // the offer branch above ends a hunt just as finally, and only one of
+            // the two comes through here.
             if (notifyOutgoing) notifyClaimEnded(guild, respawn, claim)
           }
           // The card already flips to free with a Claim button, so a "now free"
@@ -1921,8 +1934,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
     }
 
-  /** Tell a holder their claim is over. Only for claims that ended on their own —
-   *  by running out, or by being taken over once the handover window closed.
+  /** Tell a holder their claim is over: because it ran out, because it was taken
+   *  over once the handover window closed, or because they ended it themselves
+   *  somewhere this DM is the only way to say so (see `release`'s `notifyHolder`).
    *
    *  Carries the Loot Split form, because this DM lands at the one moment a party
    *  has a hunt to split and is looking at their phone: the hunt has just finished.
