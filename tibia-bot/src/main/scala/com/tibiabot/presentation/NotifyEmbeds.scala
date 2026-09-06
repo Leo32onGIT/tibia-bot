@@ -11,6 +11,7 @@ import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.entities.emoji.Emoji
 
 import java.time.Instant
+import scala.jdk.CollectionConverters._
 
 /** The DMs the two notification autoroles send, and the controls under them.
  *
@@ -80,11 +81,45 @@ object NotifyEmbeds {
       .build()
   }
 
-  def bountyControls(sub: BountySub): ActionRow =
+  /** The row under a bounty alert: be rid of this one, or just have it quiet
+   *  for a while.
+   *
+   *  Remove where a mass-log alert offers Disable, because the two subscriptions
+   *  aren't the same shape. There is one mass-log subscription per world and
+   *  switching it off is the only sense in which you can be done with it; a
+   *  bounty is one name among several, and being done with a name means it
+   *  should stop taking up a line on the list. Mute stays either way — "not
+   *  tonight" is a different answer from "not again".
+   *
+   *  Enable only appears on one already switched off, which no new alert can be:
+   *  a disabled subscription doesn't send. It is here for the DMs sitting in
+   *  people's inboxes from before Remove existed, whose Disable button still
+   *  works — pressing it must not leave the bounty off with nothing anywhere
+   *  offering to turn it back on. */
+  def bountyControls(sub: BountySub): ActionRow = {
+    val row = List(
+      Button.danger(NotifyIds.bountyDrop(sub.id), "Remove"),
+      muteButton(NotifyIds.bountyMute(sub.id), sub.mutedUntil))
     ActionRow.of(
-      toggleButton(sub.enabled, NotifyIds.bountyToggle(sub.id, enable = !sub.enabled)),
-      muteButton(NotifyIds.bountyMute(sub.id), sub.mutedUntil)
-    )
+      (if (sub.enabled) row
+       else Button.success(NotifyIds.bountyToggle(sub.id, enable = true), "Enable") :: row).asJava)
+  }
+
+  /** What Remove leaves behind it: the way back.
+   *
+   *  Remove asks nothing before it deletes, which is right for a button pressed
+   *  one-handed at an awkward hour — so the undo lives here instead, after the
+   *  fact, where it costs a mis-tap one press rather than costing everybody else
+   *  a confirmation step. It restores the cooldown that was set, not the
+   *  default: getting the name back is not the same as getting the setting back.
+   *
+   *  The disabled marker is the fallback for an id too long to carry all that,
+   *  which nothing real should reach — see NotifyIds.MaxCustomId. */
+  def bountyRestoreControls(removed: BountySub): ActionRow = {
+    val again = NotifyIds.bountyTrackAgain(removed.guildId, removed.world, removed.character, removed.cooldownMinutes)
+    if (again.length <= NotifyIds.MaxCustomId) ActionRow.of(Button.success(again, "Track again"))
+    else ActionRow.of(Button.secondary(NotifyIds.bountyRemoved, "Removed").asDisabled)
+  }
 
   /** The ephemeral panel behind the Bounty button: everything this user is
    *  watching on the world, with whatever just happened said above it.

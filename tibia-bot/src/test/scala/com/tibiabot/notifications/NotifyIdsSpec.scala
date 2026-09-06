@@ -12,6 +12,9 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
     NotifyIds.parseControl(NotifyIds.masslogThreshold(7)) shouldBe Some(NotifyIds.MasslogThreshold(7))
     NotifyIds.parseControl(NotifyIds.bountyToggle(9, enable = false)) shouldBe Some(NotifyIds.BountyToggle(9, enable = false))
     NotifyIds.parseControl(NotifyIds.bountyMute(9)) shouldBe Some(NotifyIds.BountyMute(9))
+    NotifyIds.parseControl(NotifyIds.bountyDrop(9)) shouldBe Some(NotifyIds.BountyDrop(9))
+    NotifyIds.parseControl(NotifyIds.bountyTrackAgain("1234", "Antica", "Bubble", 10)) shouldBe
+      Some(NotifyIds.BountyTrackAgain("1234", "Antica", "Bubble", 10))
     NotifyIds.parseControl(NotifyIds.bountyAdd("Antica")) shouldBe Some(NotifyIds.BountyAdd("Antica"))
     NotifyIds.parseControl(NotifyIds.bountyRemove("Antica")) shouldBe Some(NotifyIds.BountyRemove("Antica"))
   }
@@ -49,6 +52,29 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
     NotifyIds.opensModal(NotifyIds.bountyRemove("Antica")) shouldBe true
     NotifyIds.opensModal(NotifyIds.masslogToggle(1, enable = true)) shouldBe false
     NotifyIds.opensModal(NotifyIds.bountyToggle(1, enable = false)) shouldBe false
+    NotifyIds.opensModal(NotifyIds.bountyDrop(1)) shouldBe false
+    NotifyIds.opensModal(NotifyIds.bountyTrackAgain("1", "Antica", "Bubble", 10)) shouldBe false
+  }
+
+  /** Track again carries the whole subscription rather than a key, so the parts
+   *  that make a character name have to survive the round trip — and the id has
+   *  to stay inside what Discord will take. */
+  test("track again carries a name with spaces, and stays under the id cap") {
+    val id = NotifyIds.bountyTrackAgain("123456789012345678", "Antica", "Eternal Oblivion", 1440)
+    NotifyIds.parseControl(id) shouldBe Some(NotifyIds.BountyTrackAgain("123456789012345678", "Antica", "Eternal Oblivion", 1440))
+    id.length should be <= NotifyIds.MaxCustomId
+
+    // The longest anything real can be: a 20-digit guild, a long world and a
+    // name at Tibia's own 29-character limit.
+    val longest = NotifyIds.bountyTrackAgain("1" * 20, "Wintera", "a" * 29, 1440)
+    longest.length should be <= NotifyIds.MaxCustomId
+  }
+
+  /** The picker's world and the alert's row id are two different removals, and
+   *  a world named like a number must not be read as one. */
+  test("removing from the panel and removing from a DM don't parse as each other") {
+    NotifyIds.parseControl(NotifyIds.bountyRemove("7")) shouldBe Some(NotifyIds.BountyRemove("7"))
+    NotifyIds.parseControl(NotifyIds.bountyDrop(7)) shouldBe Some(NotifyIds.BountyDrop(7))
   }
 
   /** The Bounty button opens the panel rather than the add form now, so it is

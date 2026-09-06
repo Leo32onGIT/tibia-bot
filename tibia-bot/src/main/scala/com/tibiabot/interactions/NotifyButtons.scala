@@ -47,6 +47,9 @@ object NotifyButtons extends StrictLogging {
           case Some(NotifyIds.BountyToggle(id, enable))  => toggleBounty(event, id, enable)
           case Some(NotifyIds.MasslogMute(id))           => openMuteForm(event, id, bounty = false)
           case Some(NotifyIds.BountyMute(id))            => openMuteForm(event, id, bounty = true)
+          case Some(NotifyIds.BountyDrop(id))            => dropBounty(event, id)
+          case Some(NotifyIds.BountyTrackAgain(guildId, world, character, cooldown)) =>
+            trackAgain(event, guildId, world, character, cooldown)
           case Some(NotifyIds.MasslogThreshold(id))      => openThresholdForm(event, id)
           case Some(NotifyIds.BountyAdd(world))          => openBountyForm(event, world)
           case Some(NotifyIds.BountyRemove(world))       => openRemoveForm(event, world)
@@ -231,6 +234,37 @@ object NotifyButtons extends StrictLogging {
         syncRole(event.getJDA, event.getUser.getId, updated.guildId, updated.world, "bounty_role", stillWatching)
         event.getHook.editOriginalComponents(NotifyEmbeds.bountyControls(updated)).queue(_ => (), _ => ())
     }
+
+  /** Remove, pressed under the alert itself. One press, like the Disable it
+   *  replaced: this is read on a phone at an awkward moment, and a confirmation
+   *  step there is one more thing between the reader and quiet. The row it
+   *  leaves is the undo — Mute and a second Remove would both mean nothing once
+   *  the subscription is gone. */
+  private def dropBounty(event: ButtonInteractionEvent, id: Long): Unit =
+    ownedBounty(event, id).flatMap(_ => BotApp.notifyService.removeBounty(id)) match {
+      case None => refuse(event, gone)
+      case Some(removed) =>
+        val stillWatching = BotApp.notifyService
+          .bountiesFor(removed.guildId, removed.world, removed.userId)
+          .exists(_.enabled)
+        syncRole(event.getJDA, event.getUser.getId, removed.guildId, removed.world, "bounty_role", stillWatching)
+        event.getHook.editOriginalComponents(NotifyEmbeds.bountyRestoreControls(removed)).queue(_ => (), _ => ())
+    }
+
+  /** Track again, on a DM whose bounty has been removed. Everything needed is in
+   *  the button, since the row it stood for is gone — but the presser is not
+   *  taken from it: it is whoever is holding the DM, which is the one thing a
+   *  forwarded id can't fake.
+   *
+   *  Adding is an upsert, so pressing it twice, or after re-adding the name by
+   *  hand, settles on one subscription rather than a second. */
+  private def trackAgain(
+    event: ButtonInteractionEvent, guildId: String, world: String, character: String, cooldownMinutes: Int
+  ): Unit = {
+    val restored = BotApp.notifyService.addBounty(guildId, world, event.getUser.getId, character, cooldownMinutes)
+    syncRole(event.getJDA, event.getUser.getId, guildId, world, "bounty_role", subscribed = true)
+    event.getHook.editOriginalComponents(NotifyEmbeds.bountyControls(restored)).queue(_ => (), _ => ())
+  }
 
   // --- shared ------------------------------------------------------------
 

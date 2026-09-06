@@ -32,6 +32,19 @@ object NotifyIds {
   final case class MasslogThreshold(id: Long) extends Control
   final case class BountyToggle(id: Long, enable: Boolean) extends Control
   final case class BountyMute(id: Long) extends Control
+  /** Stop watching, from under the alert itself. Named apart from
+   *  [[BountyRemove]] because that one carries a world and opens a picker;
+   *  this one already knows which bounty is meant — it is the one that just
+   *  woke the reader up. */
+  final case class BountyDrop(id: Long) extends Control
+  /** Put back what a [[BountyDrop]] just removed.
+   *
+   *  The whole subscription rides in the id, because after the delete there is
+   *  no row left to point at — and a DM has no guild of its own to fall back on.
+   *  It is the only id here carrying state rather than a key, and it can: all
+   *  four parts are short, and a character name is letters, spaces, apostrophes
+   *  and hyphens — never the colon this splits on. */
+  final case class BountyTrackAgain(guildId: String, world: String, character: String, cooldownMinutes: Int) extends Control
   /** The bounty panel's buttons: track somebody new on `world`, or stop
    *  watching somebody already tracked there. */
   final case class BountyAdd(world: String) extends Control
@@ -42,6 +55,21 @@ object NotifyIds {
   def masslogThreshold(id: Long): String = s"${Prefix}ml:threshold:$id"
   def bountyToggle(id: Long, enable: Boolean): String = s"${Prefix}bt:${if (enable) "on" else "off"}:$id"
   def bountyMute(id: Long): String = s"${Prefix}bt:mute:$id"
+  def bountyDrop(id: Long): String = s"${Prefix}bt:drop:$id"
+  def bountyTrackAgain(guildId: String, world: String, character: String, cooldownMinutes: Int): String =
+    s"${Prefix}bt:back:$guildId:$world:$cooldownMinutes:$character"
+
+  /** The id on the disabled marker that stands in when a way back won't fit. It
+   *  is never pressed — Discord sends nothing for a disabled button — but every
+   *  button needs one, and this keeps it out of the way of ids that mean
+   *  something. */
+  val bountyRemoved: String = s"${Prefix}bt:removed"
+
+  /** Discord's cap on a component id. Only [[bountyTrackAgain]] can approach it,
+   *  and its worst case — a 20-digit guild, the longest world and a 29-character
+   *  name — still lands under 90. The check exists so that a longer one would
+   *  lose its button rather than the message losing its edit. */
+  val MaxCustomId: Int = 100
   def bountyAdd(world: String): String = s"${Prefix}bt:add:$world"
   def bountyRemove(world: String): String = s"${Prefix}bt:rm:$world"
 
@@ -57,6 +85,9 @@ object NotifyIds {
       case "notify" :: "bt" :: "on" :: id :: Nil        => id.toLongOption.map(BountyToggle(_, enable = true))
       case "notify" :: "bt" :: "off" :: id :: Nil       => id.toLongOption.map(BountyToggle(_, enable = false))
       case "notify" :: "bt" :: "mute" :: id :: Nil      => id.toLongOption.map(BountyMute)
+      case "notify" :: "bt" :: "drop" :: id :: Nil      => id.toLongOption.map(BountyDrop)
+      case "notify" :: "bt" :: "back" :: guild :: world :: cooldown :: character :: Nil =>
+        cooldown.toIntOption.map(BountyTrackAgain(guild, world, character, _))
       case "notify" :: "bt" :: "add" :: world :: Nil    => Some(BountyAdd(world))
       case "notify" :: "bt" :: "rm" :: world :: Nil     => Some(BountyRemove(world))
       case _                                            => None
