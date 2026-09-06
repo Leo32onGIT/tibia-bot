@@ -278,4 +278,83 @@ class OnlineListEmbedsSpec extends AnyFunSuite with Matchers {
     stable.size.toDouble should be < (fresh.size * 1.25)
     stable.flatMap(linesOf) shouldBe lines
   }
+
+  // --- a heading and the rows it introduces ---
+  //
+  // A heading is the one line whose meaning comes from what is under it, so
+  // being the last thing on an embed makes it read as a mistake: the reader gets
+  // a guild name with nothing beneath it and that guild's players opening the
+  // next message, as if they belonged to nobody.
+
+  private def guildHeading(name: String, count: Int) =
+    s"### [$name](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=$name) $count"
+
+  private def guildRoster(guilds: Int, per: Int): List[String] =
+    (1 to guilds).flatMap(g => guildHeading(s"Guild$g", per) :: rows(per, from = g * 100)).toList
+
+  /** Headings left as the last line of the embed they sit in. */
+  private def strandedHeadings(messages: List[List[String]]): List[String] =
+    messages.flatMap(_.flatMap(_.split("\n").filter(_.nonEmpty).lastOption.filter(_.startsWith("### "))))
+
+  test("a fresh packing never ends an embed on a heading, at any roster shape") {
+    // Swept rather than sampled: the failure needs a heading to land within a
+    // row's length of the message budget, so a single shape proves very little
+    // and the shapes that hit it are not the ones anybody would pick by hand.
+    val offenders = for {
+      guilds <- 4 to 40
+      per <- 2 to 8
+      bad = strandedHeadings(OnlineListEmbeds.packMessages(guildRoster(guilds, per)))
+      if bad.nonEmpty
+    } yield s"$guilds guilds of $per -> ${bad.mkString(",")}"
+
+    offenders shouldBe empty
+  }
+
+  test("a heading rolled onto a new message takes its rows with it") {
+    val packed = OnlineListEmbeds.packMessages(guildRoster(22, 4))
+    // Wherever a message starts with a heading, the next line is one of its rows
+    // rather than another message boundary.
+    packed.foreach { message =>
+      val lines = linesOf(message)
+      if (lines.headOption.exists(_.startsWith("### "))) lines.size should be > 1
+    }
+    packed.flatMap(linesOf) shouldBe guildRoster(22, 4)
+  }
+
+  test("the stable packing does not strand a heading as churn spills rows forward") {
+    // The spill moves rows one at a time off the end of a full message. Taking
+    // the last of a guild's players while leaving the guild's name behind is the
+    // same separation as above, reached from the other direction.
+    val random = new scala.util.Random(7)
+    var lines = guildRoster(28, 5)
+    var stable = OnlineListEmbeds.packMessages(lines)
+
+    (1 to 60).foreach { round =>
+      lines = lines.patch(random.nextInt(lines.size), rows(1, from = 50000 + round), 0)
+      val victim = lines.indexWhere(line => !line.startsWith("### ") && random.nextBoolean())
+      if (victim >= 0) lines = lines.patch(victim, Nil, 1)
+      stable = OnlineListEmbeds.packMessagesStable(lines, stable)
+      withClue(s"round $round: ") { strandedHeadings(stable) shouldBe empty }
+    }
+    stable.flatMap(linesOf) shouldBe lines
+  }
+
+  test("a heading already separated from its rows is reunited, not preserved") {
+    // Keeping every line where it is is the point of the stable packing,
+    // and this is the one case where it is the wrong answer: both sides keep the
+    // position they are being read from, so the split cannot heal on its own and
+    // a channel stays wrong until the 6-hourly purge repacks it.
+    val lines = guildHeading("Alpha", 2) :: rows(2, from = 1) :::
+      guildHeading("NoDramas", 3) :: rows(3, from = 10)
+    val split = List(
+      List((guildHeading("Alpha", 2) :: rows(2, from = 1)).mkString("\n"), guildHeading("NoDramas", 3)),
+      List(rows(3, from = 10).mkString("\n"))
+    )
+    strandedHeadings(split) should have size 1
+
+    val healed = OnlineListEmbeds.packMessagesStable(lines, split)
+    strandedHeadings(healed) shouldBe empty
+    linesOf(healed.last).head shouldBe guildHeading("NoDramas", 3)
+    healed.flatMap(linesOf) shouldBe lines
+  }
 }

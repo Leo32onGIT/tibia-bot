@@ -100,6 +100,11 @@ object OnlineListEmbeds {
    *  as opposed to a guild's own header. */
   private def isSectionHeader(line: String): Boolean = line.matches("### [^\\[].*")
 
+  /** Any heading, guild or section. A heading only means anything with the rows
+   *  it introduces underneath it, so wherever one can be separated from them,
+   *  both kinds have to be asked about. */
+  private def isHeader(line: String): Boolean = line.startsWith("### ")
+
   /** Pack online-list lines into messages, each holding one or more embed
    *  descriptions.
    *
@@ -136,20 +141,42 @@ object OnlineListEmbeds {
     }
 
     // Close the current embed and open a new one holding `line`, rolling over to
-    // a new message when this one cannot hold that line as well.
-    def startEmbed(line: String): Unit = {
+    // a new message when this one cannot hold that line *and* whatever `line`
+    // must keep with it (see `follows`).
+    def startEmbed(line: String, keepsWith: Int): Unit = {
       embeds += field
       messageUsed += field.length
-      if (embeds.size >= MaxEmbedsPerMessage || messageUsed + line.length >= MessageBudget) closeMessage()
+      if (embeds.size >= MaxEmbedsPerMessage || messageUsed + line.length + keepsWith >= MessageBudget) closeMessage()
       field = line
     }
 
-    values.foreach { v =>
+    // What each heading must be able to keep on its own message: the headings
+    // that follow it, if any, and the first row underneath them. Rows keep
+    // nothing, so this is 0 for them.
+    //
+    // Without it a heading that merely fits is placed, the row it introduces
+    // trips the message budget on the very next line, and the reader is left
+    // with a guild name at the bottom of one message and its players at the top
+    // of the next. `embedFull` already buys the same thing at the embed
+    // boundary; unbought here, the failure simply happened one level up.
+    //
+    // Measured rather than a fixed allowance, because a heading is only stranded
+    // by the row that actually follows it, and rounding that up to a constant
+    // would roll headings onto a new message that had room for them.
+    val follows = new Array[Int](values.size)
+    var keeps = 0
+    values.zipWithIndex.reverse.foreach { case (line, index) =>
+      follows(index) = if (isHeader(line)) keeps else 0
+      keeps = if (isHeader(line)) keeps + line.length + 1 else line.length + 1
+    }
+
+    values.zipWithIndex.foreach { case (v, index) =>
       val currentField = field + "\n" + v
-      if (messageUsed + currentField.length >= MessageBudget || embedFull(currentField, v)) startEmbed(v)
+      val keepsWith = follows(index)
+      if (messageUsed + currentField.length + keepsWith >= MessageBudget || embedFull(currentField, v)) startEmbed(v, keepsWith)
       else if (isSectionHeader(v)) {
         if (field == "") field = currentField
-        else startEmbed(v)
+        else startEmbed(v, keepsWith)
       } else field = currentField
     }
     embeds += field
@@ -229,14 +256,36 @@ object OnlineListEmbeds {
       })
     }
 
+    // What each line's position should follow. A row follows itself, as
+    // everything did before; a heading follows the first row underneath it,
+    // because a heading's place in the channel is decided entirely by where its
+    // rows are. Staying put is what this whole function is for, but a heading
+    // that stays put while its rows move is the one case where staying put is
+    // the wrong answer — and, since both sides then keep the positions they are
+    // being read from, the one case that never recovers on its own. Anchoring
+    // pulls such a heading forward to its rows on the next cycle instead of
+    // waiting for the 6-hourly purge to repack.
+    val anchors = new Array[String](values.size)
+    var nextRow: String = null
+    values.zipWithIndex.reverse.foreach { case (line, index) =>
+      if (isHeader(line)) anchors(index) = nextRow
+      else {
+        nextRow = withoutDurations(line)
+        anchors(index) = nextRow
+      }
+    }
+
     // Walk the new list, keeping each line on its own message. An index that
     // would go backwards is clamped forward, so the messages stay in order
     // whatever has moved.
     val runs = scala.collection.mutable.ListBuffer.empty[scala.collection.mutable.ListBuffer[String]]
     var current = scala.collection.mutable.ListBuffer.empty[String]
     var currentIndex = 0
-    values.foreach { line =>
-      val wanted = math.max(where.getOrElse(withoutDurations(line), currentIndex), currentIndex)
+    values.zipWithIndex.foreach { case (line, index) =>
+      // A heading with no rows after it at all has nothing to follow, so it
+      // keeps its own place.
+      val anchor = Option(anchors(index)).getOrElse(withoutDurations(line))
+      val wanted = math.max(where.getOrElse(anchor, currentIndex), currentIndex)
       if (wanted != currentIndex && current.nonEmpty) {
         runs += current
         current = scala.collection.mutable.ListBuffer.empty[String]
@@ -249,10 +298,18 @@ object OnlineListEmbeds {
     // Spill only what does not fit, and only as far as it takes to find room.
     var i = 0
     while (i < runs.size) {
-      while (runs(i).nonEmpty && overfull(packEmbeds(runs(i).toList, i == 0))) {
+      def spill(): Unit = {
         if (i + 1 == runs.size) runs += scala.collection.mutable.ListBuffer.empty[String]
-        val moved = runs(i).remove(runs(i).size - 1)
-        runs(i + 1).prepend(moved)
+        runs(i + 1).prepend(runs(i).remove(runs(i).size - 1))
+      }
+      while (runs(i).nonEmpty && overfull(packEmbeds(runs(i).toList, i == 0))) {
+        spill()
+        // Whatever a spill leaves exposed at the end goes with it. Moving rows
+        // one at a time off the end of a full message will otherwise take the
+        // last of a guild's players and leave the guild's name behind — the
+        // same separation as above, arrived at from the other direction, and
+        // then pinned in place by `where` on every cycle after it.
+        while (runs(i).nonEmpty && isHeader(runs(i).last)) spill()
       }
       i += 1
     }
