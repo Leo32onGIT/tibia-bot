@@ -86,9 +86,14 @@ object NotifyEmbeds {
       muteButton(NotifyIds.bountyMute(sub.id), sub.mutedUntil)
     )
 
-  /** The ephemeral reply to pressing the Bounty button: what was just added, and
-   *  everything else this user is watching on the world. */
-  def bountySettings(added: BountySub, held: List[BountySub], world: String, headline: String): MessageEmbed = {
+  /** The ephemeral panel behind the Bounty button: everything this user is
+   *  watching on the world, with whatever just happened said above it.
+   *
+   *  Pressing the button used to open the add form on the spot, which left the
+   *  list — and anyone wanting off it — with nowhere to be seen. The list is
+   *  where the button lands now, and adding is one of the two things offered
+   *  from it. */
+  def bountyPanel(held: List[BountySub], world: String, headline: String): MessageEmbed = {
     val list =
       if (held.isEmpty) "*You aren't watching anyone on this world.*"
       else held.map { sub =>
@@ -102,8 +107,38 @@ object NotifyEmbeds {
       .setColor(Embeds.BrandColor)
       .setTitle(s"Bounties on $world")
       .setDescription(s"$headline\n\n${EmbedText.fit(list)}")
-      .setFooter(status(added.enabled, added.mutedUntil))
+      .setFooter(listStatus(held))
       .build()
+  }
+
+  /** The panel's own two buttons. Both act on the list rather than on any one
+   *  row, so neither carries a subscription id — Disable and Mute belong to a
+   *  single bounty, and stay where a single bounty is being talked about: under
+   *  the DM it sent.
+   *
+   *  Remove is greyed out rather than dropped when there is nothing to remove,
+   *  so the panel doesn't change shape between one visit and the next. */
+  def bountyPanelControls(world: String, held: List[BountySub]): ActionRow = {
+    val remove = Button.danger(NotifyIds.bountyRemove(world), "Remove")
+    ActionRow.of(
+      Button.success(NotifyIds.bountyAdd(world), "Add"),
+      if (held.isEmpty) remove.asDisabled else remove)
+  }
+
+  /** The panel's footer: whether anything on this list can still reach the
+   *  reader at all. Which one is off, or muted until when, is on its own row. */
+  private def listStatus(held: List[BountySub]): String =
+    if (held.isEmpty) "Nothing tracked here yet"
+    else if (!held.exists(_.enabled)) "Notifications are off"
+    else "Notifications are on"
+
+  /** Names run together the way somebody would say them. Used for what a Remove
+   *  has just taken off the list: a count alone gives the reader no way to check
+   *  they picked the ones they meant. */
+  def nameList(names: List[String]): String = names match {
+    case Nil           => ""
+    case single :: Nil => s"**$single**"
+    case many          => s"${many.init.map(name => s"**$name**").mkString(", ")} and **${many.last}**"
   }
 
   // --- shared controls ---------------------------------------------------

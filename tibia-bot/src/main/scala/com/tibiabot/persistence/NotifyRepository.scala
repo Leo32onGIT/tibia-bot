@@ -42,6 +42,11 @@ trait NotifyRepository {
   def markMasslogNotified(id: Long, at: Instant): Unit
   def markBountyNotified(id: Long, at: Instant): Unit
 
+  /** Stop watching one character — the only row deletion a user can ask for.
+   *  Mass-log subscriptions have no equivalent: there is one per world, and
+   *  switching it off is what wanting rid of it looks like. */
+  def deleteBounty(id: Long): Unit
+
   /** Drop everything for a guild — called when a world or the whole guild goes
    *  away. Guild-scoped rows in a shared database have no other way of being
    *  cleaned up, since dropping the guild's database doesn't touch them. */

@@ -130,6 +130,24 @@ final class NotifyService(
       updated
     }
 
+  /** Stop watching one character. Returns the row that went, so the caller can
+   *  say whose alerts have just stopped — after this it is nowhere to be read.
+   *
+   *  Database first, cache after, like every other write here: a delete that
+   *  fails must leave the subscription still firing rather than leave the sweep
+   *  and the stored rows disagreeing until the next restart. */
+  def removeBounty(id: Long): Option[BountySub] =
+    bountySubs.get(id).flatMap { _ =>
+      try {
+        repository.deleteBounty(id)
+        bountySubs.remove(id)
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Failed to delete bounty subscription $id", ex)
+          None
+      }
+    }
+
   def forgetGuild(guildId: String): Unit = {
     try repository.deleteGuild(guildId)
     catch { case ex: Throwable => logger.warn(s"Failed to delete notification subscriptions for guild '$guildId'", ex) }

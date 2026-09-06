@@ -112,6 +112,29 @@ class NotifyRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Pos
     repo.allBounty().count(_.guildId == guildId) shouldBe 0
   }
 
+  test("removing one bounty leaves that user's others alone") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcNotifyRepository(provider)
+    val userId = "user-bounty-remove"
+    repo.deleteGuild(guildId)
+
+    val dropped = repo.upsertBounty(guildId, world, userId, "Bubble", 10)
+    val kept = repo.upsertBounty(guildId, world, userId, "Eternal Oblivion", 10)
+
+    repo.deleteBounty(dropped.id)
+    repo.bountyById(dropped.id) shouldBe None
+    repo.bountyById(kept.id).map(_.character) shouldBe Some("Eternal Oblivion")
+
+    // The name is free again afterwards, rather than colliding with a row that
+    // is no longer there.
+    val readded = repo.upsertBounty(guildId, world, userId, "Bubble", 20)
+    readded.id should not be dropped.id
+    repo.allBounty().count(_.guildId == guildId) shouldBe 2
+
+    repo.deleteGuild(guildId)
+  }
+
   test("notification stamps survive the round trip to the second") {
     val provider = pgOrCancel()
     ensureCacheSchema(provider)

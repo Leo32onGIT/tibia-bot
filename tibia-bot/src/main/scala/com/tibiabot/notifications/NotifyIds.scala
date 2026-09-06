@@ -22,19 +22,28 @@ object NotifyIds {
   val MasslogButton = "masslog"
   val BountyButton = "bounty"
 
-  sealed trait Control { def id: Long }
+  /** A control names either one subscription, by the row id it carries, or a
+   *  world — the bounty panel's own two buttons act on whatever the presser
+   *  happens to be watching there, which is not known until they press. */
+  sealed trait Control
   /** Turn a mass-log subscription off (`enable = false`) or back on. */
   final case class MasslogToggle(id: Long, enable: Boolean) extends Control
   final case class MasslogMute(id: Long) extends Control
   final case class MasslogThreshold(id: Long) extends Control
   final case class BountyToggle(id: Long, enable: Boolean) extends Control
   final case class BountyMute(id: Long) extends Control
+  /** The bounty panel's buttons: track somebody new on `world`, or stop
+   *  watching somebody already tracked there. */
+  final case class BountyAdd(world: String) extends Control
+  final case class BountyRemove(world: String) extends Control
 
   def masslogToggle(id: Long, enable: Boolean): String = s"${Prefix}ml:${if (enable) "on" else "off"}:$id"
   def masslogMute(id: Long): String = s"${Prefix}ml:mute:$id"
   def masslogThreshold(id: Long): String = s"${Prefix}ml:threshold:$id"
   def bountyToggle(id: Long, enable: Boolean): String = s"${Prefix}bt:${if (enable) "on" else "off"}:$id"
   def bountyMute(id: Long): String = s"${Prefix}bt:mute:$id"
+  def bountyAdd(world: String): String = s"${Prefix}bt:add:$world"
+  def bountyRemove(world: String): String = s"${Prefix}bt:rm:$world"
 
   def handlesButton(componentId: String): Boolean =
     componentId == MasslogButton || componentId == BountyButton || componentId.startsWith(Prefix)
@@ -48,17 +57,22 @@ object NotifyIds {
       case "notify" :: "bt" :: "on" :: id :: Nil        => id.toLongOption.map(BountyToggle(_, enable = true))
       case "notify" :: "bt" :: "off" :: id :: Nil       => id.toLongOption.map(BountyToggle(_, enable = false))
       case "notify" :: "bt" :: "mute" :: id :: Nil      => id.toLongOption.map(BountyMute)
+      case "notify" :: "bt" :: "add" :: world :: Nil    => Some(BountyAdd(world))
+      case "notify" :: "bt" :: "rm" :: world :: Nil     => Some(BountyRemove(world))
       case _                                            => None
     }
 
   /** A press that answers with a modal cannot be deferred — `replyModal` has to
-   *  be the interaction's first response. Everything else here rewrites the
-   *  message it was pressed on, so it defers an edit. Mirrors
+   *  be the interaction's first response. Everything else is deferred as an
+   *  edit: those either rewrite the row they were pressed on or, in the Bounty
+   *  button's case, answer with an ephemeral of their own, and a deferred edit
+   *  leaves the message it was pressed on alone either way. Mirrors
    *  RespawnButtonId.ackFor, for the same three-second reason. */
   def opensModal(componentId: String): Boolean =
-    componentId == MasslogButton || componentId == BountyButton ||
+    componentId == MasslogButton ||
       parseControl(componentId).exists {
         case _: MasslogMute | _: MasslogThreshold | _: BountyMute => true
+        case _: BountyAdd | _: BountyRemove                       => true
         case _                                                    => false
       }
 
@@ -71,11 +85,14 @@ object NotifyIds {
   final case class BountyForm(world: String) extends Form
   final case class ThresholdForm(id: Long) extends Form
   final case class MuteForm(id: Long, bounty: Boolean) extends Form
+  /** Picking which of this user's bounties on `world` to stop watching. */
+  final case class RemoveForm(world: String) extends Form
 
   def masslogForm(world: String): String = s"${Prefix}form:masslog:$world"
   def bountyForm(world: String): String = s"${Prefix}form:bounty:$world"
   def thresholdForm(id: Long): String = s"${Prefix}form:threshold:$id"
   def muteForm(id: Long, bounty: Boolean): String = s"${Prefix}form:mute:${if (bounty) "bt" else "ml"}:$id"
+  def removeForm(world: String): String = s"${Prefix}form:remove:$world"
 
   def handlesModal(modalId: String): Boolean = modalId.startsWith(s"${Prefix}form:")
 
@@ -86,6 +103,7 @@ object NotifyIds {
       case "notify" :: "form" :: "threshold" :: id :: Nil    => id.toLongOption.map(ThresholdForm)
       case "notify" :: "form" :: "mute" :: "bt" :: id :: Nil => id.toLongOption.map(MuteForm(_, bounty = true))
       case "notify" :: "form" :: "mute" :: "ml" :: id :: Nil => id.toLongOption.map(MuteForm(_, bounty = false))
+      case "notify" :: "form" :: "remove" :: world :: Nil    => Some(RemoveForm(world))
       case _                                                 => None
     }
 
@@ -94,4 +112,5 @@ object NotifyIds {
   val CharacterField = "character"
   val CooldownField = "cooldown"
   val MuteField = "mute"
+  val RemoveField = "remove"
 }

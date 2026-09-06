@@ -12,6 +12,8 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
     NotifyIds.parseControl(NotifyIds.masslogThreshold(7)) shouldBe Some(NotifyIds.MasslogThreshold(7))
     NotifyIds.parseControl(NotifyIds.bountyToggle(9, enable = false)) shouldBe Some(NotifyIds.BountyToggle(9, enable = false))
     NotifyIds.parseControl(NotifyIds.bountyMute(9)) shouldBe Some(NotifyIds.BountyMute(9))
+    NotifyIds.parseControl(NotifyIds.bountyAdd("Antica")) shouldBe Some(NotifyIds.BountyAdd("Antica"))
+    NotifyIds.parseControl(NotifyIds.bountyRemove("Antica")) shouldBe Some(NotifyIds.BountyRemove("Antica"))
   }
 
   test("every form id round-trips, including worlds that are only a name") {
@@ -20,6 +22,7 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
     NotifyIds.parseForm(NotifyIds.thresholdForm(3)) shouldBe Some(NotifyIds.ThresholdForm(3))
     NotifyIds.parseForm(NotifyIds.muteForm(3, bounty = true)) shouldBe Some(NotifyIds.MuteForm(3, bounty = true))
     NotifyIds.parseForm(NotifyIds.muteForm(3, bounty = false)) shouldBe Some(NotifyIds.MuteForm(3, bounty = false))
+    NotifyIds.parseForm(NotifyIds.removeForm("Antica")) shouldBe Some(NotifyIds.RemoveForm("Antica"))
   }
 
   test("ids from another feature are left alone") {
@@ -39,11 +42,19 @@ class NotifyIdsSpec extends AnyFunSuite with Matchers {
    *  answers with a modal, which Discord requires be the first response. */
   test("only the form-opening presses are exempt from the early acknowledgement") {
     NotifyIds.opensModal("masslog") shouldBe true
-    NotifyIds.opensModal("bounty") shouldBe true
     NotifyIds.opensModal(NotifyIds.masslogMute(1)) shouldBe true
     NotifyIds.opensModal(NotifyIds.masslogThreshold(1)) shouldBe true
     NotifyIds.opensModal(NotifyIds.bountyMute(1)) shouldBe true
+    NotifyIds.opensModal(NotifyIds.bountyAdd("Antica")) shouldBe true
+    NotifyIds.opensModal(NotifyIds.bountyRemove("Antica")) shouldBe true
     NotifyIds.opensModal(NotifyIds.masslogToggle(1, enable = true)) shouldBe false
     NotifyIds.opensModal(NotifyIds.bountyToggle(1, enable = false)) shouldBe false
+  }
+
+  /** The Bounty button opens the panel rather than the add form now, so it is
+   *  acknowledged like every other press — the add form it used to open is
+   *  reached from a button on that panel instead. */
+  test("the bounty button answers with a panel, not a form") {
+    NotifyIds.opensModal("bounty") shouldBe false
   }
 }

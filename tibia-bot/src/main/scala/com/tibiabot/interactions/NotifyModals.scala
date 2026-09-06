@@ -14,7 +14,7 @@ import java.time.temporal.ChronoUnit
 import scala.jdk.CollectionConverters._
 
 /** The forms behind the notification autoroles: the threshold prompt, the bounty
- *  prompt, and the mute picker.
+ *  prompt, the remove picker and the mute picker.
  *
  *  Routed apart from [[ModalHandler]] for the same reason the respawn forms are:
  *  that handler opens with `deferEdit()`, which rewrites the message the modal
@@ -33,6 +33,7 @@ object NotifyModals extends StrictLogging {
       case Some(NotifyIds.BountyForm(world))     => addBounty(event, world)
       case Some(NotifyIds.ThresholdForm(id))     => adjustThreshold(event, id)
       case Some(NotifyIds.MuteForm(id, bounty))  => mute(event, id, bounty)
+      case Some(NotifyIds.RemoveForm(world))     => removeBounties(event, world)
       case None =>
         logger.debug(s"Ignoring unparseable notification modal id '${event.getModalId}'")
         reply(event, Embeds.response(s"${Config.noEmoji} That form is out of date — press the button again."))
@@ -41,15 +42,18 @@ object NotifyModals extends StrictLogging {
   private def value(event: ModalInteractionEvent, field: String): String =
     Option(event.getValue(field)).map(_.getAsString.trim).getOrElse("")
 
-  /** What was picked in a select. Not interchangeable with [[value]]: a select's
-   *  answer refuses `getAsString` outright and throws rather than coming back
-   *  empty — see the same pair in RespawnModals. */
-  private def selected(event: ModalInteractionEvent, field: String): Option[String] =
+  /** Everything picked in a select. Not interchangeable with [[value]]: a
+   *  select's answer refuses `getAsString` outright and throws rather than
+   *  coming back empty — see the same pair in RespawnModals. */
+  private def selections(event: ModalInteractionEvent, field: String): List[String] =
     Option(event.getValue(field))
       .toList
       .flatMap(_.getAsStringList.asScala.toList)
       .map(_.trim)
-      .find(_.nonEmpty)
+      .filter(_.nonEmpty)
+
+  private def selected(event: ModalInteractionEvent, field: String): Option[String] =
+    selections(event, field).headOption
 
   // --- subscribing -------------------------------------------------------
 
@@ -81,15 +85,49 @@ object NotifyModals extends StrictLogging {
         parsed match {
           case Left(problem) => reply(event, Embeds.response(s"${Config.noEmoji} $problem"))
           case Right((character, cooldown)) =>
-            val sub = BotApp.notifyService.addBounty(guild.getId, world, event.getUser.getId, character, cooldown)
+            BotApp.notifyService.addBounty(guild.getId, world, event.getUser.getId, character, cooldown)
             NotifyButtons.syncRole(event.getJDA, event.getUser.getId, guild.getId, world, "bounty_role", subscribed = true)
-            val held = BotApp.notifyService.bountiesFor(guild.getId, world, event.getUser.getId)
-            reply(
-              event,
-              NotifyEmbeds.bountySettings(sub, held, world, s"${Config.yesEmoji} I'll DM you when **$character** logs in."),
-              Some(NotifyEmbeds.bountyControls(sub)))
+            panel(event, guild.getId, world, s"${Config.yesEmoji} I'll DM you when **$character** logs in.")
         }
     }
+
+  /** Stop watching whoever was ticked. Several at once, because the reason to
+   *  open this is usually a tidy-up rather than one name.
+   *
+   *  A pick that isn't this user's is dropped silently rather than refused: the
+   *  ids come from a menu we built for them a moment ago, so the only way to
+   *  send somebody else's is to have gone looking for it. */
+  private def removeBounties(event: ModalInteractionEvent, world: String): Unit =
+    Option(event.getGuild) match {
+      case None => reply(event, Embeds.response(s"${Config.noEmoji} That button only works inside a server."))
+      case Some(guild) =>
+        val userId = event.getUser.getId
+        val removed = selections(event, NotifyIds.RemoveField)
+          .flatMap(_.toLongOption)
+          .flatMap(id => BotApp.notifyService.bountyById(id)
+            .filter(sub => sub.userId == userId && sub.guildId == guild.getId && sub.world.equalsIgnoreCase(world)))
+          .flatMap(sub => BotApp.notifyService.removeBounty(sub.id))
+          .map(_.character)
+
+        if (removed.isEmpty) reply(event, Embeds.response(s"${Config.noEmoji} Nothing was removed — that bounty had already gone."))
+        else {
+          // The role stands for "watching somebody here", so it comes off only
+          // once the last live one has gone — the same rule Disable follows.
+          val stillWatching = BotApp.notifyService.bountiesFor(guild.getId, world, userId).exists(_.enabled)
+          NotifyButtons.syncRole(event.getJDA, userId, guild.getId, world, "bounty_role", stillWatching)
+          panel(event, guild.getId, world, s"${Config.yesEmoji} No longer watching ${NotifyEmbeds.nameList(removed)}.")
+        }
+    }
+
+  /** The bounty panel again, rebuilt from what is stored now.
+   *
+   *  Sent as a new ephemeral rather than an edit of the panel this form was
+   *  opened from: that one may itself be ephemeral, which only the interaction
+   *  that created it may edit — and this is a different interaction. */
+  private def panel(event: ModalInteractionEvent, guildId: String, world: String, headline: String): Unit = {
+    val held = BotApp.notifyService.bountiesFor(guildId, world, event.getUser.getId)
+    reply(event, NotifyEmbeds.bountyPanel(held, world, headline), Some(NotifyEmbeds.bountyPanelControls(world, held)))
+  }
 
   // --- adjusting from a DM ------------------------------------------------
 

@@ -20,12 +20,16 @@ import scala.jdk.CollectionConverters._
  *  embed, and the controls under every DM they send.
  *
  *  Split out of [[ButtonHandler]]'s if/else chain the way the respawn buttons
- *  were, because this family shares an id format and a rule — a press either
- *  opens a form or rewrites the message it came from, and the DM controls carry
- *  the subscription's row id rather than a guild, since a direct message has no
- *  guild to read.
+ *  were, because this family shares an id format and a rule — a press opens a
+ *  form, rewrites the message it came from, or answers with an ephemeral of its
+ *  own, and never touches the notifications embed the whole server reads. The DM
+ *  controls carry the subscription's row id rather than a guild, since a direct
+ *  message has no guild to read.
  */
 object NotifyButtons extends StrictLogging {
+
+  /** Discord's cap on a select menu's options. */
+  private val MaxRemoveOptions = 25
 
   def handles(componentId: String): Boolean = NotifyIds.handlesButton(componentId)
 
@@ -36,7 +40,7 @@ object NotifyButtons extends StrictLogging {
   def handle(event: ButtonInteractionEvent): Unit =
     event.getComponentId match {
       case NotifyIds.MasslogButton => openMasslogForm(event)
-      case NotifyIds.BountyButton  => openBountyForm(event)
+      case NotifyIds.BountyButton  => openBountyPanel(event)
       case other =>
         NotifyIds.parseControl(other) match {
           case Some(NotifyIds.MasslogToggle(id, enable)) => toggleMasslog(event, id, enable)
@@ -44,6 +48,8 @@ object NotifyButtons extends StrictLogging {
           case Some(NotifyIds.MasslogMute(id))           => openMuteForm(event, id, bounty = false)
           case Some(NotifyIds.BountyMute(id))            => openMuteForm(event, id, bounty = true)
           case Some(NotifyIds.MasslogThreshold(id))      => openThresholdForm(event, id)
+          case Some(NotifyIds.BountyAdd(world))          => openBountyForm(event, world)
+          case Some(NotifyIds.BountyRemove(world))       => openRemoveForm(event, world)
           case None =>
             // A control from a deploy whose id format no longer parses. The DM
             // it sits under is old news by then, so say so rather than throw.
@@ -86,8 +92,32 @@ object NotifyButtons extends StrictLogging {
     event.replyModal(modal).queue()
   }
 
-  private def openBountyForm(event: ButtonInteractionEvent): Unit = {
-    val world = worldOf(event)
+  /** What the Bounty button now answers with: the list of who this user is
+   *  watching on the world, and the two buttons that change it.
+   *
+   *  Ephemeral, and a fresh message each time rather than an edit of the
+   *  notifications embed the press came from — that embed belongs to the whole
+   *  server, and this list is one person's. */
+  private def openBountyPanel(event: ButtonInteractionEvent): Unit =
+    Option(event.getGuild) match {
+      case None => refuse(event, s"${Config.noEmoji} That button only works inside a server.")
+      case Some(guild) =>
+        val world = worldOf(event)
+        val held = BotApp.notifyService.bountiesFor(guild.getId, world, event.getUser.getId)
+        val headline =
+          if (held.isEmpty) s"${Config.bountyEmoji} Press **Add** to start watching someone on **$world**."
+          else s"${Config.bountyEmoji} Here's who you're watching on **$world**."
+        event.getHook
+          .sendMessageEmbeds(NotifyEmbeds.bountyPanel(held, world, headline))
+          .setComponents(NotifyEmbeds.bountyPanelControls(world, held))
+          .setEphemeral(true)
+          .queue(_ => (), _ => ())
+    }
+
+  /** The world comes off the button rather than off the embed here: the panel
+   *  these are pressed on is a message of our own, with no world in its title
+   *  to read back. */
+  private def openBountyForm(event: ButtonInteractionEvent, world: String): Unit = {
     val name = TextInput.create(NotifyIds.CharacterField, TextInputStyle.SHORT)
       .setPlaceholder("Character name")
       .setMaxLength(NotifySettings.MaxCharacterName)
@@ -104,6 +134,40 @@ object NotifyButtons extends StrictLogging {
         label("Cooldown between alerts (minutes)", NotifySettings.CooldownHelp, cooldown))
       .build()
     event.replyModal(modal).queue()
+  }
+
+  /** Picking who to stop watching. The names are read at press time rather than
+   *  written into the button, so a panel left open in a chat window can't offer
+   *  a bounty that has since gone.
+   *
+   *  Discord takes 25 options at most. Nobody is near that, but the list is
+   *  alphabetical, so a hypothetical 26th would at least be missing from a
+   *  predictable end rather than at random. */
+  private def openRemoveForm(event: ButtonInteractionEvent, world: String): Unit = {
+    val held = Option(event.getGuild).toList.flatMap(guild =>
+      BotApp.notifyService.bountiesFor(guild.getId, world, event.getUser.getId))
+    if (held.isEmpty) refuse(event, s"${Config.noEmoji} You aren't watching anyone on **$world**.")
+    else {
+      val offered = held.take(MaxRemoveOptions)
+      // The same three facts each row of the panel carries, so the picker and the
+      // list the reader is picking from can't describe the same bounty differently.
+      val options = offered.map { sub =>
+        val state =
+          if (!sub.enabled) " • off"
+          else if (sub.mutedUntil.exists(_.isAfter(Instant.now()))) " • muted"
+          else ""
+        SelectOption.of(sub.character, sub.id.toString).withDescription(s"${sub.cooldownMinutes}m cooldown$state")
+      }
+      val menu = StringSelectMenu.create(NotifyIds.RemoveField)
+        .setPlaceholder("Who to stop watching")
+        .addOptions(options.asJava)
+        .setRequiredRange(1, offered.size)
+        .build()
+      val modal = Modal.create(NotifyIds.removeForm(world), "Stop watching")
+        .addComponents(label("Which bounties?", s"Pick as many as you like — they'll stop alerting you on $world.", menu))
+        .build()
+      event.replyModal(modal).queue()
+    }
   }
 
   private def openThresholdForm(event: ButtonInteractionEvent, id: Long): Unit =
