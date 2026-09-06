@@ -68,9 +68,9 @@ object LootSplitEmbeds {
    *  there is nobody to split with. */
   private def headline(hunt: HuntSession, goldEmoji: String): List[String] =
     List(
-      Some(s"**Balance:** ${gold(hunt.balance, goldEmoji)}"),
-      if (hunt.members.size >= 2) Some(s"**Individual balance:** ${gold(hunt.individualBalance, goldEmoji)}") else None,
-      hunt.lootPerHour.map(rate => s"**Loot per hour:** ${gold(rate, goldEmoji)}")
+      Some(s"Balance: ${gold(hunt.balance, goldEmoji)}"),
+      if (hunt.members.size >= 2) Some(s"Individual balance: ${gold(hunt.individualBalance, goldEmoji)}") else None,
+      hunt.lootPerHour.map(rate => s"Loot per hour: ${gold(rate, goldEmoji)}")
     ).flatten
 
   private def shareField(embed: EmbedBuilder, name: String, shares: List[(HuntMember, Double)]): Unit =
@@ -139,7 +139,10 @@ object LootSplitEmbeds {
     if (parts.isEmpty) None else Some(parts.mkString(" "))
   }
 
-  private def gold(amount: Long, goldEmoji: String): String = s"${number(amount)} $goldEmoji"
+  /** The amount carries the bold, not the label beside it: the reader is scanning
+   *  for the numbers, and three bold labels down the left edge only compete with
+   *  them. The emoji is left out of it — bold does nothing to an image. */
+  private def gold(amount: Long, goldEmoji: String): String = s"**${number(amount)}** $goldEmoji"
 
   /** Grouped in threes with a comma, like the client writes them and like the paste
    *  they came from — explicitly US-formatted, since the bot's host locale is not

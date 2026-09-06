@@ -51,9 +51,9 @@ class LootSplitEmbedsSpec extends AnyFunSuite with Matchers with OptionValues {
 
   test("the headline carries the balance, the split and the hourly rate, with separators") {
     val description = split(Hunt).getDescription
-    description should include("**Balance:** 9,005,562")
-    description should include("**Individual balance:** 2,251,390")
-    description should include("**Loot per hour:** 6,258,575")
+    description should include("Balance: **9,005,562**")
+    description should include("Individual balance: **2,251,390**")
+    description should include("Loot per hour: **6,258,575**")
   }
 
   test("damage and healing sit side by side, biggest share first") {
@@ -113,7 +113,7 @@ class LootSplitEmbedsSpec extends AnyFunSuite with Matchers with OptionValues {
   test("a header with no readable timestamps loses the hourly rate, not the split") {
     val embed = split(Hunt.copy(from = None, to = None))
     embed.getDescription should not include "Loot per hour"
-    embed.getDescription should include("**Individual balance:** 2,251,390")
+    embed.getDescription should include("Individual balance: **2,251,390**")
     embed.getFooter.getText shouldBe "02:17h hunt"
   }
 
