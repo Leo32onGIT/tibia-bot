@@ -33,6 +33,9 @@ trait NotifyRepository {
 
   def setMasslogEnabled(id: Long, enabled: Boolean): Unit
   def deleteMasslog(id: Long): Unit
+  /** Every subscription one user holds in one guild — what is left behind when
+   *  they leave it. */
+  def deleteUser(guildId: String, userId: String): Unit
   def setBountyEnabled(id: Long, enabled: Boolean): Unit
 
   def muteMasslog(id: Long, until: Instant): Unit
