@@ -162,4 +162,28 @@ class CharacterMappingSpec extends AnyFunSuite with Matchers with FansiteJsonSup
     val mapped = CharacterMapping.toCharacterResponse(fixture("character_full.json"), None)
     OriginTimestamp.of(mapped.information) shouldBe None
   }
+
+  /** The traded flag has to survive this mapping.
+   *
+   *  TibiaData and this API race, freshest sheet wins, so a flag only one of them
+   *  carries is a flag that appears and disappears depending on who answered
+   *  first. The hunted list reads it at *add* time to decide a player must never
+   *  later be proposed for removal — so a flag lost here is an entry somebody
+   *  added deliberately being proposed for deletion afterwards.
+   */
+  test("a traded character keeps the flag when this API answers instead of TibiaData") {
+    val payload = fixture("character_full.json")
+    val traded = payload.copy(characterGameInformation =
+      payload.characterGameInformation.copy(wasRecentlyTradedAndNotRenamed = true))
+    CharacterMapping.toCharacterResponse(traded, Some(origin))
+      .character.character.traded shouldBe Some(true)
+  }
+
+  test("a character this API says is not traded maps to false rather than absent") {
+    val payload = fixture("character_full.json")
+    val notTraded = payload.copy(characterGameInformation =
+      payload.characterGameInformation.copy(wasRecentlyTradedAndNotRenamed = false))
+    CharacterMapping.toCharacterResponse(notTraded, Some(origin))
+      .character.character.traded shouldBe Some(false)
+  }
 }

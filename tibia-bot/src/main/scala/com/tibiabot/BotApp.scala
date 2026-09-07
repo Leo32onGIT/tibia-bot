@@ -1229,6 +1229,7 @@ object BotApp extends App with StrictLogging {
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
+      reviewQuietListedPlayers()
       galthenService.cleanExpired()
       updateOnOdd = 0
     } else {
@@ -1872,6 +1873,23 @@ object BotApp extends App with StrictLogging {
       startUpComplete = true
     }
   }
+
+  /** Re-check the listed players the world poll cannot see, one guild at a time.
+   *
+   *  Runs on the same half-hourly beat as the cache sweep above. Each guild only
+   *  looks at players nothing has refreshed in a day and caps how many it asks
+   *  about, so this is a handful of lookups however long the lists are — see
+   *  HuntedAlliedService.reviewQuietPlayers.
+   *
+   *  Failures are per guild and swallowed there: one unreachable database or
+   *  deleted admin channel must not stop the sweep reaching everybody else.
+   */
+  private def reviewQuietListedPlayers(): Unit =
+    discordGateway.guilds.foreach { guild =>
+      huntedAlliedService.reviewQuietPlayers(guild).failed.foreach { ex =>
+        logger.warn(s"Listed-player review failed for guild '${guild.getId}': ${ex.getMessage}")
+      }(ex)
+    }
 
   /** Nightly cleanup of the shared list cache.
    *

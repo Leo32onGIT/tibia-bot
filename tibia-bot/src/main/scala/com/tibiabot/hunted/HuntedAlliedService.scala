@@ -16,7 +16,7 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.events.interaction.GenericInteractionCreateEvent
 
-import java.time.ZonedDateTime
+import java.time.{Duration, ZonedDateTime}
 import java.time.temporal.ChronoUnit
 import scala.collection.immutable.ListMap
 import scala.collection.mutable.ListBuffer
@@ -89,7 +89,8 @@ final class HuntedAlliedService(
         if (character.name.isEmpty) PlayerLookup.NotFound
         else {
           cacheSheet(charResponse)
-          PlayerLookup.Found(character.name, character.world, vocEmoji(charResponse), character.level.toInt)
+          PlayerLookup.Found(character.name, character.world, vocEmoji(charResponse),
+            character.level.toInt, character.traded.getOrElse(false))
         }
       case Left(_) => PlayerLookup.Unavailable
     }.recover { case NonFatal(_) => PlayerLookup.Unavailable }
@@ -123,8 +124,9 @@ final class HuntedAlliedService(
   private def dateStringToEpochSeconds(dateString: String): String =
     com.tibiabot.presentation.RecentLogin.stamp(dateString, java.time.Instant.now())
 
-  def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
-    huntedAlliedRepository.addHunted(guild.getId, option, name, reason, reasonText, addedBy)
+  def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String,
+                          addedBy: String, tradedWhenAdded: Boolean = false): Unit =
+    huntedAlliedRepository.addHunted(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded)
 
   def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit =
     activityRepository.add(guild.getId, name, formerNames, guildName, updatedTime)
@@ -135,8 +137,9 @@ final class HuntedAlliedService(
   def updateHuntedOrAllyNameToDatabase(guild: Guild, option: String, oldName: String, newName: String): Unit =
     huntedAlliedRepository.rename(guild.getId, option, oldName, newName)
 
-  private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit =
-    huntedAlliedRepository.addAllied(guild.getId, option, name, reason, reasonText, addedBy)
+  private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String,
+                                addedBy: String, tradedWhenAdded: Boolean = false): Unit =
+    huntedAlliedRepository.addAllied(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded)
 
   def removeHuntedFromDatabase(guild: Guild, option: String, name: String): Unit =
     huntedAlliedRepository.removeHunted(guild.getId, option, name)
@@ -494,6 +497,114 @@ final class HuntedAlliedService(
       com.tibiabot.presentation.GuildIcons.listGuildIcon(guildName, allied, hunted, arg)
     }
 
+  // --- retiring an entry ---------------------------------------------------
+
+  /** Flag one listed player and say so in the admin channel, once.
+   *
+   *  Marking and announcing are one step on purpose: writing the reason is what
+   *  stops the notice repeating, so a notice that went out without the write
+   *  would go out again on the next sweep, forever. Returns whether anything was
+   *  said, which is what the caller counts.
+   *
+   *  Nothing is removed. The notice names what to do and a person does it — see
+   *  ListReview for why neither finding is safe to act on automatically.
+   */
+  def flagForRemoval(guild: Guild, hunted: Boolean, entry: Players,
+                     finding: ListReview.Finding): Boolean =
+    try {
+      val table = if (hunted) "hunted_players" else "allied_players"
+      huntedAlliedRepository.flagPlayer(guild.getId, table, entry.name, finding.reason)
+
+      val flagged = entry.copy(flaggedReason = finding.reason)
+      val replace = (players: List[Players]) =>
+        players.map(player => if (player.name.equalsIgnoreCase(entry.name)) flagged else player)
+      if (hunted) streamState.modifyHuntedPlayersData(m => m + (guild.getId -> replace(m.getOrElse(guild.getId, List()))))
+      else streamState.modifyAlliedPlayersData(m => m + (guild.getId -> replace(m.getOrElse(guild.getId, List()))))
+
+      val listName = if (hunted) "hunted" else "allies"
+      val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
+      val because = finding match {
+        case ListReview.Finding.Traded =>
+          s"has been **traded** since being added"
+        case ListReview.Finding.MovedWorld(world) =>
+          s"has moved to **$world**, which isn't set up here"
+      }
+      val thumbnail =
+        if (hunted) "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
+        else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      AdminLog.post(adminChannel,
+        s"**[$shown](${charUrl(entry.name)})** $because, so the $listName list entry is " +
+          "probably worth removing.\nNothing has been changed — remove them with `/" + listName + "` if you agree.",
+        thumbnail)
+      true
+    } catch {
+      // A guild whose admin channel has gone, or whose database is unreachable.
+      // Losing one notice is not a reason to break the sweep for every other guild.
+      case NonFatal(ex) =>
+        logger.warn(s"Failed to flag '${entry.name}' in guild '${guild.getId}': ${ex.getMessage}")
+        false
+    }
+
+  /** Re-check listed players the world poll has not seen lately.
+   *
+   *  The poll only ever scans characters that turn up in a *tracked* world's
+   *  online list, which leaves two blind spots this covers:
+   *
+   *   - a player who has stopped logging in, so nothing refreshes what is known
+   *     about them and a trade goes unnoticed;
+   *   - a player who moved to a world this guild does not track, who from that
+   *     moment never appears in any list the poll reads. Every world finding
+   *     comes from here — the poll cannot make one, because its per-guild loop
+   *     only runs for discords tracking the world the character was seen on.
+   *
+   *  Bounded by only asking about the quiet ones: anybody the poll has refreshed
+   *  recently is already known to be fine, so a busy server costs nothing. The
+   *  lookups go through the command-path fetch, which retries — a 503 must not
+   *  read as "no such character" here any more than it may on an add.
+   */
+  def reviewQuietPlayers(guild: Guild, quietFor: Duration = Duration.ofHours(24),
+                         maxPerSweep: Int = 20): Future[Int] = {
+    if (!checkConfigDatabase(guild)) return Future.successful(0)
+    val guildId = guild.getId
+    val trackedWorlds = worldConfig(guild).map(_.name).toSet
+    // Nothing to compare a world against: a guild mid-setup, or one whose worlds
+    // have all been removed. Flagging everybody for having left a set of no
+    // worlds would be the worst possible reading of that.
+    if (trackedWorlds.isEmpty) return Future.successful(0)
+
+    val cached: Map[String, ListCache] =
+      trackedWorlds.toList.flatMap(getListTable).map(entry => entry.name.toLowerCase -> entry).toMap
+    val cutoff = ZonedDateTime.now().minus(quietFor)
+
+    def quiet(entry: Players): Boolean =
+      entry.flaggedReason.isEmpty &&
+        cached.get(entry.name.toLowerCase).forall(_.updatedTime.isBefore(cutoff))
+
+    val hunted = streamState.huntedPlayersData.getOrElse(guildId, List()).filter(quiet).map(_ -> true)
+    val allied = streamState.alliedPlayersData.getOrElse(guildId, List()).filter(quiet).map(_ -> false)
+    // Capped so one sweep cannot turn a long-neglected list into hundreds of
+    // lookups at once; the rest are picked up by the sweeps after it.
+    val toCheck = (hunted ++ allied).take(maxPerSweep)
+
+    if (toCheck.isEmpty) Future.successful(0)
+    else Source(toCheck)
+      .mapAsyncUnordered(BulkParallelism) { case (entry, isHunted) =>
+        fetchPlayerSummary(entry.name).map {
+          case PlayerLookup.Found(_, world, _, _, traded) =>
+            ListReview.review(entry, traded, world, trackedWorlds)
+              .exists(finding => flagForRemoval(guild, isHunted, entry, finding))
+          // Says nothing about the character either way, so it decides nothing.
+          // A deleted character is left alone deliberately: that is a third thing
+          // entirely, and not one this was asked to act on.
+          case _ => false
+        }
+      }
+      .runWith(Sink.seq)
+      .map(_.count(identity))
+  }
+
   // --- bulk list changes ---------------------------------------------------
   //
   // What the paste boxes on the /hunted and /allies panels run. The single-name
@@ -549,14 +660,17 @@ final class HuntedAlliedService(
                            reasonText: String, commandUser: String): Future[BulkListOutcome] = {
     val lower = name.toLowerCase
     fetchPlayerSummary(lower).map {
-      case PlayerLookup.Found(realName, _, _, _) =>
-        val entry = Players(lower, reasonFlag, reasonText, commandUser)
+      case PlayerLookup.Found(realName, _, _, _, traded) =>
+        // The traded flag is snapshotted here and never recomputed. A player who
+        // was already traded when somebody listed them is deliberate, and must
+        // never be proposed for removal on that basis later.
+        val entry = Players(lower, reasonFlag, reasonText, commandUser, tradedWhenAdded = traded)
         if (hunted) {
           streamState.modifyHuntedPlayersData(m => m + (guild.getId -> (entry :: m.getOrElse(guild.getId, List()))))
-          addHuntedToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser)
+          addHuntedToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded)
         } else {
           streamState.modifyAlliedPlayersData(m => m + (guild.getId -> (entry :: m.getOrElse(guild.getId, List()))))
-          addAllyToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser)
+          addAllyToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded)
         }
         BulkListOutcome(added = List(realName))
       case PlayerLookup.NotFound    => BulkListOutcome(notFound = List(name))

@@ -115,7 +115,18 @@ object CharacterMapping {
       houses = None,
       guild = g.guildName.map(name => Guild(name = name, rank = g.guildRank.getOrElse(""))),
       last_login = optionalInstant(g.lastLogin),
-      account_status = if (g.isPremium) "Premium Account" else "Free Account"
+      account_status = if (g.isPremium) "Premium Account" else "Free Account",
+      // The same signal under a different name. Both are read off tibia.com's
+      // " (traded)" marker, which stands until the new owner renames the
+      // character - so "recently traded and not renamed" and TibiaData's
+      // "traded in the last six months" describe one flag, not two.
+      //
+      // Mapping it is not optional. This API and TibiaData race, freshest sheet
+      // wins, so leaving it None here would make a traded character read as not
+      // traded whenever this source happened to win - and the hunted list uses
+      // the flag at *add* time to decide it must never flag that player later.
+      // A missed one there is a player wrongly proposed for removal.
+      traded = Some(g.wasRecentlyTradedAndNotRenamed)
     )
 
   /** Map a decoded payload, stamping it with the moment the upstream copy was

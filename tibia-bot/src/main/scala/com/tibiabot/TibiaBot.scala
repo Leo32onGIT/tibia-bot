@@ -384,6 +384,23 @@ class TibiaBot(
               // stops matching rather than renaming anything back.
               renameListEntries(guild, guildId, charName, formerNamesList)
 
+              // Has this entry stopped being worth keeping? Free here — the sheet
+              // is already in hand for a character this guild lists. Only catches
+              // players who still log in on a world this guild tracks; everyone
+              // else is the sweep's job, and a world move away from this guild's
+              // worlds is *always* the sweep's, since this loop only runs for
+              // discords tracking the world the character was just seen on.
+              if (huntedPlayerCheck || allyPlayerCheck) {
+                val hunted = huntedPlayerCheck
+                val listed = if (hunted) guildHuntedPlayers else guildAlliedPlayers
+                listed.find(_.name.equalsIgnoreCase(charName)).foreach { entry =>
+                  val trackedWorlds = worldsData.getOrElse(guildId, List()).map(_.name).toSet
+                  com.tibiabot.hunted.ListReview.review(entry, char.character.character.traded.getOrElse(false),
+                    char.character.character.world, trackedWorlds)
+                    .foreach(finding => BotApp.huntedAlliedService.flagForRemoval(guild, hunted, entry, finding))
+                }
+              }
+
               val rename = presentation.GuildActivity.renameFromFormerNames(
                 activityData.getOrElse(guildId, List()),
                 charName,
