@@ -1,0 +1,124 @@
+package com.tibiabot.panels
+
+import scala.util.Try
+
+/** Component ids for the three command panels — `/settings`, `/hunted` and
+ *  `/allies` — and how BotListener must acknowledge each one.
+ *
+ *  These commands used to be subcommand trees: twenty-four leaves between them,
+ *  every one its own row in Discord's command picker, and every setting
+ *  write-only because nothing could show you what it currently was. They are now
+ *  three bare commands that answer with a panel of buttons, each opening a form
+ *  that both shows the current value and takes the new one.
+ *
+ *  Ids are `panel:<panel>:<action>` for a button and `panelform:<panel>:<action>`
+ *  for the form it opens, so a press and its submission stay recognisably paired
+ *  while routing tells them apart on the prefix alone. Everything here is far
+ *  inside Discord's hundred-character component-id limit.
+ */
+object PanelIds {
+
+  val ButtonPrefix: String = "panel:"
+  val FormPrefix: String = "panelform:"
+
+  /** Which panel a component belongs to. `/hunted` and `/allies` are the same
+   *  panel with different words and one extra button, so they travel as a value
+   *  rather than as two parallel sets of ids. */
+  sealed trait Panel {
+    def token: String
+    /** What this panel's list is called in a sentence. */
+    def noun: String
+  }
+
+  object Panel {
+    case object Settings extends Panel { val token = "settings"; val noun = "settings" }
+    case object Hunted extends Panel { val token = "hunted"; val noun = "hunted list" }
+    case object Allies extends Panel { val token = "allies"; val noun = "allies list" }
+
+    val all: List[Panel] = List(Settings, Hunted, Allies)
+    def fromToken(token: String): Option[Panel] = all.find(_.token == token)
+  }
+
+  /** How a press must be acknowledged, decided before the handler runs.
+   *
+   *  Same three cases as the respawn buttons, and for the same reasons: a form
+   *  cannot be deferred at all because `replyModal` has to be the interaction's
+   *  first response, and a press that rewrites the panel it sits on defers an
+   *  edit rather than replying underneath it. */
+  sealed trait Ack
+  object Ack {
+    case object OpensModal extends Ack
+    case object EditsMessage extends Ack
+    case object Replies extends Ack
+  }
+
+  // --- settings actions ----------------------------------------------------
+
+  val Fullbless = "fullbless"
+  val Exiva = "exiva"
+  val Layout = "layout"
+  val Neutral = "neutral"
+  val ChannelFilter = "chanfilter"
+  val OnlineFilter = "onlinefilter"
+
+  /** Every button on `/settings`, in the order they are drawn. */
+  val settingsActions: List[String] = List(Fullbless, Exiva, Layout, Neutral, ChannelFilter, OnlineFilter)
+
+  // --- hunted/allies actions ----------------------------------------------
+
+  val Add = "add"
+  val Remove = "remove"
+  val Info = "info"
+  val Display = "display"
+  val Clear = "clear"
+  /** The second press, after the first one asked whether they meant it. */
+  val ClearConfirm = "clearconfirm"
+  /** Backing out of that question. Its own action rather than reusing another
+   *  button: every other one either opens a form or changes something, and this
+   *  must do neither — it only puts the panel back. */
+  val Cancel = "cancel"
+
+  def listActions(panel: Panel): List[String] =
+    // No "view list" button: the panel's own reply is the list. It costs
+    // nothing to draw — see HuntedAlliedService.playersEmbeds — so putting it
+    // behind a press only hid what somebody ran the command to see.
+    List(Add, Remove, Info, Display, Clear)
+
+  // --- building ------------------------------------------------------------
+
+  def button(panel: Panel, action: String): String = s"$ButtonPrefix${panel.token}:$action"
+  def form(panel: Panel, action: String): String = s"$FormPrefix${panel.token}:$action"
+
+  // --- routing -------------------------------------------------------------
+
+  def handlesButton(componentId: String): Boolean = componentId.startsWith(ButtonPrefix)
+  def handlesForm(modalId: String): Boolean = modalId.startsWith(FormPrefix)
+
+  /** None for anything malformed or from an older deploy, so a stale component is
+   *  answered rather than throwing. */
+  def parse(componentId: String): Option[(Panel, String)] =
+    Try {
+      val body =
+        if (componentId.startsWith(FormPrefix)) componentId.stripPrefix(FormPrefix)
+        else componentId.stripPrefix(ButtonPrefix)
+      body.split(':') match {
+        case Array(panelToken, action) => Panel.fromToken(panelToken).map(_ -> action)
+        case _                         => None
+      }
+    }.toOption.flatten
+
+  /** Everything opens a form except the three that answer from what the bot
+   *  already knows: listing, asking whether they meant Clear, and doing it. */
+  def ackFor(componentId: String): Ack =
+    parse(componentId) match {
+      case Some((_, Clear))        => Ack.EditsMessage
+      case Some((_, ClearConfirm)) => Ack.EditsMessage
+      case Some((_, Cancel))       => Ack.EditsMessage
+      case Some(_)                 => Ack.OpensModal
+      // Unparseable: it gets an ephemeral "that button is out of date" reply,
+      // which is a message, so it defers one.
+      case None                    => Ack.Replies
+    }
+
+  def opensModal(componentId: String): Boolean = ackFor(componentId) == Ack.OpensModal
+}

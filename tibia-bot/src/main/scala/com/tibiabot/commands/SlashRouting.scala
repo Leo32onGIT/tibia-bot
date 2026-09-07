@@ -17,27 +17,22 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 object SlashRouting {
 
   val handlers: Map[String, SlashCommandInteractionEvent => Unit] = Map(
-    "setup"              -> (ChannelCommands.setup _),
-    "remove"             -> (ChannelCommands.remove _),
-    "repair"             -> (ChannelCommands.repair _),
-    "help"               -> (HelpCommands.handle _),
-    "hunted"             -> (HuntedCommands.handle _),
-    "allies"             -> (AlliesCommands.handle _),
-    // One entry per branch of /settings rather than one for the root: these are
-    // five formerly separate commands whose handlers each still read their own
-    // subcommand, so the group is the level that owns the behaviour.
-    "settings fullbless" -> (FullblessCommands.handle _),
-    "settings exiva"     -> (ExivaCommands.handle _),
-    "settings layout"    -> (OnlineListCommands.handle _),
-    "settings neutral"   -> (NeutralCommands.handle _),
-    "settings filter"    -> (FilterCommands.handle _),
-    "galthen"            -> (GalthenCommands.handle _),
-    "boosted"            -> (BoostedCommands.handle _),
-    "patreon"            -> (PatreonCommands.handle _),
-    "stamina"            -> (RespawnCommands.handle _),
-    "bookings"           -> (RespawnCommands.bookings _),
-    "lootsplit"          -> (LootSplitCommands.handle _),
-    "admin"              -> (AdminCommands.handle _)
+    "setup"     -> (ChannelCommands.setup _),
+    "remove"    -> (ChannelCommands.remove _),
+    "repair"    -> (ChannelCommands.repair _),
+    "help"      -> (HelpCommands.handle _),
+    // Three panels, no subcommands: each answers with buttons, and everything
+    // they can do happens on a button or in the form it opens. See panels.Panels.
+    "settings"  -> (PanelCommands.settings _),
+    "hunted"    -> (PanelCommands.hunted _),
+    "allies"    -> (PanelCommands.allies _),
+    "galthen"   -> (GalthenCommands.handle _),
+    "boosted"   -> (BoostedCommands.handle _),
+    "patreon"   -> (PatreonCommands.handle _),
+    "stamina"   -> (RespawnCommands.handle _),
+    "bookings"  -> (RespawnCommands.bookings _),
+    "lootsplit" -> (LootSplitCommands.handle _),
+    "admin"     -> (AdminCommands.handle _)
   )
 
   /** Commands that answer with a form rather than a message.

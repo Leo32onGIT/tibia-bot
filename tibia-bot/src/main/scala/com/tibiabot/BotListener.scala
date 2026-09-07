@@ -140,6 +140,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
     // deferEdit(), which rewrites the message the modal came from — here that is
     // the pinned board post. They also hit the database and JDA, so like the
     // respawn buttons they run off the event thread.
+    // Panel forms. Always deferred: a bulk add is up to a hundred API lookups,
+    // and none of the settings writes are instant either. Replies go through the
+    // hook, and ephemerally — the panel they came from is ephemeral too.
+    else if (interactions.PanelModals.handles(event.getModalId)) {
+      event.deferReply(true).queue()
+      interactionExecutor.execute(() => {
+        try interactions.PanelModals.handle(event)(scala.concurrent.ExecutionContext.global)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on panel form '${event.getModalId}'", ex)
+        }
+      })
+    }
     else if (interactions.RespawnModals.handles(event.getModalId)) {
       // Acknowledged here rather than inside the handler, as with the buttons
       // below: deferring as the handler's first statement still left the
@@ -218,7 +230,26 @@ class BotListener extends ListenerAdapter with StrictLogging {
           case ex: Throwable => logger.error(s"Unhandled exception on respawn button '${event.getComponentId}'", ex)
         }
       })
-    } else if (interactions.NotifyButtons.handles(event.getComponentId)) {
+    }
+    // The /settings, /hunted and /allies panels. Same shape as the respawn
+    // buttons above and acknowledged the same way: a press that opens a form
+    // cannot be deferred at all, one that rewrites the panel defers an edit,
+    // and one that answers with a message defers a reply. See PanelIds.ackFor.
+    else if (interactions.PanelButtons.handles(event.getComponentId)) {
+      import com.tibiabot.panels.PanelIds
+      PanelIds.ackFor(event.getComponentId) match {
+        case PanelIds.Ack.OpensModal   => ()
+        case PanelIds.Ack.EditsMessage => event.deferEdit().queue()
+        case PanelIds.Ack.Replies      => event.deferReply(true).queue()
+      }
+      interactionExecutor.execute(() => {
+        try interactions.PanelButtons.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on panel button '${event.getComponentId}'", ex)
+        }
+      })
+    }
+    else if (interactions.NotifyButtons.handles(event.getComponentId)) {
       // The notification autoroles and the controls under the DMs they send.
       // Acknowledged here for the same reason as the respawn buttons above,
       // with the same exception: a press that opens a form cannot be deferred,

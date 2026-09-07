@@ -96,14 +96,19 @@ object OnlineListEmbeds {
     currentField.length >= EmbedBudget ||
       (currentField.length >= EmbedBudget - HeaderHeadroom && line.startsWith("### ["))
 
-  /** "### " not followed by "[" — the allies/enemies/others section headings,
-   *  as opposed to a guild's own header. */
-  private def isSectionHeader(line: String): Boolean = line.matches("### [^\\[].*")
+  /** "### " not followed by "[" — the allies/enemies/others section headings, as
+   *  opposed to a guild's own header — or a "## " world heading.
+   *
+   *  The hunted and allies lists reuse this packer, and head each world with
+   *  "## ". They have no equivalent of a guild header, so every heading they
+   *  emit is a section heading and each one opens a fresh embed. */
+  private def isSectionHeader(line: String): Boolean =
+    (line.startsWith("### ") && !line.startsWith("### [")) || line.startsWith("## ")
 
   /** Any heading, guild or section. A heading only means anything with the rows
    *  it introduces underneath it, so wherever one can be separated from them,
    *  both kinds have to be asked about. */
-  private def isHeader(line: String): Boolean = line.startsWith("### ")
+  private def isHeader(line: String): Boolean = line.startsWith("### ") || line.startsWith("## ")
 
   /** Pack online-list lines into messages, each holding one or more embed
    *  descriptions.

@@ -11,7 +11,7 @@ import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
-import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+import net.dv8tion.jda.api.events.interaction.GenericInteractionCreateEvent
 
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
@@ -124,10 +124,7 @@ final class WorldSettingsService(
     embedBuild.build()
   }
 
-  def detectHunted(event: SlashCommandInteractionEvent): MessageEmbed = {
-    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val worldOption: String = options.getOrElse("world", "")
-    val settingOption: String = options.getOrElse("option", "")
+  def detectHunted(event: GenericInteractionCreateEvent, worldOption: String, settingOption: String): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(worldOption).trim
     val guild = event.getGuild
     val commandUser = event.getUser.getId
@@ -144,7 +141,7 @@ final class WorldSettingsService(
     )
   }
 
-  def deathsLevelsHideShow(event: SlashCommandInteractionEvent, world: String, setting: String, playerType: String, channelType: String): MessageEmbed = {
+  def deathsLevelsHideShow(event: GenericInteractionCreateEvent, world: String, setting: String, playerType: String, channelType: String): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
@@ -201,10 +198,7 @@ final class WorldSettingsService(
     )
   }
 
-  def exivaList(event: SlashCommandInteractionEvent): MessageEmbed = {
-    val options: Map[String, String] = event.getInteraction.getOptions.asScala.map(option => option.getName.toLowerCase() -> option.getAsString.trim()).toMap
-    val worldOption: String = options.getOrElse("world", "")
-    val settingOption: String = options.getOrElse("option", "")
+  def exivaList(event: GenericInteractionCreateEvent, worldOption: String, settingOption: String): MessageEmbed = {
     val settingType = if (settingOption == "show") "true" else "false"
     val worldFormal = com.tibiabot.domain.WorldName.formal(worldOption).trim
     val guild = event.getGuild
@@ -222,7 +216,7 @@ final class WorldSettingsService(
     )
   }
 
-  def minLevel(event: SlashCommandInteractionEvent, world: String, level: Int, levelsOrDeaths: String): MessageEmbed = {
+  def minLevel(event: GenericInteractionCreateEvent, world: String, level: Int, levelsOrDeaths: String): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
@@ -248,7 +242,7 @@ final class WorldSettingsService(
    *  not want forty level-8 alts filling its enemies list.
    *
    *  0 turns it off, which is where every world starts. */
-  def onlineMinLevel(event: SlashCommandInteractionEvent, world: String, level: Int, category: String): MessageEmbed = {
+  def onlineMinLevel(event: GenericInteractionCreateEvent, world: String, level: Int, category: String): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
@@ -283,7 +277,7 @@ final class WorldSettingsService(
     )
   }
 
-  def fullblessLevel(event: SlashCommandInteractionEvent, world: String, level: Int): MessageEmbed = {
+  def fullblessLevel(event: GenericInteractionCreateEvent, world: String, level: Int): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId
@@ -340,7 +334,7 @@ final class WorldSettingsService(
     }
   }
 
-  def onlineListConfig(event: SlashCommandInteractionEvent, world: String, setting: String): MessageEmbed = {
+  def onlineListConfig(event: GenericInteractionCreateEvent, world: String, setting: String): MessageEmbed = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val guild = event.getGuild
     val commandUser = event.getUser.getId

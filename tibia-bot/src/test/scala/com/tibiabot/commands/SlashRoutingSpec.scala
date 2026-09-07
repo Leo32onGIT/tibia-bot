@@ -36,7 +36,7 @@ class SlashRoutingSpec extends AnyFunSuite with Matchers {
    *  entry came first — which neither check above can see, since what survives
    *  is still a valid route. Only the count gives it away. */
   test("no route is registered twice") {
-    SlashRouting.handlers should have size 18
+    SlashRouting.handlers should have size 14
   }
 
   test("the loot split form is named at the depth it actually lives at") {

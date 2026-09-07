@@ -2,7 +2,7 @@ package com.tibiabot.commands
 
 import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.interactions.commands.Command.Choice
-import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData, SubcommandGroupData}
+import net.dv8tion.jda.api.interactions.commands.build.{Commands, OptionData, SlashCommandData, SubcommandData}
 import net.dv8tion.jda.api.interactions.commands.{DefaultMemberPermissions, OptionType}
 
 /** Slash-command schema (shape) definitions, extracted verbatim from BotApp.
@@ -19,211 +19,30 @@ object CommandSchemas {
     .addOptions(new OptionData(OptionType.STRING, "world", "The world you want to remove")
     .setRequired(true))
 
-  val huntedCommand: SlashCommandData = Commands.slash("hunted", "Manage the hunted list")
-    .addSubcommands(
-      new SubcommandData("guild", "Manage guilds in the hunted list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the hunted list").setRequired(true)
-        ),
-      new SubcommandData("player", "Manage players in the hunted list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The player name you want to add to the hunted list").setRequired(true),
-        new OptionData(OptionType.STRING, "reason", "You can add a reason when players are added to the hunted list")
-        ),
-      new SubcommandData("list", "List players & guilds in the hunted list"),
-      new SubcommandData("clear", "Remove all players and guilds from the hunted list"),
-      new SubcommandData("info", "Show detailed info on a hunted player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
-      ),
-      new SubcommandData("autodetect", "Configure the auto-detection on or off")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to toggle it on or off?").setRequired(true)
-            .addChoices(
-              new Choice("on", "on"),
-              new Choice("off", "off")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("levels", "Show or hide hunted levels")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("deaths", "Show or hide hunted deaths")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide hunted deaths?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-      )
-
-  val alliesCommand: SlashCommandData = Commands.slash("allies", "Manage the allies list")
-    .addSubcommands(
-      new SubcommandData("guild", "Manage guilds in the allies list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a guild?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The guild name you want to add to the allies list").setRequired(true)
-        ),
-      new SubcommandData("player", "Manage players in the allies list")
-      .addOptions(
-        new OptionData(OptionType.STRING, "option", "Would you like to add or remove a player?").setRequired(true)
-          .addChoices(
-            new Choice("add", "add"),
-            new Choice("remove", "remove")
-          ),
-        new OptionData(OptionType.STRING, "name", "The player name you want to add to the allies list").setRequired(true)
-        ),
-      new SubcommandData("list", "List players & guilds in the allies list"),
-      new SubcommandData("clear", "Remove all players and guilds from the allies list"),
-      new SubcommandData("info", "Show detailed info on a allied player")
-        .addOptions(new OptionData(OptionType.STRING, "name", "The player name you want to check").setRequired(true)
-      ),
-      new SubcommandData("levels", "Show or hide ally levels")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("deaths", "Show or hide ally deaths")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally deaths?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-      )
-
-  /** Every per-world display setting, under one root.
+  /** The three panel commands: `/hunted`, `/allies` and `/settings`.
    *
-   *  These were five separate top-level commands — `/neutral`, `/fullbless`,
-   *  `/filter`, `/exiva` and `/online` — which is a lot of the command picker to
-   *  spend on settings a server touches once and then forgets. Folding them needs
-   *  no thought about access: all five were already Manage Server, so the root
-   *  carries the same gate each of them did.
+   *  No options and no subcommands between them, which is the point. They carried
+   *  twenty-four subcommands, and Discord's picker lists every leaf — so typing a
+   *  slash offered twenty-four rows of these three commands alone. Each now
+   *  answers with a panel of buttons, and every button opens a form that shows
+   *  what the setting is before it takes a new one, which no arrangement of
+   *  subcommands could do.
    *
-   *  `fullbless`, `exiva` and `layout` are flat rather than groups: each was a
-   *  command with exactly one real setting, so a second level would name nothing.
-   *  `layout` is what `/online list` was — "online" would read confusingly beside
-   *  `filter online`, which is a different setting on the same list. */
-  val settingsCommand: SlashCommandData = Commands.slash("settings", "Configure how a tracked world is displayed")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("fullbless", "Modify the level at which enemy fullblesses poke")
-        .addOptions(
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-          new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for fullbless pokes").setRequired(true)
-            .setMinValue(1)
-            .setMaxValue(4000)
-        ),
-      new SubcommandData("exiva", "Show or hide the exiva list in the deaths channel")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide the exiva list?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("layout", "Keep the online list split across channels, or combine it into one")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
-            .addChoices(
-              new Choice("separate", "separate"),
-              new Choice("combine", "combine")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-    )
-    .addSubcommandGroups(
-      new SubcommandGroupData("neutral", "Configuration options for neutrals")
-        .addSubcommands(
-          new SubcommandData("levels", "Show or hide neutral levels")
-            .addOptions(
-              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
-                .addChoices(
-                  new Choice("show", "show"),
-                  new Choice("hide", "hide")
-                ),
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-            ),
-          new SubcommandData("deaths", "Show or hide neutral deaths")
-            .addOptions(
-              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral deaths?").setRequired(true)
-                .addChoices(
-                  new Choice("show", "show"),
-                  new Choice("hide", "hide")
-                ),
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-            ),
-          new SubcommandData("activity", "Show or hide activity for players you don't track")
-            .addOptions(
-              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral activity?").setRequired(true)
-                .addChoices(
-                  new Choice("show", "show"),
-                  new Choice("hide", "hide")
-                ),
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-            )
-        ),
-      new SubcommandGroupData("filter", "Set a minimum level for a channel or an online list")
-        .addSubcommands(
-          new SubcommandData("levels", "Hide events in the levels channel if the character is below a certain level")
-            .addOptions(
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-              new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the levels channel").setRequired(true)
-                .setMinValue(1)
-                .setMaxValue(4000)
-            ),
-          new SubcommandData("deaths", "Hide events in the deaths channel if the character is below a certain level")
-            .addOptions(
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-              new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
-                .setMinValue(1)
-                .setMaxValue(4000)
-            ),
-          // Minimum 0 rather than 1, because 0 is how the filter is turned back off
-          // — there is no level 0, so it cannot collide with a real floor.
-          new SubcommandData("online", "Hide players from an online list if they are below a certain level")
-            .addOptions(
-              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-              new OptionData(OptionType.STRING, "list", "Which online list to filter").setRequired(true)
-                .addChoices(
-                  new Choice("enemies", "enemies"),
-                  new Choice("allies", "allies"),
-                  new Choice("neutrals", "neutrals")
-                ),
-              new OptionData(OptionType.INTEGER, "level", "The minimum level to show; 0 shows everyone again").setRequired(true)
-                .setMinValue(0)
-                .setMaxValue(4000)
-            )
-        )
-    )
+   *  `/hunted` and `/allies` keep no default permissions: they are gated at run
+   *  time on Manage Server *or* the guild's moderator role, which Discord cannot
+   *  express here — see Permissions.isModerator. `/settings` keeps the Manage
+   *  Server gate that all five commands folded into it already had, and its
+   *  buttons re-check it on every press.
+   */
+  val huntedCommand: SlashCommandData =
+    Commands.slash("hunted", "Manage the hunted list")
+
+  val alliesCommand: SlashCommandData =
+    Commands.slash("allies", "Manage the allies list")
+
+  val settingsCommand: SlashCommandData =
+    Commands.slash("settings", "Configure how a tracked world is displayed")
+      .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
 
   val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))

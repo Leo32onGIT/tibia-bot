@@ -257,6 +257,25 @@ class TibiaDataClient(
       .flatMap(unmarshalCharacter(_, encodedName))
   }
 
+  /** The command path's character fetch: `/hunted` and `/allies` checking a name
+   *  before they add it, one at a time or a pasted list at once.
+   *
+   *  Retries, unlike `getCharacter` — see [[TibiaApi.getCharacterOnDemand]] for
+   *  why the poll's fetch must not and this one must.
+   *
+   *  Goes through `fetch` rather than `unmarshalCharacter` deliberately: that
+   *  method files every parse into the `cacheAge` histogram, and the command path
+   *  is excluded from it on purpose — see `unmarshalCharacter`. A pasted list is
+   *  still a person typing, however many names it holds.
+   */
+  override def getCharacterOnDemand(name: String): Future[Either[String, CharacterResponse]] = {
+    val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
+    fetch[CharacterResponse](
+      s"$characterUrl$encodedName",
+      resp => s"Failed to get character: '${encodedName.replaceAll("%20", " ")}' with status: '${resp.status}'",
+      s"Failed to parse character: '${encodedName.replaceAll("%20", " ")}'")
+  }
+
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = {
     val encodedName = URLEncoder.encode(name, "UTF-8").replaceAll("\\+", "%20")
     val responseFuture = requestWithRetry(get(s"$characterUrl$encodedName"))

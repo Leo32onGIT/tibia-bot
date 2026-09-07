@@ -82,6 +82,9 @@ final class CachingTibiaApi(
   def getGuild(guild: String): Future[Either[String, GuildResponse]] = underlying.getGuild(guild)
   def getGuildWithInput(input: (String, String)): Future[(Either[String, GuildResponse], String, String)] = underlying.getGuildWithInput(input)
   def getCharacter(name: String): Future[Either[String, CharacterResponse]] = underlying.getCharacter(name)
+  // Forwarded rather than left to the trait default, which would drop back to
+  // the poll's non-retrying fetch — this decorator sits in front of /hunted.
+  override def getCharacterOnDemand(name: String): Future[Either[String, CharacterResponse]] = underlying.getCharacterOnDemand(name)
   def getKillerFallback(name: String): Future[Either[String, CharacterResponse]] = underlying.getKillerFallback(name)
   def getCharacterWithInput(input: (String, String, String)): Future[(Either[String, CharacterResponse], String, String, String)] = underlying.getCharacterWithInput(input)
 }

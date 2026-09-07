@@ -27,25 +27,35 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
     opts.head.isRequired shouldBe true
   }
 
-  test("hunted exposes the expected subcommands") {
-    CommandSchemas.huntedCommand.getSubcommands.asScala.map(_.getName) should contain allOf
-      ("guild", "player", "list", "clear", "info", "autodetect", "levels", "deaths")
+  /** The panel commands carry no subcommands and no options at all — that is the
+   *  whole point of them, and it is what keeps them to one row each in Discord's
+   *  command picker instead of twenty-four between them. */
+  test("the panel commands are bare — no subcommands, no options") {
+    List(CommandSchemas.huntedCommand, CommandSchemas.alliesCommand, CommandSchemas.settingsCommand)
+      .foreach { command =>
+        withClue(s"/${command.getName} should have no subcommands: ") {
+          command.getSubcommands.asScala shouldBe empty
+        }
+        withClue(s"/${command.getName} should have no subcommand groups: ") {
+          command.getSubcommandGroups.asScala shouldBe empty
+        }
+        withClue(s"/${command.getName} should have no options: ") {
+          command.getOptions.asScala shouldBe empty
+        }
+      }
   }
 
-  test("settings folds the five per-world setting commands into one root") {
-    CommandSchemas.settingsCommand.getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
-      List("fullbless", "exiva", "layout")
-    CommandSchemas.settingsCommand.getSubcommandGroups.asScala.map(_.getName) should contain theSameElementsAs
-      List("neutral", "filter")
-  }
-
-  test("settings groups expose the subcommands their old commands had") {
-    def group(name: String) =
-      CommandSchemas.settingsCommand.getSubcommandGroups.asScala.find(_.getName == name).get
-    group("neutral").getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
-      List("levels", "deaths", "activity")
-    group("filter").getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
-      List("levels", "deaths", "online")
+  /** /hunted and /allies must stay ungated by Discord: they are open to Manage
+   *  Server *or* the guild's moderator role, and Discord's default-permission
+   *  flags cannot say "or a role" — so the check lives in the handler and the
+   *  buttons, and the command itself has to be visible for that to be reachable.
+   *  See Permissions.isModerator. */
+  test("the list commands stay ungated, since their real check is a role") {
+    List(CommandSchemas.huntedCommand, CommandSchemas.alliesCommand).foreach { command =>
+      withClue(s"/${command.getName}: ") {
+        command.getDefaultPermissions shouldBe DefaultMemberPermissions.ENABLED
+      }
+    }
   }
 
   // Manage Server is what all five folded commands each carried, and the root
