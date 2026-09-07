@@ -126,7 +126,10 @@ object CharacterMapping {
       // traded whenever this source happened to win - and the hunted list uses
       // the flag at *add* time to decide it must never flag that player later.
       // A missed one there is a player wrongly proposed for removal.
-      traded = Some(g.wasRecentlyTradedAndNotRenamed)
+      traded = Some(g.wasRecentlyTradedAndNotRenamed),
+      // Zero means "not scheduled" on this API, which optionalInstant already
+      // reads as absent - the same shape TibiaData sends by omitting the key.
+      deletion_date = optionalInstant(g.deletedTimestamp)
     )
 
   /** Map a decoded payload, stamping it with the moment the upstream copy was

@@ -23,7 +23,8 @@ object PlayerLookup {
    *  it so a player already traded when somebody listed them is never later
    *  proposed for removal on that basis — whoever added them evidently knew. */
   final case class Found(name: String, world: String, vocation: String, level: Int,
-                         traded: Boolean = false) extends PlayerLookup
+                         traded: Boolean = false,
+                         deletionDate: Option[String] = None) extends PlayerLookup
 
   /** TibiaData answered, and there is no such character. */
   case object NotFound extends PlayerLookup

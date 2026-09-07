@@ -396,7 +396,7 @@ class TibiaBot(
                 listed.find(_.name.equalsIgnoreCase(charName)).foreach { entry =>
                   val trackedWorlds = worldsData.getOrElse(guildId, List()).map(_.name).toSet
                   com.tibiabot.hunted.ListReview.review(entry, char.character.character.traded.getOrElse(false),
-                    char.character.character.world, trackedWorlds)
+                    char.character.character.world, trackedWorlds, char.character.character.deletion_date)
                     .foreach(finding => BotApp.huntedAlliedService.flagForRemoval(guild, hunted, entry, finding))
                 }
               }

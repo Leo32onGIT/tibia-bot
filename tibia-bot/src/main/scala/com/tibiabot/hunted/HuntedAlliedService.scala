@@ -90,7 +90,7 @@ final class HuntedAlliedService(
         else {
           cacheSheet(charResponse)
           PlayerLookup.Found(character.name, character.world, vocEmoji(charResponse),
-            character.level.toInt, character.traded.getOrElse(false))
+            character.level.toInt, character.traded.getOrElse(false), character.deletion_date)
         }
       case Left(_) => PlayerLookup.Unavailable
     }.recover { case NonFatal(_) => PlayerLookup.Unavailable }
@@ -524,8 +524,12 @@ final class HuntedAlliedService(
       val listName = if (hunted) "hunted" else "allies"
       val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
       val because = finding match {
+        case ListReview.Finding.Gone =>
+          "no longer exists under that name — deleted, or renamed and not seen since"
+        case ListReview.Finding.ScheduledForDeletion(date) =>
+          s"is **scheduled for deletion** (**$date**)"
         case ListReview.Finding.Traded =>
-          s"has been **traded** since being added"
+          "has been **traded** since being added"
         case ListReview.Finding.MovedWorld(world) =>
           s"has moved to **$world**, which isn't set up here"
       }
@@ -592,13 +596,17 @@ final class HuntedAlliedService(
     else Source(toCheck)
       .mapAsyncUnordered(BulkParallelism) { case (entry, isHunted) =>
         fetchPlayerSummary(entry.name).map {
-          case PlayerLookup.Found(_, world, _, _, traded) =>
-            ListReview.review(entry, traded, world, trackedWorlds)
+          case PlayerLookup.Found(_, world, _, _, traded, deletionDate) =>
+            ListReview.review(entry, traded, world, trackedWorlds, deletionDate)
               .exists(finding => flagForRemoval(guild, isHunted, entry, finding))
-          // Says nothing about the character either way, so it decides nothing.
-          // A deleted character is left alone deliberately: that is a third thing
-          // entirely, and not one this was asked to act on.
-          case _ => false
+          // TibiaData answered and there is no such character: deleted, or renamed
+          // and not seen since. The entry matches nobody either way.
+          case PlayerLookup.NotFound =>
+            ListReview.reviewMissing(entry)
+              .exists(finding => flagForRemoval(guild, isHunted, entry, finding))
+          // A lookup that never got an answer says nothing about the character,
+          // so it decides nothing. This is the whole reason the two are apart.
+          case PlayerLookup.Unavailable => false
         }
       }
       .runWith(Sink.seq)
@@ -660,7 +668,7 @@ final class HuntedAlliedService(
                            reasonText: String, commandUser: String): Future[BulkListOutcome] = {
     val lower = name.toLowerCase
     fetchPlayerSummary(lower).map {
-      case PlayerLookup.Found(realName, _, _, _, traded) =>
+      case PlayerLookup.Found(realName, _, _, _, traded, _) =>
         // The traded flag is snapshotted here and never recomputed. A player who
         // was already traded when somebody listed them is deliberate, and must
         // never be proposed for removal on that basis later.

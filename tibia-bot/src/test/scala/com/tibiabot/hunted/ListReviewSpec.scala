@@ -82,4 +82,54 @@ class ListReviewSpec extends AnyFunSuite with Matchers {
     Finding.Traded.reason shouldBe "traded"
     Finding.MovedWorld("Vunira").reason shouldBe "world"
   }
+
+  // --- gone and scheduled for deletion ---
+
+  /** Deliberately not called "deleted": from the old name, a deleted character
+   *  and one renamed-and-not-seen-since look identical. The notice says what is
+   *  actually known, and the outcome is the same either way. */
+  test("a name that resolves to nobody is flagged as gone") {
+    ListReview.reviewMissing(entry()) shouldBe Some(Finding.Gone)
+  }
+
+  test("an already-flagged entry is not flagged as gone again") {
+    ListReview.reviewMissing(entry(flagged = "traded")) shouldBe None
+  }
+
+  test("a character scheduled for deletion is flagged, with the date") {
+    ListReview.review(entry(), traded = false, "Antica", tracked, Some("2026-10-01T00:00:00Z")) shouldBe
+      Some(Finding.ScheduledForDeletion("2026-10-01T00:00:00Z"))
+  }
+
+  /** Absent is the normal case — TibiaData omits the key entirely — and an empty
+   *  string is the same non-answer arriving a different way. */
+  test("no deletion date, or an empty one, is not a finding") {
+    ListReview.review(entry(), traded = false, "Antica", tracked, None) shouldBe None
+    ListReview.review(entry(), traded = false, "Antica", tracked, Some("")) shouldBe None
+  }
+
+  /** Ordered by how final each is. A scheduled deletion ends the character
+   *  outright; the others describe a character who still exists. */
+  test("a scheduled deletion outranks both traded and a world move") {
+    ListReview.review(entry(), traded = true, "Vunira", tracked, Some("2026-10-01T00:00:00Z")) shouldBe
+      Some(Finding.ScheduledForDeletion("2026-10-01T00:00:00Z"))
+  }
+
+  /** The safety rule still applies above it: an already-traded player is not
+   *  flagged for being traded, but a deletion is about the character, not about
+   *  who owns them, so it is reported regardless. */
+  test("an already-traded player is still flagged when scheduled for deletion") {
+    ListReview.review(entry(tradedWhenAdded = true), traded = true, "Antica", tracked,
+      Some("2026-10-01T00:00:00Z")) shouldBe Some(Finding.ScheduledForDeletion("2026-10-01T00:00:00Z"))
+  }
+
+  test("a scheduled deletion on an already-flagged entry says nothing new") {
+    ListReview.review(entry(flagged = "world"), traded = false, "Antica", tracked,
+      Some("2026-10-01T00:00:00Z")) shouldBe None
+  }
+
+  test("the new reasons are the strings the database stores") {
+    Finding.Gone.reason shouldBe "gone"
+    Finding.ScheduledForDeletion("x").reason shouldBe "deletion"
+  }
 }

@@ -43,7 +43,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
       case Some(g) => guildFormat.write(g)
     }
   }
-  implicit val characterFormat: RootJsonFormat[response.Character] = jsonFormat17(response.Character)
+  implicit val characterFormat: RootJsonFormat[response.Character] = jsonFormat18(response.Character)
   implicit val killersFormat: RootJsonFormat[Killers] = jsonFormat4(Killers)
   implicit val deathsFormat: RootJsonFormat[Deaths] = jsonFormat5(Deaths)
   implicit val accountInformationFormat: RootJsonFormat[AccountInformation] = jsonFormat3(AccountInformation)

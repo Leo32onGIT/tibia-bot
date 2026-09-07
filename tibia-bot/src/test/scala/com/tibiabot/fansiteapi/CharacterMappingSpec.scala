@@ -186,4 +186,25 @@ class CharacterMappingSpec extends AnyFunSuite with Matchers with FansiteJsonSup
     CharacterMapping.toCharacterResponse(notTraded, Some(origin))
       .character.character.traded shouldBe Some(false)
   }
+
+  /** The deletion date has to survive the mapping for the same reason the traded
+   *  flag does: these two sources race, so a field only one of them carries is a
+   *  field that comes and goes with whoever answered first. */
+  test("a character scheduled for deletion keeps the date when this API answers") {
+    val payload = fixture("character_full.json")
+    val scheduled = payload.copy(characterGameInformation =
+      payload.characterGameInformation.copy(deletedTimestamp = 1790000000L))
+    CharacterMapping.toCharacterResponse(scheduled, Some(origin))
+      .character.character.deletion_date shouldBe Some("2026-09-21T14:13:20Z")
+  }
+
+  /** Zero means "not scheduled" on this API, which is the same thing TibiaData
+   *  says by omitting the key. */
+  test("a zero deletion timestamp maps to no date at all") {
+    val payload = fixture("character_full.json")
+    val notScheduled = payload.copy(characterGameInformation =
+      payload.characterGameInformation.copy(deletedTimestamp = 0L))
+    CharacterMapping.toCharacterResponse(notScheduled, Some(origin))
+      .character.character.deletion_date shouldBe None
+  }
 }

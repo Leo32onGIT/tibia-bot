@@ -28,7 +28,14 @@ case class Character(
      *  owner renames the character or six months pass. Anything that needs to
      *  know whether a character *was* traded at some past moment has to have
      *  recorded it then - it cannot be asked for afterwards. */
-    traded: Option[Boolean]
+    traded: Option[Boolean],
+    /** When the character is due to be deleted, if it has been scheduled.
+     *
+     *  Absent for the overwhelming majority, like `traded` — TibiaData marks it
+     *  `omitempty` too. Positive evidence, and worth far more than inferring
+     *  deletion from a name that stopped resolving: a name resolving to nothing
+     *  says only that nobody answers to it, which a rename does as well. */
+    deletion_date: Option[String]
 )
 case class Killers(name: String, player: Boolean, traded: Boolean, summon: String)
 case class Deaths(time: String, level: Double, killers: List[Killers], assists: List[Killers], reason: String)

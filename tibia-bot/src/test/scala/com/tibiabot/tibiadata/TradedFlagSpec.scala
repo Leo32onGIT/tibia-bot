@@ -61,4 +61,31 @@ class TradedFlagSpec extends AnyFunSuite with Matchers with JsonSupport {
     parsed.character.character.name should not be empty
     parsed.character.character.world should not be empty
   }
+
+  /** The deletion date, the other `omitempty` field on this endpoint.
+   *
+   *  Positive evidence that a character is on its way out, and worth far more
+   *  than inferring it from a name that stopped resolving — which a rename does
+   *  just as well.
+   */
+  private def withDeletionDate(value: Option[String]): CharacterResponse = {
+    val root = liveResponse
+    val sheet = root.fields("character").asJsObject
+    val character = sheet.fields("character").asJsObject
+    val updated = value match {
+      case Some(date) => JsObject(character.fields + ("deletion_date" -> JsString(date)))
+      case None       => JsObject(character.fields - "deletion_date")
+    }
+    JsObject(root.fields + ("character" ->
+      JsObject(sheet.fields + ("character" -> updated)))).convertTo[CharacterResponse]
+  }
+
+  test("an absent deletion date parses, and means not scheduled") {
+    withDeletionDate(None).character.character.deletion_date shouldBe None
+  }
+
+  test("a deletion date is parsed as sent") {
+    withDeletionDate(Some("2026-10-01T00:00:00Z"))
+      .character.character.deletion_date shouldBe Some("2026-10-01T00:00:00Z")
+  }
 }
