@@ -3,7 +3,6 @@ package com.tibiabot.persistence.jdbc
 import com.tibiabot.domain.CustomSort
 import com.tibiabot.persistence.{ConnectionProvider, CustomSortRepository}
 
-import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of CustomSortRepository, routed through
@@ -46,38 +45,5 @@ final class JdbcCustomSortRepository(connectionProvider: ConnectionProvider) ext
 
       statement.close()
       results.toList
-    }
-
-  def add(guildId: String, entity: String, name: String, label: String, emoji: String): Unit =
-    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      val query = "INSERT INTO online_list_categories(entity, name, label, emoji, added) VALUES (?, ?, ?, ?, ?);"
-      val statement = conn.prepareStatement(query)
-      statement.setString(1, entity)
-      statement.setString(2, name)
-      statement.setString(3, label)
-      statement.setString(4, emoji)
-      statement.setString(5, ZonedDateTime.now().toEpochSecond().toString)
-      statement.executeUpdate()
-
-      statement.close()
-    }
-
-  def removeByNameEntity(guildId: String, entity: String, name: String): Unit =
-    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE name = ? AND entity = ?;")
-      statement.setString(1, name)
-      statement.setString(2, entity)
-      statement.executeUpdate()
-
-      statement.close()
-    }
-
-  def removeByLabel(guildId: String, label: String): Unit =
-    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      val statement = conn.prepareStatement(s"DELETE FROM online_list_categories WHERE LOWER(label) = LOWER(?);")
-      statement.setString(1, label)
-      statement.executeUpdate()
-
-      statement.close()
     }
 }

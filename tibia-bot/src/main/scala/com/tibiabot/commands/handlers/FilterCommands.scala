@@ -4,7 +4,7 @@ import com.tibiabot.{BotApp, Config}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
-/** Handles `/filter`: sets the minimum level for level/death notifications. */
+/** Handles `/settings filter`: sets the minimum level for level/death notifications. */
 object FilterCommands {
 
   val DefaultLevel = 8
@@ -32,7 +32,7 @@ object FilterCommands {
         event.getHook.sendMessageEmbeds(embed).queue()
       case other =>
         val embed = new EmbedBuilder()
-          .setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/filter`.").build()
+          .setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/settings filter`.").build()
         event.getHook.sendMessageEmbeds(embed).queue()
     }
   }

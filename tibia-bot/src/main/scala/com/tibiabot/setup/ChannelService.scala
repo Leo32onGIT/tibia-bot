@@ -673,8 +673,8 @@ final class ChannelService(
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
 
-        postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
-        postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
+        postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/settings filter levels`** command.")
+        postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/settings filter deaths`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "0", "0", activityId)

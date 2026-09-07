@@ -68,8 +68,7 @@ final class HuntedAlliedService(
 
   /** Fetch a character and reduce it to the (name, world, vocation-emoji, level)
    *  summary the add/remove player commands render. On lookup failure yields the
-   *  empty/"does not exist" summary (name == ""). Also used by
-   *  [[com.tibiabot.customsort.CustomSortService]]'s player-tagging command. */
+   *  empty/"does not exist" summary (name == ""). */
   def fetchPlayerSummary(name: String): Future[(String, String, String, Int)] =
     tibiaDataClient.getCharacter(name).map {
       case Right(charResponse) =>

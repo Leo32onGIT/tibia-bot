@@ -33,7 +33,7 @@ case class Worlds(name: String,
    *  guild and on no tracked list — currently just a high-level stranger
    *  transferring in. On by default, like its show_neutral_ siblings: the level
    *  bar keeps the volume to a handful, and a server that does not want it has
-   *  `/neutral activity hide`. */
+   *  `/settings neutral activity hide`. */
   showNeutralActivity: String,
   /** Level floors for the online list, per tracked category. A character below
    *  its category's floor is left out of that list entirely.

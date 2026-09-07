@@ -3,15 +3,17 @@ package com.tibiabot.commands
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import net.dv8tion.jda.api.Permission
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions
+
 import scala.jdk.CollectionConverters._
 
 class CommandSchemasSpec extends AnyFunSuite with Matchers {
 
   test("registered commands have the expected names") {
     CommandSchemas.commands.map(_.getName) should contain theSameElementsAs List(
-      "setup", "remove", "hunted", "allies", "neutral", "fullbless",
-      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "stamina", "bookings",
-      "lootsplit")
+      "setup", "remove", "repair", "help", "hunted", "allies", "settings",
+      "boosted", "galthen", "patreon", "stamina", "bookings", "lootsplit")
   }
 
   test("admin command list adds /admin to the normal set") {
@@ -28,6 +30,29 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
   test("hunted exposes the expected subcommands") {
     CommandSchemas.huntedCommand.getSubcommands.asScala.map(_.getName) should contain allOf
       ("guild", "player", "list", "clear", "info", "autodetect", "levels", "deaths")
+  }
+
+  test("settings folds the five per-world setting commands into one root") {
+    CommandSchemas.settingsCommand.getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
+      List("fullbless", "exiva", "layout")
+    CommandSchemas.settingsCommand.getSubcommandGroups.asScala.map(_.getName) should contain theSameElementsAs
+      List("neutral", "filter")
+  }
+
+  test("settings groups expose the subcommands their old commands had") {
+    def group(name: String) =
+      CommandSchemas.settingsCommand.getSubcommandGroups.asScala.find(_.getName == name).get
+    group("neutral").getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
+      List("levels", "deaths", "activity")
+    group("filter").getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
+      List("levels", "deaths", "online")
+  }
+
+  // Manage Server is what all five folded commands each carried, and the root
+  // has to keep it: it is the only gate on any of them (no handler re-checks).
+  test("settings keeps the Manage Server gate its commands had") {
+    CommandSchemas.settingsCommand.getDefaultPermissions shouldBe
+      DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)
   }
 
   test("admin exposes the expected subcommands") {

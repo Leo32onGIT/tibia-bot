@@ -247,11 +247,6 @@ object BotApp extends App with StrictLogging {
     discordRetrieveConfig _, worldConfig _, checkConfigDatabase _
   )
 
-  // Per-guild custom online-list tag categories (/neutral tag ...)
-  val customSortService = new customsort.CustomSortService(
-    customSortRepository, streamState, tibiaDataClient, huntedAlliedService.fetchPlayerSummary _,
-    discordRetrieveConfig _, checkConfigDatabase _
-  )
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = discordGateway.selfUserId

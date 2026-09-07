@@ -110,7 +110,7 @@ object CommandSchemas {
         ),
       new SubcommandData("deaths", "Show or hide ally deaths")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide ally deaths?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
@@ -119,79 +119,110 @@ object CommandSchemas {
         )
       )
 
-  val neutralsCommand: SlashCommandData = Commands.slash("neutral", "Configuration options for neutrals")
+  /** Every per-world display setting, under one root.
+   *
+   *  These were five separate top-level commands — `/neutral`, `/fullbless`,
+   *  `/filter`, `/exiva` and `/online` — which is a lot of the command picker to
+   *  spend on settings a server touches once and then forgets. Folding them needs
+   *  no thought about access: all five were already Manage Server, so the root
+   *  carries the same gate each of them did.
+   *
+   *  `fullbless`, `exiva` and `layout` are flat rather than groups: each was a
+   *  command with exactly one real setting, so a second level would name nothing.
+   *  `layout` is what `/online list` was — "online" would read confusingly beside
+   *  `filter online`, which is a different setting on the same list. */
+  val settingsCommand: SlashCommandData = Commands.slash("settings", "Configure how a tracked world is displayed")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
     .addSubcommands(
-      new SubcommandData("levels", "Show or hide neutral levels")
+      new SubcommandData("fullbless", "Modify the level at which enemy fullblesses poke")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+          new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for fullbless pokes").setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(4000)
+        ),
+      new SubcommandData("exiva", "Show or hide the exiva list in the deaths channel")
+        .addOptions(
+          new OptionData(OptionType.STRING, "option", "Would you like to show or hide the exiva list?").setRequired(true)
             .addChoices(
               new Choice("show", "show"),
               new Choice("hide", "hide")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         ),
-      new SubcommandData("deaths", "Show or hide neutral deaths")
+      new SubcommandData("layout", "Keep the online list split across channels, or combine it into one")
         .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
             .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        ),
-      new SubcommandData("activity", "Show or hide activity for players you don't track")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral activity?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
+              new Choice("separate", "separate"),
+              new Choice("combine", "combine")
             ),
           new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
         )
     )
-
-  val fullblessCommand: SlashCommandData = Commands.slash("fullbless", "Modify the level at which enemy fullblesses poke")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(
-      new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-      new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for fullbless pokes").setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(4000)
-    )
-
-  val filterCommand: SlashCommandData = Commands.slash("filter", "Set a minimum level for the levels or deaths channels")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("levels", "Hide events in the levels channel if the character is below a certain level")
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the levels channel").setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(4000)
-      ),
-      new SubcommandData("deaths", "Hide events in the deaths channel if the character is below a certain level")
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-        new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(4000)
-      ),
-      // Minimum 0 rather than 1, because 0 is how the filter is turned back off
-      // — there is no level 0, so it cannot collide with a real floor.
-      new SubcommandData("online", "Hide players from an online list if they are below a certain level")
-      .addOptions(
-        new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
-        new OptionData(OptionType.STRING, "list", "Which online list to filter").setRequired(true)
-          .addChoices(
-            new Choice("enemies", "enemies"),
-            new Choice("allies", "allies"),
-            new Choice("neutrals", "neutrals")
-          ),
-        new OptionData(OptionType.INTEGER, "level", "The minimum level to show; 0 shows everyone again").setRequired(true)
-          .setMinValue(0)
-          .setMaxValue(4000)
-      )
+    .addSubcommandGroups(
+      new SubcommandGroupData("neutral", "Configuration options for neutrals")
+        .addSubcommands(
+          new SubcommandData("levels", "Show or hide neutral levels")
+            .addOptions(
+              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral levels?").setRequired(true)
+                .addChoices(
+                  new Choice("show", "show"),
+                  new Choice("hide", "hide")
+                ),
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+            ),
+          new SubcommandData("deaths", "Show or hide neutral deaths")
+            .addOptions(
+              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral deaths?").setRequired(true)
+                .addChoices(
+                  new Choice("show", "show"),
+                  new Choice("hide", "hide")
+                ),
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+            ),
+          new SubcommandData("activity", "Show or hide activity for players you don't track")
+            .addOptions(
+              new OptionData(OptionType.STRING, "option", "Would you like to show or hide neutral activity?").setRequired(true)
+                .addChoices(
+                  new Choice("show", "show"),
+                  new Choice("hide", "hide")
+                ),
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
+            )
+        ),
+      new SubcommandGroupData("filter", "Set a minimum level for a channel or an online list")
+        .addSubcommands(
+          new SubcommandData("levels", "Hide events in the levels channel if the character is below a certain level")
+            .addOptions(
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+              new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the levels channel").setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(4000)
+            ),
+          new SubcommandData("deaths", "Hide events in the deaths channel if the character is below a certain level")
+            .addOptions(
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+              new OptionData(OptionType.INTEGER, "level", "The minimum level you want to set for the deaths channel").setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(4000)
+            ),
+          // Minimum 0 rather than 1, because 0 is how the filter is turned back off
+          // — there is no level 0, so it cannot collide with a real floor.
+          new SubcommandData("online", "Hide players from an online list if they are below a certain level")
+            .addOptions(
+              new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true),
+              new OptionData(OptionType.STRING, "list", "Which online list to filter").setRequired(true)
+                .addChoices(
+                  new Choice("enemies", "enemies"),
+                  new Choice("allies", "allies"),
+                  new Choice("neutrals", "neutrals")
+                ),
+              new OptionData(OptionType.INTEGER, "level", "The minimum level to show; 0 shows everyone again").setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(4000)
+            )
+        )
     )
 
   val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
@@ -213,20 +244,6 @@ object CommandSchemas {
       )
     )
 
-  val exivaCommand: SlashCommandData = Commands.slash("exiva", "Show or hide exiva lists on death posts")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("deaths", "Show or hide the exiva list in the deaths channel")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to show or hide the exiva list?").setRequired(true)
-            .addChoices(
-              new Choice("show", "show"),
-              new Choice("hide", "hide")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
-    )
-
   val helpCommand: SlashCommandData = Commands.slash("help", "Resend the welcome message & basic getting started information")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
 
@@ -242,20 +259,6 @@ object CommandSchemas {
       .addOptions(
         new OptionData(OptionType.STRING, "character", "What character/tag is this for?")
       )
-    )
-
-  val onlineCombineCommand: SlashCommandData = Commands.slash("online", "Configure how the online list is displayed")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("list", "Configure the online list")
-        .addOptions(
-          new OptionData(OptionType.STRING, "option", "Would you like to combine the list into one channel or keep them separate?").setRequired(true)
-            .addChoices(
-              new Choice("separate", "separate"),
-              new Choice("combine", "combine")
-            ),
-          new OptionData(OptionType.STRING, "world", "The world you want to configure this setting for").setRequired(true)
-        )
     )
 
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
@@ -305,7 +308,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, neutralsCommand, fullblessCommand, filterCommand, exivaCommand, onlineCombineCommand, staminaCommand, bookingsCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands
