@@ -744,6 +744,20 @@ object BotApp extends App with StrictLogging {
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
   def huntedGuildsData: Map[String, List[Guilds]] = streamState.huntedGuildsData
   def alliedGuildsData: Map[String, List[Guilds]] = streamState.alliedGuildsData
+
+  /** Does any guild list this player, hunted or allied?
+   *
+   *  Across every guild, because the list cache is shared: one cached sheet
+   *  serves whoever lists that player, so it is worth writing if anybody does.
+   *  The per-guild checks in TibiaBot answer a different question — whether
+   *  *this* discord cares — and cannot stand in for this one.
+   */
+  def isOnAnyList(name: String): Boolean = {
+    val lower = name.toLowerCase
+    huntedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower)) ||
+      alliedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower))
+  }
+
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
@@ -1859,8 +1873,25 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def cleanHuntedList(): Unit =
-    cacheRepository.removeExpiredList(ZonedDateTime.now())
+  /** Nightly cleanup of the shared list cache.
+   *
+   *  Keyed on who is still listed rather than on how old a row is: the table has
+   *  one reader — drawing the hunted and allied lists — and a cached sheet does
+   *  not decay while a character is offline, so age said nothing about whether a
+   *  row was still right. It only decided when the list would stop being able to
+   *  show somebody. See CacheRepository.pruneList.
+   *
+   *  The set spans every guild, because the cache does: one row serves whoever
+   *  lists that player, so it may only go when nobody does.
+   */
+  private def cleanHuntedList(): Unit = {
+    val listed: Set[String] =
+      (huntedPlayersData.values.flatten ++ alliedPlayersData.values.flatten)
+        .map(_.name.toLowerCase).toSet
+    val removed = cacheRepository.pruneList(listed)
+    if (removed > 0)
+      logger.info(s"List cache: dropped $removed sheet(s) for players no list references any more")
+  }
 
 
   /** The Rashid / Dream Courts / (Drome, when active) server-save embeds for a

@@ -117,7 +117,11 @@ class TibiaBot(
   // inside Discord's 2-per-10-minutes window, which the cooldown exists to prevent.
   private val renameTimerLock = new Object()
   private var onlineListCategoryTimer: Map[String, ZonedDateTime] = BotApp.getRenameCooldowns(world)
-  private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
+  /** What was last written to the list cache for a player, keyed by lowercased
+   *  name: (level, world, guild). Lets a scan skip the write when nothing the
+   *  list shows has moved, without reading the row back to find out. Rebuilt
+   *  from nothing on restart, so the first scan of each listed player refreshes. */
+  private var listCacheState: Map[String, (Int, String, String)] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -217,6 +221,7 @@ class TibiaBot(
     // World poll failed: fall back to re-checking whoever was last seen online.
     case Left(_) =>
       fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
+
   }.withAttributes(logAndResume)
 
   /** Fetch every character in `inputs` at the shared 32-way concurrency and
@@ -243,14 +248,32 @@ class TibiaBot(
 
         val formerNamesList: List[String] = char.character.character.former_names.map(_.toList).getOrElse(Nil)
         val formerWorldsList: List[String] = char.character.character.former_worlds.map(_.toList).getOrElse(Nil)
-
-        // Refresh the shared hunted/allied lookup cache at most once per 6 minutes
-        // per world (gated per-world, not per-character).
-        val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
-          val cacheWorld = char.character.character.world
-          BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, cacheWorld, formerWorldsList, guildName, char.character.character.level.toInt.toString, char.character.character.vocation, char.character.character.last_login.getOrElse(""), ZonedDateTime.now())
-          cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
+        // Refresh the shared hunted/allied lookup cache.
+        //
+        // Only for players somebody actually lists, and only when something they
+        // show has changed. This used to write one arbitrary character per world
+        // per six minutes, which cached mostly players nothing reads — the table
+        // has one reader, the hunted and allied lists — while leaving listed
+        // players untouched for days at a time.
+        //
+        // The guard is in memory rather than a read of the row, so a character
+        // whose sheet has not moved costs nothing at all. It covers world and
+        // guild as well as level: a transfer or a guild swap changes what the
+        // list draws just as much as a level does.
+        // Former names count as well as the current one: on the poll that first
+        // sees a rename, the lists still hold the old name, so asking only about
+        // the new one would skip the very tick that needs writing. The row left
+        // under the old name is collected by the nightly orphan sweep once the
+        // lists have moved on - see CacheRepository.pruneList.
+        if (BotApp.isOnAnyList(charName) || formerNamesList.exists(BotApp.isOnAnyList)) {
+          val sheet = char.character.character
+          val fingerprint = (sheet.level.toInt, sheet.world, guildName)
+          if (!listCacheState.get(charName.toLowerCase).contains(fingerprint)) {
+            BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, sheet.world,
+              formerWorldsList, guildName, sheet.level.toInt.toString, sheet.vocation,
+              sheet.last_login.getOrElse(""), ZonedDateTime.now())
+            listCacheState = listCacheState + (charName.toLowerCase -> fingerprint)
+          }
         }
 
         // Incoming world transfer, detected once for the world rather than once
@@ -349,6 +372,18 @@ class TibiaBot(
 
               var skipJoinLeave = false
 
+              // Renaming the list entry is deliberately separate from the activity
+              // rename below. That one is derived from this guild's activity
+              // records, and those only exist for characters who joined a *tracked
+              // guild* - so a player added to the hunted list on their own has
+              // never had one, their rename was never noticed, and their entry kept
+              // a name that from then on matched nobody.
+              //
+              // Needs no activity row, no announcement and no settling period: it
+              // is idempotent, and a sheet that flaps back to the old name simply
+              // stops matching rather than renaming anything back.
+              renameListEntries(guild, guildId, charName, formerNamesList)
+
               val rename = presentation.GuildActivity.renameFromFormerNames(
                 activityData.getOrElse(guildId, List()),
                 charName,
@@ -391,29 +426,10 @@ class TibiaBot(
                   // repeat afterwards, so say nothing.
                   if (moved) {
                     BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, renamed.guild, renamedAt, charName)
-                    // if player is in hunted or allied 'players' list, update information there too
-                    if (huntedPlayerCheck) {
-                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
-                      val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                        if (player.name.equalsIgnoreCase(oldName)) {
-                          player.copy(name = charName.toLowerCase)
-                        } else {
-                          player
-                        }
-                      }
-                      BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
-                    }
-                    if (allyPlayerCheck) {
-                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
-                      val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                        if (player.name.equalsIgnoreCase(oldName)) {
-                          player.copy(name = charName.toLowerCase)
-                        } else {
-                          player
-                        }
-                      }
-                      BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
-                    }
+                    // The hunted and allied entries are renamed by
+                    // renameListEntries above, which does not need this activity
+                    // row to exist — see the note there. Doing it again here would
+                    // be a second path to the same write, on a narrower condition.
                     if (activityTextChannel != null) {
                       if (activityTextChannel.canTalk() || (!Config.prod)) {
                         val activityEmbed = new EmbedBuilder()
@@ -793,6 +809,46 @@ class TibiaBot(
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
 
+
+  /** Move a guild's hunted and allied entries onto a character's new name.
+   *
+   *  Matches on the sheet's former names, which is the only signal that survives
+   *  a rename — the entry still holds whatever the character used to be called,
+   *  and from the moment they renamed it matches no live character at all. Left
+   *  alone, that entry sits on the list forever, never colouring a death, never
+   *  appearing online, and looking for all the world like it is still working.
+   *
+   *  Renames at most one entry per list per call: two entries whose names are
+   *  both former names of one character would mean the same person listed twice,
+   *  which the add path already refuses.
+   */
+  private def renameListEntries(guild: Guild, guildId: String, charName: String,
+                                formerNames: List[String]): Unit =
+    if (formerNames.nonEmpty) {
+      val wasCalled = formerNames.map(_.toLowerCase).toSet
+
+      BotApp.huntedPlayersData.getOrElse(guildId, List())
+        .find(player => wasCalled.contains(player.name.toLowerCase))
+        .foreach { entry =>
+          BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", entry.name, charName)
+          BotApp.huntedAlliedService.modifyHuntedPlayersData(m =>
+            m + (guildId -> m.getOrElse(guildId, List()).map(player =>
+              if (player.name.equalsIgnoreCase(entry.name)) player.copy(name = charName.toLowerCase)
+              else player)))
+          logger.info(s"Hunted list: '${entry.name}' renamed to '$charName' in guild '$guildId'")
+        }
+
+      BotApp.alliedPlayersData.getOrElse(guildId, List())
+        .find(player => wasCalled.contains(player.name.toLowerCase))
+        .foreach { entry =>
+          BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", entry.name, charName)
+          BotApp.huntedAlliedService.modifyAlliedPlayersData(m =>
+            m + (guildId -> m.getOrElse(guildId, List()).map(player =>
+              if (player.name.equalsIgnoreCase(entry.name)) player.copy(name = charName.toLowerCase)
+              else player)))
+          logger.info(s"Allies list: '${entry.name}' renamed to '$charName' in guild '$guildId'")
+        }
+    }
   /** One pass over every discord tracking this world, refreshing the online list
    *  for those whose refresh interval has elapsed.
    *

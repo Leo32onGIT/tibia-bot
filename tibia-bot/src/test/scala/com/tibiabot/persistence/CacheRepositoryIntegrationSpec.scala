@@ -37,7 +37,7 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     repo.getLevels(world).map(_.name) should not contain "Char B"
   }
 
-  test("list cache: add (upsert), get and expiry") {
+  test("list cache: add (upsert), get, and orphan-only pruning") {
     val provider = pgOrCancel()
     ensureCacheSchema(provider)
     val repo = new JdbcCacheRepository(provider)
@@ -51,9 +51,31 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     rows.map(_.name) should contain("ListChar")
     rows.find(_.name == "ListChar").map(_.guild) shouldBe Some("SomeGuild")
 
-    // now is well past the 7-day window -> the row is purged
-    repo.removeExpiredList(ZonedDateTime.parse("2026-06-30T00:00:00Z"))
+    // Age no longer decides anything: a sheet does not go stale sitting still,
+    // since a character's level cannot change while they are offline. However old
+    // the row, it survives as long as somebody still lists that player.
+    repo.pruneList(Set("listchar"))
+    repo.getList(listWorld).map(_.name) should contain("ListChar")
+
+    // Dropped only once no list references them.
+    repo.pruneList(Set("somebodyelse"))
     repo.getList(listWorld).map(_.name) should not contain "ListChar"
+  }
+
+  /** An empty keep-set is indistinguishable from "the lists have not loaded
+   *  yet", so it must not be read as "nobody is listed, drop everything". */
+  test("list cache: an empty keep-set prunes nothing at all") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcCacheRepository(provider)
+    val listWorld = "Itestlisty"
+
+    repo.getList(listWorld)
+    repo.addToList("SafeChar", Nil, listWorld, Nil, "G", "100", "Druid",
+      "2026-05-30T09:00:00Z", ZonedDateTime.parse("2026-05-30T10:00:00Z"))
+
+    repo.pruneList(Set.empty) shouldBe 0
+    repo.getList(listWorld).map(_.name) should contain("SafeChar")
   }
 
   test("boosted_info: default row created, then updated and read back") {

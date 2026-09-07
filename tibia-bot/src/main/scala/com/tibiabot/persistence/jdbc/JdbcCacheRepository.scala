@@ -213,12 +213,51 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       selectStatement.close()
     }
 
-  def removeExpiredList(now: ZonedDateTime): Unit =
-    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val deleteStatement = conn.prepareStatement("DELETE FROM list WHERE time < ?;")
-      deleteStatement.setTimestamp(1, Timestamp.from(now.minus(7, ChronoUnit.DAYS).toInstant))
-      deleteStatement.executeUpdate()
-      deleteStatement.close()
+  /** Delete rows for players no list references any more — see the port for why
+   *  this is not an age cut.
+   *
+   *  Read-then-delete rather than one `NOT IN`, for two reasons: the parameter
+   *  list would otherwise grow with every player on every list in every guild,
+   *  and doing the difference here means the count of what actually went can be
+   *  logged. Returns how many rows were removed.
+   *
+   *  An empty `keep` deletes nothing at all. It is indistinguishable from "the
+   *  lists have not loaded yet", and emptying the whole cache because a sweep
+   *  ran early is far worse than leaving it a day.
+   */
+  def pruneList(keep: Set[String]): Int =
+    if (keep.isEmpty) 0
+    else JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.createStatement()
+      val tableExistsQuery = statement.executeQuery(
+        "SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'list'")
+      val tableExists = tableExistsQuery.next()
+      tableExistsQuery.close()
+      if (!tableExists) {
+        statement.close()
+        0
+      } else {
+        val result = statement.executeQuery("SELECT name FROM list")
+        val orphans = ListBuffer[String]()
+        while (result.next()) {
+          val name = Option(result.getString("name")).getOrElse("")
+          if (name.nonEmpty && !keep.contains(name.toLowerCase)) orphans += name
+        }
+        result.close()
+        statement.close()
+
+        if (orphans.isEmpty) 0
+        else {
+          val delete = conn.prepareStatement("DELETE FROM list WHERE LOWER(name) = LOWER(?);")
+          orphans.foreach { name =>
+            delete.setString(1, name)
+            delete.addBatch()
+          }
+          val removed = delete.executeBatch().sum
+          delete.close()
+          removed
+        }
+      }
     }
 
   /** Create `boosted_info` if it isn't there, and bring an older one up to the
