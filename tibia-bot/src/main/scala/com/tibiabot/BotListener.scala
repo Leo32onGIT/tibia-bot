@@ -13,7 +13,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter
 import com.typesafe.scalalogging.StrictLogging
 import scala.jdk.CollectionConverters._
 import com.tibiabot.domain.PendingScreenshot
-import com.tibiabot.commands.{CommandRouter, SlashRouting}
+import com.tibiabot.commands.{CommandPath, CommandRouter, SlashRouting}
 
 import java.time.ZonedDateTime
 import java.util.concurrent.{Executors, ThreadFactory}
@@ -27,7 +27,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
   // mutable.Map, so the handler signatures are unchanged.
   private val pendingScreenshots = scala.collection.concurrent.TrieMap[String, PendingScreenshot]()
 
-  // Slash-command dispatch table lives in commands.SlashRouting (one entry per command).
+  // Slash-command dispatch table lives in commands.SlashRouting, keyed by invoked
+  // path rather than command name (see CommandPath) — the router falls back to the
+  // longest registered prefix, so an entry can own a command, a group or one leaf.
   private val slashRouter = new CommandRouter[SlashCommandInteractionEvent](SlashRouting.handlers)
 
   private def namedPool(size: Int, prefix: String) = {
@@ -56,19 +58,20 @@ class BotListener extends ListenerAdapter with StrictLogging {
   private val interactionExecutor = namedPool(8, "interaction")
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
+    val path = CommandPath.of(event)
     // A command that answers with a form is the one shape this cannot acknowledge
     // up front: replyModal has to be the interaction's first response, so there is
     // nothing to defer into. It cannot queue for a worker either — the three-second
     // window would then be spent waiting on a pool shared with /setup, with Discord
     // still unanswered. Both are fine because such a handler only builds a form: no
     // database, no REST, nothing that could block JDA's event thread.
-    if (SlashRouting.opensModal(event.getName)) {
+    if (SlashRouting.opensModal(path)) {
       if (!BotApp.startUpComplete) event.reply(startingUpText).setEphemeral(true).queue()
       else {
-        try slashRouter.route(event.getName, event)
+        try slashRouter.route(path, event)
         catch {
           case ex: Throwable =>
-            logger.error(s"Unhandled exception opening the form for slash command '${event.getName}'", ex)
+            logger.error(s"Unhandled exception opening the form for slash command '$path'", ex)
             if (!event.isAcknowledged)
               event.reply(s"${Config.noEmoji} Something went wrong running that command.").setEphemeral(true).queue(_ => (), _ => ())
         }
@@ -83,10 +86,10 @@ class BotListener extends ListenerAdapter with StrictLogging {
       commandExecutor.execute(() => {
         try {
           recordCommandActivity(event)
-          slashRouter.route(event.getName, event)
+          slashRouter.route(path, event)
         } catch {
           case ex: Throwable =>
-            logger.error(s"Unhandled exception running slash command '${event.getName}'", ex)
+            logger.error(s"Unhandled exception running slash command '$path'", ex)
             val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Something went wrong running that command.").setColor(presentation.Embeds.BrandColor).build()
             event.getHook.sendMessageEmbeds(embed).queue(_ => (), _ => ())
         }
@@ -108,7 +111,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
     try {
       Option(event.getGuild).foreach(g => BotApp.guildActivityRepository.recordCommandRun(g.getId, ZonedDateTime.now()))
     } catch {
-      case ex: Throwable => logger.warn(s"Failed to record guild activity for command '${event.getName}'", ex)
+      case ex: Throwable => logger.warn(s"Failed to record guild activity for command '${CommandPath.of(event)}'", ex)
     }
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
