@@ -170,7 +170,11 @@ object PanelModals extends StrictLogging {
     // One post for the batch rather than one per name - see logBulk.
     if (adding) BotApp.huntedAlliedService.logBulk(event.getGuild, panel == Panel.Hunted, adding = true,
       event.getUser.getName, full, kind)
-    event.getHook.sendMessageEmbeds(PanelReplies.bulkEmbed(panel, kind, adding, full)).setEphemeral(true).queue()
+    // Both emoji come from config, like every other yes and no in the bot —
+    // PanelReplies stays Config-free so it can be tested, so they are passed in.
+    event.getHook.sendMessageEmbeds(
+      PanelReplies.bulkEmbed(panel, kind, adding, full, Config.yesEmoji, Config.noEmoji, tagKey))
+      .setEphemeral(true).queue()
   }
 
   private def applyDisplay(event: ModalInteractionEvent, panel: Panel): Unit = {

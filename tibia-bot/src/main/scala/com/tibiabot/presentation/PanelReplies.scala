@@ -22,16 +22,17 @@ import net.dv8tion.jda.api.entities.MessageEmbed
  */
 object PanelReplies {
 
-  /** The tick comes from config like every other yes in the bot, rather than
-   *  being a literal here — this object stays Config-free so it can be tested,
-   *  the same reason `noEmoji` is passed in. The default is only for tests.
+  /** Both emoji are required rather than defaulted. This object stays
+   *  Config-free so it can be tested, so they are passed in — and a default
+   *  meant a caller could quietly drop one and get a literal tick instead of the
+   *  server's, which is exactly what happened twice before they were made
+   *  mandatory. Let the compiler ask.
    */
   /** How many names are shown per group before the rest become a count. */
   private val ShownPerGroup = 15
 
   def bulkEmbed(panel: Panel, kind: String, adding: Boolean, outcome: BulkListOutcome,
-                noEmoji: String = "", tagKey: String = "",
-                yesEmoji: String = ":white_check_mark:"): MessageEmbed = {
+                yesEmoji: String, noEmoji: String, tagKey: String = ""): MessageEmbed = {
     val noun = if (kind == "guild") "guild" else "player"
     val listName = panel.noun
     val builder = new EmbedBuilder().setColor(Embeds.BrandColor)
