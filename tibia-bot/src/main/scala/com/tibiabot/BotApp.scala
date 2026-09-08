@@ -1886,8 +1886,14 @@ object BotApp extends App with StrictLogging {
    */
   private def reviewQuietListedPlayers(): Unit =
     discordGateway.guilds.foreach { guild =>
-      huntedAlliedService.reviewQuietPlayers(guild).failed.foreach { ex =>
-        logger.warn(s"Listed-player review failed for guild '${guild.getId}': ${ex.getMessage}")
+      huntedAlliedService.reviewQuietPlayers(guild).failed.foreach { failure =>
+        logger.warn(s"Listed-player review failed for guild '${guild.getId}': ${failure.getMessage}")
+      }(ex)
+      // Separate pass, and after the review: an entry flagged on this very beat
+      // has its whole grace period ahead of it, so nothing it just found can be
+      // removed here.
+      huntedAlliedService.pruneFlaggedPlayers(guild).failed.foreach { failure =>
+        logger.warn(s"Flagged-player prune failed for guild '${guild.getId}': ${failure.getMessage}")
       }(ex)
     }
 

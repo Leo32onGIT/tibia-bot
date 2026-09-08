@@ -13,21 +13,28 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
 
   /** Bring a guild's player tables up to the current shape.
    *
-   *  Both columns arrived together, so one check per table covers them. Idempotent
-   *  and cheap, and run before every read rather than once at startup: a guild's
-   *  database is created lazily by /setup, so there is no single moment when every
-   *  guild's schema is known to have been seen.
+   *  Each column is checked on its own, deliberately. Gating them all behind one
+   *  probe looks tidier and is wrong: a table migrated by an earlier version
+   *  already has that column, so the whole block is skipped and every column
+   *  added since is silently never created. The failure then surfaces as a query
+   *  against a column that does not exist, a long way from here.
+   *
+   *  Idempotent and cheap, and run before every read rather than once at startup:
+   *  a guild's database is created lazily by /setup, so there is no single moment
+   *  when every guild's schema is known to have been seen.
    */
   private def ensurePlayerColumns(conn: java.sql.Connection, table: String): Unit = {
     val statement = conn.createStatement()
-    val existing = statement.executeQuery(
-      s"SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$table' AND COLUMN_NAME = 'traded_when_added'")
-    val hasColumns = existing.next()
-    existing.close()
-    if (!hasColumns) {
-      statement.execute(s"ALTER TABLE $table ADD COLUMN traded_when_added VARCHAR(255) NOT NULL DEFAULT 'false'")
-      statement.execute(s"ALTER TABLE $table ADD COLUMN flagged_reason VARCHAR(255) NOT NULL DEFAULT ''")
+    def ensure(column: String, definition: String): Unit = {
+      val existing = statement.executeQuery(
+        s"SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$table' AND COLUMN_NAME = '$column'")
+      val present = existing.next()
+      existing.close()
+      if (!present) statement.execute(s"ALTER TABLE $table ADD COLUMN $column $definition")
     }
+    ensure("traded_when_added", "VARCHAR(255) NOT NULL DEFAULT 'false'")
+    ensure("flagged_reason", "VARCHAR(255) NOT NULL DEFAULT ''")
+    ensure("flagged_at", "VARCHAR(255) NOT NULL DEFAULT ''")
     statement.close()
   }
 
@@ -42,7 +49,7 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     ensurePlayerColumns(conn, query)
     val statement = conn.createStatement()
     val result = statement.executeQuery(
-      s"SELECT name,reason,reason_text,added_by,traded_when_added,flagged_reason FROM $query")
+      s"SELECT name,reason,reason_text,added_by,traded_when_added,flagged_reason,flagged_at FROM $query")
 
     val results = new ListBuffer[Players]()
     while (result.next()) {
@@ -52,7 +59,8 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
       val addedBy = Option(result.getString("added_by")).getOrElse("")
       val tradedWhenAdded = storedFlag(Option(result.getString("traded_when_added")).getOrElse(""))
       val flaggedReason = Option(result.getString("flagged_reason")).getOrElse("")
-      results += Players(name, reason, reasonText, addedBy, tradedWhenAdded, flaggedReason)
+      val flaggedAt = Option(result.getString("flagged_at")).getOrElse("")
+      results += Players(name, reason, reasonText, addedBy, tradedWhenAdded, flaggedReason, flaggedAt)
     }
 
     statement.close()
@@ -132,11 +140,43 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
       ensurePlayerColumns(conn, table)
       val statement = conn.prepareStatement(
-        s"UPDATE $table SET flagged_reason = ? WHERE LOWER(name) = LOWER(?) AND flagged_reason = '';")
+        s"UPDATE $table SET flagged_reason = ?, flagged_at = ? WHERE LOWER(name) = LOWER(?) AND flagged_reason = '';")
       statement.setString(1, reason)
-      statement.setString(2, name)
+      statement.setString(2, java.time.ZonedDateTime.now().toString)
+      statement.setString(3, name)
       statement.executeUpdate()
       statement.close()
+    }
+
+  /** Clear a flag, leaving the entry on the list.
+   *
+   *  What happens when the reason stops being true before the grace period is up
+   *  — most obviously a world move undone by the server setting that world up.
+   *  The entry goes back to being ordinary, and can be flagged again later on its
+   *  own merits.
+   */
+  def unflagPlayer(guildId: String, table: String, name: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      ensurePlayerColumns(conn, table)
+      val statement = conn.prepareStatement(
+        s"UPDATE $table SET flagged_reason = '', flagged_at = '' WHERE LOWER(name) = LOWER(?);")
+      statement.setString(1, name)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+  /** Empty one list table, returning how many rows went.
+   *
+   *  One statement rather than a delete per name: a long list was a round trip
+   *  per entry, and the count comes back for free where counting the loop's
+   *  successes did not.
+   */
+  def clearAll(guildId: String, table: String): Int =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      val statement = conn.prepareStatement(s"DELETE FROM $table;")
+      val removed = statement.executeUpdate()
+      statement.close()
+      removed
     }
 
   def removeHunted(guildId: String, option: String, name: String): Unit =

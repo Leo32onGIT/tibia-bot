@@ -31,6 +31,56 @@ class HuntedAlliedRepositoryIntegrationSpec extends AnyFunSuite with Matchers wi
     repo.getPlayers(guildId, "hunted_players").map(_.name) should not contain "EnemyTwo"
   }
 
+  /** clearAll empties one table in one statement, and reports what it removed.
+   *
+   *  The count matters: the version this replaced deleted per name in a loop and
+   *  reported a fixed "has been reset", which is part of why the list not
+   *  actually clearing went unnoticed. */
+  test("hunted players: clearAll empties the table and counts what went") {
+    val provider = pgOrCancel()
+    ensureGuildDatabase(provider, guildId)
+    ensureTable(provider, "hunted_players")
+    val repo = new JdbcHuntedAlliedRepository(provider)
+
+    repo.clearAll(guildId, "hunted_players")
+    repo.addHunted(guildId, "player", "ClearOne", "manual", "x", "tester")
+    repo.addHunted(guildId, "player", "ClearTwo", "manual", "x", "tester")
+    repo.getPlayers(guildId, "hunted_players").map(_.name) should
+      (contain("ClearOne") and contain("ClearTwo"))
+
+    repo.clearAll(guildId, "hunted_players") shouldBe 2
+    repo.getPlayers(guildId, "hunted_players") shouldBe empty
+  }
+
+  test("clearAll on an already-empty table removes nothing and says so") {
+    val provider = pgOrCancel()
+    ensureGuildDatabase(provider, guildId)
+    ensureTable(provider, "hunted_players")
+    val repo = new JdbcHuntedAlliedRepository(provider)
+
+    repo.clearAll(guildId, "hunted_players")
+    repo.clearAll(guildId, "hunted_players") shouldBe 0
+  }
+
+  /** Every list table is separate, so clearing one must not touch another —
+   *  the hunted and allied lists live side by side in the same database. */
+  test("clearing the hunted list leaves the allied list alone") {
+    val provider = pgOrCancel()
+    ensureGuildDatabase(provider, guildId)
+    ensureTable(provider, "hunted_players")
+    ensureTable(provider, "allied_players")
+    val repo = new JdbcHuntedAlliedRepository(provider)
+
+    repo.clearAll(guildId, "hunted_players")
+    repo.clearAll(guildId, "allied_players")
+    repo.addHunted(guildId, "player", "AnEnemy", "manual", "x", "tester")
+    repo.addAllied(guildId, "player", "AFriend", "manual", "x", "tester")
+
+    repo.clearAll(guildId, "hunted_players") shouldBe 1
+    repo.getPlayers(guildId, "hunted_players") shouldBe empty
+    repo.getPlayers(guildId, "allied_players").map(_.name) should contain("AFriend")
+  }
+
   test("hunted guilds: add, read and remove") {
     val provider = pgOrCancel()
     ensureGuildDatabase(provider, guildId)

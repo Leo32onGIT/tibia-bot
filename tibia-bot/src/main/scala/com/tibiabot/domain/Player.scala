@@ -16,7 +16,8 @@ import java.time.ZonedDateTime
  *  notice is said once: detecting is unconditional, announcing is not.
  */
 case class Players(name: String, reason: String, reasonText: String, addedBy: String,
-                   tradedWhenAdded: Boolean = false, flaggedReason: String = "")
+                   tradedWhenAdded: Boolean = false, flaggedReason: String = "",
+                   flaggedAt: String = "")
 case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
 
 /** A world transfer already posted to a discord's activity channel. `formerWorlds`

@@ -29,6 +29,19 @@ import com.tibiabot.domain.Players
  */
 object ListReview {
 
+  /** How long a flagged entry is left alone before it is removed.
+   *
+   *  Long enough for somebody who disagrees to say so — by removing the entry
+   *  themselves, or, for a world move, by setting that world up. Short enough
+   *  that a list left to itself still tidies up.
+   *
+   *  Nothing is removed on the strength of the original finding alone: it is
+   *  checked again when the time is up, and an entry whose reason no longer holds
+   *  is unflagged rather than removed. That is what makes setting up the world
+   *  they moved to cancel the removal.
+   */
+  val GraceBeforeRemoval: java.time.Duration = java.time.Duration.ofDays(7)
+
   sealed trait Finding { def reason: String }
   object Finding {
     /** The character no longer resolves at all.

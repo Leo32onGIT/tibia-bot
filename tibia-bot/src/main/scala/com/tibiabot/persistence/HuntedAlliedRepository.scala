@@ -19,6 +19,12 @@ trait HuntedAlliedRepository {
   /** Mark a player entry as flagged for removal, naming why. Leaves an entry that
    *  already carries a reason alone, which is what keeps the notice one-shot. */
   def flagPlayer(guildId: String, table: String, name: String, reason: String): Unit
+
+  /** Clear a flag, leaving the entry on the list — see the implementation. */
+  def unflagPlayer(guildId: String, table: String, name: String): Unit
+
+  /** Empty one list table, returning how many rows went. */
+  def clearAll(guildId: String, table: String): Int
   def removeHunted(guildId: String, option: String, name: String): Unit
   def removeAllied(guildId: String, option: String, name: String): Unit
   /** Rename a hunted/allied player, retrying past a duplicate-key collision. */

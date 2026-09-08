@@ -271,80 +271,88 @@ final class HuntedAlliedService(
     }
     Embeds.response(embedText)
   }
-  def clearAllies(event: GenericInteractionCreateEvent): MessageEmbed = {
-    val guild = event.getGuild
+  /** Empty a guild's allied list — players, guilds and the activity records they
+   *  brought with them. */
+  def clearAllies(event: GenericInteractionCreateEvent): MessageEmbed =
+    clearList(event.getGuild, hunted = false)
+
+  /** Empty a guild's hunted list, the same way. */
+  def clearHunted(event: GenericInteractionCreateEvent): MessageEmbed =
+    clearList(event.getGuild, hunted = true)
+
+  /** What both of those do.
+   *
+   *  ==What went wrong before==
+   *  This used to delete the database rows and filter the activity records, and
+   *  never touch the in-memory lists at all — which is what every command
+   *  actually reads. So it reported success, really did empty the tables, and the
+   *  list carried on showing everybody until the next restart reloaded it from
+   *  the now-empty tables. The two lines that cleared them were dropped when
+   *  BotApp's mutable state moved behind StreamState, because in their old form
+   *  (`huntedPlayersData = Map.empty`) they emptied the lists of *every* guild and
+   *  did not survive translation.
+   *
+   *  Which is the other half of it: everything here is scoped to one guild. The
+   *  activity filter was written across the whole map, so clearing one server's
+   *  list dropped activity records in unrelated servers for anyone whose guild
+   *  happened to match — and those records are the "have we seen this player"
+   *  baseline, so those servers then announced them all over again as joining.
+   */
+  private def clearList(guild: Guild, hunted: Boolean): MessageEmbed = {
     val guildId = guild.getId
+    val listGuilds =
+      if (hunted) streamState.huntedGuildsData.getOrElse(guildId, List.empty[Guilds])
+      else streamState.alliedGuildsData.getOrElse(guildId, List.empty[Guilds])
+    val listPlayers =
+      if (hunted) streamState.huntedPlayersData.getOrElse(guildId, List.empty[Players])
+      else streamState.alliedPlayersData.getOrElse(guildId, List.empty[Players])
 
-    val listGuilds: List[Guilds] = streamState.alliedGuildsData.getOrElse(guildId, List.empty[Guilds])
-    val listPlayers: List[Players] = streamState.alliedPlayersData.getOrElse(guildId, List.empty[Players])
+    if (listGuilds.isEmpty && listPlayers.isEmpty)
+      Embeds.response(s"${Config.noEmoji} The ${if (hunted) "hunted" else "allies"} list is already empty.")
+    else {
+      val guildNames = listGuilds.map(_.name.toLowerCase).toSet
+      val playerNames = listPlayers.map(_.name.toLowerCase).toSet
 
-    val guildNamesToRemove = listGuilds.map(_.name.toLowerCase).toSet
-    val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
+      // One pass over this guild's activity records, dropping anyone the list was
+      // keeping them for: a member of a cleared guild, or a cleared player. Note
+      // `m.updated(guildId, ...)` — every other guild's records are left exactly
+      // as they were, which is the fix for the bug named above.
+      streamState.modifyActivityData(m =>
+        m.updated(guildId,
+          HuntedAlliedService.activityAfterClear(m.getOrElse(guildId, List.empty), guildNames, playerNames)))
 
-    if (listGuilds.nonEmpty) {
-      streamState.modifyActivityData { m =>
-        m.view.mapValues {
-          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
-        }.toMap
+      // The lists themselves, for this guild only.
+      if (hunted) {
+        streamState.modifyHuntedGuildsData(m => m.updated(guildId, List.empty))
+        streamState.modifyHuntedPlayersData(m => m.updated(guildId, List.empty))
+      } else {
+        streamState.modifyAlliedGuildsData(m => m.updated(guildId, List.empty))
+        streamState.modifyAlliedPlayersData(m => m.updated(guildId, List.empty))
       }
 
-      listGuilds.foreach { guildEntry =>
-        removeAllyFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
-        removeGuildActivityfromDatabase(guild, guildEntry.name.toLowerCase)
-      }
+      // The tables, one statement each rather than a delete per name.
+      val guildTable = if (hunted) "hunted_guilds" else "allied_guilds"
+      val playerTable = if (hunted) "hunted_players" else "allied_players"
+      huntedAlliedRepository.clearAll(guildId, guildTable)
+      huntedAlliedRepository.clearAll(guildId, playerTable)
+
+      // Activity rows are per-guild-database already, so these were always
+      // correctly scoped — unlike the in-memory pass above.
+      listGuilds.foreach(entry => removeGuildActivityfromDatabase(guild, entry.name.toLowerCase))
+      listPlayers.foreach(entry => removePlayerActivityfromDatabase(guild, entry.name.toLowerCase))
+
+      // Counted rather than a flat "has been reset". The numbers are what makes a
+      // clear that did nothing obvious at a glance — which is exactly how the
+      // version this replaces hid the fact that it was not working.
+      val listName = if (hunted) "hunted" else "allies"
+      Embeds.response(
+        s"${Config.yesEmoji} The $listName list has been cleared — " +
+          s"**${listPlayers.size}** ${plural(listPlayers.size, "player", "players")} and " +
+          s"**${listGuilds.size}** ${plural(listGuilds.size, "guild", "guilds")} removed.")
     }
-
-    if (listPlayers.nonEmpty) {
-      streamState.modifyActivityData { m =>
-        val updatedList = m.getOrElse(guildId, List.empty)
-          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
-
-        m.updated(guildId, updatedList)
-      }
-
-      listPlayers.foreach { filterPlayer =>
-        removeAllyFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
-        removePlayerActivityfromDatabase(guild, filterPlayer.name.toLowerCase)
-      }
-    }
-
-    val embedText = s"${Config.yesEmoji} The allies list has been reset."
-    Embeds.response(embedText)
   }
 
-  def clearHunted(event: GenericInteractionCreateEvent): MessageEmbed = {
-    val guild = event.getGuild
-    val guildId = guild.getId
-    val listGuilds: List[Guilds] = streamState.huntedGuildsData.getOrElse(guild.getId, List.empty[Guilds])
-    val listPlayers: List[Players] = streamState.huntedPlayersData.getOrElse(guild.getId, List.empty[Players])
-    val guildNamesToRemove = listGuilds.map(_.name.toLowerCase).toSet
-    val playerNamesToRemove = listPlayers.map(_.name.toLowerCase).toSet
-    if (listGuilds.nonEmpty) {
-      streamState.modifyActivityData { m =>
-        m.view.mapValues {
-          _.filterNot(pc => guildNamesToRemove.contains(pc.guild.toLowerCase))
-        }.toMap
-      }
-      listGuilds.foreach { guildEntry =>
-        removeHuntedFromDatabase(guild, "guild", guildEntry.name.toLowerCase)
-        removeGuildActivityfromDatabase(guild, guildEntry.name.toLowerCase)
-      }
-    }
-    if (listPlayers.nonEmpty) {
-      streamState.modifyActivityData { m =>
-        val updatedList = m.getOrElse(guildId, List.empty)
-          .filterNot(player => playerNamesToRemove.contains(player.name.toLowerCase))
-
-        m.updated(guildId, updatedList)
-      }
-      listPlayers.foreach { filterPlayer =>
-        removeHuntedFromDatabase(guild, "player", filterPlayer.name.toLowerCase)
-        removePlayerActivityfromDatabase(guild, filterPlayer.name.toLowerCase)
-      }
-    }
-    val embedText = s"${Config.yesEmoji} The hunted list has been reset."
-    Embeds.response(embedText)
-  }
+  private def plural(n: Int, one: String, many: String): String = if (n == 1) one else many
 
 
   // --- drawing the lists ---------------------------------------------------
@@ -404,13 +412,13 @@ final class HuntedAlliedService(
             val level = scala.util.Try(sheet.level.toInt).getOrElse(0)
             if (vocationBuffers.contains(voc))
               vocationBuffers(voc) += ((level, sheet.world,
-                s"$emoji **${sheet.level}** - **[${sheet.name}](${charUrl(sheet.name)})** $icon $login"))
+                s"$emoji **${sheet.level}** - **[${sheet.name}](${charUrl(sheet.name)})** $icon $login${flagMark(player)}"))
           case _ =>
             // On the list, but nothing cached about them yet - the next poll or
             // the next time somebody adds them fills this in.
             val shown = com.tibiabot.presentation.Names.capitalizeWords(player.name)
             vocationBuffers("none") += ((0, "Not checked yet",
-              s":grey_question: **?** - **[$shown](${charUrl(player.name)})**"))
+              s":grey_question: **?** - **[$shown](${charUrl(player.name)})**${flagMark(player)}"))
         }
       }
 
@@ -488,6 +496,19 @@ final class HuntedAlliedService(
     }
   }
 
+  /** The marker a flagged entry carries on the list.
+   *
+   *  A red flag, and the date it goes — the flag alone says something is wrong
+   *  but not that anything is about to happen, and the whole point of the notice
+   *  in the admin channel is that somebody has until then to disagree. Rendered
+   *  as a Discord relative timestamp so it reads the same in every timezone.
+   */
+  private def flagMark(entry: Players): String =
+    if (entry.flaggedReason.isEmpty) ""
+    else scala.util.Try(ZonedDateTime.parse(entry.flaggedAt))
+      .map(at => s" :triangular_flag_on_post: _removed <t:${at.plus(ListReview.GraceBeforeRemoval).toEpochSecond}:R>_")
+      .getOrElse(" :triangular_flag_on_post:")
+
   /** Which icon a player's guild earns on a list — allied, hunted, or neither. */
   private def guildIconFor(guildId: String, guildName: String, arg: String): String =
     if (guildName.isEmpty) com.tibiabot.presentation.GuildIcons.listGuildIcon("", false, false, arg)
@@ -538,9 +559,12 @@ final class HuntedAlliedService(
         else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
-      AdminLog.post(adminChannel,
-        s"**[$shown](${charUrl(entry.name)})** $because, so the $listName list entry is " +
-          "probably worth removing.\nNothing has been changed — remove them with `/" + listName + "` if you agree.",
+      val side = if (hunted) "enemy" else "ally"
+      val removalDay = ZonedDateTime.now().plus(ListReview.GraceBeforeRemoval).toEpochSecond
+      AdminLog.automatic(adminChannel,
+        s":robot: $side flagged for removal:",
+        s"**[$shown](${charUrl(entry.name)})** $because, so the character has been flagged for removal.\n" +
+          s"It will be removed from the $listName list <t:$removalDay:R>",
         thumbnail)
       true
     } catch {
@@ -612,6 +636,127 @@ final class HuntedAlliedService(
       .runWith(Sink.seq)
       .map(_.count(identity))
   }
+
+  /** Remove the flagged entries whose grace period is up — or unflag them, if the
+   *  reason has stopped being true.
+   *
+   *  Nothing is removed on the strength of the original finding. It is checked
+   *  again here, which is what lets a server undo one: setting up the world a
+   *  player moved to makes the world finding false, and the entry goes back to
+   *  being ordinary instead of being deleted. The same holds for a scheduled
+   *  deletion that was cancelled, or a character who has reappeared.
+   *
+   *  A trade is the exception that needs no re-check to survive one: it stays
+   *  true, so those entries do get removed. That is the intent — the account
+   *  changed hands, and no amount of waiting changes it back.
+   *
+   *  A lookup that fails leaves the entry alone entirely, flag and all. Removal
+   *  is destructive and irreversible from here, so it happens only on a positive
+   *  answer, never on the absence of one.
+   */
+  def pruneFlaggedPlayers(guild: Guild): Future[Int] = {
+    if (!checkConfigDatabase(guild)) return Future.successful(0)
+    val guildId = guild.getId
+    val trackedWorlds = worldConfig(guild).map(_.name).toSet
+    val now = ZonedDateTime.now()
+
+    def due(entry: Players): Boolean =
+      entry.flaggedReason.nonEmpty && flaggedLongEnough(entry, now)
+
+    val hunted = streamState.huntedPlayersData.getOrElse(guildId, List()).filter(due).map(_ -> true)
+    val allied = streamState.alliedPlayersData.getOrElse(guildId, List()).filter(due).map(_ -> false)
+    val dueNow = hunted ++ allied
+
+    if (dueNow.isEmpty) Future.successful(0)
+    else Source(dueNow)
+      .mapAsyncUnordered(BulkParallelism) { case (entry, isHunted) =>
+        fetchPlayerSummary(entry.name).map {
+          case PlayerLookup.Found(_, world, _, _, traded, deletionDate) =>
+            // Re-asked from scratch, ignoring the stored reason: what matters is
+            // whether anything is wrong with this entry *now*.
+            val stillWrong = ListReview.review(entry.copy(flaggedReason = ""), traded, world,
+              trackedWorlds, deletionDate).isDefined
+            if (stillWrong) removeFlagged(guild, isHunted, entry)
+            else { clearFlag(guild, isHunted, entry); false }
+          case PlayerLookup.NotFound    => removeFlagged(guild, isHunted, entry)
+          case PlayerLookup.Unavailable => false
+        }
+      }
+      .runWith(Sink.seq)
+      .map(_.count(identity))
+  }
+
+  /** True once the grace period has passed. An entry with no timestamp — flagged
+   *  before the column existed — is stamped by the next flag rather than removed
+   *  on a date nobody recorded. */
+  private def flaggedLongEnough(entry: Players, now: ZonedDateTime): Boolean =
+    scala.util.Try(ZonedDateTime.parse(entry.flaggedAt))
+      .map(at => at.plus(ListReview.GraceBeforeRemoval).isBefore(now))
+      .getOrElse(false)
+
+  /** Take a flagged entry off the list and say so. */
+  private def removeFlagged(guild: Guild, hunted: Boolean, entry: Players): Boolean =
+    try {
+      val guildId = guild.getId
+      if (hunted) {
+        streamState.modifyHuntedPlayersData(m => m + (guildId ->
+          m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(entry.name))))
+        removeHuntedFromDatabase(guild, "player", entry.name)
+      } else {
+        streamState.modifyAlliedPlayersData(m => m + (guildId ->
+          m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(entry.name))))
+        removeAllyFromDatabase(guild, "player", entry.name)
+      }
+      streamState.modifyActivityData(m => m + (guildId ->
+        m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(entry.name))))
+      removePlayerActivityfromDatabase(guild, entry.name)
+
+      val listName = if (hunted) "hunted" else "allies"
+      val side = if (hunted) "enemy" else "ally"
+      val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      val thumbnail =
+        if (hunted) "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
+        else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
+      AdminLog.automatic(adminChannel,
+        s":robot: $side removed:",
+        s"**$shown** was flagged for removal and the finding still stands, " +
+          s"so they have been removed from the $listName list.",
+        thumbnail)
+      true
+    } catch {
+      case NonFatal(ex) =>
+        logger.warn(s"Failed to remove flagged '${entry.name}' in guild '${guild.getId}': ${ex.getMessage}")
+        false
+    }
+
+  /** Put a flagged entry back to ordinary, and say why it was spared. */
+  private def clearFlag(guild: Guild, hunted: Boolean, entry: Players): Unit =
+    try {
+      val guildId = guild.getId
+      val table = if (hunted) "hunted_players" else "allied_players"
+      huntedAlliedRepository.unflagPlayer(guildId, table, entry.name)
+      val cleared = entry.copy(flaggedReason = "", flaggedAt = "")
+      val replace = (players: List[Players]) =>
+        players.map(player => if (player.name.equalsIgnoreCase(entry.name)) cleared else player)
+      if (hunted) streamState.modifyHuntedPlayersData(m => m + (guildId -> replace(m.getOrElse(guildId, List()))))
+      else streamState.modifyAlliedPlayersData(m => m + (guildId -> replace(m.getOrElse(guildId, List()))))
+
+      val listName = if (hunted) "hunted" else "allies"
+      val side = if (hunted) "enemy" else "ally"
+      val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
+      val discordInfo = discordRetrieveConfig(guild)
+      val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
+      AdminLog.automatic(adminChannel,
+        s":robot: $side no longer flagged:",
+        s"**$shown** was flagged for removal, but that no longer applies, " +
+          s"so they stay on the $listName list.",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
+    } catch {
+      case NonFatal(ex) =>
+        logger.warn(s"Failed to unflag '${entry.name}' in guild '${guild.getId}': ${ex.getMessage}")
+    }
 
   // --- bulk list changes ---------------------------------------------------
   //
@@ -772,5 +917,31 @@ final class HuntedAlliedService(
       AdminLog.post(adminChannel,
         s"${Names.user(actor)} $verb ${names.size} $preposition the $listName list:\n$shown$more.",
         thumbnail)
+    }
+}
+
+/** The parts of clearing a list that are decisions rather than side effects.
+ *
+ *  Out here as a companion so they can be tested without building a service —
+ *  which needs four repositories, a JDA guild and a database, and would prove
+ *  less about the one thing that was wrong.
+ */
+object HuntedAlliedService {
+
+  /** A guild's activity records after clearing its list: everyone the list was
+   *  keeping a record for is dropped, and nobody else is.
+   *
+   *  Takes one guild's records, never the whole map. That is the fix: this
+   *  filter used to be applied across every guild at once, so clearing one
+   *  server's list dropped records in unrelated servers for anyone whose guild
+   *  name happened to match — and a dropped record is the baseline that stops a
+   *  player being announced as joining, so those servers announced them again.
+   */
+  private[hunted] def activityAfterClear(records: List[PlayerCache],
+                                         clearedGuilds: Set[String],
+                                         clearedPlayers: Set[String]): List[PlayerCache] =
+    records.filterNot { record =>
+      clearedGuilds.contains(record.guild.toLowerCase) ||
+        clearedPlayers.contains(record.name.toLowerCase)
     }
 }

@@ -376,6 +376,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |added_by VARCHAR(255) NOT NULL,
              |traded_when_added VARCHAR(255) NOT NULL DEFAULT 'false',
              |flagged_reason VARCHAR(255) NOT NULL DEFAULT '',
+             |flagged_at VARCHAR(255) NOT NULL DEFAULT '',
              |PRIMARY KEY (name)
              |);""".stripMargin
 
@@ -396,6 +397,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |added_by VARCHAR(255) NOT NULL,
              |traded_when_added VARCHAR(255) NOT NULL DEFAULT 'false',
              |flagged_reason VARCHAR(255) NOT NULL DEFAULT '',
+             |flagged_at VARCHAR(255) NOT NULL DEFAULT '',
              |PRIMARY KEY (name)
              |);""".stripMargin
 

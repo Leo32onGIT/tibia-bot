@@ -132,4 +132,34 @@ class ListReviewSpec extends AnyFunSuite with Matchers {
     Finding.Gone.reason shouldBe "gone"
     Finding.ScheduledForDeletion("x").reason shouldBe "deletion"
   }
+
+  // --- the grace period, and changing your mind ---
+
+  /** Re-asked from scratch when the time is up, ignoring the stored reason. That
+   *  is what lets a server cancel a removal by setting up the world the player
+   *  moved to — the finding simply stops being true. */
+  test("a world finding stops holding once that world is set up") {
+    val flagged = entry(flagged = "world")
+    val reasked = flagged.copy(flaggedReason = "")
+    ListReview.review(reasked, traded = false, "Vunira", tracked) shouldBe
+      Some(Finding.MovedWorld("Vunira"))
+    ListReview.review(reasked, traded = false, "Vunira", tracked + "Vunira") shouldBe None
+  }
+
+  /** A trade needs no re-check to survive one: the account changed hands, and no
+   *  amount of waiting changes it back. */
+  test("a traded finding still holds when re-asked") {
+    val reasked = entry(flagged = "traded").copy(flaggedReason = "")
+    ListReview.review(reasked, traded = true, "Antica", tracked) shouldBe Some(Finding.Traded)
+  }
+
+  /** Logging in cancels a scheduled deletion, so the re-check must see that. */
+  test("a cancelled deletion stops holding") {
+    val reasked = entry(flagged = "deletion").copy(flaggedReason = "")
+    ListReview.review(reasked, traded = false, "Antica", tracked, None) shouldBe None
+  }
+
+  test("the grace period is seven days") {
+    ListReview.GraceBeforeRemoval shouldBe java.time.Duration.ofDays(7)
+  }
 }
