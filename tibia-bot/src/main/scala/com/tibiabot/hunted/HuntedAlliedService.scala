@@ -403,8 +403,13 @@ final class HuntedAlliedService(
       )
       listed.foreach { player =>
         cached.get(player.name.toLowerCase) match {
-          case Some(sheet) if sheet.vocation.nonEmpty &&
-            allWorlds.exists(_.name.equalsIgnoreCase(sheet.world)) =>
+          // Anything we have a sheet for is drawn from it, whatever world it
+          // says. A player who has moved to a world this server does not track
+          // is still a player we know the level and vocation of, and hiding that
+          // behind "not checked yet" threw away what had already been learned —
+          // they are grouped under the world they are actually on, and the
+          // review flags them separately for having left.
+          case Some(sheet) if sheet.vocation.nonEmpty =>
             val voc = sheet.vocation.toLowerCase.split(' ').last
             val emoji = com.tibiabot.presentation.Emojis.vocEmoji(voc)
             val icon = guildIconFor(guildId, sheet.guild, arg)
@@ -414,8 +419,10 @@ final class HuntedAlliedService(
               vocationBuffers(voc) += ((level, sheet.world,
                 s"$emoji **${sheet.level}** - **[${sheet.name}](${charUrl(sheet.name)})** $icon $login${com.tibiabot.panels.ListTags.mark(player.tag)}${flagMark(player)}"))
           case _ =>
-            // On the list, but nothing cached about them yet - the next poll or
-            // the next time somebody adds them fills this in.
+            // Genuinely nothing known: an entry added before sheets were cached
+            // at add time. The sweep looks these up within a day or so — see
+            // reviewQuietPlayers — so this should be a state a list passes
+            // through once rather than one it sits in.
             val shown = com.tibiabot.presentation.Names.capitalizeWords(player.name)
             vocationBuffers("none") += ((0, "Not checked yet",
               s":grey_question: **?** - **[$shown](${charUrl(player.name)})**${com.tibiabot.panels.ListTags.mark(player.tag)}${flagMark(player)}"))
