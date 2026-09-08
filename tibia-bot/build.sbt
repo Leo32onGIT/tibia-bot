@@ -1,7 +1,7 @@
 import com.typesafe.sbt.packager.docker.Cmd
 
 name := "violent-bot-dedicated"
-version := "2.2"
+version := "4.1"
 
 scalaVersion := "2.13.18"
 
