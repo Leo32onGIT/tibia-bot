@@ -74,7 +74,7 @@ object SettingsForms {
       // thirty-fifth row of the picker for a thing set once.
       case PanelIds.CommandLog =>
         Some("Command log", List(channelPicker("Command log channel",
-          "Where the bot posts what was run and what it changed.", commandLog)))
+          "Change where the bot posts its logs:", commandLog)))
 
       case _ => None
     }
