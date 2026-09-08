@@ -68,7 +68,7 @@ object Panels {
     PanelIds.Add     -> ("Add" -> "➕"),
     PanelIds.Remove  -> ("Remove" -> "➖"),
     PanelIds.Info    -> ("Look up" -> "🔍"),
-    PanelIds.Display -> ("Display" -> "⚙️"),
+    PanelIds.Config  -> ("Config" -> "⚙️"),
     PanelIds.Clear   -> ("Clear all" -> "🗑️")
   )
 

@@ -29,7 +29,7 @@ object PanelCommands {
         val worlds = worldsOf(event)
         if (worlds.isEmpty) refuse(event, noWorldsText)
         else event.getHook.sendMessageEmbeds(Panels.settingsEmbed(worlds))
-          .setComponents(Panels.settingsButtons.asJava).queue()
+          .setComponents(Panels.settingsButtons.asJava).setEphemeral(true).queue()
       }
     }
 
@@ -54,10 +54,15 @@ object PanelCommands {
         // empty in practice — but a deferred reply nobody answers hangs as
         // "thinking" forever, which is too poor a failure to leave to that.
         val pagesToSend = if (pages.nonEmpty) pages else List(List(Panels.emptyListEmbed(panel)))
+        // Every send carries setEphemeral, not just the ones after the first.
+        // The deferral was ephemeral, so the first send inherits it — but each one
+        // after that is a *followup*, and a followup defaults to public. A list
+        // long enough to need a second message therefore posted the rest of itself
+        // to the channel, buttons and all, for everybody to see.
         pagesToSend.init.foreach(page =>
           event.getHook.sendMessageEmbeds(page.asJava).setEphemeral(true).queue())
         event.getHook.sendMessageEmbeds(pagesToSend.last.asJava)
-          .setComponents(Panels.listButtons(panel).asJava).queue()
+          .setComponents(Panels.listButtons(panel).asJava).setEphemeral(true).queue()
       }
     }
 
@@ -110,5 +115,5 @@ object PanelCommands {
     replyEmbed(event, Embeds.response(text))
 
   private def replyEmbed(event: SlashCommandInteractionEvent, embed: MessageEmbed): Unit =
-    event.getHook.sendMessageEmbeds(embed).queue()
+    event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
 }

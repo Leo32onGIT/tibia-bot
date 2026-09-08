@@ -62,7 +62,7 @@ class PanelIdsSpec extends AnyFunSuite with Matchers {
         PanelIds.ackFor(PanelIds.button(Panel.Settings, action)) shouldBe Ack.OpensModal
       }
     }
-    List(PanelIds.Add, PanelIds.Remove, PanelIds.Info, PanelIds.Display).foreach { action =>
+    List(PanelIds.Add, PanelIds.Remove, PanelIds.Info, PanelIds.Config).foreach { action =>
       withClue(s"/hunted $action: ") {
         PanelIds.ackFor(PanelIds.button(Panel.Hunted, action)) shouldBe Ack.OpensModal
       }

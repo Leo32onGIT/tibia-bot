@@ -69,7 +69,7 @@ object PanelIds {
   val Add = "add"
   val Remove = "remove"
   val Info = "info"
-  val Display = "display"
+  val Config = "config"
   val Clear = "clear"
   /** The second press, after the first one asked whether they meant it. */
   val ClearConfirm = "clearconfirm"
@@ -82,7 +82,7 @@ object PanelIds {
     // No "view list" button: the panel's own reply is the list. It costs
     // nothing to draw — see HuntedAlliedService.playersEmbeds — so putting it
     // behind a press only hid what somebody ran the command to see.
-    List(Add, Remove, Info, Display, Clear)
+    List(Add, Remove, Info, Config, Clear)
 
   // --- building ------------------------------------------------------------
 

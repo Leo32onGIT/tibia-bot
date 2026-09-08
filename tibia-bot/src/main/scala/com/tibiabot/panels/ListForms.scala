@@ -70,9 +70,9 @@ object ListForms {
               .setMaxLength(64)
               .build())))
 
-      // The per-world display toggles that used to be `/hunted levels`,
+      // The per-world settings that used to be `/hunted levels`,
       // `/hunted deaths` and `/hunted autodetect`.
-      case PanelIds.Display =>
+      case PanelIds.Config =>
         val levels = only.map(w => showHideOf(if (panel == Panel.Hunted) w.showEnemiesLevels else w.showAlliesLevels))
         val deaths = only.map(w => showHideOf(if (panel == Panel.Hunted) w.showEnemiesDeaths else w.showAlliesDeaths))
         val side = if (panel == Panel.Hunted) "enemy" else "ally"
@@ -86,7 +86,7 @@ object ListForms {
               "Add players who join a hunted guild automatically.",
               OnOff, only.map(w => if (w.detectHunteds == "true") "on" else "off"))
           else common
-        Some(s"${panel.noun.capitalize} display", parts)
+        Some(s"${panel.noun.capitalize} config", parts)
 
       case _ => None
     }

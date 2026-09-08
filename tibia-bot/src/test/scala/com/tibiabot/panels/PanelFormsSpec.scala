@@ -52,7 +52,7 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   test("every list form fits inside Discord's component limit") {
     for {
       panel <- List(Panel.Hunted, Panel.Allies)
-      action <- List(PanelIds.Add, PanelIds.Remove, PanelIds.Info, PanelIds.Display)
+      action <- List(PanelIds.Add, PanelIds.Remove, PanelIds.Info, PanelIds.Config)
       worlds <- List(one, several)
     } {
       val modal = ListForms.modal(panel, action, worlds)
@@ -78,8 +78,8 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
 
   /** Auto-detection is a hunted-only idea, so the allies form is one shorter. */
   test("only the hunted display form carries auto-detect") {
-    sizeOf(ListForms.modal(Panel.Hunted, PanelIds.Display, one).get) shouldBe
-      sizeOf(ListForms.modal(Panel.Allies, PanelIds.Display, one).get) + 1
+    sizeOf(ListForms.modal(Panel.Hunted, PanelIds.Config, one).get) shouldBe
+      sizeOf(ListForms.modal(Panel.Allies, PanelIds.Config, one).get) + 1
   }
 
   test("an unknown action produces no form rather than an empty one") {

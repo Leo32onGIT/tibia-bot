@@ -85,7 +85,7 @@ object PanelModals extends StrictLogging {
           case _ => Nil
         }
         if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")
-        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).queue())
+        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue())
     }
   }
 
@@ -120,9 +120,9 @@ object PanelModals extends StrictLogging {
         val embed =
           if (hunted) service.infoHunted(event, "player", name)
           else service.infoAllies(event, "player", name)
-        event.getHook.sendMessageEmbeds(embed).queue()
+        event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
 
-      case PanelIds.Display =>
+      case PanelIds.Config =>
         applyDisplay(event, panel)
 
       case _ =>
@@ -136,7 +136,7 @@ object PanelModals extends StrictLogging {
     // One post for the batch rather than one per name - see logBulk.
     if (adding) BotApp.huntedAlliedService.logBulk(event.getGuild, panel == Panel.Hunted, adding = true,
       event.getUser.getName, full)
-    event.getHook.sendMessageEmbeds(PanelReplies.bulkEmbed(panel, kind, adding, full)).queue()
+    event.getHook.sendMessageEmbeds(PanelReplies.bulkEmbed(panel, kind, adding, full)).setEphemeral(true).queue()
   }
 
   private def applyDisplay(event: ModalInteractionEvent, panel: Panel): Unit = {
@@ -154,7 +154,7 @@ object PanelModals extends StrictLogging {
             .map(v => service.detectHunted(event, world.name, v))
         ).flatten
         if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")
-        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).queue())
+        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue())
     }
   }
 
@@ -200,5 +200,5 @@ object PanelModals extends StrictLogging {
     }
 
   private def reply(event: ModalInteractionEvent, text: String): Unit =
-    event.getHook.sendMessageEmbeds(Embeds.response(text)).queue()
+    event.getHook.sendMessageEmbeds(Embeds.response(text)).setEphemeral(true).queue()
 }
