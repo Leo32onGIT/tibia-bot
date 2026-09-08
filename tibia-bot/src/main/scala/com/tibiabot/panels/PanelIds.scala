@@ -61,8 +61,11 @@ object PanelIds {
   val ChannelFilter = "chanfilter"
   val OnlineFilter = "onlinefilter"
 
-  /** Every button on `/settings`, in the order they are drawn. */
-  val settingsActions: List[String] = List(Fullbless, Exiva, Layout, Neutral, ChannelFilter, OnlineFilter)
+  /** Every button on `/settings`, in the order they are drawn: the two that set a
+   *  level or a toggle for the whole world, then what the channels and the online
+   *  list show, then neutrals last — the one that is about players nobody here
+   *  tracks, and so the least often wanted. */
+  val settingsActions: List[String] = List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral)
 
   // --- hunted/allies actions ----------------------------------------------
 

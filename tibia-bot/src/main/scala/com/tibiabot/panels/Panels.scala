@@ -31,19 +31,32 @@ object Panels {
 
   // --- /settings -----------------------------------------------------------
 
-  private val settingsLabels: Map[String, (String, String)] = Map(
-    PanelIds.Fullbless     -> ("Fullbless" -> "🛡️"),
-    PanelIds.Exiva         -> ("Exiva lists" -> "🔎"),
-    PanelIds.Layout        -> ("Online layout" -> "🧭"),
-    PanelIds.Neutral       -> ("Neutrals" -> "⚪"),
-    PanelIds.ChannelFilter -> ("Channel filters" -> "📊"),
-    PanelIds.OnlineFilter  -> ("Online filters" -> "📋")
+  /** Two of these come from config rather than being unicode picked here: the
+   *  server's own exiva and blessing icons, so a setting is labelled with the
+   *  same symbol the feature it configures already uses elsewhere.
+   *
+   *  A `def`, deliberately. As a `val` it read Config while this object was being
+   *  initialised, which made merely touching Panels — from any test, for any
+   *  reason — require a fully configured environment, and fail with an
+   *  initialiser error where it did not have one. Read it when a button is
+   *  actually being drawn instead. */
+  private def settingsLabels: Map[String, (String, String)] = Map(
+    PanelIds.Fullbless     -> ("Fullbless" -> Config.inqEmoji),
+    PanelIds.Exiva         -> ("Exiva Lists" -> Config.exivaEmoji),
+    PanelIds.ChannelFilter -> ("Channel Filters" -> "📊"),
+    PanelIds.Layout        -> ("Online Layout" -> "📈"),
+    PanelIds.OnlineFilter  -> ("Online Filters" -> "📋"),
+    PanelIds.Neutral       -> ("Neutrals" -> "⚪")
   )
 
   def settingsButtons: List[ActionRow] =
     rows(PanelIds.settingsActions.map { action =>
       val (label, emoji) = settingsLabels(action)
-      Button.secondary(PanelIds.button(Panel.Settings, action), label).withEmoji(Emoji.fromUnicode(emoji))
+      // fromFormatted rather than fromUnicode: these are a mix now, and the
+      // custom ones arrive as "<:name:id>", which fromUnicode would take
+      // literally. It reads plain unicode just as happily.
+      Button.secondary(PanelIds.button(Panel.Settings, action), label)
+        .withEmoji(Emoji.fromFormatted(emoji))
     })
 
   /** Names every world the panel can configure, so somebody with one world can
