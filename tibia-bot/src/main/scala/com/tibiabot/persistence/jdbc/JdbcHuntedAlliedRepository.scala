@@ -35,6 +35,7 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     ensure("traded_when_added", "VARCHAR(255) NOT NULL DEFAULT 'false'")
     ensure("flagged_reason", "VARCHAR(255) NOT NULL DEFAULT ''")
     ensure("flagged_at", "VARCHAR(255) NOT NULL DEFAULT ''")
+    ensure("tag", "VARCHAR(255) NOT NULL DEFAULT ''")
     statement.close()
   }
 
@@ -49,7 +50,7 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
     ensurePlayerColumns(conn, query)
     val statement = conn.createStatement()
     val result = statement.executeQuery(
-      s"SELECT name,reason,reason_text,added_by,traded_when_added,flagged_reason,flagged_at FROM $query")
+      s"SELECT name,reason,reason_text,added_by,traded_when_added,flagged_reason,flagged_at,tag FROM $query")
 
     val results = new ListBuffer[Players]()
     while (result.next()) {
@@ -60,7 +61,8 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
       val tradedWhenAdded = storedFlag(Option(result.getString("traded_when_added")).getOrElse(""))
       val flaggedReason = Option(result.getString("flagged_reason")).getOrElse("")
       val flaggedAt = Option(result.getString("flagged_at")).getOrElse("")
-      results += Players(name, reason, reasonText, addedBy, tradedWhenAdded, flaggedReason, flaggedAt)
+      val tag = Option(result.getString("tag")).getOrElse("")
+      results += Players(name, reason, reasonText, addedBy, tradedWhenAdded, flaggedReason, flaggedAt, tag)
     }
 
     statement.close()
@@ -93,29 +95,30 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
    *  after the fact.
    */
   def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String,
-                addedBy: String, tradedWhenAdded: Boolean = false): Unit =
+                addedBy: String, tradedWhenAdded: Boolean, tag: String): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "hunted_guilds" else if (option == "player") "hunted_players").toString
-    insertEntry(conn, table, option, name, reason, reasonText, addedBy, tradedWhenAdded)
+    insertEntry(conn, table, option, name, reason, reasonText, addedBy, tradedWhenAdded, tag)
   }
 
   def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String,
-                addedBy: String, tradedWhenAdded: Boolean = false): Unit =
+                addedBy: String, tradedWhenAdded: Boolean, tag: String): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
     val table = (if (option == "guild") "allied_guilds" else if (option == "player") "allied_players").toString
-    insertEntry(conn, table, option, name, reason, reasonText, addedBy, tradedWhenAdded)
+    insertEntry(conn, table, option, name, reason, reasonText, addedBy, tradedWhenAdded, tag)
   }
 
   private def insertEntry(conn: java.sql.Connection, table: String, option: String, name: String,
                           reason: String, reasonText: String, addedBy: String,
-                          tradedWhenAdded: Boolean): Unit = {
+                          tradedWhenAdded: Boolean, tag: String): Unit = {
     val statement =
       if (option == "player") {
         ensurePlayerColumns(conn, table)
         val prepared = conn.prepareStatement(
-          s"INSERT INTO $table(name, reason, reason_text, added_by, traded_when_added) " +
-            "VALUES (?,?,?,?,?) ON CONFLICT (name) DO NOTHING;")
+          s"INSERT INTO $table(name, reason, reason_text, added_by, traded_when_added, tag) " +
+            "VALUES (?,?,?,?,?,?) ON CONFLICT (name) DO NOTHING;")
         prepared.setString(5, tradedWhenAdded.toString)
+        prepared.setString(6, tag)
         prepared
       } else {
         conn.prepareStatement(
@@ -226,4 +229,19 @@ final class JdbcHuntedAlliedRepository(connectionProvider: ConnectionProvider) e
       conn.close()
     }
   }
+
+  /** Put a tag on a player already on the list, or take one off with an empty
+   *  value. Only ever called for `hunted_players` — the column exists on the
+   *  allied table so one read path serves both, but nothing offers to set it. */
+  def setTag(guildId: String, table: String, name: String, tag: String): Boolean =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      ensurePlayerColumns(conn, table)
+      val statement = conn.prepareStatement(
+        s"UPDATE $table SET tag = ? WHERE LOWER(name) = LOWER(?);")
+      statement.setString(1, tag)
+      statement.setString(2, name)
+      val changed = statement.executeUpdate()
+      statement.close()
+      changed > 0
+    }
 }

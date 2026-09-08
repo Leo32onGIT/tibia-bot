@@ -3,6 +3,7 @@ package com.tibiabot.presentation
 
 import com.tibiabot.domain.BulkListOutcome
 import com.tibiabot.panels.PanelIds.Panel
+import com.tibiabot.panels.ListTags
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
@@ -21,11 +22,16 @@ import net.dv8tion.jda.api.entities.MessageEmbed
  */
 object PanelReplies {
 
+  /** The tick comes from config like every other yes in the bot, rather than
+   *  being a literal here — this object stays Config-free so it can be tested,
+   *  the same reason `noEmoji` is passed in. The default is only for tests.
+   */
   /** How many names are shown per group before the rest become a count. */
   private val ShownPerGroup = 15
 
   def bulkEmbed(panel: Panel, kind: String, adding: Boolean, outcome: BulkListOutcome,
-                noEmoji: String = ""): MessageEmbed = {
+                noEmoji: String = "", tagKey: String = "",
+                yesEmoji: String = ":white_check_mark:"): MessageEmbed = {
     val noun = if (kind == "guild") "guild" else "player"
     val listName = panel.noun
     val builder = new EmbedBuilder().setColor(Embeds.BrandColor)
@@ -35,8 +41,14 @@ object PanelReplies {
       else headlineFor(outcome.added.size, noun, s"removed from the $listName")
     builder.setDescription(headline)
 
-    group(builder, ":white_check_mark: Added", outcome.added, adding && outcome.added.nonEmpty)
-    group(builder, ":white_check_mark: Removed", outcome.added, !adding && outcome.added.nonEmpty)
+    // Named because the tag reaches players already on the list as well as the
+    // ones just added — re-pasting with a tag chosen is how an entry gets
+    // retagged, and saying nothing would leave that looking like it had not.
+    ListTags.find(tagKey).foreach(tag =>
+      builder.appendDescription(s"\nTagged ${tag.emoji} **${tag.label}**."))
+
+    group(builder, s"$yesEmoji Added", outcome.added, adding && outcome.added.nonEmpty)
+    group(builder, s"$yesEmoji Removed", outcome.added, !adding && outcome.added.nonEmpty)
     group(builder, ":arrow_right_hook: Already on the list", outcome.already, outcome.already.nonEmpty)
     val missingLabel = if (adding) ":grey_question: No such character" else ":grey_question: Not on the list"
     group(builder, missingLabel, outcome.notFound, outcome.notFound.nonEmpty)

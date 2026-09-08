@@ -11,13 +11,17 @@ import java.time.ZonedDateTime
  *  from "this player was already traded when they were added, which whoever added
  *  them evidently knew" — and the second must never be proposed for removal.
  *
+ *
+ *  `tag` is a hunted-list label — see panels.ListTags. The column exists on both
+ *  tables so one read path serves both; only the hunted panel offers it, because
+ *  the tags describe an opponent.
  *  `flaggedReason` is empty until the entry has been flagged, then names why
  *  ("traded" or "world"). It is stored rather than derived so the admin-channel
  *  notice is said once: detecting is unconditional, announcing is not.
  */
 case class Players(name: String, reason: String, reasonText: String, addedBy: String,
                    tradedWhenAdded: Boolean = false, flaggedReason: String = "",
-                   flaggedAt: String = "")
+                   flaggedAt: String = "", tag: String = "")
 case class PlayerCache(name: String, formerNames: List[String], guild: String, updatedTime: ZonedDateTime)
 
 /** A world transfer already posted to a discord's activity channel. `formerWorlds`

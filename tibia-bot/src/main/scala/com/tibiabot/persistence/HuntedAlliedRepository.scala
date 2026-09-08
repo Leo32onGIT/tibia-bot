@@ -12,9 +12,9 @@ trait HuntedAlliedRepository {
    *  and cannot be traded. Snapshotted at add time because the flag it comes from
    *  decays; see domain.Players. */
   def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String,
-                addedBy: String, tradedWhenAdded: Boolean = false): Unit
+                addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit
   def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String,
-                addedBy: String, tradedWhenAdded: Boolean = false): Unit
+                addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit
 
   /** Mark a player entry as flagged for removal, naming why. Leaves an entry that
    *  already carries a reason alone, which is what keeps the notice one-shot. */
@@ -22,6 +22,10 @@ trait HuntedAlliedRepository {
 
   /** Clear a flag, leaving the entry on the list — see the implementation. */
   def unflagPlayer(guildId: String, table: String, name: String): Unit
+
+  /** Put a tag on a listed player, or take one off with an empty value.
+   *  False when there is no such entry. */
+  def setTag(guildId: String, table: String, name: String, tag: String): Boolean
 
   /** Empty one list table, returning how many rows went. */
   def clearAll(guildId: String, table: String): Int

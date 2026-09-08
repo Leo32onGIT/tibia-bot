@@ -80,6 +80,22 @@ object PanelButtons extends StrictLogging {
           else BotApp.huntedAlliedService.clearAllies(event)
         event.getHook.editOriginalEmbeds(embed).setComponents().queue()
 
+      // Opens a form for one named player, so it must be the first response —
+      // the name comes off the button's own id.
+      case _ if action == PanelIds.TagOne =>
+        val current = PanelIds.subjectOf(event.getComponentId)
+          .flatMap(name => BotApp.huntedPlayersData.getOrElse(event.getGuild.getId, List())
+            .find(_.name.equalsIgnoreCase(name)))
+        (PanelIds.subjectOf(event.getComponentId), current) match {
+          case (Some(name), entry) =>
+            ListForms.tagOneModal(panel, name, entry.map(_.tag).getOrElse("")) match {
+              case Some(modal) => event.replyModal(modal).queue()
+              case None => reply(event, s"${Config.noEmoji} That isn't available here.")
+            }
+          case _ =>
+            reply(event, s"${Config.noEmoji} That button is out of date - look them up again.")
+        }
+
       // Everything else opens a form. Nothing has been acknowledged, so this must
       // be the first response - see the class doc.
       case _ =>

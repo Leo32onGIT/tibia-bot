@@ -3,6 +3,7 @@ package com.tibiabot.panels
 import com.tibiabot.domain.Worlds
 import net.dv8tion.jda.api.components.label.Label
 import net.dv8tion.jda.api.components.selections.{SelectOption, StringSelectMenu}
+import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
 import net.dv8tion.jda.api.modals.Modal
 
@@ -39,6 +40,7 @@ object PanelForms {
   val KindField = "kind"
   val ReasonField = "reason"
   val NameField = "name"
+  val TagField = "tag"
 
   /** Discord rejects the whole modal if a label passes 45 characters or its
    *  description 100 — as RespawnModals found, it fails rather than trimming. */
@@ -85,6 +87,27 @@ object PanelForms {
       .setMaxLength(4)
     current.foreach(value => input.setValue(value.toString))
     label(text, description, input.build())
+  }
+
+  /** The tag picker: every tag, plus the choice that takes one off.
+   *
+   *  A select rather than a text box because Discord has no emoji picker — see
+   *  panels.ListTags. `current` pre-selects what the entry already carries, so
+   *  opening the form shows the tag as well as setting it.
+   */
+  def tagPicker(text: String, description: String, current: Option[String],
+                required: Boolean): Label = {
+    val clearing = SelectOption.of("No tag", ListTags.NoneKey)
+      .withDescription("Remove any tag this player has")
+    val options = ListTags.all.map(tag =>
+      SelectOption.of(tag.label, tag.key).withEmoji(Emoji.fromUnicode(tag.emoji))
+        .withDefault(current.contains(tag.key)))
+    val menu = StringSelectMenu.create(TagField)
+      .setPlaceholder(if (required) "Pick a tag" else "Leave the tag as it is")
+      .addOptions((options :+ clearing).asJava)
+      .setRequired(required)
+      .build()
+    label(text, description, menu)
   }
 
   val ShowHide: List[(String, String)] = List("Show" -> "show", "Hide" -> "hide")

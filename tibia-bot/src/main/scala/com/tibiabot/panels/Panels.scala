@@ -64,25 +64,46 @@ object Panels {
 
   // --- /hunted and /allies -------------------------------------------------
 
+  /** Label and emoji per button. An empty label means the button is drawn as the
+   *  emoji alone — Discord has a factory for exactly that, and the two whose
+   *  meaning the icon already carries do not need the word beside it. */
   private def listLabels(panel: Panel): Map[String, (String, String)] = Map(
     PanelIds.Add     -> ("Add" -> "➕"),
     PanelIds.Remove  -> ("Remove" -> "➖"),
-    PanelIds.Info    -> ("Look up" -> "🔍"),
     PanelIds.Config  -> ("Config" -> "⚙️"),
-    PanelIds.Clear   -> ("Clear all" -> "🗑️")
+    PanelIds.Info    -> ("" -> "🔍"),
+    PanelIds.Clear   -> ("Clear All" -> "🗑️")
   )
 
   def listButtons(panel: Panel): List[ActionRow] = {
     val labels = listLabels(panel)
     rows(PanelIds.listActions(panel).map { action =>
       val (label, emoji) = labels(action)
-      val button =
-        if (action == PanelIds.Clear) Button.danger(PanelIds.button(panel, action), label)
-        else Button.secondary(PanelIds.button(panel, action), label)
-      button.withEmoji(Emoji.fromUnicode(emoji))
+      val id = PanelIds.button(panel, action)
+      val icon = Emoji.fromUnicode(emoji)
+      if (label.isEmpty) {
+        if (action == PanelIds.Clear) Button.danger(id, icon) else Button.secondary(id, icon)
+      } else {
+        val button = if (action == PanelIds.Clear) Button.danger(id, label) else Button.secondary(id, label)
+        button.withEmoji(icon)
+      }
     })
   }
 
+  /** The Tag button under a Look up reply.
+   *
+   *  Tagging lives here rather than on the panel: the panel's five buttons fit
+   *  one row and a sixth pushed Clear All onto a row of its own. It reads better
+   *  here anyway — you have just looked somebody up, and the button acts on the
+   *  player in front of you rather than asking for a name again.
+   */
+  def lookupButtons(panel: Panel, name: String, currentTag: String): ActionRow = {
+    val tag = ListTags.find(currentTag)
+    val label = tag.map(t => s"Tag: ${t.label}").getOrElse("Tag")
+    val icon = tag.map(_.emoji).getOrElse("🏷️")
+    ActionRow.of(Button.secondary(PanelIds.buttonFor(panel, PanelIds.TagOne, name), label)
+      .withEmoji(Emoji.fromUnicode(icon)))
+  }
   /** The fallback when a list somehow draws nothing at all. Not reachable from
    *  the list builders, which always draw at least a "nothing on it" embed for
    *  each half — this exists so a panel can never answer with silence. */

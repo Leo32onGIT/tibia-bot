@@ -46,7 +46,10 @@ object ListForms {
 
     val form = action match {
       case PanelIds.Add =>
-        Some(s"Add to the ${panel.noun}", List(
+        // The tag rides along with the paste, like the reason does: one tag for
+        // the batch. Hunted only, and ignored outright for a guild — the tag
+        // lives on the player entry, and a guild is not a player.
+        val common = List(
           kindPicker(panel, "Add"),
           namesBox("Add", s"Up to $MaxNames at a time."),
           label("Reason", "Optional, and applies to every name here.",
@@ -54,7 +57,13 @@ object ListForms {
               .setPlaceholder("Why are these being added?")
               .setRequired(false)
               .setMaxLength(200)
-              .build())))
+              .build()))
+        val parts =
+          if (panel == Panel.Hunted)
+            common :+ tagPicker("Tag", "Optional, and applies to every player here.",
+              current = None, required = false)
+          else common
+        Some(s"Add to the ${panel.noun}", parts)
 
       case PanelIds.Remove =>
         Some(s"Remove from the ${panel.noun}", List(
@@ -93,4 +102,16 @@ object ListForms {
 
     form.map { case (title, parts) => build(PanelIds.form(panel, action), title, parts) }
   }
+
+  /** The tag form for one named player, opened from a Look up reply.
+   *
+   *  No name box: the button that opened it carries the name, so the form asks
+   *  the only thing still unknown. `current` pre-selects what they are tagged as
+   *  now, so opening it reads as well as sets.
+   */
+  def tagOneModal(panel: Panel, name: String, current: String): Option[Modal] =
+    if (panel != Panel.Hunted) None
+    else Some(build(PanelIds.formFor(panel, PanelIds.TagOne, name), s"Tag $name",
+      List(tagPicker("Tag", s"What $name is worth knowing for.",
+        current = ListTags.find(current).map(_.key), required = true))))
 }

@@ -1349,6 +1349,11 @@ class TibiaBot(
     val huntedGuildNames = huntedGuildsData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
     val alliedPlayerNames = alliedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
     val huntedPlayerNames = huntedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
+    // Name -> tag for this guild's hunted entries, so a row can show the tag as
+    // well as the fact of being hunted. Built once per list build, from data
+    // already in memory - see panels.ListTags.
+    val huntedPlayerTags = huntedPlayersData.getOrElse(guildId, Nil).iterator
+      .filter(_.tag.nonEmpty).map(player => player.name.toLowerCase -> player.tag).toMap
 
     // The online-list floors, per category. 0 is off, which is where every world
     // starts and what every world had before these existed.
@@ -1401,7 +1406,7 @@ class TibiaBot(
         (huntedGuildCheck || huntedPlayerCheck) && player.level.toInt >= enemiesMin
       val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
-      vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
+      vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}${com.tibiabot.panels.ListTags.mark(huntedPlayerTags.getOrElse(playerNameLower, ""))}"
       )
     }
 

@@ -84,4 +84,41 @@ class PanelIdsSpec extends AnyFunSuite with Matchers {
         List(PanelIds.button(p, a), PanelIds.form(p, a))))
     ids.foreach(id => id.length should be <= 100)
   }
+
+  // --- tagging one player from a Look up reply ---
+
+  /** The name rides in the component id, which is what lets the form ask only
+   *  for the tag. Tibia names contain spaces but never a colon. */
+  test("a subject round-trips through the id, spaces and all") {
+    val id = PanelIds.buttonFor(Panel.Hunted, PanelIds.TagOne, "Violent Beams")
+    PanelIds.parse(id) shouldBe Some(Panel.Hunted -> PanelIds.TagOne)
+    PanelIds.subjectOf(id) shouldBe Some("Violent Beams")
+  }
+
+  test("a form id carries the subject the same way") {
+    val id = PanelIds.formFor(Panel.Hunted, PanelIds.TagOne, "Bubble")
+    PanelIds.parse(id) shouldBe Some(Panel.Hunted -> PanelIds.TagOne)
+    PanelIds.subjectOf(id) shouldBe Some("Bubble")
+  }
+
+  /** Every component without one still reads as having no subject, rather than
+   *  throwing or inventing an empty name. */
+  test("components with no subject have none") {
+    PanelIds.subjectOf(PanelIds.button(Panel.Hunted, PanelIds.Add)) shouldBe None
+    PanelIds.subjectOf(PanelIds.button(Panel.Settings, PanelIds.Fullbless)) shouldBe None
+    PanelIds.subjectOf("nonsense") shouldBe None
+    PanelIds.subjectOf("panel:hunted:tagone:") shouldBe None
+  }
+
+  test("carrying a subject does not change how the press is acknowledged") {
+    PanelIds.ackFor(PanelIds.buttonFor(Panel.Hunted, PanelIds.TagOne, "Bubble")) shouldBe Ack.OpensModal
+  }
+
+  /** Discord rejects a component id past a hundred characters, and a subject is
+   *  the only part that varies in length. */
+  test("even the longest name stays inside the id limit") {
+    val longest = "A" * 29
+    PanelIds.buttonFor(Panel.Hunted, PanelIds.TagOne, longest).length should be <= 100
+    PanelIds.formFor(Panel.Hunted, PanelIds.TagOne, longest).length should be <= 100
+  }
 }

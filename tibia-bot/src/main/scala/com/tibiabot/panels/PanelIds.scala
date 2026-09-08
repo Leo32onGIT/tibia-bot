@@ -70,6 +70,10 @@ object PanelIds {
   val Remove = "remove"
   val Info = "info"
   val Config = "config"
+  /** Tag the one player a Look up reply is about. Hunted only — see
+   *  panels.ListTags. Carries the name, so its form has nothing to ask for
+   *  beyond the tag itself. */
+  val TagOne = "tagone"
   val Clear = "clear"
   /** The second press, after the first one asked whether they meant it. */
   val ClearConfirm = "clearconfirm"
@@ -78,32 +82,63 @@ object PanelIds {
    *  must do neither — it only puts the panel back. */
   val Cancel = "cancel"
 
-  def listActions(panel: Panel): List[String] =
+  def listActions(panel: Panel): List[String] = {
     // No "view list" button: the panel's own reply is the list. It costs
     // nothing to draw — see HuntedAlliedService.playersEmbeds — so putting it
     // behind a press only hid what somebody ran the command to see.
-    List(Add, Remove, Info, Config, Clear)
+    //
+    // Five, so they sit on one row: a sixth pushed Clear All onto a second row
+    // of its own. Tagging lives in the Add form instead, which can retag an
+    // entry already on the list — see HuntedAlliedService.addMany.
+    List(Add, Remove, Config, Info, Clear)
+  }
 
   // --- building ------------------------------------------------------------
 
   def button(panel: Panel, action: String): String = s"$ButtonPrefix${panel.token}:$action"
   def form(panel: Panel, action: String): String = s"$FormPrefix${panel.token}:$action"
 
+  /** The same, carrying a subject — a player's name, for a component that acts on
+   *  one particular player rather than on the list.
+   *
+   *  Third segment onward, so `parse` still reads the panel and action off the
+   *  first two and every existing component keeps working. Tibia names contain
+   *  spaces but never a colon, and the longest is far inside Discord's
+   *  hundred-character id limit.
+   */
+  def buttonFor(panel: Panel, action: String, subject: String): String =
+    s"${button(panel, action)}:$subject"
+  def formFor(panel: Panel, action: String, subject: String): String =
+    s"${form(panel, action)}:$subject"
+
   // --- routing -------------------------------------------------------------
 
   def handlesButton(componentId: String): Boolean = componentId.startsWith(ButtonPrefix)
   def handlesForm(modalId: String): Boolean = modalId.startsWith(FormPrefix)
 
+  private def body(componentId: String): String =
+    if (componentId.startsWith(FormPrefix)) componentId.stripPrefix(FormPrefix)
+    else componentId.stripPrefix(ButtonPrefix)
+
   /** None for anything malformed or from an older deploy, so a stale component is
-   *  answered rather than throwing. */
+   *  answered rather than throwing. Extra segments are the subject and are
+   *  ignored here — see [[subjectOf]]. */
   def parse(componentId: String): Option[(Panel, String)] =
     Try {
-      val body =
-        if (componentId.startsWith(FormPrefix)) componentId.stripPrefix(FormPrefix)
-        else componentId.stripPrefix(ButtonPrefix)
-      body.split(':') match {
-        case Array(panelToken, action) => Panel.fromToken(panelToken).map(_ -> action)
-        case _                         => None
+      body(componentId).split(':') match {
+        case Array(panelToken, action, _*) => Panel.fromToken(panelToken).map(_ -> action)
+        case _                             => None
+      }
+    }.toOption.flatten
+
+  /** What the component acts on, for the ones that name a player. Everything
+   *  after the action, rejoined, so a subject is returned whole even if one ever
+   *  contains the separator. */
+  def subjectOf(componentId: String): Option[String] =
+    Try {
+      body(componentId).split(':').toList match {
+        case _ :: _ :: rest if rest.nonEmpty => Some(rest.mkString(":")).filter(_.nonEmpty)
+        case _                               => None
       }
     }.toOption.flatten
 

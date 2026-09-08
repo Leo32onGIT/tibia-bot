@@ -2,7 +2,7 @@ package com.tibiabot.interactions
 
 import com.tibiabot.domain.{BulkListOutcome, Worlds}
 import com.tibiabot.panels.PanelIds.Panel
-import com.tibiabot.panels.{ListForms, NameList, PanelForms, PanelIds}
+import com.tibiabot.panels.{ListForms, ListTags, NameList, PanelForms, PanelIds, Panels}
 import com.tibiabot.presentation.{Embeds, PanelReplies}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
@@ -104,8 +104,10 @@ object PanelModals extends StrictLogging {
         if (names.isEmpty) reply(event, s"${Config.noEmoji} No names in that - one per line.")
         else if (action == PanelIds.Add) {
           val reason = text(event, PanelForms.ReasonField)
-          service.addMany(guild, hunted, kind, names, reason, event.getUser.getId)
-            .map(outcome => finishBulk(event, panel, kind, adding = true, outcome, overflow))
+          // Hunted only, and only for players - the tag lives on the player entry.
+          val tag = if (hunted && kind == "player") choice(event, PanelForms.TagField).getOrElse("") else ""
+          service.addMany(guild, hunted, kind, names, reason, event.getUser.getId, tag)
+            .map(outcome => finishBulk(event, panel, kind, adding = true, outcome, overflow, tag))
             .recover { case NonFatal(ex) =>
               logger.error(s"Bulk add failed for guild ${guild.getId}", ex)
               reply(event, s"${Config.noEmoji} Something went wrong partway through - check the list and try again.")
@@ -120,7 +122,38 @@ object PanelModals extends StrictLogging {
         val embed =
           if (hunted) service.infoHunted(event, "player", name)
           else service.infoAllies(event, "player", name)
-        event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
+        // Tagging hangs off this reply rather than the panel — see
+        // Panels.lookupButtons. Only for a hunted player actually on the list:
+        // there is nothing to tag otherwise, and the button would only refuse.
+        val listed =
+          if (hunted) BotApp.huntedPlayersData.getOrElse(guild.getId, List())
+            .find(_.name.equalsIgnoreCase(name))
+          else None
+        listed match {
+          case Some(entry) =>
+            event.getHook.sendMessageEmbeds(embed)
+              .setComponents(Panels.lookupButtons(panel, entry.name, entry.tag))
+              .setEphemeral(true).queue()
+          case None =>
+            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
+        }
+
+      // Tag the one player a Look up reply was about. The name rides in the id,
+      // so the form has only the tag to ask for.
+      case PanelIds.TagOne =>
+        PanelIds.subjectOf(event.getModalId) match {
+          case None => reply(event, s"${Config.noEmoji} That button is out of date - look them up again.")
+          case Some(name) =>
+            val tag = choice(event, PanelForms.TagField).getOrElse(ListTags.NoneKey)
+            val outcome = service.tagMany(guild, List(name), tag)
+            if (outcome.added.isEmpty)
+              reply(event, s"${Config.noEmoji} **$name** isn't on the ${panel.noun} any more.")
+            else {
+              val shown = ListTags.find(tag)
+                .map(t => s"${t.emoji} **${t.label}**").getOrElse("**no tag**")
+              reply(event, s"${Config.yesEmoji} **$name** is now $shown.")
+            }
+        }
 
       case PanelIds.Config =>
         applyDisplay(event, panel)
@@ -131,11 +164,12 @@ object PanelModals extends StrictLogging {
   }
 
   private def finishBulk(event: ModalInteractionEvent, panel: Panel, kind: String,
-                         adding: Boolean, outcome: BulkListOutcome, overflow: List[String]): Unit = {
+                         adding: Boolean, outcome: BulkListOutcome, overflow: List[String],
+                         tagKey: String = ""): Unit = {
     val full = outcome.copy(skipped = overflow)
     // One post for the batch rather than one per name - see logBulk.
     if (adding) BotApp.huntedAlliedService.logBulk(event.getGuild, panel == Panel.Hunted, adding = true,
-      event.getUser.getName, full)
+      event.getUser.getName, full, kind)
     event.getHook.sendMessageEmbeds(PanelReplies.bulkEmbed(panel, kind, adding, full)).setEphemeral(true).queue()
   }
 

@@ -125,8 +125,8 @@ final class HuntedAlliedService(
     com.tibiabot.presentation.RecentLogin.stamp(dateString, java.time.Instant.now())
 
   def addHuntedToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String,
-                          addedBy: String, tradedWhenAdded: Boolean = false): Unit =
-    huntedAlliedRepository.addHunted(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded)
+                          addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit =
+    huntedAlliedRepository.addHunted(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded, tag)
 
   def addActivityToDatabase(guild: Guild, name: String, formerNames: List[String], guildName: String, updatedTime: ZonedDateTime): Unit =
     activityRepository.add(guild.getId, name, formerNames, guildName, updatedTime)
@@ -138,8 +138,8 @@ final class HuntedAlliedService(
     huntedAlliedRepository.rename(guild.getId, option, oldName, newName)
 
   private def addAllyToDatabase(guild: Guild, option: String, name: String, reason: String, reasonText: String,
-                                addedBy: String, tradedWhenAdded: Boolean = false): Unit =
-    huntedAlliedRepository.addAllied(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded)
+                                addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit =
+    huntedAlliedRepository.addAllied(guild.getId, option, name, reason, reasonText, addedBy, tradedWhenAdded, tag)
 
   def removeHuntedFromDatabase(guild: Guild, option: String, name: String): Unit =
     huntedAlliedRepository.removeHunted(guild.getId, option, name)
@@ -412,13 +412,13 @@ final class HuntedAlliedService(
             val level = scala.util.Try(sheet.level.toInt).getOrElse(0)
             if (vocationBuffers.contains(voc))
               vocationBuffers(voc) += ((level, sheet.world,
-                s"$emoji **${sheet.level}** - **[${sheet.name}](${charUrl(sheet.name)})** $icon $login${flagMark(player)}"))
+                s"$emoji **${sheet.level}** - **[${sheet.name}](${charUrl(sheet.name)})** $icon $login${com.tibiabot.panels.ListTags.mark(player.tag)}${flagMark(player)}"))
           case _ =>
             // On the list, but nothing cached about them yet - the next poll or
             // the next time somebody adds them fills this in.
             val shown = com.tibiabot.presentation.Names.capitalizeWords(player.name)
             vocationBuffers("none") += ((0, "Not checked yet",
-              s":grey_question: **?** - **[$shown](${charUrl(player.name)})**${flagMark(player)}"))
+              s":grey_question: **?** - **[$shown](${charUrl(player.name)})**${com.tibiabot.panels.ListTags.mark(player.tag)}${flagMark(player)}"))
         }
       }
 
@@ -721,7 +721,7 @@ final class HuntedAlliedService(
         else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
       AdminLog.automatic(adminChannel,
         s":robot: $side removed:",
-        s"**$shown** was flagged for removal and the finding still stands, " +
+        s"**[$shown](${charUrl(entry.name)})** was flagged for removal and the finding still stands, " +
           s"so they have been removed from the $listName list.",
         thumbnail)
       true
@@ -750,7 +750,7 @@ final class HuntedAlliedService(
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
       AdminLog.automatic(adminChannel,
         s":robot: $side no longer flagged:",
-        s"**$shown** was flagged for removal, but that no longer applies, " +
+        s"**[$shown](${charUrl(entry.name)})** was flagged for removal, but that no longer applies, " +
           s"so they stay on the $listName list.",
         "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Hammer.gif")
     } catch {
@@ -779,7 +779,7 @@ final class HuntedAlliedService(
 
   /** Add a pasted list of players or guilds. `hunted` picks which list. */
   def addMany(guild: Guild, hunted: Boolean, kind: String, names: List[String],
-              reason: String, commandUser: String): Future[BulkListOutcome] = {
+              reason: String, commandUser: String, tag: String = ""): Future[BulkListOutcome] = {
     if (!checkConfigDatabase(guild)) return Future.successful(BulkListOutcome.empty)
     val guildId = guild.getId
     val reasonFlag = if (reason.isEmpty) "false" else "true"
@@ -790,13 +790,22 @@ final class HuntedAlliedService(
     val existing: Set[String] =
       if (kind == "guild") currentGuildNames(guildId, hunted) else currentPlayerNames(guildId, hunted)
     val (duplicates, fresh) = names.partition(name => existing.contains(name.toLowerCase))
+    // A name already on the list still takes the tag. Re-pasting with a tag
+    // chosen is the only way to retag an entry — the insert below cannot, since
+    // it does nothing on conflict — so without this a tag could be set once when
+    // a player was added and never changed or cleared again.
+    //
+    // Only when a tag was actually picked: an empty one means "leave the tag
+    // alone", not "clear what they have", or every plain re-add would strip the
+    // tags off everyone it touched.
+    if (hunted && kind == "player" && tag.nonEmpty) tagMany(guild, duplicates, tag)
     val startingPoint = BulkListOutcome(already = duplicates)
 
     if (fresh.isEmpty) Future.successful(startingPoint)
     else Source(fresh)
       .mapAsyncUnordered(BulkParallelism)(name =>
         if (kind == "guild") addOneGuild(guild, hunted, name, reasonFlag, reasonText, commandUser)
-        else addOnePlayer(guild, hunted, name, reasonFlag, reasonText, commandUser))
+        else addOnePlayer(guild, hunted, name, reasonFlag, reasonText, commandUser, tag))
       .runWith(Sink.seq)
       .map(_.foldLeft(startingPoint)(_ merge _))
   }
@@ -810,20 +819,20 @@ final class HuntedAlliedService(
       .getOrElse(guildId, List()).map(_.name.toLowerCase).toSet
 
   private def addOnePlayer(guild: Guild, hunted: Boolean, name: String, reasonFlag: String,
-                           reasonText: String, commandUser: String): Future[BulkListOutcome] = {
+                           reasonText: String, commandUser: String, tag: String = ""): Future[BulkListOutcome] = {
     val lower = name.toLowerCase
     fetchPlayerSummary(lower).map {
       case PlayerLookup.Found(realName, _, _, _, traded, _) =>
         // The traded flag is snapshotted here and never recomputed. A player who
         // was already traded when somebody listed them is deliberate, and must
         // never be proposed for removal on that basis later.
-        val entry = Players(lower, reasonFlag, reasonText, commandUser, tradedWhenAdded = traded)
+        val entry = Players(lower, reasonFlag, reasonText, commandUser, tradedWhenAdded = traded, tag = tag)
         if (hunted) {
           streamState.modifyHuntedPlayersData(m => m + (guild.getId -> (entry :: m.getOrElse(guild.getId, List()))))
-          addHuntedToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded)
+          addHuntedToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded, tag)
         } else {
           streamState.modifyAlliedPlayersData(m => m + (guild.getId -> (entry :: m.getOrElse(guild.getId, List()))))
-          addAllyToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded)
+          addAllyToDatabase(guild, "player", lower, reasonFlag, reasonText, commandUser, traded, "")
         }
         BulkListOutcome(added = List(realName))
       case PlayerLookup.NotFound    => BulkListOutcome(notFound = List(name))
@@ -864,6 +873,30 @@ final class HuntedAlliedService(
       }
     }
 
+  /** Put a tag on players already on the hunted list, or take one off.
+   *
+   *  Asks Tibia's API nothing: what can be tagged is decided by what is on the
+   *  list, exactly as removing is. A name that is not on it comes back under
+   *  `notFound`, which for the caller means the same thing it always does —
+   *  nothing happened to it.
+   */
+  def tagMany(guild: Guild, names: List[String], tag: String): BulkListOutcome = {
+    if (!checkConfigDatabase(guild)) return BulkListOutcome.empty
+    val guildId = guild.getId
+    val stored = if (tag == com.tibiabot.panels.ListTags.NoneKey) "" else tag
+    val present = currentPlayerNames(guildId, hunted = true)
+    val (found, missing) = names.partition(name => present.contains(name.toLowerCase))
+
+    found.foreach { name =>
+      val lower = name.toLowerCase
+      huntedAlliedRepository.setTag(guildId, "hunted_players", lower, stored)
+      streamState.modifyHuntedPlayersData(m => m + (guildId ->
+        m.getOrElse(guildId, List()).map(player =>
+          if (player.name.equalsIgnoreCase(lower)) player.copy(tag = stored) else player)))
+    }
+    BulkListOutcome(added = found, notFound = missing)
+  }
+
   /** Remove a pasted list. No API call anywhere: what comes off the list is
    *  decided by what is on it, so a name that never existed and a name that was
    *  never added are the same answer - it was not on the list. */
@@ -900,8 +933,13 @@ final class HuntedAlliedService(
     BulkListOutcome(added = found, notFound = missing)
   }
 
-  /** One line in the admin channel for a whole batch. */
-  def logBulk(guild: Guild, hunted: Boolean, adding: Boolean, actor: String, outcome: BulkListOutcome): Unit =
+  /** One line in the admin channel for a whole batch.
+   *
+   *  `kind` decides which page a name links to — a guild add lists guild names,
+   *  and linking those at a character URL would give a dead link for every one.
+   */
+  def logBulk(guild: Guild, hunted: Boolean, adding: Boolean, actor: String,
+              outcome: BulkListOutcome, kind: String = "player"): Unit =
     if (outcome.changedAnything) {
       val discordInfo = discordRetrieveConfig(guild)
       val adminChannel = guild.getTextChannelById(discordInfo("admin_channel"))
@@ -909,7 +947,8 @@ final class HuntedAlliedService(
       val verb = if (adding) "added" else "removed"
       val preposition = if (adding) "to" else "from"
       val names = outcome.added
-      val shown = names.take(20).map(n => s"**$n**").mkString(", ")
+      val link = (name: String) => if (kind == "guild") guildUrl(name) else charUrl(name)
+      val shown = names.take(20).map(name => s"**[$name](${link(name)})**").mkString(", ")
       val more = if (names.sizeIs > 20) s" and ${names.size - 20} more" else ""
       val thumbnail =
         if (hunted) "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"

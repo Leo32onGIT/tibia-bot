@@ -86,4 +86,22 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
     SettingsForms.modal("nonsense", one) shouldBe empty
     ListForms.modal(Panel.Hunted, "nonsense", one) shouldBe empty
   }
+
+  /** The tag picker is hunted-only, so the two panels' Add forms differ by one
+   *  component. */
+  test("only the hunted Add form carries the tag picker") {
+    sizeOf(ListForms.modal(Panel.Hunted, PanelIds.Add, one).get) shouldBe
+      sizeOf(ListForms.modal(Panel.Allies, PanelIds.Add, one).get) + 1
+  }
+
+  /** Both panels stay inside Discord's five-button row limit as drawn, and every
+   *  form inside the component cap — the Add form is the one that grew. */
+  test("every tag-bearing form still fits the component limit") {
+    for {
+      worlds <- List(one, several)
+      action <- List(PanelIds.Add)
+    } withClue(s"/hunted $action with ${worlds.size} world(s): ") {
+      sizeOf(ListForms.modal(Panel.Hunted, action, worlds).get) should be <= Modal.MAX_COMPONENTS
+    }
+  }
 }
