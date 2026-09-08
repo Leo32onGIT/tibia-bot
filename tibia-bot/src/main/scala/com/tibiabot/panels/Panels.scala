@@ -12,8 +12,9 @@ import net.dv8tion.jda.api.entities.emoji.Emoji
 
 import scala.jdk.CollectionConverters._
 
-/** What `/settings`, `/hunted` and `/allies` actually answer with: an ephemeral
- *  message naming what the panel covers, and a button per thing you can do to it.
+/** What `/settings`, `/hunted`, `/allies` and `/admin` actually answer with: an
+ *  ephemeral message naming what the panel covers, and a button per thing you can
+ *  do to it.
  *
  *  Ephemeral on purpose. These are one person's administrative errands, the reply
  *  is only ever useful to whoever ran the command, and Discord only lets the
@@ -25,9 +26,10 @@ object Panels {
   private def row(buttons: List[Button]): ActionRow = ActionRow.of(buttons.asJava)
 
   /** Discord allows five buttons to a row, so anything longer is split rather
-   *  than silently rejected. */
-  private def rows(buttons: List[Button]): List[ActionRow] =
-    buttons.grouped(5).map(row).toList
+   *  than silently rejected. A panel may ask for fewer per row where the split
+   *  itself carries meaning — see [[adminButtons]]. */
+  private def rows(buttons: List[Button], perRow: Int = 5): List[ActionRow] =
+    buttons.grouped(perRow).map(row).toList
 
   // --- /settings -----------------------------------------------------------
 
@@ -144,4 +146,44 @@ object Panels {
       .build()
 
   private def plural(n: Int, one: String, many: String): String = if (n == 1) one else many
+
+  // --- /admin --------------------------------------------------------------
+
+  /** Six buttons, and the only panel drawn three to a row rather than five: the
+   *  split is the grouping. The top row acts on one particular server and needs
+   *  its id — so the list that gives you one leads. The bottom row is the three
+   *  bot-wide refreshes, which act everywhere and ask for nothing.
+   *
+   *  Leaving a server is the only red button. Reposting boosted touches every
+   *  guild the bot is in, but all it reposts is a message that reposts itself at
+   *  the next server save anyway, so it is not destructive the way leaving is. */
+  private val adminLabels: Map[String, (String, String)] = Map(
+    PanelIds.GuildList   -> ("Server list" -> "🗒️"),
+    PanelIds.Message     -> ("Message" -> "✉️"),
+    PanelIds.Leave       -> ("Leave" -> "🚪"),
+    PanelIds.Dreamscar   -> ("Dreamscar" -> "🌙"),
+    PanelIds.WorldList   -> ("Worlds" -> "🌍"),
+    PanelIds.BoostedPost -> ("Repost boosted" -> "📢")
+  )
+
+  def adminButtons: List[ActionRow] =
+    rows(PanelIds.adminActions.map { action =>
+      val (label, emoji) = adminLabels(action)
+      val id = PanelIds.button(Panel.Admin, action)
+      val button = if (action == PanelIds.Leave) Button.danger(id, label) else Button.secondary(id, label)
+      button.withEmoji(Emoji.fromUnicode(emoji))
+    }, perRow = 3)
+
+  /** Names the one number the creator wants at a glance. It is also the size of
+   *  what Server list is about to print, which is worth knowing before pressing
+   *  it — that reply is one ephemeral message per three thousand characters. */
+  def adminEmbed(guilds: Int): MessageEmbed =
+    new EmbedBuilder()
+      .setTitle("Bot creator tools")
+      .setDescription(
+        s"In **$guilds** ${plural(guilds, "server", "servers")}.\n\n" +
+          "The top row acts on one server and needs its id — **Server list** has them. " +
+          "The bottom row refreshes something everywhere and takes no input.")
+      .setColor(Embeds.BrandColor)
+      .build()
 }

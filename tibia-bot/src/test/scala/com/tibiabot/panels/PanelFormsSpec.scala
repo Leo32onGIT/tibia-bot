@@ -4,6 +4,7 @@ import com.tibiabot.domain.Worlds
 import com.tibiabot.panels.PanelIds.Panel
 import net.dv8tion.jda.api.components.label.Label
 import net.dv8tion.jda.api.components.selections.EntitySelectMenu
+import net.dv8tion.jda.api.components.textinput.TextInput
 import net.dv8tion.jda.api.entities.channel.ChannelType
 import net.dv8tion.jda.api.modals.Modal
 import org.scalatest.funsuite.AnyFunSuite
@@ -39,6 +40,34 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   private val several = List(world("Antica"), world("Belobra"), world("Vunira"))
 
   private def sizeOf(modal: Modal): Int = modal.getComponents.size
+
+  /** The admin forms are the only ones that take no worlds at all, so nothing
+   *  about them varies with the guild — but they are still modals, and Discord
+   *  still rejects an oversized one at the point somebody presses the button. */
+  test("both admin forms fit inside Discord's component limit") {
+    for (action <- List(PanelIds.Leave, PanelIds.Message)) withClue(s"$action: ") {
+      val modal = AdminForms.modal(action).getOrElse(fail(s"no form for $action"))
+      sizeOf(modal) should be <= Modal.MAX_COMPONENTS
+    }
+  }
+
+  test("both admin forms ask for a server id, and one other thing") {
+    for (action <- List(PanelIds.Leave, PanelIds.Message)) withClue(s"$action: ") {
+      val ids = AdminForms.modal(action).getOrElse(fail(s"no form for $action"))
+        .getComponents.asScala.toList
+        .map(_.asInstanceOf[Label].getChild.asInstanceOf[TextInput].getCustomId)
+      ids should have size 2
+      ids should contain(PanelForms.GuildIdField)
+    }
+  }
+
+  /** Four of the six admin buttons act on the press. Asking for a form they do
+   *  not have must come back empty rather than as an empty modal — the press
+   *  handler reads None as "not a form action". */
+  test("the admin buttons that act on the press have no form") {
+    PanelIds.adminActions.diff(List(PanelIds.Leave, PanelIds.Message))
+      .foreach(action => withClue(s"$action: ")(AdminForms.modal(action) shouldBe None))
+  }
 
   test("every settings form fits inside Discord's component limit") {
     for {

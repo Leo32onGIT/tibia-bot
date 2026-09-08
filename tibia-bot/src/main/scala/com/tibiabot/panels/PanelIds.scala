@@ -2,14 +2,14 @@ package com.tibiabot.panels
 
 import scala.util.Try
 
-/** Component ids for the three command panels — `/settings`, `/hunted` and
- *  `/allies` — and how BotListener must acknowledge each one.
+/** Component ids for the command panels — `/settings`, `/hunted`, `/allies` and
+ *  `/admin` — and how BotListener must acknowledge each one.
  *
- *  These commands used to be subcommand trees: twenty-four leaves between them,
- *  every one its own row in Discord's command picker, and every setting
- *  write-only because nothing could show you what it currently was. They are now
- *  three bare commands that answer with a panel of buttons, each opening a form
- *  that both shows the current value and takes the new one.
+ *  These commands used to be subcommand trees: thirty leaves between them, every
+ *  one its own row in Discord's command picker, and every setting write-only
+ *  because nothing could show you what it currently was. They are now four bare
+ *  commands that answer with a panel of buttons, each of which either acts on the
+ *  press or opens a form that both shows the current value and takes the new one.
  *
  *  Ids are `panel:<panel>:<action>` for a button and `panelform:<panel>:<action>`
  *  for the form it opens, so a press and its submission stay recognisably paired
@@ -23,7 +23,13 @@ object PanelIds {
 
   /** Which panel a component belongs to. `/hunted` and `/allies` are the same
    *  panel with different words and one extra button, so they travel as a value
-   *  rather than as two parallel sets of ids. */
+   *  rather than as two parallel sets of ids.
+   *
+   *  `/admin` rides here too rather than carrying a prefix of its own: it is the
+   *  same press-a-button-open-a-form shape, so BotListener's `panel:` branch,
+   *  [[parse]] and [[handlesButton]] all serve it unchanged. What it does *not*
+   *  share is the permission model — it is bot-creator-only, checked in
+   *  PanelButtons — or the actions, which are its own. */
   sealed trait Panel {
     def token: String
     /** What this panel's list is called in a sentence. */
@@ -34,8 +40,9 @@ object PanelIds {
     case object Settings extends Panel { val token = "settings"; val noun = "settings" }
     case object Hunted extends Panel { val token = "hunted"; val noun = "hunted list" }
     case object Allies extends Panel { val token = "allies"; val noun = "allies list" }
+    case object Admin extends Panel { val token = "admin"; val noun = "admin tools" }
 
-    val all: List[Panel] = List(Settings, Hunted, Allies)
+    val all: List[Panel] = List(Settings, Hunted, Allies, Admin)
     def fromToken(token: String): Option[Panel] = all.find(_.token == token)
   }
 
@@ -92,7 +99,11 @@ object PanelIds {
    *  must do neither — it only puts the panel back. */
   val Cancel = "cancel"
 
+  /** Nil for a panel that is not a list — `/settings` and `/admin` draw their own
+   *  buttons, and returning the hunted set for them would silently draw Add and
+   *  Remove on a panel with nothing to add to. */
   def listActions(panel: Panel): List[String] = {
+    if (panel != Panel.Hunted && panel != Panel.Allies) return Nil
     // No "view list" button: the panel's own reply is the list. It costs
     // nothing to draw — see HuntedAlliedService.playersEmbeds — so putting it
     // behind a press only hid what somebody ran the command to see.
@@ -102,6 +113,34 @@ object PanelIds {
     // entry already on the list — see HuntedAlliedService.addMany.
     List(Add, Remove, Config, Info, Clear)
   }
+
+  // --- admin actions -------------------------------------------------------
+
+  /** Every guild the bot is in, with its id — which is where the id the two
+   *  forms below ask for comes from. */
+  val GuildList = "guildlist"
+  val Leave = "leave"
+  val Message = "message"
+  val Dreamscar = "dreamscar"
+  val WorldList = "worldlist"
+  /** Repost the boosted boss/creature message everywhere, now, rather than at the
+   *  next server save. Named apart from the `/boosted` command so grepping for
+   *  one never lands on the other. */
+  val BoostedPost = "boostedpost"
+
+  /** Drawn three to a row: what you do to one particular server, then the three
+   *  bot-wide refreshes. Each row ends with its heaviest action.
+   *
+   *  None of these collide with the list or settings actions above, which matters
+   *  because [[parse]] reads an action without knowing the panel — but [[ackFor]]
+   *  branches on the panel first regardless, so a future collision would be a
+   *  readability problem rather than a routing one. */
+  val adminActions: List[String] = List(GuildList, Message, Leave, Dreamscar, WorldList, BoostedPost)
+
+  /** Only the two that act on one named server ask for anything; the rest are a
+   *  single press, and answer with a message. */
+  private def adminAck(action: String): Ack =
+    if (action == Leave || action == Message) Ack.OpensModal else Ack.Replies
 
   // --- building ------------------------------------------------------------
 
@@ -156,13 +195,17 @@ object PanelIds {
    *  already knows: listing, asking whether they meant Clear, and doing it. */
   def ackFor(componentId: String): Ack =
     parse(componentId) match {
-      case Some((_, Clear))        => Ack.EditsMessage
-      case Some((_, ClearConfirm)) => Ack.EditsMessage
-      case Some((_, Cancel))       => Ack.EditsMessage
-      case Some(_)                 => Ack.OpensModal
+      // Admin first, and on the panel rather than the action: the fallthrough
+      // below is OpensModal, which is wrong for the four admin buttons that take
+      // no input at all.
+      case Some((Panel.Admin, action)) => adminAck(action)
+      case Some((_, Clear))            => Ack.EditsMessage
+      case Some((_, ClearConfirm))     => Ack.EditsMessage
+      case Some((_, Cancel))           => Ack.EditsMessage
+      case Some(_)                     => Ack.OpensModal
       // Unparseable: it gets an ephemeral "that button is out of date" reply,
       // which is a message, so it defers one.
-      case None                    => Ack.Replies
+      case None                        => Ack.Replies
     }
 
   def opensModal(componentId: String): Boolean = ackFor(componentId) == Ack.OpensModal

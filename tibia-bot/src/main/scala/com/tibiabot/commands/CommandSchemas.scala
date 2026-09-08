@@ -44,24 +44,18 @@ object CommandSchemas {
     Commands.slash("settings", "Configure how a tracked world is displayed")
       .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
 
+  /** The bot creator's panel. Six subcommands once — leave, message, info,
+   *  dreamscar, worldlist and boosted — and now six buttons, drawn three to a
+   *  row. See commands.handlers.AdminCommands.
+   *
+   *  Keeps the Manage Server default permission it already had, which is not the
+   *  gate that matters: Discord has no permission flag for "is the application
+   *  owner", so the real check is at run time in the handler and again on every
+   *  press. This only keeps the command out of the picker for everybody else in
+   *  the two support guilds it is registered in.
+   */
   val adminCommand: SlashCommandData = Commands.slash("admin", "Commands only available to the bot creator")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addSubcommands(
-      new SubcommandData("leave", "Force the bot to leave a specific discord")
-      .addOptions(
-        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
-        new OptionData(OptionType.STRING, "reason", "What reason do you want to leave for the discord owner?").setRequired(true)
-      ),
-      new SubcommandData("info", "get discord info"),
-      new SubcommandData("dreamscar", "resync dreamscar wiki info"),
-      new SubcommandData("boosted", "Repost the boosted boss/creature message in every discord"),
-      new SubcommandData("worldlist", "get discord info"),
-      new SubcommandData("message", "Send a message to a specific discord")
-      .addOptions(
-        new OptionData(OptionType.STRING, "guildid", "The guild ID you want the bot to leave").setRequired(true),
-        new OptionData(OptionType.STRING, "message", "What message do you want to leave for the discord owner?").setRequired(true)
-      )
-    )
 
   val helpCommand: SlashCommandData = Commands.slash("help", "Resend the welcome message & basic getting started information")
     .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))

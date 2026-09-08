@@ -9,10 +9,42 @@ class PanelIdsSpec extends AnyFunSuite with Matchers {
   test("every button id round-trips back to the panel and action that built it") {
     for {
       panel <- Panel.all
-      action <- PanelIds.settingsActions ++ PanelIds.listActions(panel) ++ List(PanelIds.ClearConfirm, PanelIds.Cancel)
+      action <- PanelIds.settingsActions ++ PanelIds.listActions(panel) ++ PanelIds.adminActions ++
+        List(PanelIds.ClearConfirm, PanelIds.Cancel)
     } withClue(s"${panel.token}/$action: ") {
       PanelIds.parse(PanelIds.button(panel, action)) shouldBe Some(panel -> action)
     }
+  }
+
+  /** Drawing the hunted buttons on a panel with nothing to add to would be a
+   *  silent nonsense rather than a failure, so it is asserted instead. */
+  test("only the two list panels have list actions") {
+    PanelIds.listActions(Panel.Hunted) should not be empty
+    PanelIds.listActions(Panel.Allies) should not be empty
+    PanelIds.listActions(Panel.Settings) shouldBe empty
+    PanelIds.listActions(Panel.Admin) shouldBe empty
+  }
+
+  /** The admin actions must not fall through to the OpensModal default that
+   *  serves the other three panels: four of the six take no input at all, and a
+   *  form opening on Repost boosted would be a press that does nothing. */
+  test("only the two admin buttons that ask for a server id open a form") {
+    val opensForm = PanelIds.adminActions.filter(action =>
+      PanelIds.opensModal(PanelIds.button(Panel.Admin, action)))
+    opensForm should contain theSameElementsAs List(PanelIds.Leave, PanelIds.Message)
+    PanelIds.adminActions.diff(opensForm).foreach { action =>
+      withClue(s"$action: ") {
+        PanelIds.ackFor(PanelIds.button(Panel.Admin, action)) shouldBe Ack.Replies
+      }
+    }
+  }
+
+  /** `parse` reads an action without knowing its panel, so a token shared across
+   *  two panels would resolve to whichever branch of `ackFor` came first. */
+  test("no admin action collides with a settings or list action") {
+    val others = PanelIds.settingsActions ++ PanelIds.listActions(Panel.Hunted) ++
+      List(PanelIds.TagOne, PanelIds.ClearConfirm, PanelIds.Cancel)
+    PanelIds.adminActions.intersect(others) shouldBe empty
   }
 
   test("a form id round-trips the same way, so a press and its form stay paired") {

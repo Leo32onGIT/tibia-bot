@@ -38,6 +38,7 @@ object PanelModals extends StrictLogging {
       case Some((panel, action)) =>
         val guild = event.getGuild
         if (guild == null) reply(event, s"${Config.noEmoji} That only works inside a server.")
+        else if (panel == Panel.Admin) AdminPanel.submit(event, action)
         else if (panel == Panel.Settings) applySetting(event, action)
         else applyList(event, panel, action)
     }

@@ -43,6 +43,8 @@ object PanelForms {
   val NameField = "name"
   val TagField = "tag"
   val ChannelField = "channel"
+  val GuildIdField = "guildid"
+  val MessageField = "message"
 
   /** Discord rejects the whole modal if a label passes 45 characters or its
    *  description 100 — as RespawnModals found, it fails rather than trimming. */

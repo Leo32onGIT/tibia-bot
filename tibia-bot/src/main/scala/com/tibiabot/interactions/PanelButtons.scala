@@ -11,7 +11,7 @@ import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 
 import scala.jdk.CollectionConverters._
 
-/** The buttons on the `/settings`, `/hunted` and `/allies` panels.
+/** The buttons on the `/settings`, `/hunted`, `/allies` and `/admin` panels.
  *
  *  Routed on the `panel:` prefix rather than as branches of [[ButtonHandler]]'s
  *  if/else chain, the same way the respawn buttons are: this family shares an id
@@ -49,15 +49,22 @@ object PanelButtons extends StrictLogging {
    *  role can be taken away while it sits open. */
   private def permitted(event: ButtonInteractionEvent, panel: Panel): Boolean = {
     val member = event.getMember
-    if (panel == Panel.Settings) Permissions.hasManageServer(member)
+    // The admin panel is the one whose gate has nothing to do with this guild:
+    // it is the bot's creator or nobody, whatever roles the server has given out.
+    if (panel == Panel.Admin) Permissions.isBotCreator(event.getUser.getId, BotApp.botOwner)
+    else if (panel == Panel.Settings) Permissions.hasManageServer(member)
     else Permissions.isModerator(member, BotApp.moderatorRoleId(event.getGuild.getId))
   }
 
   private def refusalFor(panel: Panel): String =
-    if (panel == Panel.Settings) s"${Config.noEmoji} You need **Manage Server** to change these settings."
+    if (panel == Panel.Admin) s"${Config.noEmoji} This is only available to the bot creator."
+    else if (panel == Panel.Settings) s"${Config.noEmoji} You need **Manage Server** to change these settings."
     else s"${Config.noEmoji} You do not have permission to use this command."
 
   private def dispatch(event: ButtonInteractionEvent, panel: Panel, action: String): Unit = {
+    // Delegated whole, before anything below reads this guild's worlds or lists:
+    // the admin panel is about other servers, and has none of its own here.
+    if (panel == Panel.Admin) return AdminPanel.press(event, action)
     val guildId = event.getGuild.getId
     val worlds: List[Worlds] = BotApp.worldsData.getOrElse(guildId, List())
     action match {

@@ -63,7 +63,7 @@ object ListEmbeds {
    *  chars. The first chunk keeps the leading newline from the empty seed; each
    *  subsequent one begins with the line that overflowed the previous. Always
    *  returns at least one chunk. Shared by [[paginate]] and other chunking call
-   *  sites (the /admin guild list, the level-up message flush), which each
+   *  sites (the /admin panel's server list, the level-up message flush), which each
    *  build their own embeds/messages from the chunks. */
   def pack(values: List[String], limit: Int): List[String] = {
     val fields = ListBuffer.empty[String]

@@ -65,9 +65,12 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
       DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)
   }
 
-  test("admin exposes the expected subcommands") {
-    CommandSchemas.adminCommand.getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
-      List("leave", "info", "dreamscar", "boosted", "worldlist", "message")
+  /** Its six — leave, message, info, dreamscar, worldlist and boosted — are the
+   *  buttons of a panel now. See panels.PanelIds.adminActions. */
+  test("admin carries no subcommands, and keeps the Manage Server gate it had") {
+    CommandSchemas.adminCommand.getSubcommands.asScala shouldBe empty
+    CommandSchemas.adminCommand.getDefaultPermissions shouldBe
+      DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)
   }
 
   test("initialCommands is the minimal set visible before any world is configured") {

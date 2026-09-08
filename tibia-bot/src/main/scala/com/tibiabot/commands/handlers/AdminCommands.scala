@@ -1,65 +1,36 @@
 package com.tibiabot.commands.handlers
 
-import com.tibiabot.{BotApp, Config, WorldManager}
 import com.tibiabot.commands.Permissions
-import net.dv8tion.jda.api.EmbedBuilder
+import com.tibiabot.panels.Panels
+import com.tibiabot.presentation.Embeds
+import com.tibiabot.{BotApp, Config}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
 import scala.jdk.CollectionConverters._
 
-/** Handles `/admin`: bot-creator-only maintenance subcommands. */
+/** `/admin`: the bot creator's maintenance panel.
+ *
+ *  Six subcommands once — leave, message, info, dreamscar, worldlist and boosted
+ *  — and now one bare command that answers with six buttons. The same trade the
+ *  three list and settings panels made, for a different reason: `/admin` is
+ *  registered in the support guilds alone, so its rows were never crowding
+ *  anybody's picker. What it buys here is that a button can be labelled and
+ *  grouped, and that the two acting on one particular server ask for its id in a
+ *  form that says where to find one — where a subcommand offered `guildid` and a
+ *  description copied from the wrong option.
+ *
+ *  Everything past this point is [[com.tibiabot.interactions.AdminPanel]].
+ */
 object AdminCommands {
-  def handle(event: SlashCommandInteractionEvent): Unit = {
-    val options = Options.of(event)
-    val guildOption = options.getOrElse("guildid", "")
-    val reasonOption = options.getOrElse("reason", "")
-    val messageOption = options.getOrElse("message", "")
 
-    if (!Permissions.isBotCreator(event.getUser.getId, BotApp.botOwner)) {
-      val embed = new EmbedBuilder()
-        .setDescription(s"${Config.noEmoji} This command is only available to the bot creator.")
-        .build()
-      event.getHook.sendMessageEmbeds(embed).queue()
-      return
-    }
-
-    event.getInteraction.getSubcommandName match {
-      case "leave" =>
-        val embed = BotApp.adminService.leave(guildOption, reasonOption)
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case "dreamscar" =>
-        val embed = BotApp.adminService.resyncDreamCourtBosses()
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case "boosted" =>
-        BotApp.adminService.refreshBoostedMessages(embed =>
-          event.getHook.sendMessageEmbeds(embed).queue())
-      case "message" =>
-        val embed = BotApp.adminService.message(guildOption, messageOption)
-        event.getHook.sendMessageEmbeds(embed).queue()
-      case "worldlist" =>
-        try {
-          WorldManager.getWorldList()
-          val embed = new EmbedBuilder()
-            .setDescription(s"${Config.yesEmoji} The worlds list has been refreshed.")
-            .build()
-          event.getHook.sendMessageEmbeds(embed).queue()
-        } catch {
-          case _: Exception =>
-            val embed = new EmbedBuilder()
-              .setDescription(s"${Config.noEmoji} The worlds list has failed to refresh.")
-              .build()
-            event.getHook.sendMessageEmbeds(embed).queue()
-        }
-      case "info" =>
-        BotApp.adminService.info(embeds => {
-          embeds.asJava.forEach { embed =>
-            event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
-          }
-        })
-      case other =>
-        val embed = new EmbedBuilder()
-          .setDescription(s"${Config.noEmoji} Invalid subcommand '$other' for `/admin`.").build()
-        event.getHook.sendMessageEmbeds(embed).queue()
-    }
-  }
+  def handle(event: SlashCommandInteractionEvent): Unit =
+    // Discord gates commands on permission flags and has no flag for "is the
+    // application owner", so the command carries Manage Server and the real gate
+    // is here — and again on every press, since the panel outlives this check.
+    if (!Permissions.isBotCreator(event.getUser.getId, BotApp.botOwner))
+      event.getHook.sendMessageEmbeds(Embeds.response(
+        s"${Config.noEmoji} This command is only available to the bot creator.")).queue()
+    else
+      event.getHook.sendMessageEmbeds(Panels.adminEmbed(BotApp.discordGateway.guilds.size))
+        .setComponents(Panels.adminButtons.asJava).setEphemeral(true).queue()
 }

@@ -1499,7 +1499,8 @@ object BotApp extends App with StrictLogging {
    *  was dispatched for — the send itself is queued, so a guild counted here
    *  can still fail asynchronously (logged per guild).
    *
-   *  Shared by the server-save refresh above and `/admin boosted`. */
+   *  Shared by the server-save refresh above and the Repost boosted button on
+   *  the `/admin` panel. */
   private def repostBoostedMessages(boostedEmbeds: List[MessageEmbed]): Int = {
     var posted = 0
     discordGateway.guilds.foreach { guild =>
@@ -1568,7 +1569,7 @@ object BotApp extends App with StrictLogging {
     posted
   }
 
-  /** `/admin boosted`: rebuild and repost every guild's boosted message right
+  /** `/admin`'s Repost boosted button: rebuild and repost every guild's boosted message right
    *  now, off the server-save cycle — for when a save was missed, or a batch
    *  of messages went out wrong and needs redoing without waiting a day.
    *
@@ -2138,7 +2139,7 @@ object BotApp extends App with StrictLogging {
   /** Bring `dreamScar` up to date, preferring a fresh day-aligned wiki read so the
    *  map corrects itself rather than inheriting past mistakes. `shiftOnFailure`
    *  says what to do when the wiki can't be read: the server-save refresh advances
-   *  the map we hold, so an outage still rotates, while `/admin dreamscar` leaves
+   *  the map we hold, so an outage still rotates, while `/admin`'s Dreamscar leaves
    *  it alone — that exists to *undo* drift, not add some. */
   private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
     fetchDreamScarBosses() match {
