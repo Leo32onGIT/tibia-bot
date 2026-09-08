@@ -483,9 +483,9 @@ trait RespawnRepository {
   // --- teardown -----------------------------------------------------------
 
   /** Forget everything the respawn system knows about this guild: claims,
-   *  catalogue and settings. Used when the last world is `/remove`d. The forum is
-   *  kept as read-only history (see ChannelService.retireSpawnsForum) but no
-   *  longer tracked, so a later `/setup` starts from the bundled seed rather than
-   *  inheriting a catalogue whose threads point into a retired channel. */
+   *  catalogue and settings. Used when the last world is `/remove`d, alongside
+   *  deleting the forum itself (see ChannelService.deleteSpawnsForum), so a later
+   *  `/setup` starts from the bundled seed rather than inheriting a catalogue
+   *  whose threads point at a channel that no longer exists. */
   def dropGuildData(guildId: String): Unit
 }

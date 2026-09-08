@@ -2384,10 +2384,10 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     )
 
   /** Stop tracking respawns for this guild — claims, catalogue and settings all
-   *  go. Called when the last world is removed; the forum is retired as read-only
-   *  history rather than deleted (see ChannelService.retireSpawnsForum). Its
-   *  threads are deliberately orphaned, so a later `/setup` builds a fresh forum
-   *  instead of reviving posts in what is now an archive. */
+   *  go. Called when the last world is removed, alongside deleting the forum
+   *  itself (see ChannelService.deleteSpawnsForum), so a later `/setup` builds a
+   *  fresh forum from the seed instead of reviving a catalogue pointing at
+   *  threads that are gone. */
   def teardown(guildId: String): Unit = repository.dropGuildData(guildId)
 
   def userPrefs(guildId: String, userId: String): RespawnUserPrefs =

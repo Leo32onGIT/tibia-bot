@@ -455,39 +455,36 @@ final class ChannelService(
     }
   }
 
-  /** Retire the respawn forum when `/remove` takes the guild's last world.
+  /** Delete the respawn forum when `/remove` takes the guild's last world.
    *
-   *  Unlike the command-log and notifications channels, the forum is **kept** —
-   *  it holds the server's hunt history, and deleting that silently isn't worth
-   *  the tidiness. Instead it is archived, renamed, lifted out of the bot's
-   *  category and made read-only, while the bot drops all of its own respawn
-   *  data (claims, catalogue, settings).
+   *  The same treatment the command-log and notifications channels get, and for
+   *  the same reason: `/remove` on the last world is somebody asking the bot to
+   *  take its furniture with it, and a channel nothing writes to any more is
+   *  just something for them to clean up by hand. It used to be kept as a
+   *  read-only archive, which left a locked, renamed channel behind and made the
+   *  removal feel half-done.
    *
-   *  Two consequences worth knowing:
-   *   - Because the catalogue goes, a later `/setup` builds a *new* forum from
-   *     the bundled seed; the retired one stays behind as history under its own
-   *     name, so the two never collide.
-   *   - This is deliberately *not* gated on `Config.Respawn.enabled`. The flag
-   *     can be switched off after a guild already has a forum, and teardown
-   *     still has to leave that channel in a sane state.
+   *  The bot's own respawn data (claims, catalogue, settings) goes with it, so a
+   *  later `/setup` builds a fresh forum from the bundled seed rather than
+   *  inheriting a catalogue whose threads point at a channel that is gone.
+   *
+   *  Deliberately *not* gated on `Config.Respawn.enabled`: the flag can be
+   *  switched off after a guild already has a forum, and teardown still has to
+   *  clean it up.
    */
-  def retireSpawnsForum(guild: Guild): Unit = {
+  def deleteSpawnsForum(guild: Guild): Unit = {
     try {
       respawnService.settings(guild.getId).foreach { settings =>
         com.tibiabot.respawn.RespawnThreads.findForum(guild, settings).foreach { forum =>
-          com.tibiabot.respawn.RespawnThreads.retireForum(guild, forum,
-            "Violent Bot is no longer tracking a world on this server, so respawn claims have been turned off.\n\n" +
-              "This channel has been kept as a read-only archive of previous claims. " +
-              "Delete it whenever you like — the bot won't touch it again.\n\n" +
-              "Running `/setup` for a world later will create a fresh spawns channel.")
+          forum.delete().complete()
         }
         respawnService.teardown(guild.getId)
       }
     } catch {
       case ex: Throwable =>
         // Never fail a /remove over this — the world's own channels are the
-        // point, and a half-retired forum is fixable by hand.
-        logger.warn(s"Could not retire the respawn forum on guild '${guild.getId}'", ex)
+        // point, and a forum left behind is deletable by hand.
+        logger.warn(s"Could not delete the respawn forum on guild '${guild.getId}'", ex)
     }
   }
 
@@ -1347,9 +1344,9 @@ final class ChannelService(
           if (boostedChannel != null) boostedChannel.delete().complete()
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           if (adminChannel != null) adminChannel.delete().complete()
-          // Before the category: the forum is kept, so it has to be moved out
-          // deliberately rather than orphaned by the category's deletion.
-          retireSpawnsForum(guild)
+          // Before the category: deleting a category doesn't delete what is in
+          // it, it orphans those channels to the top of the server.
+          deleteSpawnsForum(guild)
           val adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
           if (adminCategory != null) adminCategory.delete().complete()
         } else {

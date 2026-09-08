@@ -825,55 +825,6 @@ object RespawnThreads extends StrictLogging {
           s"(DMs closed, or no mutual guild): ${error.getMessage}")
         false
     }.getOrElse(false)
-
-  // --- retirement ---------------------------------------------------------
-
-  /** What a retired forum is renamed to, so it reads as history at a glance and
-   *  can't be confused with a live one if the bot is set up again later. */
-  val RetiredChannelName: String = "🗄️・sᴘᴀᴡɴs-ᴀʀᴄʜɪᴠᴇ"
-
-  /** Close the forum down but keep it: archive what is open, post a closing
-   *  notice, rename it, lift it out of the bot's category and make it read-only.
-   *  Used when the guild's last world is removed. Nothing is deleted — the server
-   *  keeps its hunt history — but the bot no longer owns or writes to it. */
-  def retireForum(guild: Guild, forum: ForumChannel, notice: String): Unit = {
-    // Only the threads Discord still considers active need closing, and those
-    // are already in JDA's cache — so this costs one REST call per *open*
-    // claim, not one per catalogue entry.
-    forum.getThreadChannels.asScala.filterNot(_.isArchived).foreach { thread =>
-      Try(thread.getManager.setArchived(true).complete()).failed.foreach { error =>
-        logger.warn(s"Could not archive respawn thread '${thread.getId}' while retiring the forum", error)
-      }
-    }
-
-    Try {
-      val message = new MessageCreateBuilder().addContent(notice).build()
-      val post = forum.createForumPost("⚠️ Respawn tracking has been removed", message).complete()
-      post.getThreadChannel.getManager.setLocked(true).setPinned(true).complete()
-    }.failed.foreach { error =>
-      logger.warn(s"Could not post the closing notice in guild '${guild.getId}'", error)
-    }
-
-    // Out of the "Violent Bot" category before the caller deletes it. Deleting
-    // a category doesn't delete its channels, it orphans them to the top of the
-    // server — doing it explicitly makes that deliberate rather than a surprise.
-    Try(forum.getManager.setName(RetiredChannelName).setParent(null).complete()).failed.foreach { error =>
-      logger.warn(s"Could not rename/move the retired respawn forum in guild '${guild.getId}'", error)
-    }
-
-    // Read-only from here: the history stays visible, but nobody (including the
-    // bot) is meant to keep using it.
-    Try(
-      forum.upsertPermissionOverride(guild.getPublicRole)
-        .grant(Permission.VIEW_CHANNEL)
-        .grant(Permission.MESSAGE_HISTORY)
-        .deny(Permission.CREATE_PUBLIC_THREADS)
-        .deny(Permission.MESSAGE_SEND_IN_THREADS)
-        .complete()
-    ).failed.foreach { error =>
-      logger.warn(s"Could not lock down the retired respawn forum in guild '${guild.getId}'", error)
-    }
-  }
 }
 
 /** Encoding for the respawn buttons' component ids.
