@@ -60,12 +60,19 @@ object PanelIds {
   val Neutral = "neutral"
   val ChannelFilter = "chanfilter"
   val OnlineFilter = "onlinefilter"
+  /** Where the bot's command log is posted. The only setting on this panel that
+   *  is about the server rather than about a world — hence no world picker on its
+   *  form, and last on the panel. */
+  val CommandLog = "cmdlog"
 
   /** Every button on `/settings`, in the order they are drawn: the two that set a
    *  level or a toggle for the whole world, then what the channels and the online
-   *  list show, then neutrals last — the one that is about players nobody here
-   *  tracks, and so the least often wanted. */
-  val settingsActions: List[String] = List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral)
+   *  list show, then neutrals — the one that is about players nobody here tracks,
+   *  and so the least often wanted — and the command log after them, which is set
+   *  once for the server and then forgotten about.
+   *
+   *  Seven, so they no longer fit one row; Panels.rows splits them 5 and 2. */
+  val settingsActions: List[String] = List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
 
   // --- hunted/allies actions ----------------------------------------------
 

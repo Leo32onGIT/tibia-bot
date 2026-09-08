@@ -47,6 +47,10 @@ object PanelModals extends StrictLogging {
   private def applySetting(event: ModalInteractionEvent, action: String): Unit = {
     val guildId = event.getGuild.getId
     val worlds = BotApp.worldsData.getOrElse(guildId, List())
+    // The one setting on this panel that is not about a world, so it is answered
+    // before a world is looked for at all — the form has no picker and the
+    // question "which world's command log" does not exist.
+    if (action == PanelIds.CommandLog) return applyCommandLog(event)
     worldOf(event, worlds) match {
       case None => reply(event, s"${Config.noEmoji} Pick a world first.")
       case Some(world) =>
@@ -85,6 +89,27 @@ object PanelModals extends StrictLogging {
         }
         if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")
         else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue())
+    }
+  }
+
+  /** Point the command log at an existing channel.
+   *
+   *  The picker only offers text channels of this server, so the lookup below
+   *  fails on almost nothing — a channel deleted between the form opening and it
+   *  being submitted is what is left, and that reads correctly as "pick a channel
+   *  in this server". Whether the bot may actually post there is not asked here:
+   *  that is the service's to check, along with everything else it must be true
+   *  of. See ChannelService.setCommandLogChannel.
+   */
+  private def applyCommandLog(event: ModalInteractionEvent): Unit = {
+    val guild = event.getGuild
+    selected(event, PanelForms.ChannelField).headOption
+      .flatMap(id => Option(guild.getTextChannelById(id))) match {
+      case None =>
+        reply(event, s"${Config.noEmoji} Pick a text channel in this server.")
+      case Some(channel) =>
+        val embed = BotApp.channelService.setCommandLogChannel(guild, event.getUser, channel)
+        event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue()
     }
   }
 

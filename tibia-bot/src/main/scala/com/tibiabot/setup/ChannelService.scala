@@ -12,7 +12,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, TextChannel}
 import net.dv8tion.jda.api.entities.emoji.Emoji
-import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
+import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role, User}
 import net.dv8tion.jda.api.events.guild.{GuildJoinEvent, GuildLeaveEvent}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -102,6 +102,74 @@ final class ChannelService(
         discord.copy(boostedChannel = channelId)
       case other => other
     }).toMap)
+  }
+
+  /** What the bot needs where its command log goes. Embeds because that is all
+   *  AdminLog ever posts — a channel granting Send Messages alone takes the log
+   *  and shows nothing of it. */
+  private val commandLogPermissions: List[Permission] =
+    List(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_EMBED_LINKS)
+
+  /** Point the command log at a channel that already exists — the Command Log
+   *  button on `/settings`.
+   *
+   *  `/setup` makes a log channel in the bot's own category, which is right for a
+   *  server meeting the bot for the first time and wrong for one that already
+   *  keeps every bot's log in one place. Only the channel moves: the category
+   *  stays, since the boosted channel and the spawns forum live in it, and the old
+   *  channel is left alone rather than deleted — by now it is an ordinary channel
+   *  of theirs, with history somebody may want.
+   *
+   *  Permissions are checked before anything is written. AdminLog drops a post it
+   *  cannot send (see AdminLog.send), so a log pointed somewhere the bot cannot
+   *  talk simply goes quiet — and the moment you would notice is the moment you
+   *  went looking for a record of something.
+   */
+  def setCommandLogChannel(guild: Guild, user: User, channel: TextChannel): MessageEmbed = {
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(BrandColor)
+    val config = discordRetrieveConfig(guild)
+    val currentId = config.getOrElse("admin_channel", "0")
+    val missing = commandLogPermissions.filterNot(guild.getSelfMember.hasPermission(channel, _))
+    if (config.isEmpty) {
+      embedBuild.setDescription(
+        s"${Config.noEmoji} You need to run `/setup` before you can move the command log.")
+    } else if (currentId == channel.getId) {
+      embedBuild.setDescription(s"${Config.noEmoji} The command log is already <#${channel.getId}>.")
+    } else if (missing.nonEmpty) {
+      val named = missing.map(permission => s"**${permission.getName}**").mkString(", ")
+      embedBuild.setDescription(
+        s"${Config.noEmoji} I can't post in <#${channel.getId}> — I'm missing $named there.\n\n" +
+          "Grant them to me on that channel, or to a role I have, and press the button again.")
+    } else {
+      // Database first, then the cache the death and activity posts read — see
+      // TibiaBot.postToDiscordAndCleanUp, which takes the channel id off the
+      // Discords record rather than re-reading config per death.
+      discordUpdateConfig(guild, "", channel.getId, "", "", "")
+      updateAdminChannel(guild.getId, channel.getId)
+
+      // Digits-only before it is looked up: `getTextChannelById` parses a
+      // snowflake and throws on anything else, and this runs inside a deferred
+      // interaction, where a throw is an answer that never arrives. The stored
+      // value is "0" on a guild that never had one.
+      val previous = Option(currentId).filter(id => id.nonEmpty && id.forall(_.isDigit))
+        .flatMap(id => Option(guild.getTextChannelById(id)))
+      // The move is logged in both places, and the order is the point: the new
+      // channel proves the bot can write there, and the old one says where its
+      // log went rather than just stopping.
+      com.tibiabot.presentation.AdminLog.post(channel,
+        s"${Names.user(user.getName)} pointed the command log here.",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
+      previous.foreach(old => com.tibiabot.presentation.AdminLog.post(old,
+        s"${Names.user(user.getName)} moved the command log to <#${channel.getId}>.\n\nNothing more will be posted here.",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif"))
+      val leftBehind = previous
+        .map(old => s"\n\n*<#${old.getId}> is still there — delete it if you don't want it.*")
+        .getOrElse("")
+      embedBuild.setDescription(
+        s":gear: The command log is now <#${channel.getId}>.$leftBehind")
+    }
+    embedBuild.build()
   }
 
   /** The bot's own override on its "Violent Bot" category.

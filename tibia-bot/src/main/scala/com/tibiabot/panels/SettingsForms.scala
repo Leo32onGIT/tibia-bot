@@ -16,8 +16,13 @@ import net.dv8tion.jda.api.modals.Modal
  */
 object SettingsForms {
 
-  /** None when there is nothing to configure — no worlds set up yet. */
-  def modal(action: String, worlds: List[Worlds]): Option[Modal] = {
+  /** None when there is nothing to configure — no worlds set up yet.
+   *
+   *  @param commandLog the command log's current channel id, for the one form
+   *                    that is about the server rather than a world. Only pass a
+   *                    channel that still exists — see PanelForms.channelPicker.
+   */
+  def modal(action: String, worlds: List[Worlds], commandLog: Option[String] = None): Option[Modal] = {
     if (worlds.isEmpty) return None
     // With one world its values are known now, so every box opens filled in.
     // With several the world is picked in the form, so nothing can be.
@@ -62,6 +67,14 @@ object SettingsForms {
             only.map(_.onlineAlliesMin), "0"),
           number(NeutralsField, "Neutrals list", "Hide neutrals below this level; 0 shows everyone.",
             only.map(_.onlineNeutralsMin), "0")))
+
+      // No world picker: there is one command log per server, not one per world.
+      // It sits on this panel anyway because that is where somebody looking for
+      // "where does the bot post" goes — a command of its own would be a
+      // thirty-fifth row of the picker for a thing set once.
+      case PanelIds.CommandLog =>
+        Some("Command log", List(channelPicker("Command log channel",
+          "Where the bot posts what was run and what it changed.", commandLog)))
 
       case _ => None
     }

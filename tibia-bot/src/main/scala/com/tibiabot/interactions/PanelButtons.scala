@@ -100,7 +100,11 @@ object PanelButtons extends StrictLogging {
       // be the first response - see the class doc.
       case _ =>
         val form =
-          if (panel == Panel.Settings) SettingsForms.modal(action, worlds)
+          // The command log's form opens showing the channel it uses now, which
+          // has to be read here — see BotApp.commandLogChannel for why that is a
+          // cache read rather than a database one.
+          if (panel == Panel.Settings)
+            SettingsForms.modal(action, worlds, BotApp.commandLogChannel(event.getGuild).map(_.getId))
           else ListForms.modal(panel, action, worlds)
         form match {
           case Some(modal) => event.replyModal(modal).queue()

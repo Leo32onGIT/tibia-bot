@@ -2,7 +2,8 @@ package com.tibiabot.panels
 
 import com.tibiabot.domain.Worlds
 import net.dv8tion.jda.api.components.label.Label
-import net.dv8tion.jda.api.components.selections.{SelectOption, StringSelectMenu}
+import net.dv8tion.jda.api.components.selections.{EntitySelectMenu, SelectOption, StringSelectMenu}
+import net.dv8tion.jda.api.entities.channel.ChannelType
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.components.textinput.{TextInput, TextInputStyle}
 import net.dv8tion.jda.api.modals.Modal
@@ -41,6 +42,7 @@ object PanelForms {
   val ReasonField = "reason"
   val NameField = "name"
   val TagField = "tag"
+  val ChannelField = "channel"
 
   /** Discord rejects the whole modal if a label passes 45 characters or its
    *  description 100 — as RespawnModals found, it fails rather than trimming. */
@@ -108,6 +110,35 @@ object PanelForms {
       .setRequired(required)
       .build()
     label(text, description, menu)
+  }
+
+  /** A channel picker, showing the channel the setting names now.
+   *
+   *  Discord's own picker rather than a box to paste an id into: it only offers
+   *  channels of this server, so nothing typed can be wrong, and it hands back an
+   *  id with no parsing of `#name` or `<#id>` in between.
+   *
+   *  Text channels only. What the picker returns is looked up with
+   *  `getTextChannelById`, and every channel the bot logs to is a TextChannel all
+   *  the way down to AdminLog — a voice or forum channel picked here would come
+   *  back as nothing and read as "pick a channel in this server", which is a
+   *  confusing way to say "not that kind".
+   *
+   *  `current` pre-selects what is set now, so opening the form reads the setting
+   *  as well as changing it — the same bargain every other form here makes. It is
+   *  passed only for a channel that still exists: Discord silently drops a default
+   *  it cannot resolve, and the empty picker that leaves is indistinguishable from
+   *  nothing being set, which is exactly what a deleted channel means.
+   */
+  def channelPicker(text: String, description: String, current: Option[String]): Label = {
+    val menu = EntitySelectMenu.create(ChannelField, EntitySelectMenu.SelectTarget.CHANNEL)
+      .setChannelTypes(ChannelType.TEXT)
+      .setPlaceholder("Pick a channel")
+      // Required, unlike the selects above: this form asks one thing, and a
+      // submission with nothing picked would have nothing to do.
+      .setRequiredRange(1, 1)
+    current.foreach(id => menu.setDefaultValues(EntitySelectMenu.DefaultValue.channel(id)))
+    label(text, description, menu.build())
   }
 
   val ShowHide: List[(String, String)] = List("Show" -> "show", "Hide" -> "hide")

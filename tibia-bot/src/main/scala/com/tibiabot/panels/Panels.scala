@@ -46,7 +46,8 @@ object Panels {
     PanelIds.ChannelFilter -> ("Channel Filters" -> "📊"),
     PanelIds.Layout        -> ("Online Layout" -> "📈"),
     PanelIds.OnlineFilter  -> ("Online Filters" -> "📋"),
-    PanelIds.Neutral       -> ("Neutrals" -> "⚪")
+    PanelIds.Neutral       -> ("Neutrals" -> "⚪"),
+    PanelIds.CommandLog    -> ("Command Log" -> "🖥️")
   )
 
   def settingsButtons: List[ActionRow] =

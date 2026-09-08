@@ -12,7 +12,7 @@ import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
-import net.dv8tion.jda.api.entities.channel.concrete.PrivateChannel
+import net.dv8tion.jda.api.entities.channel.concrete.{PrivateChannel, TextChannel}
 import net.dv8tion.jda.api.utils.TimeFormat
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
@@ -760,6 +760,23 @@ object BotApp extends App with StrictLogging {
 
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
+
+  /** Where a guild's command log currently goes, if that channel is still there.
+   *
+   *  Off the in-memory Discords record rather than `discordRetrieveConfig`, which
+   *  is a database round trip — this is read while a button press is being turned
+   *  into a form, and that has no deferral to hide behind. The same record is what
+   *  the death and activity posts log through, so it is the honest answer to
+   *  "where does the bot post" as well as the cheap one.
+   *
+   *  None for a guild with no worlds set up: it has no Discords record at all.
+   */
+  def commandLogChannel(guild: Guild): Option[TextChannel] =
+    discordsData.values.flatten.find(_.id == guild.getId).map(_.adminChannel)
+      // A snowflake or nothing: getTextChannelById parses the string and throws
+      // on anything that is not a number. "0" is what a guild without one holds.
+      .filter(id => id.nonEmpty && id.forall(_.isDigit))
+      .flatMap(id => Option(guild.getTextChannelById(id)))
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
 

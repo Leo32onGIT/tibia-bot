@@ -2,9 +2,14 @@ package com.tibiabot.panels
 
 import com.tibiabot.domain.Worlds
 import com.tibiabot.panels.PanelIds.Panel
+import net.dv8tion.jda.api.components.label.Label
+import net.dv8tion.jda.api.components.selections.EntitySelectMenu
+import net.dv8tion.jda.api.entities.channel.ChannelType
 import net.dv8tion.jda.api.modals.Modal
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+
+import scala.jdk.CollectionConverters._
 
 /** Guards the one thing about these forms that fails at run time rather than at
  *  compile time: Discord rejects a modal carrying more than `Modal.MAX_COMPONENTS`
@@ -84,6 +89,44 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   test("an unknown action produces no form rather than an empty one") {
     SettingsForms.modal("nonsense", one) shouldBe empty
     ListForms.modal(Panel.Hunted, "nonsense", one) shouldBe empty
+  }
+
+  // --- the command log, the one setting that is not about a world ---
+
+  private def channelPicker(modal: Modal): EntitySelectMenu =
+    modal.getComponents.get(0).asInstanceOf[Label].getChild.asInstanceOf[EntitySelectMenu]
+
+  /** Every other form on this panel opens with "which world?" on a guild tracking
+   *  several. There is one command log per server, so this one must not — and a
+   *  form that asked would have no answer to write it to. */
+  test("the command log form asks for a channel and never for a world") {
+    for (worlds <- List(one, several)) withClue(s"${worlds.size} world(s): ") {
+      val modal = SettingsForms.modal(PanelIds.CommandLog, worlds).get
+      modal.getComponents should have size 1
+      val picker = channelPicker(modal)
+      picker.getCustomId shouldBe PanelForms.ChannelField
+      picker.getEntityTypes.asScala should contain only EntitySelectMenu.SelectTarget.CHANNEL
+    }
+  }
+
+  /** Text channels only: what comes back is resolved with getTextChannelById, and
+   *  AdminLog posts to a TextChannel. A voice or forum channel picked here would
+   *  come back as nothing at all. */
+  test("only text channels can be picked for the command log") {
+    channelPicker(SettingsForms.modal(PanelIds.CommandLog, one).get)
+      .getChannelTypes.asScala should contain only ChannelType.TEXT
+  }
+
+  /** The form shows the setting as well as taking it, which for a channel means
+   *  opening on the one in use — and opening on nothing when there is none to
+   *  show, rather than on a channel that has since been deleted. */
+  test("the command log form opens on the channel it uses now") {
+    val current = channelPicker(SettingsForms.modal(PanelIds.CommandLog, one, Some("123456789")).get)
+    current.getDefaultValues.size shouldBe 1
+    current.getDefaultValues.get(0).getId shouldBe "123456789"
+
+    channelPicker(SettingsForms.modal(PanelIds.CommandLog, one, None).get)
+      .getDefaultValues shouldBe empty
   }
 
   /** The tag picker is hunted-only, so the two panels' Add forms differ by one
