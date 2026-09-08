@@ -66,16 +66,11 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN online_combined VARCHAR(255) DEFAULT 'false'")
     }
 
-    // Defaults on, like the other show_neutral_ columns — a world set up before
-    // this existed starts showing untracked arrivals when it picks the column up,
-    // which is the intent. The level bar is what keeps that from being noisy.
-    val neutralActivityExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'show_neutral_activity'")
-    val neutralActivityExists = neutralActivityExistsQuery.next()
-    neutralActivityExistsQuery.close()
-
-    if (!neutralActivityExists) {
-      statement.execute("ALTER TABLE worlds ADD COLUMN show_neutral_activity VARCHAR(255) DEFAULT 'true'")
-    }
+    // show_neutral_activity was migrated in here too until it was removed. The
+    // column is deliberately left on tables that already have it rather than
+    // dropped: nothing selects or writes it, createWorld never named it, and its
+    // DEFAULT fills it on insert, so a dead column costs nothing — where dropping
+    // it would mean an ALTER against every guild's database to reclaim a byte.
 
     // 0, meaning no floor, so a world that picks these columns up shows exactly
     // the online list it showed before them. Unlike the show_ columns above,
@@ -89,7 +84,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,show_neutral_activity,online_allies_min,online_enemies_min,online_neutrals_min FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -120,14 +115,13 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
       val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
-      val showNeutralActivity = Option(result.getString("show_neutral_activity")).getOrElse("true")
       val onlineAlliesMin = Option(result.getInt("online_allies_min")).getOrElse(0)
       val onlineEnemiesMin = Option(result.getInt("online_enemies_min")).getOrElse(0)
       val onlineNeutralsMin = Option(result.getInt("online_neutrals_min")).getOrElse(0)
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, showNeutralActivity, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin)
       }
     }
 

@@ -45,9 +45,7 @@ object SettingsForms {
           choice(LevelsField, "Neutral levels", "Level-ups by players you don't track.",
             ShowHide, only.map(w => showHideOf(w.showNeutralLevels))),
           choice(DeathsField, "Neutral deaths", "Deaths of players you don't track.",
-            ShowHide, only.map(w => showHideOf(w.showNeutralDeaths))),
-          choice(ActivityField, "Neutral activity", "Guild joins, leaves and transfers.",
-            ShowHide, only.map(w => showHideOf(w.showNeutralActivity)))))
+            ShowHide, only.map(w => showHideOf(w.showNeutralDeaths)))))
 
       case PanelIds.ChannelFilter =>
         Some("Channel level filters", picker ++ List(

@@ -28,8 +28,7 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
     showAlliesLevels = "true", showAlliesDeaths = "true",
     showEnemiesLevels = "true", showEnemiesDeaths = "true",
     detectHunteds = "true", levelsMin = 8, deathsMin = 8,
-    exivaList = "true", activityChannel = "0", onlineCombined = "separate",
-    showNeutralActivity = "true")
+    exivaList = "true", activityChannel = "0", onlineCombined = "separate")
 
   private val one = List(world("Antica"))
   private val several = List(world("Antica"), world("Belobra"), world("Vunira"))

@@ -25,7 +25,7 @@ class HuntedNamesForWorldSpec extends AnyFunSuite with Matchers {
    *  configuration this selection never reads. */
   private def worldRow(name: String) = Worlds(
     name, "", "", "", "", "", "", "", "", "", "", "", "", "",
-    0, "", "", "", "", "", "", "", 0, 0, "", "", "", "")
+    0, "", "", "", "", "", "", "", 0, 0, "", "", "")
 
   private def stateWith(
       worlds: Map[String, List[Worlds]],

@@ -345,12 +345,18 @@ class TibiaBot(
               // transferred in and joined a tracked guild in one poll reads in order.
               //
               // Anyone tracked is announced at any level; everybody else must clear
-              // the world's bar (see WorldTransfers.UntrackedMinLevel), which keeps
-              // this from becoming a feed of every stranger who moved house.
+              // the bar (see WorldTransfers.UntrackedMinLevel), which keeps this
+              // from becoming a feed of every stranger who moved house.
+              //
+              // The bar is now the whole control. A per-world show_neutral_activity
+              // switch used to sit in front of it, but it was the only thing that
+              // setting did: everything else the activity channel posts — guild
+              // joins, leaves, swaps, renames — reaches this code only for a
+              // character already in a tracked guild or on a list, so there was no
+              // neutral activity for it to gate. It read as a switch over the
+              // neutral half of the channel while silencing one rare line.
               val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
-              val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
-              val notableStranger =
-                showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
+              val notableStranger = charLevel >= presentation.WorldTransfers.UntrackedMinLevel
               if (trackedHere || notableStranger) {
                 transferSources.foreach { arrivedFrom =>
                   if (activityTextChannel != null) {

@@ -65,8 +65,7 @@ object PanelModals extends StrictLogging {
           case PanelIds.Neutral =>
             List(
               choice(event, PanelForms.LevelsField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "levels")),
-              choice(event, PanelForms.DeathsField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "deaths")),
-              choice(event, PanelForms.ActivityField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "activity"))
+              choice(event, PanelForms.DeathsField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "deaths"))
             ).flatten
 
           case PanelIds.ChannelFilter =>

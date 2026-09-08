@@ -162,10 +162,6 @@ final class WorldSettingsService(
         case "neutrals" =>
           if (channelType == "deaths") Some(w.showNeutralDeaths)
           else if (channelType == "levels") Some(w.showNeutralLevels)
-          // Only neutrals have an activity setting: the activity channel is
-          // about tracked players by definition, so there is no allied or
-          // enemy equivalent to turn off.
-          else if (channelType == "activity") Some(w.showNeutralActivity)
           else None
         case "enemies" =>
           if (channelType == "deaths") Some(w.showEnemiesDeaths)
@@ -181,7 +177,6 @@ final class WorldSettingsService(
         case "neutrals" =>
           if (channelType == "deaths") w.copy(showNeutralDeaths = v)
           else if (channelType == "levels") w.copy(showNeutralLevels = v)
-          else if (channelType == "activity") w.copy(showNeutralActivity = v)
           else w
         case "enemies" =>
           if (channelType == "deaths") w.copy(showEnemiesDeaths = v)
