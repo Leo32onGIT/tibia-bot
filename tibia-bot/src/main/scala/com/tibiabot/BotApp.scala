@@ -739,6 +739,10 @@ object BotApp extends App with StrictLogging {
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.
   def activityData: Map[String, List[PlayerCache]] = streamState.activityData
+
+  /** See [[com.tibiabot.state.StreamState.activityIndex]] — `activityData` for
+   *  one guild, as a name lookup, delegated like the accessors around it. */
+  def activityIndex(guildId: String): domain.ActivityIndex = streamState.activityIndex(guildId)
   def worldTransfersData: Map[String, List[WorldTransfer]] = streamState.worldTransfersData
   def huntedPlayersData: Map[String, List[Players]] = streamState.huntedPlayersData
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData

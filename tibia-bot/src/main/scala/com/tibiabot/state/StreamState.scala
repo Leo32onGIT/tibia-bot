@@ -1,6 +1,8 @@
 package com.tibiabot.state
 
-import com.tibiabot.domain.{PlayerCache, Players, Guilds, CustomSort, Discords, Worlds, WorldTransfer}
+import com.tibiabot.domain.{ActivityIndex, PlayerCache, Players, Guilds, CustomSort, Discords, Worlds, WorldTransfer}
+
+import java.util.concurrent.ConcurrentHashMap
 
 
 /**
@@ -38,7 +40,51 @@ final class StreamState {
   @volatile private var _listedNames: Set[String] = Set.empty
   @volatile private var _listedNamesStale: Boolean = false
 
+  /** `_activity`, per guild, as a name lookup — memoised against the very list
+   *  it was built from, so a guild whose rows have not been replaced is indexed
+   *  once and then read for free.
+   *
+   *  Keyed on list identity rather than on an invalidation flag because
+   *  `modifyActivityData` takes an opaque function and so cannot say which
+   *  guilds it touched: comparing the cached list reference to the live one
+   *  asks the map itself, and is right for every write path there will ever be.
+   *  Rebuilding a guild nobody wrote to would be the only cost of getting that
+   *  wrong, and in practice nothing rebuilds — across all 121 guilds on the
+   *  primary bot, fewer than ten activity rows are written in ten minutes.
+   *
+   *  A ConcurrentHashMap rather than another `@volatile var`: this is derived
+   *  data that several world streams fill in concurrently, and publishing it a
+   *  whole map at a time would let one stream's rebuild drop another's.
+   */
+  private val _activityIndex = new ConcurrentHashMap[String, (List[PlayerCache], ActivityIndex)]()
+
   def activityData: Map[String, List[PlayerCache]] = _activity
+
+  /** One guild's activity rows as a name lookup. Equivalent to searching
+   *  `activityData.getOrElse(guildId, Nil)` with `equalsIgnoreCase`, which is
+   *  what the death scan used to do at three call sites per character per
+   *  discord — up to four passes over the list, since renameFromFormerNames
+   *  makes two of its own.
+   *
+   *  The snapshot it answers from is the one live when it was called, exactly
+   *  as reading `activityData` is — a row written afterwards is not in it. Both
+   *  are read the same way by the scan, which decides against a snapshot and
+   *  then re-reads inside the lock before writing.
+   */
+  def activityIndex(guildId: String): ActivityIndex = {
+    val rows = _activity.getOrElse(guildId, Nil)
+    if (rows.isEmpty) ActivityIndex.empty
+    else {
+      val cached = _activityIndex.get(guildId)
+      if (cached != null && (cached._1 eq rows)) cached._2
+      else {
+        val built = ActivityIndex(rows)
+        _activityIndex.put(guildId, (rows, built))
+        built
+      }
+    }
+  }
+
   /** Announced world transfers, keyed by world. */
   def worldTransfersData: Map[String, List[WorldTransfer]] = _worldTransfers
   def huntedPlayersData: Map[String, List[Players]] = _huntedPlayers
@@ -119,7 +165,15 @@ final class StreamState {
   }
 
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
-    lock.synchronized { _activity = f(_activity) }
+    lock.synchronized {
+      _activity = f(_activity)
+      // A guild that has gone entirely — a discord removed, or /clear run —
+      // would otherwise keep its rows and their index alive in the cache for
+      // the life of the process, and the largest guild's is a couple of
+      // megabytes. Guilds still present are left alone: their entry is
+      // validated on read against the list it was built from.
+      _activityIndex.keySet().removeIf(guildId => !_activity.contains(guildId))
+    }
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
     lock.synchronized { _worldTransfers = f(_worldTransfers) }
   // Both of these invalidate `listedNames`, which is derived from them.
