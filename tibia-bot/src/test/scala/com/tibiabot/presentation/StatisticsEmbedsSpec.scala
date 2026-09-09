@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
-import com.tibiabot.statistics.DailyReport
+import com.tibiabot.domain.{ExperienceDelta, FragTally, HighscoreEvent}
+import com.tibiabot.statistics.{DailyReport, DayKillSummary}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -18,8 +18,19 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   private def report(
       gains: List[ExperienceDelta] = Nil,
       loss: Option[ExperienceDelta] = None,
-      advance: Option[HighscoreEvent] = None
-  ) = DailyReport("Antica", day, gains, loss, advance)
+      advance: Option[HighscoreEvent] = None,
+      kills: Option[DayKillSummary] = None
+  ) = DailyReport("Antica", day, gains, loss, advance, kills)
+
+  private def summary(
+      mostKilled: Option[(String, Int)] = Some(("flimsy lost souls", 23965)),
+      deadliest: Option[(String, Int)] = Some(("quara looters", 13)),
+      playerDeaths: Int = 378,
+      totalKilled: Long = 2514276L
+  ) = DayKillSummary("Antica", day, mostKilled, deadliest, playerDeaths, totalKilled, 818)
+
+  private def fieldNamed(embed: net.dv8tion.jda.api.entities.MessageEmbed, fragment: String) =
+    embed.getFields.stream().filter(_.getName.contains(fragment)).findFirst()
 
   private def advance(category: String, score: Long, name: String = "Bubble") =
     HighscoreEvent("Antica", category, name.toLowerCase, name, "Master Sorcerer", 402, score - 1, score,
@@ -58,8 +69,72 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     field.getValue should not include "+"
   }
 
-  test("the loss and advance fields are absent when there is nothing to put in them") {
+  test("every optional field is absent when there is nothing to put in it") {
     StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900)))).getFields shouldBe empty
+  }
+
+  // --- what the world was killing -----------------------------------------
+
+  test("the kill statistics field names both creatures and the PvP count") {
+    val field = fieldNamed(StatisticsEmbeds.build(report(kills = Some(summary()))), "Around the world")
+    field.isPresent shouldBe true
+    val value = field.get.getValue
+    value should include("flimsy lost souls")
+    value should include("23,965")
+    value should include("quara looters")
+    value should include("13 players")
+    value should include("378")
+    value should include("2,514,276")
+  }
+
+  test("a single player killed reads as one player, not one players") {
+    val field = fieldNamed(StatisticsEmbeds.build(report(kills = Some(summary(deadliest = Some(("wyrm", 1)))))), "Around the world")
+    field.get.getValue should include("(1 player)")
+  }
+
+  test("lines are dropped individually rather than the whole field") {
+    // A world can genuinely have a day where no creature killed a player.
+    val field = fieldNamed(
+      StatisticsEmbeds.build(report(kills = Some(summary(deadliest = None, playerDeaths = 0)))), "Around the world")
+    field.get.getValue should include("Most killed")
+    field.get.getValue should not include "Deadliest"
+    field.get.getValue should not include "Killed by other players"
+  }
+
+  test("a snapshot with nothing in it produces no field at all") {
+    val nothing = summary(mostKilled = None, deadliest = None, playerDeaths = 0, totalKilled = 0)
+    fieldNamed(StatisticsEmbeds.build(report(kills = Some(nothing))), "Around the world").isPresent shouldBe false
+  }
+
+  // --- frags ---------------------------------------------------------------
+
+  test("both sides' totals are shown even when one is zero") {
+    // "0 allies lost" is the good half of the news; dropping it would leave a
+    // reader wondering whether it was zero or unmeasured.
+    val frags = FragTally(6, 0, List(("Bubble", 4), ("Arieswar", 2)), Nil)
+    val field = fieldNamed(StatisticsEmbeds.build(report(), frags), "Frags")
+    field.get.getValue should include("Enemies killed — **6**")
+    field.get.getValue should include("Allies lost — **0**")
+  }
+
+  test("each side's leaderboard is its own field, and an empty side has none") {
+    val frags = FragTally(6, 0, List(("Bubble", 4), ("Arieswar", 2)), Nil)
+    val embed = StatisticsEmbeds.build(report(), frags)
+    fieldNamed(embed, "Top fraggers").isPresent shouldBe true
+    fieldNamed(embed, "Top fraggers").get.getValue should include("Bubble")
+    fieldNamed(embed, "Enemy fraggers").isPresent shouldBe false
+  }
+
+  test("a day with no frags carries no frag fields") {
+    StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900))), FragTally.empty)
+      .getFields shouldBe empty
+  }
+
+  test("frags are shown even when nothing else happened") {
+    val frags = FragTally(2, 1, List(("Bubble", 2)), List(("Arieswar", 1)))
+    val embed = StatisticsEmbeds.build(report(), frags)
+    fieldNamed(embed, "Frags").isPresent shouldBe true
+    fieldNamed(embed, "Enemy fraggers").isPresent shouldBe true
   }
 
   test("magic level is named without doubling the word level") {
@@ -79,13 +154,22 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       .getValue should include("bosspoints **4200**")
   }
 
-  test("a full day fits inside Discord's limits") {
-    // Ten linked names plus a figure runs to roughly 1,200 characters, which is
-    // why the leaderboard is in the description and not in a field.
-    val gains = (1 to 10).toList.map(n => delta(s"Averylongcharactername$n", 100000000L - n))
-    val embed = StatisticsEmbeds.build(report(gains, Some(delta("Someoneunlucky", -9182993)), Some(advance("magiclevel", 131))))
+  test("the fullest possible day still fits inside Discord's limits") {
+    // Everything at once, with names at the length Tibia actually allows: ten
+    // gainers, a loss, an advance, the kill statistics, and both frag
+    // leaderboards full. The description is where the leaderboard has to live —
+    // ten linked names plus a figure is about 1,200 characters against a field's
+    // 1,024 — and the two fragger fields are the ones most likely to be full,
+    // which is why they carry plain names rather than links.
+    val long = "Averylongcharactername"
+    val gains = (1 to 10).toList.map(i => delta(s"$long$i", 100000000L - i))
+    val fraggers = (1 to FragTally.TopFraggers).toList.map(i => (s"$long$i", 20 - i))
+    val embed = StatisticsEmbeds.build(
+      report(gains, Some(delta("Someoneunlucky", -9182993)), Some(advance("magiclevel", 131)), Some(summary())),
+      FragTally(99, 99, fraggers, fraggers))
     embed.getDescription.length should be < 4096
     embed.getFields.forEach(field => field.getValue.length should be < 1024)
+    embed.getFields.size should be <= 25
     embed.getLength should be < 6000
   }
 }

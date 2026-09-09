@@ -17,7 +17,14 @@ final case class DailyReport(
     saveDay: LocalDate,
     gains: List[ExperienceDelta],
     loss: Option[ExperienceDelta],
-    advance: Option[HighscoreEvent]
+    advance: Option[HighscoreEvent],
+    /** What the world was killing, from the day's kill statistics snapshot.
+     *
+     *  None where the snapshot was never taken — a bot that was down, an
+     *  upstream 503 that outlasted the day, or simply the first day after this
+     *  shipped. The rest of the post is unaffected: the two halves come from
+     *  different sources and neither waits on the other. */
+    kills: Option[DayKillSummary] = None
 ) {
 
   /** Nothing to say. The ordinary cause is a cold start rather than a quiet day:
@@ -25,7 +32,7 @@ final case class DailyReport(
    *  day is the second one it was swept. A world where genuinely nobody in the
    *  top thousand moved and nobody advanced a skill is possible in principle and
    *  reads the same way — silence, which is the honest answer either way. */
-  def isEmpty: Boolean = gains.isEmpty && loss.isEmpty && advance.isEmpty
+  def isEmpty: Boolean = gains.isEmpty && loss.isEmpty && advance.isEmpty && kills.isEmpty
 
   def nonEmpty: Boolean = !isEmpty
 }

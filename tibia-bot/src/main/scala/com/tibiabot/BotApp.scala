@@ -115,6 +115,8 @@ object BotApp extends App with StrictLogging {
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
   private val killStatisticsRepository: persistence.KillStatisticsRepository =
     new persistence.jdbc.JdbcKillStatisticsRepository(connectionProvider)
+  private val fragRepository: persistence.FragRepository =
+    new persistence.jdbc.JdbcFragRepository(connectionProvider)
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
   private lazy val wikiClient: wiki.WikiClient = new wiki.FandomWikiClient()
@@ -1267,6 +1269,32 @@ object BotApp extends App with StrictLogging {
     logger.info("Daily statistics post enabled for this bot's guilds")
   }
 
+  /** File a death's frags for one guild.
+   *
+   *  Called from the death path, which runs on the world's stream thread and
+   *  must not be held up by a database write it does not need the result of —
+   *  and must certainly not be brought down by one. A failure costs one death's
+   *  frags out of a day's tally.
+   *
+   *  Skipped entirely when the guild has no statistics channel: the tally exists
+   *  only to be posted there, so recording for a server that will never read it
+   *  is a write per death for nothing. A guild that turns the channel on starts
+   *  counting from that moment, which is the same cold start the feature has
+   *  everywhere.
+   */
+  def recordFrags(guildId: String, events: List[domain.FragEvent]): Unit =
+    if (events.nonEmpty && hasStatisticsChannel(guildId, events.head.world)) {
+      Future {
+        fragRepository.record(guildId, events)
+      }(ex).failed.foreach(error =>
+        logger.warn(s"Could not record ${events.size} frag(s) for guild '$guildId': ${error.getMessage}"))(ex)
+    }
+
+  private def hasStatisticsChannel(guildId: String, world: String): Boolean =
+    worldsData.getOrElse(guildId, Nil)
+      .exists(w => w.name.equalsIgnoreCase(world) && w.statisticsChannel != null &&
+        w.statisticsChannel.nonEmpty && w.statisticsChannel != "0")
+
   /** The statistics channels waiting on a post, one per world per discord.
    *
    *  Unlike the Levels audience above this needs no per-world show flags: the
@@ -1309,14 +1337,16 @@ object BotApp extends App with StrictLogging {
   private lazy val statisticsService = new statistics.StatisticsService(
     experience = experienceRepository,
     highscores = highscoreRepository,
+    killStatistics = killStatisticsRepository,
+    frags = fragRepository,
     targets = () => statisticsTargets(),
-    announce = (target, report) =>
+    announce = (target, report, frags) =>
       Option(discordGateway.guildById(target.guildId))
         .flatMap(guild => Option(guild.getTextChannelById(target.channelId)))
         .filter(channel => channel.canTalk() || !Config.prod)
         .foreach { channel =>
           outboundSender.enqueue("statistics") { () =>
-            channel.sendMessageEmbeds(presentation.StatisticsEmbeds.build(report, presentation.SkillEmojis.icon))
+            channel.sendMessageEmbeds(presentation.StatisticsEmbeds.build(report, frags, presentation.SkillEmojis.icon))
               .setSuppressedNotifications(true).queue(null, null)
           }
         },
@@ -1696,6 +1726,8 @@ object BotApp extends App with StrictLogging {
     catch { case ex: Throwable => logger.warn("Failed to run the highscore history prune", ex) }
     try pruneKillStatistics()
     catch { case ex: Throwable => logger.warn("Failed to run the kill statistics prune", ex) }
+    try pruneFrags()
+    catch { case ex: Throwable => logger.warn("Failed to run the frag prune", ex) }
   })(ex)
 
   /** Retention for the highscore tables.
@@ -1733,6 +1765,27 @@ object BotApp extends App with StrictLogging {
         .minusSeconds(Config.Statistics.KillStatistics.retention.toSeconds)
         .atZone(domain.time.Clock.Berlin).toLocalDate
       killStatisticsRepository.removeExpired(before)
+    }
+
+  /** Drop frag rows older than the retention, per guild.
+   *
+   *  Guild by guild because the rows are, and only for guilds that actually have
+   *  a statistics channel — a guild with none has no rows, and opening its
+   *  database to prove that is a connection for nothing.
+   *
+   *  Not primary-only, unlike the two prunes above: these live in each guild's
+   *  own database, and only the bot that serves a guild can reach it. */
+  private def pruneFrags(): Unit =
+    if (Config.Statistics.enabled) {
+      val before = Instant.now()
+        .minusSeconds(Config.Statistics.fragRetention.toSeconds)
+        .atZone(domain.time.Clock.Berlin).toLocalDate
+      statisticsTargets().map(_.guildId).distinct.foreach { guildId =>
+        try fragRepository.removeExpired(guildId, before)
+        catch {
+          case ex: Throwable => logger.warn(s"Could not prune frags for guild '$guildId'", ex)
+        }
+      }
     }
 
   /** A guild with no worlds tracked (its own per-guild database may not even

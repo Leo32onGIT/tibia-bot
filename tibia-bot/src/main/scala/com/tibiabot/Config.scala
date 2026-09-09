@@ -142,6 +142,7 @@ object Config {
 
     val enabled: Boolean = statistics.getBoolean("enabled")
     val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
+    val fragRetention: FiniteDuration = statistics.getDuration("frag-retention").toScala
 
     /** The daily kill statistics snapshot. Independent of `enabled` above: the
      *  history is worth banking whether or not anything posts it yet. */

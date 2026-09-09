@@ -1,8 +1,8 @@
 package com.tibiabot.statistics
 
 import com.tibiabot.domain.time.Clock
-import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
-import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
+import com.tibiabot.domain._
+import com.tibiabot.persistence.{ExperienceRepository, FragRepository, HighscoreRepository, KillStatisticsRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -39,6 +39,28 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
+  private class StubKillStatistics(days: Map[(String, LocalDate), DayKillSummary] = Map.empty)
+      extends KillStatisticsRepository {
+    def recordBossKills(rows: List[BossKills]): Unit = ()
+    def recordSummary(summary: DayKillSummary): Unit = ()
+    def hasDay(world: String, saveDay: LocalDate): Boolean = false
+    def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
+    def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = days.get((world, saveDay))
+    def removeExpired(before: LocalDate): Unit = ()
+  }
+
+  private class StubFrags(tallies: Map[(String, String), FragTally] = Map.empty, fail: Boolean = false)
+      extends FragRepository {
+    val reads = mutable.ListBuffer.empty[(String, String)]
+    def record(guildId: String, events: List[FragEvent]): Unit = ()
+    def tally(guildId: String, world: String, saveDay: LocalDate, topFraggers: Int): FragTally = {
+      reads += ((guildId, world))
+      if (fail) throw new RuntimeException("guild database is away")
+      tallies.getOrElse((guildId, world), FragTally.empty)
+    }
+    def removeExpired(guildId: String, before: LocalDate): Unit = ()
+  }
+
   private object NoopHighscores extends HighscoreRepository {
     def load(world: String, category: String): Map[String, HighscoreRecord] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
@@ -58,17 +80,21 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       targets: List[StatisticsTarget],
       experience: ExperienceRepository = new StubExperience(Map("Antica" -> List(delta("Bubble", 900)))),
       now: ZonedDateTime = insideWindow,
-      announceFails: Boolean = false
+      announceFails: Boolean = false,
+      kills: KillStatisticsRepository = new StubKillStatistics(),
+      frags: FragRepository = new StubFrags()
   ) {
-    val posts = mutable.ListBuffer.empty[(String, DailyReport)]
+    val posts = mutable.ListBuffer.empty[(String, DailyReport, FragTally)]
     val marks = mutable.ListBuffer.empty[(String, LocalDate)]
     val service = new StatisticsService(
       experience = experience,
       highscores = NoopHighscores,
+      killStatistics = kills,
+      frags = frags,
       targets = () => targets,
-      announce = (target, report) => {
+      announce = (target, report, tally) => {
         if (announceFails) throw new RuntimeException("channel is gone")
-        posts += ((target.guildId, report))
+        posts += ((target.guildId, report, tally))
       },
       recordPosted = (target, day) => marks += ((target.guildId, day)),
       now = () => now
@@ -151,6 +177,66 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     harness.marks shouldBe List(("a", yesterday))
   }
 
+  // --- the guild-scoped half ----------------------------------------------
+
+  test("the frag tally is read per guild, not shared like the world figures") {
+    // Two servers watching the same world read the same deaths as opposite
+    // frags, and both are right — so this is the one thing that cannot be
+    // computed once and handed to everybody.
+    val frags = new StubFrags(Map(
+      ("a", "Antica") -> FragTally(3, 1, List(("Bubble", 3)), List(("Arieswar", 1))),
+      ("b", "Antica") -> FragTally(1, 3, List(("Arieswar", 1)), List(("Bubble", 3)))))
+    val harness = new Harness(List(target("a"), target("b")), frags = frags)
+    harness.service.tick()
+    frags.reads should contain theSameElementsAs List(("a", "Antica"), ("b", "Antica"))
+    harness.posts.find(_._1 == "a").map(_._3.enemiesKilled) shouldBe Some(3)
+    harness.posts.find(_._1 == "b").map(_._3.enemiesKilled) shouldBe Some(1)
+  }
+
+  test("frags alone are worth a post") {
+    // A world can have a quiet day in the highscores and a war in it.
+    val frags = new StubFrags(Map(("a", "Antica") -> FragTally(4, 2, List(("Bubble", 4)), Nil)))
+    val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), frags = frags)
+    harness.service.tick()
+    harness.posts.map(_._1) shouldBe List("a")
+    harness.posts.head._2.isEmpty shouldBe true
+    harness.posts.head._3.enemiesKilled shouldBe 4
+  }
+
+  test("a frag query that fails does not cost the rest of the post") {
+    val harness = new Harness(List(target("a")), frags = new StubFrags(fail = true))
+    harness.service.tick()
+    harness.posts.map(_._1) shouldBe List("a")
+    harness.posts.head._3 shouldBe FragTally.empty
+    harness.posts.head._2.gains should not be empty
+  }
+
+  // --- the kill statistics half -------------------------------------------
+
+  test("the day's kill statistics ride along when the snapshot was taken") {
+    val summary = DayKillSummary("Antica", yesterday, Some(("dragon", 40)), Some(("wyrm", 3)), 12, 900L, 20)
+    val harness = new Harness(List(target("a")), kills = new StubKillStatistics(Map(("Antica", yesterday) -> summary)))
+    harness.service.tick()
+    harness.posts.head._2.kills shouldBe Some(summary)
+  }
+
+  test("a day whose snapshot was never taken still posts everything else") {
+    val harness = new Harness(List(target("a")))
+    harness.service.tick()
+    harness.posts.head._2.kills shouldBe None
+    harness.posts.head._2.gains should not be empty
+  }
+
+  test("kill statistics alone are worth a post") {
+    val summary = DayKillSummary("Antica", yesterday, Some(("dragon", 40)), None, 0, 900L, 0)
+    val harness = new Harness(
+      List(target("a")),
+      experience = new StubExperience(Map.empty),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> summary)))
+    harness.service.tick()
+    harness.posts.map(_._1) shouldBe List("a")
+  }
+
   test("one guild's broken channel does not stop another's post") {
     val experience = new StubExperience(Map("Antica" -> List(delta("Bubble", 900))))
     val posts = mutable.ListBuffer.empty[String]
@@ -158,8 +244,10 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     val service = new StatisticsService(
       experience = experience,
       highscores = NoopHighscores,
+      killStatistics = new StubKillStatistics(),
+      frags = new StubFrags(),
       targets = () => List(target("broken"), target("fine")),
-      announce = (target, _) =>
+      announce = (target, _, _) =>
         if (target.guildId == "broken") throw new RuntimeException("channel is gone") else posts += target.guildId,
       recordPosted = (target, _) => marks += target.guildId,
       now = () => insideWindow

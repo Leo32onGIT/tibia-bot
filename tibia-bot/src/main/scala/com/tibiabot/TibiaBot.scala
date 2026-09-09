@@ -6,6 +6,7 @@ import org.apache.pekko.stream.ActorAttributes.supervisionStrategy
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import org.apache.pekko.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
+import com.tibiabot.scheduler.ServerSaveSchedule
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -1010,6 +1011,11 @@ class TibiaBot(
                 var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
                 val killerBuffer = ListBuffer[String]()
                 val exivaBuffer = ListBuffer[(String, Option[Int])]()
+                // Every player killer, for the frag tally. Its own buffer rather
+                // than a reuse of exivaBuffer, which only fills for an ally death
+                // and only when the world has exiva lists on — it would miss every
+                // hunted-player kill and every world with the setting off.
+                val fragBuffer = ListBuffer[String]()
                 var exivaList = ""
                 val killerList = charDeath.death.killers // get all killers
 
@@ -1097,6 +1103,7 @@ class TibiaBot(
                             val summonerLevel = getKillerLevel(summoner, killerLevelsAt)
                             val summonerLevelText = summonerLevel.map(level => s" [$level]").getOrElse("")
                             killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
+                            fragBuffer += summoner
                             if (embedColor == 13773097) {
                               if (exivaListCheck == "true") {
                                 exivaBuffer += ((summoner, summonerLevel))
@@ -1106,6 +1113,7 @@ class TibiaBot(
                             val killerLevel = getKillerLevel(k.name, killerLevelsAt)
                             val levelText = killerLevel.map(level => s" [$level]").getOrElse("")
                             killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
+                            fragBuffer += k.name
                             if (embedColor == 13773097) {
                               if (exivaListCheck == "true") {
                                 exivaBuffer += ((k.name, killerLevel))
@@ -1201,6 +1209,30 @@ class TibiaBot(
                 }
 
                 val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+
+                // File the frags. Only a listed victim counts: a neutral dying to
+                // another neutral is somebody else's war, and this guild's lists
+                // are what make it a frag at all — which is why the rows are
+                // guild-scoped while the rest of the Statistics channel is not.
+                //
+                // Deliberately not gated on the embed being shown. showEnemiesDeaths
+                // and deathsMin decide what a server wants to *see*; the frag
+                // happened either way, and a tally that quietly omitted low-level
+                // kills would be wrong rather than filtered.
+                if (fragBuffer.nonEmpty) {
+                  val victimSide =
+                    if (huntedPlayers || huntedGuilds) Some(domain.FragSide.Enemy)
+                    else if (allyPlayers || allyGuilds) Some(domain.FragSide.Ally)
+                    else None
+                  victimSide.foreach { side =>
+                    val diedAt = ZonedDateTime.parse(charDeath.death.time)
+                    val saveDay = ServerSaveSchedule.lastServerSave(diedAt).toLocalDate
+                    BotApp.recordFrags(guildId, fragBuffer.toList.distinct.map { killer =>
+                      domain.FragEvent(world, saveDay, killer, charName, side, diedAt.toInstant)
+                    })
+                  }
+                }
+
                 val limit = 4065
                 val header = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}"
 

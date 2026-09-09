@@ -1,7 +1,8 @@
 package com.tibiabot.statistics
 
 import com.tibiabot.domain.time.Clock
-import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
+import com.tibiabot.domain.FragTally
+import com.tibiabot.persistence.{ExperienceRepository, FragRepository, HighscoreRepository, KillStatisticsRepository}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
@@ -52,8 +53,10 @@ final case class StatisticsTarget(
 final class StatisticsService(
     experience: ExperienceRepository,
     highscores: HighscoreRepository,
+    killStatistics: KillStatisticsRepository,
+    frags: FragRepository,
     targets: () => List[StatisticsTarget],
-    announce: (StatisticsTarget, DailyReport) => Unit,
+    announce: (StatisticsTarget, DailyReport, FragTally) => Unit,
     recordPosted: (StatisticsTarget, LocalDate) => Unit,
     now: () => ZonedDateTime = () => ZonedDateTime.now(Clock.Berlin)
 ) extends StrictLogging {
@@ -73,12 +76,27 @@ final class StatisticsService(
 
   private def postAll(owed: List[StatisticsTarget], day: LocalDate): Unit = {
     // Built per world rather than per target, and only for the worlds something
-    // is actually waiting on.
+    // is actually waiting on. The frag tally cannot be shared this way — it is
+    // read from the guild's own lists — so it is fetched per target below.
     val reports = owed.map(_.world).distinct.map(world => world -> report(world, day)).toMap
     owed.foreach { target =>
       reports.get(target.world).flatten.foreach(post(target, _))
     }
   }
+
+  /** One guild's frags for the day, or an empty tally if the query failed.
+   *
+   *  A failure here does not hold the post back. The world figures are the bulk
+   *  of it and are already in hand; losing the frag section is worth far less
+   *  than losing the day. */
+  private def tally(target: StatisticsTarget, day: LocalDate): FragTally =
+    try frags.tally(target.guildId, target.world, day, FragTally.TopFraggers)
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read frags for '${target.world}' " +
+          s"in ${target.guildLabel}: ${error.getMessage}")
+        FragTally.empty
+    }
 
   /** Build one world's day, or None if the queries failed.
    *
@@ -98,7 +116,11 @@ final class StatisticsService(
         saveDay = day,
         gains = DailyStatistics.gains(movers),
         loss = experience.dailyLoss(world, day),
-        advance = highscores.topAdvance(world, from, to)
+        advance = highscores.topAdvance(world, from, to),
+        // Absent where the snapshot was never taken. The post is not held back
+        // for it: the two halves come from different sources, and a day with
+        // experience figures and no kill figures is worth more than silence.
+        kills = killStatistics.summary(world, day)
       ))
     } catch {
       case NonFatal(error) =>
@@ -119,7 +141,10 @@ final class StatisticsService(
    *  and again every morning, and the day it missed is not recoverable anyway. */
   private def post(target: StatisticsTarget, report: DailyReport): Unit = {
     try {
-      if (report.nonEmpty) announce(target, report)
+      // Frags alone are worth a post: a server whose world had a quiet day in the
+      // highscores can still have had a war in it.
+      val frags = tally(target, report.saveDay)
+      if (report.nonEmpty || frags.nonEmpty) announce(target, report, frags)
       else logger.debug(s"Statistics: nothing to report for '${target.world}' on ${report.saveDay}")
     } catch {
       case NonFatal(error) =>

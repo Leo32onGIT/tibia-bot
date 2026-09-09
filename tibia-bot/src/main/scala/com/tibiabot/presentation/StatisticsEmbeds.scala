@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
-import com.tibiabot.statistics.DailyReport
+import com.tibiabot.domain.{ExperienceDelta, FragTally, HighscoreEvent}
+import com.tibiabot.statistics.{DailyReport, DayKillSummary}
 import com.tibiabot.tibiadata.HighscoreCategory
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
@@ -35,7 +35,11 @@ object StatisticsEmbeds {
 
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
-  def build(report: DailyReport, skillIcon: HighscoreCategory => String = _ => ""): MessageEmbed = {
+  def build(
+      report: DailyReport,
+      frags: FragTally = FragTally.empty,
+      skillIcon: HighscoreCategory => String = _ => ""
+  ): MessageEmbed = {
     val embed = new EmbedBuilder()
     embed.setTitle(s":bar_chart: ${report.world} — ${report.saveDay.format(dayFormat)}", Urls.worldUrl(report.world))
     embed.setColor(StatisticsColor)
@@ -46,6 +50,18 @@ object StatisticsEmbeds {
     }
     report.advance.foreach { event =>
       embed.addField(":trophy: Highest skill reached", advanceLine(event, skillIcon), false)
+    }
+    report.kills.flatMap(killLines).foreach { lines =>
+      embed.addField(":crossed_swords: Around the world", lines, false)
+    }
+    // The one guild-scoped part of the post, and the only part two servers
+    // watching the same world will see differently — which is the point of it.
+    if (frags.nonEmpty) {
+      embed.addField(":dagger: Frags", fragTotals(frags), false)
+      fraggerField(frags.topAllied, ":green_circle: Top fraggers")
+        .foreach(value => embed.addField(":green_circle: Top fraggers", value, true))
+      fraggerField(frags.topEnemy, ":red_circle: Enemy fraggers")
+        .foreach(value => embed.addField(":red_circle: Enemy fraggers", value, true))
     }
 
     // Said once, in the one place a reader will look when a name they expected
@@ -89,6 +105,47 @@ object StatisticsEmbeds {
     s"${Emojis.vocEmoji(event.vocation)} **[${event.displayName}](${Urls.charUrl(event.displayName)})** " +
       s"reached $icon$reached *(level ${event.level})*"
   }
+
+  /** Both sides' losses, always both lines even when one is zero — "0 allies
+   *  lost" is the good half of the news and dropping it would leave a reader
+   *  wondering whether it was zero or unmeasured. */
+  private def fragTotals(frags: FragTally): String =
+    s"Enemies killed — **${number(frags.enemiesKilled.toLong)}**\n" +
+      s"Allies lost — **${number(frags.alliesKilled.toLong)}**"
+
+  /** One side's leaderboard, or None when nobody is on it.
+   *
+   *  Inline, so the two sides sit beside each other rather than one under the
+   *  other — a reader compares them. Names are plain rather than linked: ten
+   *  linked names is about 900 characters against a field's 1,024 cap, and these
+   *  two are the fields most likely to be full. */
+  private def fraggerField(fraggers: List[(String, Int)], label: String): Option[String] =
+    if (fraggers.isEmpty) None
+    else Some(fraggers.zipWithIndex.map { case ((name, count), index) =>
+      s"`${(index + 1).toString.reverse.padTo(2, ' ').reverse}.` $name — **$count**"
+    }.mkString("\n"))
+
+  /** The day's kill statistics, or None when the snapshot said nothing worth a
+   *  field.
+   *
+   *  A world can genuinely have a day where no creature killed a player, so each
+   *  line is dropped on its own rather than the field being all-or-nothing. PvP
+   *  deaths get a line of their own because the endpoint counts them as a race
+   *  called "players" — miscategorised rather than uninteresting, and the two
+   *  lines above deliberately exclude them. */
+  private def killLines(kills: DayKillSummary): Option[String] = {
+    val lines = List(
+      kills.mostKilled.map { case (race, count) => s"Most killed — **$race** (${number(count.toLong)})" },
+      kills.deadliest.map { case (race, count) =>
+        s"Deadliest — **$race** (${number(count.toLong)} ${plural(count, "player", "players")})" },
+      Option(kills.playerDeaths).filter(_ > 0)
+        .map(count => s"Killed by other players — **${number(count.toLong)}**"),
+      Option(kills.totalKilled).filter(_ > 0).map(total => s"Creatures killed in all — **${number(total)}**")
+    ).flatten
+    if (lines.isEmpty) None else Some(lines.mkString("\n"))
+  }
+
+  private def plural(count: Int, one: String, many: String): String = if (count == 1) one else many
 
   /** Thousands separators, and a sign that survives them.
    *

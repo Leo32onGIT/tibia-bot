@@ -161,7 +161,7 @@ what the numbers are drawn from rather than implying the whole world was measure
 
 ---
 
-## 5. Phase 2 — frags
+## 5. Phase 2 — frags — **BUILT**
 
 Guild-scoped, and **has no history** — it starts recording the day it deploys.
 
@@ -211,7 +211,7 @@ entirely when it is empty rather than rendered as a blank field.
 
 ---
 
-## 6. Phase 3 — killstatistics — **fetch-and-store BUILT, embed still to do**
+## 6. Phase 3 — killstatistics — **BUILT**
 
 ### 6.1 The endpoint
 
@@ -322,10 +322,10 @@ waiting.
    see section 10.
 2. ~~**Phase 3's fetch-and-store half**, without any embed.~~ **Done** — see
    section 11.
-3. **Phase 2** frags — the largest change to existing code, and the one whose
-   value only begins accruing after it ships.
-4. **Phase 3's embed** — creature stats, once a day's snapshot is reliably there.
-5. **Phase 4** predictions, once the history is deep enough to be honest.
+3. ~~**Phase 2** frags.~~ **Done** — see section 12.
+4. ~~**Phase 3's embed** — creature stats.~~ **Done** — see section 12.
+5. **Phase 4** predictions, once the history is deep enough to be honest. The
+   only phase left.
 
 ---
 
@@ -430,3 +430,46 @@ The correction and its evidence are recorded in the file's `_source` field.
 The embed. The figures are being banked but nothing reads them yet;
 `StatisticsService.report` is the seam, and `KillStatisticsRepository.summary`
 already returns exactly what a "what the world was killing" field needs.
+
+---
+
+## 12. What Phases 2 and 3's embed shipped
+
+1,984 tests pass, warning-free. The post now carries six fields at full stretch
+and measures ~2,060 characters against the 6,000 cap.
+
+**Kill statistics in the post.** `DailyReport` gained a `kills` field and
+`StatisticsService` reads `KillStatisticsRepository.summary`. Rendered as one
+"Around the world" field: most killed, deadliest creature, PvP deaths, total
+creatures killed. Lines drop individually rather than the field being
+all-or-nothing, because a world can genuinely have a day where no creature killed
+a player. A day whose snapshot was never taken posts everything else regardless —
+the two halves come from different sources and neither waits on the other.
+
+**Frags.** `frag_event` in the **per-guild** database, created on first use the
+way `JdbcActivityRepository` does it, so the several hundred existing guilds need
+no migration pass. Keyed `(world, killer, victim, occurred_at)` — a natural key,
+since one player cannot kill the same player twice in one instant — which makes a
+reprocessed death a no-op rather than a doubled tally.
+
+Recorded from the death path via a new `fragBuffer`, **not** `exivaBuffer`: that
+one only fills for an ally death *and* only when the world has exiva lists on, so
+reusing it would have missed every hunted-player kill and every world with the
+setting off. Recording is deliberately not gated on the embed being shown —
+`showEnemiesDeaths` and `deathsMin` decide what a server wants to *see*, and a
+tally that quietly omitted low-level kills would be wrong rather than filtered.
+It is gated on the guild having a statistics channel, since the rows exist only to
+be posted there.
+
+The counts and the leaderboards measure different things on purpose: "enemies
+killed" counts distinct deaths (a victim killed by eight people is one loss), the
+leaderboards count rows per killer.
+
+### Gaps worth knowing
+
+- **The three new frag SQL statements are unexercised.** Docker was not running,
+  so nothing here has run them against a real Postgres. They are the newest and
+  most intricate SQL in the feature. Worth a single local smoke test before this
+  is deployed.
+- Frags have no history and cannot get one — the tally starts the day it deploys,
+  and a guild that turns the channel on later starts counting from that moment.
