@@ -113,6 +113,8 @@ object BotApp extends App with StrictLogging {
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.PooledConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
+  private val killStatisticsRepository: persistence.KillStatisticsRepository =
+    new persistence.jdbc.JdbcKillStatisticsRepository(connectionProvider)
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
   private lazy val wikiClient: wiki.WikiClient = new wiki.FandomWikiClient()
@@ -1106,8 +1108,14 @@ object BotApp extends App with StrictLogging {
   /** Its own client, and so its own in-flight ceiling. A highscores sweep is
    *  thousands of requests an hour on a schedule nobody is waiting for; sharing
    *  the character poll's permits would let it sit in front of a death. */
-  private lazy val highscoresApi: tibiadata.HighscoresApi =
+  private lazy val scrapingClient: TibiaDataClient =
     new TibiaDataClient(inFlight = new tibiadata.InFlightLimit(Config.Highscores.maxInFlight))(actorSystem)
+  private lazy val highscoresApi: tibiadata.HighscoresApi = scrapingClient
+  /** The same client. The daily kill statistics snapshot is 68 requests once a
+   *  day, so a third connection pool for it would cost more than it carries —
+   *  and it is background scraping on the same footing as the sweep above, which
+   *  is what that client's separate ceiling is for. */
+  private lazy val killStatisticsApi: tibiadata.KillStatisticsApi = scrapingClient
 
   /** The guild a character is in, for the ally/enemy classification.
    *
@@ -1220,6 +1228,31 @@ object BotApp extends App with StrictLogging {
       catch { case error: Throwable => logger.warn("Failed to post highscore advances", error) }
     })(ex)
     logger.info("Highscores advance feed enabled for this bot's guilds")
+  }
+
+  /** Banks one kill statistics snapshot per world per day. Posts nothing — the
+   *  spawn prediction that reads it is a later phase — but a day not taken
+   *  cannot be recovered, so it runs well ahead of its reader. */
+  private lazy val killStatisticsService = new statistics.KillStatisticsService(
+    api = killStatisticsApi,
+    repository = killStatisticsRepository,
+    trackedWorlds = () => streamSupervisor.activeWorlds.toList,
+    gap = () => Config.Statistics.KillStatistics.requestGap,
+    delay = wait => org.apache.pekko.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex),
+    settle = Config.Statistics.KillStatistics.settle
+  )(ex)
+
+  if (Config.Statistics.KillStatistics.enabled) {
+    // Primary only, like the highscore sweep and for the same reason: reading
+    // the same 68 pages from two addresses through one TibiaData instance would
+    // double the load on tibia.com for identical rows, and the rows land in the
+    // shared cache that every bot can read anyway.
+    if (Config.BotRole.current != Config.BotRole.Secondary) {
+      actorSystem.scheduler.scheduleWithFixedDelay(
+        5.minutes, Config.Statistics.KillStatistics.tickInterval)(
+        () => { killStatisticsService.tick(); () })(ex)
+      logger.info("Daily kill statistics snapshot enabled for every tracked world")
+    }
   }
 
   if (Config.Statistics.enabled) {
@@ -1661,6 +1694,8 @@ object BotApp extends App with StrictLogging {
     catch { case ex: Throwable => logger.warn("Failed to run the inactive-guild prune sweep", ex) }
     try pruneHighscoreHistory()
     catch { case ex: Throwable => logger.warn("Failed to run the highscore history prune", ex) }
+    try pruneKillStatistics()
+    catch { case ex: Throwable => logger.warn("Failed to run the kill statistics prune", ex) }
   })(ex)
 
   /** Retention for the highscore tables.
@@ -1681,6 +1716,23 @@ object BotApp extends App with StrictLogging {
       highscoreRepository.removeExpiredEvents(now.minusSeconds(Config.Highscores.eventRetention.toSeconds))
       val staleBefore = now.minusSeconds(Config.Highscores.scoreRetention.toSeconds)
       streamSupervisor.activeWorlds.foreach(world => highscoreRepository.removeStale(world, staleBefore))
+    }
+
+  /** Drop kill statistics older than the retention.
+   *
+   *  Its own prune rather than a line in the one above, because it answers to a
+   *  different setting and a much longer one: the longest boss window is 175
+   *  days, and a history shorter than the window it is meant to measure can only
+   *  ever say "not seen recently".
+   *
+   *  Primary-only like the sweep that writes it — the rows are in the shared
+   *  cache, so one bot pruning them is enough for the fleet. */
+  private def pruneKillStatistics(): Unit =
+    if (Config.Statistics.KillStatistics.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
+      val before = Instant.now()
+        .minusSeconds(Config.Statistics.KillStatistics.retention.toSeconds)
+        .atZone(domain.time.Clock.Berlin).toLocalDate
+      killStatisticsRepository.removeExpired(before)
     }
 
   /** A guild with no worlds tracked (its own per-guild database may not even

@@ -1,0 +1,356 @@
+{
+  "killstatistics": {
+    "world": "Antica",
+    "entries": [
+      {
+        "race": "(elemental forces)",
+        "last_day_players_killed": 15,
+        "last_day_killed": 0,
+        "last_week_players_killed": 70,
+        "last_week_killed": 0
+      },
+      {
+        "race": "Arachir the Ancient One",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Arthom The Hunter",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 3
+      },
+      {
+        "race": "Big Boss Trolliver",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Burster",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 3
+      },
+      {
+        "race": "Captain Jones",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Countess Sorrow",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Dharalion",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Diblis the Fair",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Dreadmaw",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Flamecaller Zazrak",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Fleabringer",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 2
+      },
+      {
+        "race": "Grorlam",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 2
+      },
+      {
+        "race": "Hatebreeder",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "High Templar Cobrass",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Jesse the Wicked",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Mahatheb",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Man in the Cave",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Mr. Punish",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Munster",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 2
+      },
+      {
+        "race": "Oodok Witchmaster",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 3
+      },
+      {
+        "race": "Orshabaal",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Rotworm Queen",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Rukor Zad",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Sir Valorcrest",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 2
+      },
+      {
+        "race": "Smuggler Baron Silvertoe",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "The Evil Eye",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "The Handmaiden",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "The Mean Masher",
+        "last_day_players_killed": 0,
+        "last_day_killed": 4,
+        "last_week_players_killed": 0,
+        "last_week_killed": 4
+      },
+      {
+        "race": "The Old Whopper",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "The Welter",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Tyrn",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 1,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Tzumrah The Dazzler",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Warlord Ruzad",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "White Pale",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 1,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Xenia",
+        "last_day_players_killed": 0,
+        "last_day_killed": 1,
+        "last_week_players_killed": 0,
+        "last_week_killed": 1
+      },
+      {
+        "race": "Zevelon Duskbringer",
+        "last_day_players_killed": 0,
+        "last_day_killed": 0,
+        "last_week_players_killed": 1,
+        "last_week_killed": 1
+      },
+      {
+        "race": "albino dragons",
+        "last_day_players_killed": 0,
+        "last_day_killed": 2,
+        "last_week_players_killed": 0,
+        "last_week_killed": 15
+      },
+      {
+        "race": "flimsy lost souls",
+        "last_day_players_killed": 5,
+        "last_day_killed": 23965,
+        "last_week_players_killed": 34,
+        "last_week_killed": 244029
+      },
+      {
+        "race": "frazzlemaws",
+        "last_day_players_killed": 4,
+        "last_day_killed": 22399,
+        "last_week_players_killed": 23,
+        "last_week_killed": 185524
+      },
+      {
+        "race": "grim reapers",
+        "last_day_players_killed": 1,
+        "last_day_killed": 22542,
+        "last_week_players_killed": 30,
+        "last_week_killed": 245256
+      },
+      {
+        "race": "players",
+        "last_day_players_killed": 378,
+        "last_day_killed": 378,
+        "last_week_players_killed": 2185,
+        "last_week_killed": 2185
+      },
+      {
+        "race": "quara looters",
+        "last_day_players_killed": 13,
+        "last_day_killed": 2969,
+        "last_week_players_killed": 43,
+        "last_week_killed": 37823
+      },
+      {
+        "race": "rootthing bug trackers",
+        "last_day_players_killed": 13,
+        "last_day_killed": 4530,
+        "last_week_players_killed": 17,
+        "last_week_killed": 35443
+      },
+      {
+        "race": "scissorions",
+        "last_day_players_killed": 12,
+        "last_day_killed": 588,
+        "last_week_players_killed": 99,
+        "last_week_killed": 4330
+      },
+      {
+        "race": "war wolves",
+        "last_day_players_killed": 0,
+        "last_day_killed": 23756,
+        "last_week_players_killed": 0,
+        "last_week_killed": 179105
+      },
+      {
+        "race": "werehyaenas",
+        "last_day_players_killed": 7,
+        "last_day_killed": 23472,
+        "last_week_players_killed": 59,
+        "last_week_killed": 206719
+      }
+    ],
+    "total": {
+      "last_day_players_killed": 818,
+      "last_day_killed": 2514276,
+      "last_week_players_killed": 5520,
+      "last_week_killed": 21487813
+    }
+  },
+  "information": {
+    "api": {
+      "version": 4,
+      "release": "4.10.0",
+      "commit": "d53b603c7e235c45268bcf878ef2921b2356cf75"
+    },
+    "timestamp": "2026-09-09T07:09:20Z",
+    "tibia_urls": [
+      "https://www.tibia.com/community/?subtopic=killstatistics&world=Antica"
+    ],
+    "status": {
+      "http_code": 200
+    }
+  }
+}

@@ -142,6 +142,19 @@ object Config {
 
     val enabled: Boolean = statistics.getBoolean("enabled")
     val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
+
+    /** The daily kill statistics snapshot. Independent of `enabled` above: the
+     *  history is worth banking whether or not anything posts it yet. */
+    object KillStatistics {
+      private val killStatistics = statistics.getConfig("kill-statistics")
+      private def dur(key: String): FiniteDuration = killStatistics.getDuration(key).toScala
+
+      val enabled: Boolean = killStatistics.getBoolean("enabled")
+      val tickInterval: FiniteDuration = dur("tick-interval")
+      val requestGap: FiniteDuration = dur("request-gap")
+      val settle: java.time.Duration = killStatistics.getDuration("settle")
+      val retention: FiniteDuration = dur("retention")
+    }
   }
 
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {

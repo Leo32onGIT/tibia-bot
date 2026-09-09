@@ -329,6 +329,51 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS experience_daily_world_day
            |ON experience_daily (world, save_day);""".stripMargin
 
+      // A day's kill statistics, kept for the boss catalogue only. The endpoint
+      // returns about 1,500 races per world, 1,277 of them non-zero on an
+      // ordinary day — 87k rows a day across 68 worlds, 32M a year, on a box
+      // already at 80% disk. The 74 catalogued bosses are the part any of this
+      // is for, and they come to 5k rows a day instead.
+      //
+      // Every catalogued boss is written, zeroes included: "not seen for N days"
+      // is only measurable if a day we looked and saw nothing is distinguishable
+      // from a day we did not look.
+      val createKillStatisticsBossTable =
+        s"""CREATE TABLE IF NOT EXISTS kill_statistics_boss (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |race VARCHAR(255) NOT NULL,
+           |killed INT NOT NULL,
+           |players_killed INT NOT NULL,
+           |PRIMARY KEY (world, save_day, race)
+           |);""".stripMargin
+
+      // The rest of the day in one row, so the headline figures survive without
+      // keeping the 1,500 races they were derived from.
+      val createKillStatisticsSummaryTable =
+        s"""CREATE TABLE IF NOT EXISTS kill_statistics_summary (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |most_killed_race VARCHAR(255) NOT NULL DEFAULT '',
+           |most_killed INT NOT NULL DEFAULT 0,
+           |deadliest_race VARCHAR(255) NOT NULL DEFAULT '',
+           |deadliest_kills INT NOT NULL DEFAULT 0,
+           |player_deaths INT NOT NULL DEFAULT 0,
+           |total_killed BIGINT NOT NULL DEFAULT 0,
+           |total_players_killed INT NOT NULL DEFAULT 0,
+           |PRIMARY KEY (world, save_day)
+           |);""".stripMargin
+
+      // The prune deletes by day across every world, and the primary keys above
+      // both lead with world.
+      val createKillStatisticsBossIndex =
+        s"""CREATE INDEX IF NOT EXISTS kill_statistics_boss_save_day
+           |ON kill_statistics_boss (save_day);""".stripMargin
+
+      val createKillStatisticsSummaryIndex =
+        s"""CREATE INDEX IF NOT EXISTS kill_statistics_summary_save_day
+           |ON kill_statistics_summary (save_day);""".stripMargin
+
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
@@ -343,6 +388,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createExperienceReadingIndex)
       newStatement.executeUpdate(createExperienceDailyIndex)
       newStatement.executeUpdate(createExperienceDailyWorldDayIndex)
+      newStatement.executeUpdate(createKillStatisticsBossTable)
+      newStatement.executeUpdate(createKillStatisticsSummaryTable)
+      newStatement.executeUpdate(createKillStatisticsBossIndex)
+      newStatement.executeUpdate(createKillStatisticsSummaryIndex)
 
       newStatement.close()
     }

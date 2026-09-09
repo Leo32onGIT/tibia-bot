@@ -211,7 +211,7 @@ entirely when it is empty rather than rendered as a blank field.
 
 ---
 
-## 6. Phase 3 — killstatistics
+## 6. Phase 3 — killstatistics — **fetch-and-store BUILT, embed still to do**
 
 ### 6.1 The endpoint
 
@@ -320,8 +320,8 @@ waiting.
 
 1. ~~**Phase 1** end-to-end — channel, queries, embed, schedule, tests.~~ **Done** —
    see section 10.
-2. **Phase 3's fetch-and-store half**, without any embed. Cheap, and every day it
-   is deployed is a day of boss history banked for Phase 4.
+2. ~~**Phase 3's fetch-and-store half**, without any embed.~~ **Done** — see
+   section 11.
 3. **Phase 2** frags — the largest change to existing code, and the one whose
    value only begins accruing after it ships.
 4. **Phase 3's embed** — creature stats, once a day's snapshot is reliably there.
@@ -376,3 +376,57 @@ to turn it off without stopping the history.
   second, per-target piece rather than a field on it.
 - `StatisticsService.report` is the seam the killstatistics figures plug into —
   it already builds per world and caches per tick.
+
+---
+
+## 11. What Phase 3's fetch-and-store half shipped
+
+Compiles warning-free; 1,970 tests pass, 25 of them new here.
+
+**The endpoint.** `KillStatisticsResponse` + spray-json formats +
+`getKillStatistics` on a new `KillStatisticsApi` trait — separate from `TibiaApi`
+for the reason `HighscoresApi` already is, so the six character-sheet wrappers do
+not each grow a delegating method. It shares the highscore sweep's client rather
+than opening a third connection pool for 68 requests a day.
+
+**The catalogue.** `resources/bosses.json`, 74 bosses with their spawn windows,
+from kik-tibia/boss-tracker (MIT). `statistics/BossCatalogue.scala` loads it the
+way `RespawnCatalogue` loads its seed — lazily, degrading to empty with a warning.
+
+**Storage.** `kill_statistics_boss` (74 rows per world per day) and
+`kill_statistics_summary` (one), both in `bot_cache`, with a `save_day` index for
+the prune and a 400-day retention — longer than the 175-day worst-case window,
+because a history shorter than the window it measures can only ever say "not seen
+recently".
+
+**The sweep.** `statistics/KillStatisticsService.scala`, primary-only. Files boss
+rows before the summary, because `hasDay` reads the summary — so a half-finished
+day looks unfiled and is simply read again.
+
+### Two things this phase turned up
+
+**`last_day` is the *previous closed* day, not the running one.** tibia.com states
+nothing on the page and the endpoint is Kong-cached, so sampling could not settle
+it. The reference bot does: `BossDataFetcher` attributes a snapshot to
+`timestamp.minusDays(1)`. That makes `DailyStatistics.reportedDay` the right key
+for both halves of this feature — which is what will let the killstats figures and
+the experience figures share one embed later.
+
+There is one hazard in that: tibia.com's roll at server save is not instant, and a
+read at 10:01 filed under today's date is an off-by-one that nothing downstream
+could ever detect. Hence a one-hour `settle` before any read, and no deadline
+after it — a bot down all morning still catches the day.
+
+**The upstream catalogue had a wrong race name.** It maps Rotworm Queen to
+`"Rotworm Queens"`; tibia.com uses the singular. Checked against the live endpoint
+across eight worlds: the plural appears on none, the singular on five. Left alone
+that boss would have recorded as never spawning, on every world, forever — a
+silent hole in exactly the history this phase exists to build. `yetis`,
+`midnight panthers` and `albino dragons` were checked the same way and are right.
+The correction and its evidence are recorded in the file's `_source` field.
+
+### Still to do in Phase 3
+
+The embed. The figures are being banked but nothing reads them yet;
+`StatisticsService.report` is the seam, and `KillStatisticsRepository.summary`
+already returns exactly what a "what the world was killing" field needs.
