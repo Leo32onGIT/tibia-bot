@@ -154,6 +154,59 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
       deltas.toList
     }
 
+  def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] =
+    if (names.isEmpty) Nil
+    else JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // The name set is built from the guild's own hunted list, never from user
+      // input reaching here directly, but it is still bound rather than spliced.
+      val placeholders = List.fill(names.size)("?").mkString(",")
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT today.name,
+           |       today.display_name,
+           |       today.vocation,
+           |       today.char_level,
+           |       today.experience,
+           |       before.char_level AS previous_level,
+           |       today.experience - before.experience AS gained
+           |FROM experience_daily today
+           |JOIN experience_daily before
+           |  ON before.world = today.world
+           | AND before.name = today.name
+           | AND before.save_day = ?
+           |WHERE today.world = ? AND today.save_day = ?
+           |  AND today.name IN ($placeholders)
+           |  AND today.experience < before.experience
+           |ORDER BY gained ASC
+           |LIMIT ?;
+           |""".stripMargin
+      )
+      statement.setDate(1, SqlDate.valueOf(saveDay.minusDays(1)))
+      statement.setString(2, world)
+      statement.setDate(3, SqlDate.valueOf(saveDay))
+      val ordered = names.toList
+      ordered.zipWithIndex.foreach { case (name, index) => statement.setString(4 + index, name.toLowerCase) }
+      statement.setInt(4 + ordered.size, limit)
+      val result = statement.executeQuery()
+
+      val deltas = new ListBuffer[ExperienceDelta]()
+      while (result.next()) {
+        val key = Option(result.getString("name")).getOrElse("")
+        deltas += ExperienceDelta(
+          name = key,
+          displayName = Option(result.getString("display_name")).getOrElse(key),
+          vocation = Option(result.getString("vocation")).getOrElse(""),
+          level = result.getInt("char_level"),
+          previousLevel = result.getInt("previous_level"),
+          experience = result.getLong("experience"),
+          gained = result.getLong("gained")
+        )
+      }
+
+      statement.close()
+      deltas.toList
+    }
+
   def removeExpiredReadings(before: Instant): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement("DELETE FROM experience_reading WHERE observed < ?;")

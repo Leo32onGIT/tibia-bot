@@ -30,38 +30,64 @@ object FragSide {
  *  existed, so the tally starts on the day it deploys and there is no way to
  *  make it start earlier.
  *
- *  `killer` and `victim` are stored with the casing tibia.com showed, since that
- *  is what a post renders; grouping is done case-insensitively in the query, the
- *  same split every other name in this bot keeps. */
+ *  `victimLevel` is the level they died at, which is what "Top Enemy Killed"
+ *  ranks on. `deathMessageId` is the deaths-channel post, so the daily summary
+ *  can link back to it — empty when the death was never posted there, which
+ *  happens whenever the channel is off, the level is under `deaths_min`, or the
+ *  send failed.
+ *
+ *  `killer` and `victim` keep the casing tibia.com showed, since that is what a
+ *  post renders; grouping is done case-insensitively in the query, the same
+ *  split every other name in this bot keeps. */
 final case class FragEvent(
     world: String,
     saveDay: LocalDate,
     killer: String,
     victim: String,
+    victimLevel: Int,
     side: FragSide,
-    occurredAt: Instant
+    occurredAt: Instant,
+    deathMessageId: String
 )
+
+/** One row of a fragger list: who, and how many. */
+final case class Fragger(name: String, side: FragSide, kills: Int)
+
+/** An enemy who kept dying, and how often. */
+final case class Repeat(name: String, level: Int, deaths: Int)
+
+/** The biggest scalp of the day on one side.
+ *
+ *  `deathMessageId` is empty when that death was never posted, in which case the
+ *  summary names the kill without offering a link to it. */
+final case class TopKill(name: String, level: Int, side: FragSide, deathMessageId: String)
 
 /** A day's frags for one guild on one world.
  *
- *  Two counts and two leaderboards, because a war has two sides and a server
- *  wants to see both. `enemiesKilled` counts hunted players who died —
- *  our side's work — and `alliesKilled` counts allied players who died. The
- *  leaderboards name who did the killing in each case, so `topAllied` are the
- *  players who killed hunteds and `topEnemy` those who killed allies. */
+ *  `enemiesKilled` and `alliesKilled` count *deaths* — a victim killed by eight
+ *  people is one loss, not eight — while `fraggers` counts kills per killer, so
+ *  the two deliberately do not sum to each other.
+ *
+ *  `fraggers` is already merged and ranked across both sides: each row carries
+ *  its own side, so a reader can tell them apart without the list being split. */
 final case class FragTally(
     enemiesKilled: Int,
     alliesKilled: Int,
-    topAllied: List[(String, Int)],
-    topEnemy: List[(String, Int)]
+    fraggers: List[Fragger],
+    mostWanted: List[Repeat],
+    topEnemyKilled: Option[TopKill],
+    topAllyKilled: Option[TopKill]
 ) {
   def isEmpty: Boolean = enemiesKilled == 0 && alliesKilled == 0
   def nonEmpty: Boolean = !isEmpty
 }
 
 object FragTally {
-  val empty: FragTally = FragTally(0, 0, Nil, Nil)
+  val empty: FragTally = FragTally(0, 0, Nil, Nil, None, None)
 
-  /** How many names each side's leaderboard shows. */
-  val TopFraggers: Int = 10
+  /** How many names each side contributes to the merged fragger list, and how
+   *  long Most Wanted runs. Five a side rather than ten overall, so a one-sided
+   *  day cannot crowd the other side out of its own post. */
+  val TopFraggers: Int = 5
+  val TopRepeats: Int = 5
 }

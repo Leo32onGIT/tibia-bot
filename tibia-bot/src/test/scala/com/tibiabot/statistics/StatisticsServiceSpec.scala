@@ -20,11 +20,16 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
   private def delta(name: String, gained: Long) =
     ExperienceDelta(name.toLowerCase, name, "Elite Knight", 400, 399, 1000000L, gained)
 
-  private def target(guildId: String, world: String = "Antica", posted: String = "") =
-    StatisticsTarget(guildId, s"Guild $guildId", world, s"channel-$guildId", posted)
+  private def target(guildId: String, world: String = "Antica", posted: String = "",
+                     hunted: Set[String] = Set.empty) =
+    StatisticsTarget(guildId, s"Guild $guildId", world, s"channel-$guildId", posted, hunted)
 
-  private class StubExperience(movers: Map[String, List[ExperienceDelta]] = Map.empty, fail: Boolean = false)
-      extends ExperienceRepository {
+  private class StubExperience(
+      movers: Map[String, List[ExperienceDelta]] = Map.empty,
+      fail: Boolean = false,
+      losses: List[ExperienceDelta] = Nil
+  ) extends ExperienceRepository {
+    val lossCalls = mutable.ListBuffer.empty[(String, Set[String])]
     val moverCalls = mutable.ListBuffer.empty[(String, LocalDate)]
     def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
@@ -35,6 +40,10 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       movers.getOrElse(world, Nil)
     }
     def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
+    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = {
+      lossCalls += ((world, names))
+      losses
+    }
     def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
@@ -58,7 +67,10 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       extends FragRepository {
     val reads = mutable.ListBuffer.empty[(String, String)]
     def record(guildId: String, events: List[FragEvent]): Unit = ()
-    def tally(guildId: String, world: String, saveDay: LocalDate, topFraggers: Int): FragTally = {
+    def attachDeathMessage(guildId: String, world: String, victim: String,
+                           occurredAt: Instant, messageId: String): Unit = ()
+    def tally(guildId: String, world: String, saveDay: LocalDate,
+              topFraggers: Int, topRepeats: Int): FragTally = {
       reads += ((guildId, world))
       if (fail) throw new RuntimeException("guild database is away")
       tallies.getOrElse((guildId, world), FragTally.empty)
@@ -89,7 +101,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       kills: KillStatisticsRepository = new StubKillStatistics(),
       frags: FragRepository = new StubFrags()
   ) {
-    val posts = mutable.ListBuffer.empty[(String, DailyReport, FragTally)]
+    val posts = mutable.ListBuffer.empty[(String, DailyReport, FragTally, List[ExperienceDelta])]
     val marks = mutable.ListBuffer.empty[(String, LocalDate)]
     val service = new StatisticsService(
       experience = experience,
@@ -97,9 +109,9 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       killStatistics = kills,
       frags = frags,
       targets = () => targets,
-      announce = (target, report, tally) => {
+      announce = (target, report, tally, losses) => {
         if (announceFails) throw new RuntimeException("channel is gone")
-        posts += ((target.guildId, report, tally))
+        posts += ((target.guildId, report, tally, losses))
       },
       recordPosted = (target, day) => marks += ((target.guildId, day)),
       now = () => now
@@ -189,8 +201,8 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     // frags, and both are right — so this is the one thing that cannot be
     // computed once and handed to everybody.
     val frags = new StubFrags(Map(
-      ("a", "Antica") -> FragTally(3, 1, List(("Bubble", 3)), List(("Arieswar", 1))),
-      ("b", "Antica") -> FragTally(1, 3, List(("Arieswar", 1)), List(("Bubble", 3)))))
+      ("a", "Antica") -> FragTally(3, 1, Nil, Nil, None, None),
+      ("b", "Antica") -> FragTally(1, 3, Nil, Nil, None, None)))
     val harness = new Harness(List(target("a"), target("b")), frags = frags)
     harness.service.tick()
     frags.reads should contain theSameElementsAs List(("a", "Antica"), ("b", "Antica"))
@@ -200,7 +212,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   test("frags alone are worth a post") {
     // A world can have a quiet day in the highscores and a war in it.
-    val frags = new StubFrags(Map(("a", "Antica") -> FragTally(4, 2, List(("Bubble", 4)), Nil)))
+    val frags = new StubFrags(Map(("a", "Antica") -> FragTally(4, 2, Nil, Nil, None, None)))
     val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), frags = frags)
     harness.service.tick()
     harness.posts.map(_._1) shouldBe List("a")
@@ -214,6 +226,24 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     harness.posts.map(_._1) shouldBe List("a")
     harness.posts.head._3 shouldBe FragTally.empty
     harness.posts.head._2.gains should not be empty
+  }
+
+  test("enemy experience losses are read for the guild's own hunted list") {
+    val experience = new StubExperience(
+      Map("Antica" -> List(delta("Bubble", 900))),
+      losses = List(delta("Vestrik", -24180400)))
+    val harness = new Harness(List(target("a", hunted = Set("vestrik", "grimjaw"))), experience = experience)
+    harness.service.tick()
+    experience.lossCalls shouldBe List(("Antica", Set("vestrik", "grimjaw")))
+    harness.posts.head._4.map(_.displayName) shouldBe List("Vestrik")
+  }
+
+  test("a guild hunting nobody is not asked for enemy losses at all") {
+    val experience = new StubExperience(Map("Antica" -> List(delta("Bubble", 900))))
+    val harness = new Harness(List(target("a")), experience = experience)
+    harness.service.tick()
+    experience.lossCalls shouldBe empty
+    harness.posts.head._4 shouldBe empty
   }
 
   // --- the kill statistics half -------------------------------------------
@@ -293,7 +323,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       killStatistics = new StubKillStatistics(),
       frags = new StubFrags(),
       targets = () => List(target("broken"), target("fine")),
-      announce = (target, _, _) =>
+      announce = (target, _, _, _) =>
         if (target.guildId == "broken") throw new RuntimeException("channel is gone") else posts += target.guildId,
       recordPosted = (target, _) => marks += target.guildId,
       now = () => insideWindow

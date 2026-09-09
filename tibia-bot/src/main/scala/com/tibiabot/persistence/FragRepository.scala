@@ -23,11 +23,22 @@ trait FragRepository {
    *  makes a reprocessed death a no-op rather than a doubled tally. */
   def record(guildId: String, events: List[FragEvent]): Unit
 
-  /** One world's frags for one day, counted and ranked.
+  /** Attach the deaths-channel message to a death already filed.
+   *
+   *  Separate from [[record]] because the id does not exist yet when the frags
+   *  are written: the post is still queued, and Discord only hands the id back
+   *  once it has been sent. A death that is never posted simply keeps the empty
+   *  string it was filed with. */
+  def attachDeathMessage(guildId: String, world: String, victim: String,
+                         occurredAt: java.time.Instant, messageId: String): Unit
+
+  /** One world's whole day for one guild: both counts, the merged fragger list,
+   *  the repeat victims, and the biggest kill on each side.
    *
    *  Returns [[com.tibiabot.domain.FragTally.empty]] rather than None for a
    *  quiet day, since "no frags" and "no rows" are the same fact here. */
-  def tally(guildId: String, world: String, saveDay: LocalDate, topFraggers: Int): FragTally
+  def tally(guildId: String, world: String, saveDay: LocalDate,
+            topFraggers: Int, topRepeats: Int): FragTally
 
   def removeExpired(guildId: String, before: LocalDate): Unit
 }

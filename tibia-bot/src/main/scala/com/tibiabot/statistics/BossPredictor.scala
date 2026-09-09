@@ -1,6 +1,9 @@
 package com.tibiabot.statistics
 
-import java.time.LocalDate
+import com.tibiabot.domain.time.Clock
+import com.tibiabot.scheduler.ServerSaveSchedule
+
+import java.time.{Instant, LocalDate}
 import java.time.temporal.ChronoUnit
 
 /** How likely a boss is to be up. */
@@ -26,7 +29,27 @@ object Chance {
  *  second or third window, and past a certain point the windows overlap so
  *  completely that there is no upper bound left worth printing — that is what a
  *  `windowMax` of None means. */
-final case class BossChance(chance: Chance, daysSince: Int, windowMin: Int, windowMax: Option[String])
+final case class BossChance(
+    chance: Chance,
+    daysSince: Int,
+    windowMin: Int,
+    windowMax: Option[String],
+    /** The day this spawn point was last seen. Every window edge is measured
+     *  from it, and the post turns those into Discord timestamps. */
+    lastSeen: LocalDate
+) {
+
+  /** When the window it is counting towards opens and closes, as instants.
+   *
+   *  Both land on a server save, because that is the only moment a Tibia day
+   *  turns over — which is also the boundary the day counts were derived from,
+   *  so the two cannot drift apart. None for a close where the windows have
+   *  overlapped far enough that there is no meaningful upper bound left. */
+  def opensAt: Instant = BossPredictor.saveOn(lastSeen.plusDays(windowMin.toLong))
+  def closesAt: Option[Instant] =
+    windowMax.flatMap(max => scala.util.Try(max.toInt).toOption)
+      .map(max => BossPredictor.saveOn(lastSeen.plusDays(max.toLong)))
+}
 
 /** A boss and the state of each of its spawn points. */
 final case class BossPrediction(boss: Boss, chances: List[BossChance]) {
@@ -34,6 +57,14 @@ final case class BossPrediction(boss: Boss, chances: List[BossChance]) {
   /** The best any of its spawn points is doing — what a reader sorts on, since
    *  one spawn point being up is enough reason to go. */
   def best: Chance = chances.map(_.chance).maxByOption(_.rank).getOrElse(Chance.None)
+
+  /** The spawn points doing as well as the best one — how many of a multi-spawn
+   *  boss are actually up, and the window figures to quote. */
+  def leading: List[BossChance] = chances.filter(_.chance == best)
+
+  /** How far past the start of its window the leading spawn point is. Negative
+   *  before the window opens. */
+  def overdueBy: Int = leading.headOption.map(c => c.daysSince - c.windowMin).getOrElse(0)
 
   /** The fewest days since any spawn point was seen. */
   def daysSince: Int = chances.map(_.daysSince).minOption.getOrElse(0)
@@ -107,6 +138,10 @@ object BossPredictor {
    *  The divisors are guarded, which the original did not need to be: its data
    *  file was its own. This one is a resource anybody can edit, and a `windowMin`
    *  of 1 or a `windowMax` equal to `windowMin` would divide by zero. */
+  /** The server save on a given day, which is where every window edge falls. */
+  private[statistics] def saveOn(day: LocalDate): Instant =
+    day.atTime(ServerSaveSchedule.serverSaveTime).atZone(Clock.Berlin).toInstant
+
   private[statistics] def chanceFor(today: LocalDate, lastSeen: LocalDate, min: Int, max: Int): BossChance = {
     val daysSince = math.max(0, ChronoUnit.DAYS.between(lastSeen, today).toInt)
     val startWindowsHigh = daysSince / math.max(1, min)
@@ -121,7 +156,7 @@ object BossPredictor {
 
     // Inside the first window, the boss's own figures are the window — shown even
     // when the chance is None, so a reader can see how far off it is.
-    if (daysSince <= max) BossChance(chance, daysSince, min, Some(max.toString))
+    if (daysSince <= max) BossChance(chance, daysSince, min, Some(max.toString), lastSeen)
     else {
       // Past the point where consecutive windows overlap completely there is no
       // meaningful upper bound left, and the window reads as "N+".
@@ -129,7 +164,7 @@ object BossPredictor {
       val windowStart = math.min(math.max(startWindowsHigh, 1) * min, startOfEndless)
       val windowEnd = math.max(startWindowsHigh, 1) * max
       BossChance(chance, daysSince, windowStart,
-        if (windowStart >= startOfEndless) Option.empty else Some(windowEnd.toString))
+        if (windowStart >= startOfEndless) Option.empty else Some(windowEnd.toString), lastSeen)
     }
   }
 }

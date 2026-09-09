@@ -1228,7 +1228,8 @@ class TibiaBot(
                     val diedAt = ZonedDateTime.parse(charDeath.death.time)
                     val saveDay = ServerSaveSchedule.lastServerSave(diedAt).toLocalDate
                     BotApp.recordFrags(guildId, fragBuffer.toList.distinct.map { killer =>
-                      domain.FragEvent(world, saveDay, killer, charName, side, diedAt.toInstant)
+                      domain.FragEvent(world, saveDay, killer, charName,
+                        charDeath.death.level.toInt, side, diedAt.toInstant, "")
                     })
                   }
                 }
@@ -1299,6 +1300,14 @@ class TibiaBot(
                 recentEvents.record("death", s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
               }
               validEmbeds.foreach { embed =>
+                // Discord only returns the message id once the post has been sent,
+                // so the frag rows are filed without one and this fills it in
+                // afterwards. Every send below carries it, because any of them can
+                // be the post a summary later wants to link back to.
+                val noteDeathMessage: java.util.function.Consumer[net.dv8tion.jda.api.entities.Message] =
+                  (message: net.dv8tion.jda.api.entities.Message) =>
+                    BotApp.attachDeathMessage(guildId, world, embed._3,
+                      java.time.Instant.ofEpochSecond(embed._7), message.getId)
                 try {
                   // Create screenshot button
                   val screenshotButton = Button.secondary(
@@ -1313,10 +1322,10 @@ class TibiaBot(
                     if (shouldPing) {
                       deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
                         .setEmbeds(embed._1.build())
-                        .queue()
+                        .queue(noteDeathMessage)
                     } else {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .queue()
+                        .queue(noteDeathMessage)
                     }
                     recordDeath(embed._3, embed._5, embed._8, embed._9)
                   } else if (embed._2 == "allypk") {
@@ -1325,10 +1334,10 @@ class TibiaBot(
                       if (shouldPing) {
                         deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
                           .setEmbeds(embed._1.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       } else {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
@@ -1340,10 +1349,10 @@ class TibiaBot(
                       if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
                         deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
                           .setEmbeds(adjustedEmbed.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       } else {
                         deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
@@ -1351,7 +1360,7 @@ class TibiaBot(
                     if (embed._5 >= minimumLevel) {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .setComponents(actionRow)
-                        .queue()
+                        .queue(noteDeathMessage)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                       }
                   } else {
@@ -1359,7 +1368,7 @@ class TibiaBot(
                     if (embed._5 >= minimumLevel) {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .setSuppressedNotifications(true)
-                        .queue()
+                        .queue(noteDeathMessage)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                   }

@@ -6,99 +6,117 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.LocalDate
 
-/** What the prediction embed shows, and — more importantly — what it refuses to
- *  claim while the history is young. */
+/** The boss embed: one list, a dot per row, and Discord timestamps rather than
+ *  day counts. */
 class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
+  private val icon = "<:boss:1195770698401075281>"
 
   private def boss(name: String, min: Int = 12, max: Int = 28, spawnPoints: Int = 1) =
     Boss(name, scala.None, predict = true, min, max, spawnPoints, "Profitable")
 
-  private def prediction(name: String, chance: Chance, daysSince: Int, spawns: Int = 1) =
-    BossPrediction(
-      boss(name, spawnPoints = spawns),
-      List.fill(spawns)(BossChance(chance, daysSince, 12, Some("28"))))
+  /** A prediction built the way the predictor builds one, so the window instants
+   *  are derived rather than asserted into place. */
+  private def prediction(name: String, daysSince: Int, min: Int = 12, max: Int = 28, spawns: Int = 1) =
+    BossPredictor.predict(
+      boss(name, min, max, spawns),
+      List.fill(spawns)((day.minusDays(daysSince.toLong), 1)),
+      day).get
 
   private def report(predictions: List[BossPrediction] = Nil, awaiting: Int = 0) =
     DailyReport("Antica", day, Nil, scala.None, scala.None, scala.None, predictions, awaiting)
 
-  test("a due boss is named with how long it has been and its window") {
-    val embed = BossPredictionEmbeds.build(report(List(prediction("Furyosa", Chance.High, 20)))).get
-    embed.getTitle should include("Antica")
-    embed.getDescription should include("Furyosa")
-    embed.getDescription should include("20 days")
-    embed.getDescription should include("12–28")
+  private def build(r: DailyReport) = BossPredictionEmbeds.build(r, icon)
+
+  test("the title is Bosses Due and carries the configured boss icon") {
+    build(report(List(prediction("Furyosa", 20)))).get.getDescription should
+      startWith(s"## $icon Bosses Due")
   }
 
-  test("high and low chances are kept in separate bands") {
-    val embed = BossPredictionEmbeds.build(report(List(
-      prediction("Furyosa", Chance.High, 20),
-      prediction("Yeti", Chance.Low, 11)))).get
-    val description = embed.getDescription
-    description should include("Due now")
-    description should include("Possible")
-    description.indexOf("Furyosa") should be < description.indexOf("Yeti")
+  test("every row leads with a dot for the chance and the same boss icon") {
+    val embed = build(report(List(prediction("Furyosa", 20)))).get
+    embed.getDescription should include(s":green_circle: $icon **Furyosa**")
+  }
+
+  test("a low chance gets the other dot") {
+    build(report(List(prediction("White Pale", 11)))).get.getDescription should include(":yellow_circle:")
+  }
+
+  test("a boss inside its window says when the window closes") {
+    // Ferumbras at 165 days into a 161-175 window: it is up now, and what a
+    // reader wants is how long they have.
+    val embed = build(report(List(prediction("Ferumbras", 165, 161, 175)))).get
+    embed.getDescription should include("window closes <t:")
+    embed.getDescription should include(":R>")
+  }
+
+  test("a boss short of its window says when the window opens") {
+    val embed = build(report(List(prediction("White Pale", 11)))).get
+    embed.getDescription should include("opens <t:")
+  }
+
+  test("a boss past a window that had an end says how long it has been overdue") {
+    build(report(List(prediction("Man in the Cave", 200, 12, 16)))).get
+      .getDescription should include("overdue since <t:")
+  }
+
+  test("timestamps are relative, so the post stays true after the morning") {
+    // A rendered day count freezes at the moment of posting; <t:...:R> does not.
+    val embed = build(report(List(prediction("Furyosa", 20)))).get
+    embed.getDescription should not include "20 days"
+    embed.getDescription should include(":R>")
   }
 
   test("a boss that is not due is left out entirely") {
-    // Fifty-seven bosses mostly a few days into long windows would bury the
-    // handful somebody came for.
-    val embed = BossPredictionEmbeds.build(report(List(
-      prediction("Furyosa", Chance.High, 20),
-      prediction("Yeti", Chance.None, 2)))).get
+    val embed = build(report(List(prediction("Furyosa", 20), prediction("Yeti", 2)))).get
     embed.getDescription should include("Furyosa")
     embed.getDescription should not include "Yeti"
   }
 
   test("a multi-spawn boss says how many of its spawns are up") {
-    val embed = BossPredictionEmbeds.build(report(List(
-      prediction("Rotworm Queen", Chance.High, 20, spawns = 3)))).get
-    embed.getDescription should include("×3")
+    build(report(List(prediction("Rotworm Queen", 20, 12, 24, spawns = 3)))).get
+      .getDescription should include("×3")
   }
 
   test("a single spawn carries no multiplier") {
-    BossPredictionEmbeds.build(report(List(prediction("Furyosa", Chance.High, 20)))).get
-      .getDescription should not include "×"
+    build(report(List(prediction("Furyosa", 20)))).get.getDescription should not include "×"
   }
 
-  test("a long band is capped and says how many it left out") {
-    val many = (1 to 30).toList.map(i => prediction(s"Boss$i", Chance.High, 20 + i))
-    val embed = BossPredictionEmbeds.build(report(many)).get
-    embed.getDescription should include("and " + (30 - BossPredictionEmbeds.MaxHigh) + " more")
+  test("a long list is capped and says how many it left out") {
+    val many = (1 to 30).toList.map(i => prediction(s"Boss$i", 20 + i))
+    build(report(many)).get.getDescription should
+      include(s"…and ${30 - BossPredictionEmbeds.MaxRows} more")
   }
 
   // --- the honest part ------------------------------------------------------
 
   test("a world still waiting for sightings says so rather than looking broken") {
-    // A short list on a young history means "we do not know yet", not "nothing
-    // is due" — and the two read identically without this.
-    val embed = BossPredictionEmbeds.build(report(Nil, awaiting = 57)).get
+    val embed = build(report(Nil, awaiting = 57)).get
     embed.getDescription should include("Not enough history")
     embed.getFooter.getText should include("57")
   }
 
-  test("the footer is dropped once every boss has been seen") {
-    val embed = BossPredictionEmbeds.build(report(List(prediction("Furyosa", Chance.High, 20)))).get
-    embed.getFooter shouldBe null
+  test("the footer goes once every boss has been seen") {
+    build(report(List(prediction("Furyosa", 20)))).get.getFooter shouldBe null
   }
 
   test("a mature history with nothing due says that plainly") {
-    val embed = BossPredictionEmbeds.build(report(List(prediction("Yeti", Chance.None, 2)))).get
+    val embed = build(report(List(prediction("Yeti", 2)))).get
     embed.getDescription should include("No boss is inside a spawn window")
-    embed.getDescription should include("1 being tracked")
   }
 
   test("nothing at all produces no embed rather than an empty one") {
-    BossPredictionEmbeds.build(report()) shouldBe scala.None
+    build(report()) shouldBe scala.None
   }
 
-  test("a full prediction embed leaves room for the statistics one beside it") {
-    // The two share a 6,000-character message, and the statistics embed runs to
-    // about 2,100 at full stretch.
-    val high = (1 to 30).toList.map(i => prediction(s"Averylongbossname$i", Chance.High, 20 + i))
-    val low = (1 to 30).toList.map(i => prediction(s"Anotherlongbossname$i", Chance.Low, 11))
-    val embed = BossPredictionEmbeds.build(report(high ::: low, awaiting = 12)).get
+  test("there are no fields") {
+    build(report(List(prediction("Furyosa", 20)))).get.getFields shouldBe empty
+  }
+
+  test("a full boss embed leaves room for the other two beside it") {
+    val many = (1 to 30).toList.map(i => prediction("Averylongbossname" + i, 20 + i))
+    val embed = build(report(many, awaiting = 12)).get
     embed.getDescription.length should be < 3000
     embed.getLength should be < 3500
   }

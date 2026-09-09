@@ -1,19 +1,22 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{ExperienceDelta, FragTally, HighscoreEvent}
+import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
 import com.tibiabot.statistics.{DailyReport, DayKillSummary}
+import com.tibiabot.tibiadata.HighscoreCategory
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 import java.time.{Instant, LocalDate}
 
-/** How a day reads, and that a full one still fits inside Discord's limits. */
+/** The world embed: what it says, and that it stays inside Discord's limits. */
 class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
+  private val up = "<:levelup:1>"
+  private val down = "<:lvldown:2>"
 
-  private def delta(name: String, gained: Long, level: Int = 400, previousLevel: Int = 400) =
-    ExperienceDelta(name.toLowerCase, name, "Elite Knight", level, previousLevel, 4_200_000_000L, gained)
+  private def delta(name: String, gained: Long, level: Int = 400, vocation: String = "Elite Knight") =
+    ExperienceDelta(name.toLowerCase, name, vocation, level, level, 4_200_000_000L, gained)
 
   private def report(
       gains: List[ExperienceDelta] = Nil,
@@ -24,152 +27,127 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   private def summary(
       mostKilled: Option[(String, Int)] = Some(("flimsy lost souls", 23965)),
-      deadliest: Option[(String, Int)] = Some(("quara looters", 13)),
-      playerDeaths: Int = 378,
-      totalKilled: Long = 2514276L
-  ) = DayKillSummary("Antica", day, mostKilled, deadliest, playerDeaths, totalKilled, 818)
+      deadliest: Option[(String, Int)] = Some(("quara looters", 13))
+  ) = DayKillSummary("Antica", day, mostKilled, deadliest, 378, 2514276L, 818)
 
-  private def fieldNamed(embed: net.dv8tion.jda.api.entities.MessageEmbed, fragment: String) =
-    embed.getFields.stream().filter(_.getName.contains(fragment)).findFirst()
-
-  private def advance(category: String, score: Long, name: String = "Bubble") =
-    HighscoreEvent("Antica", category, name.toLowerCase, name, "Master Sorcerer", 402, score - 1, score,
+  private def advance(category: String, score: Long, name: String = "Zonta") =
+    HighscoreEvent("Antica", category, name.toLowerCase, name, "Master Sorcerer", 361, score - 1, score,
       Instant.parse("2026-09-10T18:40:00Z"))
 
-  test("the title names the world and the day it covers") {
-    val embed = StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900))))
-    embed.getTitle should include("Antica")
-    embed.getTitle should include("Thursday 10 September 2026")
+  private def build(r: DailyReport, side: String => String = _ => "") =
+    StatisticsEmbeds.build(r, side, _ => "<:mlvl:3>", up, down, "")
+
+  // --- the shape of a row --------------------------------------------------
+
+  test("a row reads vocation, name, side, level, then the figure") {
+    val embed = build(report(gains = List(delta("Arieswar", 182450912, level = 418))), _ => "<:ally:9>")
+    embed.getDescription should include(
+      ":shield: **[Arieswar](https://www.tibia.com/community/?name=Arieswar)** <:ally:9> · *418* · " + up + " **182,450,912**")
   }
 
-  test("gains are numbered, largest first, with thousands separators") {
-    val embed = StatisticsEmbeds.build(report(gains = List(delta("Bubble", 182450912), delta("Arieswar", 900))))
-    val description = embed.getDescription
-    description should include("+182,450,912")
-    description should include("Bubble")
-    description.indexOf("Bubble") should be < description.indexOf("Arieswar")
+  test("a character nobody tracks carries no side icon and the row closes up") {
+    // GuildIcons renders an untracked, guildless character as an empty string,
+    // so the row must not leave a gap where the icon would have been.
+    val bare = build(report(gains = List(delta("Arieswar", 900)))).getDescription
+    bare should include("**[Arieswar](https://www.tibia.com/community/?name=Arieswar)** · *400*")
+    bare should not include "  ·"
   }
 
-  test("a level that moved is shown either side of the day, one that did not is shown once") {
-    StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900, level = 418, previousLevel = 412))))
-      .getDescription should include("level 412 → 418")
-    // "412 → 412" reads as a mistake, and this is the common case.
-    StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900, level = 412, previousLevel = 412))))
-      .getDescription should include("(level 412)")
+  test("the experience icons stand in for the sign, and never appear together") {
+    val embed = build(report(gains = List(delta("Arieswar", 900)), loss = Some(delta("Unlucky One", -18402993))))
+    embed.getDescription should include(up + " **900**")
+    embed.getDescription should include(down + " **18,402,993**")
+    // the falling icon already says it; a minus would say it twice
+    embed.getDescription should not include "-18,402,993"
+    embed.getDescription should not include "+900"
   }
 
-  test("a day nobody gained on says so rather than showing an empty list") {
-    StatisticsEmbeds.build(report(loss = Some(delta("Bubble", -900)))).getDescription should include("Nobody")
+  // --- headings ------------------------------------------------------------
+
+  test("the date is an h2 and outranks its own sections") {
+    val embed = build(report(gains = List(delta("Arieswar", 900))))
+    embed.getDescription should startWith("## :bar_chart: [Thursday 10 September 2026](")
+    embed.getDescription should include("### Top Experience Gained")
   }
 
-  test("the loss keeps its minus sign and needs no plus") {
-    val field = StatisticsEmbeds.build(report(loss = Some(delta("Bubble", -4182993)))).getFields.get(0)
-    field.getName should include("Biggest experience loss")
-    field.getValue should include("-4,182,993")
-    field.getValue should not include "+"
+  test("only the title carries an emoji; the section labels are bare") {
+    // Repeating the trick on every heading under the title turns a hierarchy
+    // into a row of badges, so the labels are plain words on purpose.
+    val embed = build(report(
+      gains = List(delta("Arieswar", 900)),
+      loss = Some(delta("Unlucky One", -900)),
+      advance = Some(advance("magiclevel", 131)),
+      kills = Some(summary())))
+    embed.getDescription.linesIterator.filter(_.startsWith("### ")).foreach { heading =>
+      heading should not include ":"
+    }
   }
 
-  test("every optional field is absent when there is nothing to put in it") {
-    StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900)))).getFields shouldBe empty
+  test("the date links through to the world") {
+    build(report(gains = List(delta("Arieswar", 900)))).getDescription should
+      include("https://www.tibia.com/community/?subtopic=worlds&world=Antica")
   }
 
-  // --- what the world was killing -----------------------------------------
-
-  test("the kill statistics field names both creatures and the PvP count") {
-    val field = fieldNamed(StatisticsEmbeds.build(report(kills = Some(summary()))), "Around the world")
-    field.isPresent shouldBe true
-    val value = field.get.getValue
-    value should include("flimsy lost souls")
-    value should include("23,965")
-    value should include("quara looters")
-    value should include("13 players")
-    value should include("378")
-    value should include("2,514,276")
+  test("a section with nothing in it is absent rather than an empty heading") {
+    val embed = build(report(gains = List(delta("Arieswar", 900))))
+    embed.getDescription should not include "Top Experience Lost"
+    embed.getDescription should not include "Top Skill Advancement"
+    embed.getDescription should not include "Creature Stats"
   }
 
-  test("a single player killed reads as one player, not one players") {
-    val field = fieldNamed(StatisticsEmbeds.build(report(kills = Some(summary(deadliest = Some(("wyrm", 1)))))), "Around the world")
-    field.get.getValue should include("(1 player)")
+  test("there are no fields at all") {
+    // Which is what frees the post from the 1,024-character cap and from
+    // reflowing differently on a phone.
+    build(report(gains = List(delta("Arieswar", 900)), kills = Some(summary()))).getFields shouldBe empty
   }
 
-  test("lines are dropped individually rather than the whole field") {
-    // A world can genuinely have a day where no creature killed a player.
-    val field = fieldNamed(
-      StatisticsEmbeds.build(report(kills = Some(summary(deadliest = None, playerDeaths = 0)))), "Around the world")
-    field.get.getValue should include("Most killed")
-    field.get.getValue should not include "Deadliest"
-    field.get.getValue should not include "Killed by other players"
-  }
-
-  test("a snapshot with nothing in it produces no field at all") {
-    val nothing = summary(mostKilled = None, deadliest = None, playerDeaths = 0, totalKilled = 0)
-    fieldNamed(StatisticsEmbeds.build(report(kills = Some(nothing))), "Around the world").isPresent shouldBe false
-  }
-
-  // --- frags ---------------------------------------------------------------
-
-  test("both sides' totals are shown even when one is zero") {
-    // "0 allies lost" is the good half of the news; dropping it would leave a
-    // reader wondering whether it was zero or unmeasured.
-    val frags = FragTally(6, 0, List(("Bubble", 4), ("Arieswar", 2)), Nil)
-    val field = fieldNamed(StatisticsEmbeds.build(report(), frags), "Frags")
-    field.get.getValue should include("Enemies killed — **6**")
-    field.get.getValue should include("Allies lost — **0**")
-  }
-
-  test("each side's leaderboard is its own field, and an empty side has none") {
-    val frags = FragTally(6, 0, List(("Bubble", 4), ("Arieswar", 2)), Nil)
-    val embed = StatisticsEmbeds.build(report(), frags)
-    fieldNamed(embed, "Top fraggers").isPresent shouldBe true
-    fieldNamed(embed, "Top fraggers").get.getValue should include("Bubble")
-    fieldNamed(embed, "Enemy fraggers").isPresent shouldBe false
-  }
-
-  test("a day with no frags carries no frag fields") {
-    StatisticsEmbeds.build(report(gains = List(delta("Bubble", 900))), FragTally.empty)
-      .getFields shouldBe empty
-  }
-
-  test("frags are shown even when nothing else happened") {
-    val frags = FragTally(2, 1, List(("Bubble", 2)), List(("Arieswar", 1)))
-    val embed = StatisticsEmbeds.build(report(), frags)
-    fieldNamed(embed, "Frags").isPresent shouldBe true
-    fieldNamed(embed, "Enemy fraggers").isPresent shouldBe true
-  }
+  // --- the other three sections -------------------------------------------
 
   test("magic level is named without doubling the word level") {
-    val field = StatisticsEmbeds.build(report(advance = Some(advance("magiclevel", 131)))).getFields.get(0)
-    field.getValue should include("magic level **131**")
-    field.getValue should not include "magic level level"
-  }
-
-  test("a weapon skill gets the word level appended") {
-    StatisticsEmbeds.build(report(advance = Some(advance("swordfighting", 137)))).getFields.get(0)
-      .getValue should include("sword fighting level **137**")
+    val embed = build(report(advance = Some(advance("magiclevel", 131))))
+    embed.getDescription should include("<:mlvl:3> magic level **131**")
+    embed.getDescription should not include "magic level level"
   }
 
   test("a category this build no longer knows renders plainly instead of throwing") {
-    // An older row should read as itself rather than take the day's post with it.
-    StatisticsEmbeds.build(report(advance = Some(advance("bosspoints", 4200)))).getFields.get(0)
-      .getValue should include("bosspoints **4200**")
+    build(report(advance = Some(advance("bosspoints", 4200)))).getDescription should include("bosspoints **4200**")
   }
 
-  test("the fullest possible day still fits inside Discord's limits") {
-    // Everything at once, with names at the length Tibia actually allows: ten
-    // gainers, a loss, an advance, the kill statistics, and both frag
-    // leaderboards full. The description is where the leaderboard has to live —
-    // ten linked names plus a figure is about 1,200 characters against a field's
-    // 1,024 — and the two fragger fields are the ones most likely to be full,
-    // which is why they carry plain names rather than links.
-    val long = "Averylongcharactername"
-    val gains = (1 to 10).toList.map(i => delta(s"$long$i", 100000000L - i))
-    val fraggers = (1 to FragTally.TopFraggers).toList.map(i => (s"$long$i", 20 - i))
+  test("creature stats lead with the count") {
+    val embed = build(report(kills = Some(summary())))
+    embed.getDescription should include("**23,965** flimsy lost souls killed")
+    embed.getDescription should include("**13** players killed by quara looters")
+  }
+
+  test("one player killed reads as one player") {
+    build(report(kills = Some(summary(deadliest = Some(("wyrm", 1)))))).getDescription should
+      include("**1** player killed by wyrm")
+  }
+
+  test("a creature line is dropped on its own, not the whole section") {
+    val embed = build(report(kills = Some(summary(deadliest = None))))
+    embed.getDescription should include("Creature Stats")
+    embed.getDescription should include("flimsy lost souls")
+    embed.getDescription should not include "killed by"
+  }
+
+  test("a snapshot with neither figure produces no section") {
+    build(report(gains = List(delta("A", 900)), kills = Some(summary(None, None))))
+      .getDescription should not include "Creature Stats"
+  }
+
+  test("a day nobody gained on says so rather than showing an empty list") {
+    build(report(loss = Some(delta("Unlucky One", -900)))).getDescription should include("Nobody")
+  }
+
+  // --- limits --------------------------------------------------------------
+
+  test("the fullest world embed fits inside Discord's limits") {
+    val gains = (1 to 10).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i, level = 400 + i))
     val embed = StatisticsEmbeds.build(
       report(gains, Some(delta("Someoneunlucky", -9182993)), Some(advance("magiclevel", 131)), Some(summary())),
-      FragTally(99, 99, fraggers, fraggers))
+      _ => "<:otherguild:1><:enemy:2>", _ => "<:mlvl:3>", up, down, "https://example.invalid/thumb.gif")
     embed.getDescription.length should be < 4096
-    embed.getFields.forEach(field => field.getValue.length should be < 1024)
-    embed.getFields.size should be <= 25
     embed.getLength should be < 6000
   }
 }

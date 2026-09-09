@@ -209,6 +209,18 @@ object Config {
  val indentEmoji: String = discord.getString("indent-emoji")
  val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")
+ /** The falling counterpart to [[levelUpEmoji]] — experience lost rather than
+  *  gained. The statistics post uses the pair in place of a + and a - sign. */
+ val levelDownEmoji: String = discord.getString("lvldown-emoji")
+
+ /** The nine bar-segment emoji, keyed the way [[com.tibiabot.presentation.Bars]]
+  *  asks for them: a colour and a position in the run. */
+ val barEmoji: Map[(String, String), String] = (
+   for {
+     colour <- List("green", "red", "empty")
+     shape <- List("start", "mid", "end")
+   } yield (colour, shape) -> discord.getString(s"bar-$colour-$shape-emoji")
+ ).toMap
  val primalEmoji: String = discord.getString("primal-emoji")
  val hazardEmoji: String = discord.getString("hazard-emoji")
  val yesEmoji: String = discord.getString("yes-emoji")

@@ -1290,6 +1290,21 @@ object BotApp extends App with StrictLogging {
         logger.warn(s"Could not record ${events.size} frag(s) for guild '$guildId': ${error.getMessage}"))(ex)
     }
 
+  /** Note which deaths-channel post a death produced, so the daily summary can
+   *  link back to it.
+   *
+   *  Fire and forget on the stream thread, like recordFrags: a summary that
+   *  cannot offer a jump link is a smaller loss than a death post held up behind
+   *  a database write. */
+  def attachDeathMessage(guildId: String, world: String, victim: String,
+                         occurredAt: Instant, messageId: String): Unit =
+    if (messageId.nonEmpty && hasStatisticsChannel(guildId, world)) {
+      Future {
+        fragRepository.attachDeathMessage(guildId, world, victim, occurredAt, messageId)
+      }(ex).failed.foreach(error =>
+        logger.warn(s"Could not attach the death post for '$victim' in guild '$guildId': ${error.getMessage}"))(ex)
+    }
+
   private def hasStatisticsChannel(guildId: String, world: String): Boolean =
     worldsData.getOrElse(guildId, Nil)
       .exists(w => w.name.equalsIgnoreCase(world) && w.statisticsChannel != null &&
@@ -1311,10 +1326,62 @@ object BotApp extends App with StrictLogging {
             guildLabel = Option(discordGateway.guildById(guildId)).map(_.getName).getOrElse(guildId),
             world = world.name,
             channelId = world.statisticsChannel,
-            posted = world.statisticsPosted
+            posted = world.statisticsPosted,
+            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
           )
       }
     }
+
+  /** The ally/enemy icon a character gets in one discord's statistics post.
+   *
+   *  This is what makes the post guild-specific: the board is the world's top
+   *  thousand and identical everywhere, but who on it counts as an ally is that
+   *  discord's own answer. Same classification the online list and the deaths
+   *  channel use, so a name carries the same icon wherever it appears.
+   *
+   *  Guild names are not known here — the experience tables store a character's
+   *  vocation and level, never their guild — so a character is classified on the
+   *  player lists alone. Somebody hunted through their guild rather than by name
+   *  therefore reads as neutral, which is a quieter wrong answer than fetching
+   *  sixty character sheets every morning to avoid it.
+   */
+  private def statisticsSideIcon(guildId: String): String => String = {
+    val allies = alliedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val hunted = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    name => {
+      val key = name.toLowerCase
+      if (allies.contains(key)) Config.ally
+      else if (hunted.contains(key)) Config.enemy
+      else ""
+    }
+  }
+
+  /** A character's vocation on one world, by lowercased name, for the PVP rows.
+   *
+   *  Frags store names and nothing else — a killer is a name on a death message —
+   *  so the vocation has to come from somewhere that already knows it. That is
+   *  the cached character sheets the hunted and allied lists are drawn from,
+   *  which covers exactly the population a PVP post is about: a frag needs a
+   *  listed victim, and the fraggers worth naming are on somebody's list too.
+   *
+   *  Read once per post rather than per row, and empty for anybody with no sheet
+   *  cached — which renders as no icon rather than a guessed one.
+   */
+  private def statisticsVocation(world: String): String => String = {
+    val sheets = cacheRepository.getList(world).map(row => row.name.toLowerCase -> row.vocation).toMap
+    name => sheets.getOrElse(name.toLowerCase, "")
+  }
+
+  /** A link back to the deaths-channel post a kill came from, or None when it was
+   *  never posted — the channel can be off, the level under the world's minimum,
+   *  or the send have failed. */
+  private def jumpToDeath(target: statistics.StatisticsTarget): String => Option[String] = {
+    val deathsChannel = worldsData.getOrElse(target.guildId, Nil)
+      .find(_.name.equalsIgnoreCase(target.world)).map(_.deathsChannel).getOrElse("0")
+    messageId =>
+      if (messageId.isEmpty || deathsChannel == "0" || deathsChannel.isEmpty) None
+      else Some(s"https://discord.com/channels/${target.guildId}/$deathsChannel/$messageId")
+  }
 
   /** Store that a world's day has been posted, in the database and in the copy
    *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
@@ -1340,17 +1407,25 @@ object BotApp extends App with StrictLogging {
     killStatistics = killStatisticsRepository,
     frags = fragRepository,
     targets = () => statisticsTargets(),
-    announce = (target, report, frags) =>
+    announce = (target, report, frags, enemyLosses) =>
       Option(discordGateway.guildById(target.guildId))
         .flatMap(guild => Option(guild.getTextChannelById(target.channelId)))
         .filter(channel => channel.canTalk() || !Config.prod)
         .foreach { channel =>
+          val side = statisticsSideIcon(target.guildId)
           outboundSender.enqueue("statistics") { () =>
-            // Two embeds in one message: what happened, then what might happen
-            // today. One post rather than two, so a channel somebody scrolls
-            // through reads as one entry per day.
-            val embeds = presentation.StatisticsEmbeds.build(report, frags, presentation.SkillEmojis.icon) ::
-              presentation.BossPredictionEmbeds.build(report).toList
+            // Three embeds in one message: the world, then the war, then what
+            // might happen today. One post rather than three, so a channel
+            // somebody scrolls through reads as one entry per day.
+            val embeds =
+              presentation.StatisticsEmbeds.build(
+                report, side, presentation.SkillEmojis.icon,
+                Config.levelUpEmoji, Config.levelDownEmoji,
+                creatureImageUrl(presentation.StatisticsEmbeds.ThumbnailFile)) ::
+              presentation.PvpEmbeds.build(
+                target.world, frags, enemyLosses, side, statisticsVocation(target.world),
+                Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) ::
+              presentation.BossPredictionEmbeds.build(report, Config.bossEmoji).toList
             channel.sendMessageEmbeds(embeds.asJava)
               .setSuppressedNotifications(true).queue(null, null)
           }

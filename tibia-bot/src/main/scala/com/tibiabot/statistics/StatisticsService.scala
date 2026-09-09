@@ -1,7 +1,7 @@
 package com.tibiabot.statistics
 
 import com.tibiabot.domain.time.Clock
-import com.tibiabot.domain.FragTally
+import com.tibiabot.domain.{ExperienceDelta, FragTally}
 import com.tibiabot.persistence.{ExperienceRepository, FragRepository, HighscoreRepository, KillStatisticsRepository}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
@@ -19,7 +19,14 @@ final case class StatisticsTarget(
     guildLabel: String,
     world: String,
     channelId: String,
-    posted: String
+    posted: String,
+    /** Every character this discord hunts on this world, lowercased.
+     *
+     *  Read here rather than in the repository because it is the same list the
+     *  online list and the deaths channel already hold in memory, and because
+     *  "Most Exp Lost" is the only query that needs it — pushing it down would
+     *  mean the cache reading a guild's own database. */
+    huntedNames: Set[String] = Set.empty
 ) {
 
   /** Whether this channel still owes a post for `day`. String comparison against
@@ -56,7 +63,7 @@ final class StatisticsService(
     killStatistics: KillStatisticsRepository,
     frags: FragRepository,
     targets: () => List[StatisticsTarget],
-    announce: (StatisticsTarget, DailyReport, FragTally) => Unit,
+    announce: (StatisticsTarget, DailyReport, FragTally, List[ExperienceDelta]) => Unit,
     recordPosted: (StatisticsTarget, LocalDate) => Unit,
     now: () => ZonedDateTime = () => ZonedDateTime.now(Clock.Berlin)
 ) extends StrictLogging {
@@ -90,12 +97,27 @@ final class StatisticsService(
    *  of it and are already in hand; losing the frag section is worth far less
    *  than losing the day. */
   private def tally(target: StatisticsTarget, day: LocalDate): FragTally =
-    try frags.tally(target.guildId, target.world, day, FragTally.TopFraggers)
+    try frags.tally(target.guildId, target.world, day, FragTally.TopFraggers, FragTally.TopRepeats)
     catch {
       case NonFatal(error) =>
         logger.warn(s"Statistics: could not read frags for '${target.world}' " +
           s"in ${target.guildLabel}: ${error.getMessage}")
         FragTally.empty
+    }
+
+  /** The hunted characters who lost the most experience that day.
+   *
+   *  Usually returns very little: the experience table is the world's top
+   *  thousand, and most tracked enemies are not in it. That is the honest answer
+   *  rather than a fault, and the section is simply absent when it is empty. */
+  private def enemyLosses(target: StatisticsTarget, day: LocalDate): List[ExperienceDelta] =
+    if (target.huntedNames.isEmpty) Nil
+    else try experience.lossesAmong(target.world, day, target.huntedNames, FragTally.TopRepeats)
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read enemy experience for '${target.world}' " +
+          s"in ${target.guildLabel}: ${error.getMessage}")
+        Nil
     }
 
   /** Build one world's day, or None if the queries failed.
@@ -152,7 +174,8 @@ final class StatisticsService(
       // Frags alone are worth a post: a server whose world had a quiet day in the
       // highscores can still have had a war in it.
       val frags = tally(target, report.saveDay)
-      if (report.nonEmpty || frags.nonEmpty) announce(target, report, frags)
+      val losses = enemyLosses(target, report.saveDay)
+      if (report.nonEmpty || frags.nonEmpty) announce(target, report, frags, losses)
       else logger.debug(s"Statistics: nothing to report for '${target.world}' on ${report.saveDay}")
     } catch {
       case NonFatal(error) =>

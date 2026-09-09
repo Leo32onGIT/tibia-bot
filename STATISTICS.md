@@ -518,3 +518,166 @@ those genuinely go quiet between cycles.
 Nothing in the original scope. The remaining items are the two gaps already
 recorded: the frag SQL has never run against a real Postgres, and the whole
 feature has never been deployed, so no world has any history yet.
+
+---
+
+## 14. The post as designed (locked 10 Sep 2026)
+
+Worked out against a Discord mockup rather than in code. Everything below is
+settled; what is written today does not look like this and has to be rebuilt.
+
+**Three embeds in one message. No embed fields anywhere** — every embed is a
+description plus, in one case, a thumbnail and a footer. That removes the
+1,024-character field cap from the design entirely, and means nothing reflows
+differently between desktop and mobile.
+
+### Embed 1 — the world (blue `#2196F3`, thumbnail)
+
+```
+## 📊 [Thursday 10 September 2026](world url)
+### Top Experience Gained
+{voc} **[Name](url)** {sideIcon} · *{level}* · {xpUp} **182,450,912}**     × 10
+### Top Experience Lost
+{voc} **[Name](url)** {sideIcon} · *{level}* · {xpDown} **18,402,993**
+### Top Skill Advancement
+{voc} **[Name](url)** {sideIcon} · *{level}* · {skillIcon} magic level **131**
+### Creature Stats
+**23,965** flimsy lost souls killed
+**13** players killed by quara looters
+```
+
+No footer. The date is an `##` heading so it outranks its own `###` sections —
+which is why it is a masked link in the description rather than an embed title.
+
+### Embed 2 — PVP (red `#C0392B`)
+
+```
+## 🗡️ PVP
+{splitBar}
+**9** enemies killed vs **4** allies killed
+
+### Most Kills
+{voc} **[Name](url)** {sideIcon} · **4 kills**      top 5 a side, merged, ranked
+### Most Deaths
+{voc} **[Name](url)** {sideIcon} · *{level}* · **4 deaths**        × 5
+### Most Exp Lost
+{voc} **[Name](url)** {sideIcon} · *{level}* · {xpDown} **24,180,400**   × 5, enemies only
+### Top Enemy Killed
+{voc} **[Name](url)** {sideIcon} · *{level}*
+-# [Jump to the death](discord message url)
+### Top Ally Killed
+{voc} **[Name](url)** {sideIcon} · *{level}*
+-# [Jump to the death](discord message url)
+```
+
+The bar is one run split where the day was won: fixed segment count, the split
+proportional to the two figures. The two fragger lists are merged into one —
+each name carries its own side icon, so the columns were doing nothing.
+
+### Embed 3 — Bosses Due (green `#249F2D`)
+
+```
+## {bossEmoji} Bosses Due
+🟢 {bossEmoji} **Dharalion** · overdue since 22 days ago
+🟢 {bossEmoji} **Furyosa** · window closes in 3 days
+🟡 {bossEmoji} **White Pale** · opens in 1 day
+```
+
+One flat list, most overdue first, the chance as a dot on the row rather than as
+a band heading. Timings are Discord relative timestamps — `<t:epoch:R>` — so they
+stay true as the day moves rather than freezing at the moment of posting. Every
+window edge is a server save, so the epoch is 10:00 Berlin on that date.
+
+Footer: `N boss(es) not yet predicted.`
+
+### Conventions that hold everywhere
+
+- **Row shape** is `{vocation} **name** {side icon} · *level* · {figure}`, the
+  same order the online list uses — vocation first, side icon after the name.
+- **Section labels carry no emoji.** Embed titles do.
+- Experience figures use the uploaded xp icons **in place of** `+` and `−`.
+- Ally and enemy icons come from `GuildIcons`, unchanged, including the
+  neutral-guild pairs.
+
+---
+
+## 15. What building it needs
+
+### Assets to upload (yours)
+
+| | |
+| --- | --- |
+| 9 bar segments | `bar_{green,red,empty}_{start,mid,end}` — generated and sent 10 Sep |
+| 2 experience icons | xp up / xp down — supplied |
+| boss icon | already exists: `Config.bossEmoji` = `<:boss:1195770698401075281>` |
+
+Nothing renders until the ids are in `discord.conf`.
+
+### Schema
+
+- `frag_event.victim_level` — for the two Top Killed sections.
+- `frag_event.death_message_id` — for the jump links.
+- Most Deaths and Most Exp Lost need **no** new columns.
+
+### Code
+
+- **Capture the death message id.** Deaths go out through
+  `sendMessageWithRateLimit` with `queue(null, ignoreDeletedTarget)`, so nothing
+  keeps what Discord returns. Needs a success callback. The screenshot feature
+  gets its id from a button press instead, so there is no existing path to reuse.
+- **`StatisticsEmbeds`** — rebuilt: three embeds, description-only, new row shape.
+- **`BossPredictionEmbeds`** — one list, dots, relative timestamps, "Bosses Due".
+- **`BossPredictor`** — expose the window's open and close instants, not just the
+  day counts.
+- **`StatisticsService`** — renders per target rather than per world (see below),
+  and emits a list of embeds.
+- **`ExperienceRepository`** — a query for the largest experience losses among a
+  given set of names, for Most Exp Lost.
+- **`FragRepository`** — `mostWanted`, and the top killed victim per side.
+- **Guild resolution** for the board's side icons — reuse
+  `BotApp.resolveAdvanceGuilds`, about 12 lookups per world per day.
+
+### Two consequences worth stating before starting
+
+**The world embed is no longer world-shared.** Side icons are a per-guild fact,
+so the same board renders differently in every discord. The *data* stays shared
+— one pair of queries per world — but the rendering splits per target. That is a
+real change to `StatisticsService`, which today builds one report per world and
+hands the same thing to everybody.
+
+**Most Exp Lost will usually be nearly empty.** It crosses the hunted list
+against `experience_daily`, which holds only the world's top thousand, and most
+tracked enemies are not in it. Accepted knowingly; the alternative is fetching
+experience for hunted characters individually, which is a much larger change to
+the sweep.
+
+### Still true from before
+
+Frags, victim levels and message ids all start from the day this deploys —
+none of it is backfillable. Boss predictions warm up over months. And the frag
+SQL has still never run against a real Postgres.
+
+---
+
+## 16. What actually shipped (10 Sep 2026)
+
+Section 14 held, with three notes where the build learned something.
+
+**Side icons come from the player lists only.** The checklist above planned to
+reuse `resolveAdvanceGuilds` so a character hunted through their guild would
+carry an icon too. It does not: the experience tables store vocation and level,
+never a guild, so resolving guilds would mean fetching sixty character sheets
+every morning. Somebody hunted only through their guild reads as neutral, which
+is the quieter wrong answer. `BotApp.statisticsSideIcon` documents it.
+
+**PVP vocations come from the cached character sheets.** A frag row stores names
+and nothing else — a killer is a name on a death message — so the `{voc}` the
+row shape calls for has to be looked up. `BotApp.statisticsVocation` reads the
+`list` cache once per post and keys it lowercased. That cache exists to draw the
+hunted and allied lists, so it covers exactly the population a PVP post is about.
+Anybody with no sheet renders without an icon and the row closes up around the
+gap, which is also what happens to an untracked character's side icon.
+
+**Section labels lost their emoji, titles kept theirs.** Both convention and
+code: `StatisticsEmbeds.section` and `PvpEmbeds.section` take a title and no
+icon, and a test in `StatisticsEmbedsSpec` fails if one comes back.

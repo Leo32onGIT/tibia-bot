@@ -49,6 +49,19 @@ trait ExperienceRepository {
    *  [[dailyMovers]], read from the other end. */
   def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta]
 
+  /** The largest experience losses that day among a named set of characters,
+   *  worst first.
+   *
+   *  For the PVP post's "Most Exp Lost", where the set is one guild's hunted
+   *  list. Names are matched lowercased, the same key
+   *  [[com.tibiabot.highscores.HighscoreDiff.key]] stores.
+   *
+   *  Usually returns very little, and that is the honest answer rather than a
+   *  fault: this table holds the world's top thousand by experience, and most
+   *  tracked enemies are ordinary players who are not in it. An enemy with no row
+   *  has no figure at all, not a figure of zero. */
+  def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta]
+
   def removeExpiredReadings(before: Instant): Unit
 
   def removeExpiredDaily(before: LocalDate): Unit

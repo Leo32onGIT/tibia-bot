@@ -1,6 +1,6 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.{ExperienceDelta, FragTally, HighscoreEvent}
+import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
 import com.tibiabot.statistics.{DailyReport, DayKillSummary}
 import com.tibiabot.tibiadata.HighscoreCategory
 import net.dv8tion.jda.api.EmbedBuilder
@@ -9,148 +9,117 @@ import net.dv8tion.jda.api.entities.MessageEmbed
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** The daily Statistics post.
+/** The first embed of the daily post: what the world did.
  *
- *  Pure, like the other builders here: it is handed a finished
- *  [[com.tibiabot.statistics.DailyReport]] and turns it into an embed. What goes
- *  in the report is [[com.tibiabot.statistics.DailyStatistics]]' business.
+ *  ==Why there are no fields==
+ *  Everything is one description. A field caps at 1,024 characters and a ten-row
+ *  leaderboard of linked names is already 1,200, but the deciding reason is the
+ *  heading: only a description can hold `##` and `###`, and the date has to
+ *  outrank its own sections. Fields also reflow differently on a phone, which
+ *  this post no longer has to think about.
  *
- *  The leaderboard lives in the description rather than in a field, because ten
- *  lines of linked name plus a figure runs to roughly 1,200 characters and a
- *  field caps at 1,024 — it fit during development and would have started
- *  silently truncating on worlds with longer names. The description's 4,096
- *  leaves the same list about three times the room it needs.
- *
- *  Config-free, which is why the skill emoji is passed in rather than looked up:
- *  reading Config here would make merely building an embed require a fully
- *  configured environment, and every test of this file would need a database
- *  host set. Same reason and same shape as
- *  [[com.tibiabot.highscores.HighscoreAnnouncement.line]]'s `skillIcon`. */
+ *  ==Why the icons are arguments==
+ *  Config-free, so a test of this file does not need a database host set — the
+ *  same trap the `Panels` object documents. The vocation emoji come from
+ *  [[Emojis]], which is a pure table, but the experience icons, the skill icon
+ *  and the ally/enemy side icons are all configured strings and arrive from the
+ *  caller. `sideIcon` is a function of the character's name because the answer is
+ *  a fact about the *reading discord*, not about the world: two servers see the
+ *  same board with different icons on it.
+ */
 object StatisticsEmbeds {
 
   /** Deep blue — a daily digest, not an event. Told apart at a glance from the
    *  brand colour of an ordinary reply and from the allegiance colours the
    *  deaths and levels channels use, none of which mean anything here. */
-  val StatisticsColor: Int = 2201331
+  val WorldColor: Int = 2201331
+
+  /** The wiki file the thumbnail is drawn from, resolved through the same
+   *  Special:Redirect builder every other creature image uses. */
+  val ThumbnailFile: String = "Golden_Newspaper"
 
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
+  /** @param sideIcon   the ally/enemy icon for a character, by name; empty for
+   *                    somebody this discord does not track
+   *  @param skillIcon  the configured icon for a highscore category
+   *  @param xpUp       rising and falling experience icons, used in place of a
+   *                    sign so the direction reads before the number does
+   *  @param thumbnail  the resolved image URL, or empty for no thumbnail
+   */
   def build(
       report: DailyReport,
-      frags: FragTally = FragTally.empty,
-      skillIcon: HighscoreCategory => String = _ => ""
+      sideIcon: String => String,
+      skillIcon: HighscoreCategory => String,
+      xpUp: String,
+      xpDown: String,
+      thumbnail: String
   ): MessageEmbed = {
     val embed = new EmbedBuilder()
-    embed.setTitle(s":bar_chart: ${report.world} — ${report.saveDay.format(dayFormat)}", Urls.worldUrl(report.world))
-    embed.setColor(StatisticsColor)
-    embed.setDescription(description(report))
+    embed.setColor(WorldColor)
+    if (thumbnail.nonEmpty) embed.setThumbnail(thumbnail)
 
-    report.loss.foreach { delta =>
-      embed.addField(":skull: Biggest experience loss", lossLine(delta), false)
-    }
-    report.advance.foreach { event =>
-      embed.addField(":trophy: Highest skill reached", advanceLine(event, skillIcon), false)
-    }
-    report.kills.flatMap(killLines).foreach { lines =>
-      embed.addField(":crossed_swords: Around the world", lines, false)
-    }
-    // The one guild-scoped part of the post, and the only part two servers
-    // watching the same world will see differently — which is the point of it.
-    if (frags.nonEmpty) {
-      embed.addField(":dagger: Frags", fragTotals(frags), false)
-      fraggerField(frags.topAllied, ":green_circle: Top fraggers")
-        .foreach(value => embed.addField(":green_circle: Top fraggers", value, true))
-      fraggerField(frags.topEnemy, ":red_circle: Enemy fraggers")
-        .foreach(value => embed.addField(":red_circle: Enemy fraggers", value, true))
-    }
+    val sections = List(
+      Some(s"## :bar_chart: [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
+      Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
+      report.loss.map(delta =>
+        section("Top Experience Lost", List(gainLine(delta, sideIcon, xpDown)))),
+      report.advance.map(event =>
+        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon)))),
+      report.kills.flatMap(killLines).map(section("Creature Stats", _))
+    ).flatten
 
-    // Said once, in the one place a reader will look when a name they expected
-    // is missing: the experience list is only a thousand deep, so a character
-    // outside it has no figures at all rather than a figure of zero.
-    embed.setFooter("Experience from the world's top 1,000 · the server save day named above")
+    embed.setDescription(sections.mkString("\n"))
     embed.build()
   }
 
-  private def description(report: DailyReport): String =
-    if (report.gains.isEmpty) "*Nobody in the top 1,000 gained experience.*"
-    else {
-      val lines = report.gains.zipWithIndex.map { case (delta, index) => gainLine(delta, index + 1) }
-      (s"**:chart_with_upwards_trend: Top experience gained**" :: lines).mkString("\n")
-    }
+  /** A section is its heading and its rows. Absent sections are dropped by the
+   *  caller rather than printed empty, so a quiet day is short rather than a
+   *  column of headings with nothing under them.
+   *
+   *  The label carries no emoji: the `##` title above it has one, and repeating
+   *  the trick on every `###` under that turns a hierarchy into a row of badges. */
+  private def section(title: String, rows: List[String]): String =
+    (s"### $title" :: rows).mkString("\n")
 
-  private def gainLine(delta: ExperienceDelta, rank: Int): String =
-    s"`${rank.toString.reverse.padTo(2, ' ').reverse}.` ${Emojis.vocEmoji(delta.vocation)} " +
-      s"**[${delta.displayName}](${Urls.charUrl(delta.displayName)})** — " +
-      s"**+${number(delta.gained)}** ${levels(delta)}"
+  private def gains(report: DailyReport, sideIcon: String => String, xpUp: String): List[String] =
+    if (report.gains.isEmpty) List("*Nobody in the top 1,000 gained experience.*")
+    else report.gains.map(gainLine(_, sideIcon, xpUp))
 
-  private def lossLine(delta: ExperienceDelta): String =
-    s"${Emojis.vocEmoji(delta.vocation)} **[${delta.displayName}](${Urls.charUrl(delta.displayName)})** — " +
-      s"**${number(delta.gained)}** ${levels(delta)}"
-
-  /** The levels either side of the day, or just the one when it did not change —
-   *  which is the common case, and "412 → 412" reads as a mistake. */
-  private def levels(delta: ExperienceDelta): String =
-    if (delta.level == delta.previousLevel) s"*(level ${delta.level})*"
-    else s"*(level ${delta.previousLevel} → ${delta.level})*"
+  private def gainLine(delta: ExperienceDelta, sideIcon: String => String, icon: String): String =
+    StatLines.cells(
+      StatLines.who(delta.vocation, delta.displayName, sideIcon(delta.name)),
+      StatLines.level(delta.level),
+      s"$icon **${StatLines.number(delta.gained)}**")
 
   /** The day's best advance, named by what it was.
    *
    *  Falls back to the stored slug for a category this build no longer knows,
    *  the same way [[com.tibiabot.highscores.HighscoreFeed]] tolerates one — an
    *  older row should read plainly rather than crash the day's post. */
-  private def advanceLine(event: HighscoreEvent, skillIcon: HighscoreCategory => String): String = {
+  private def advanceLine(event: HighscoreEvent, sideIcon: String => String,
+                          skillIcon: HighscoreCategory => String): String = {
     val category = HighscoreCategory.fromSlug(event.category)
     val icon = category.map(skillIcon).filter(_.nonEmpty).map(_ + " ").getOrElse("")
     val reached = category.map(_.advancement(event.score)).getOrElse(s"${event.category} **${event.score}**")
-    s"${Emojis.vocEmoji(event.vocation)} **[${event.displayName}](${Urls.charUrl(event.displayName)})** " +
-      s"reached $icon$reached *(level ${event.level})*"
+    StatLines.cells(
+      StatLines.who(event.vocation, event.displayName, sideIcon(event.name)),
+      StatLines.level(event.level),
+      s"$icon$reached")
   }
 
-  /** Both sides' losses, always both lines even when one is zero — "0 allies
-   *  lost" is the good half of the news and dropping it would leave a reader
-   *  wondering whether it was zero or unmeasured. */
-  private def fragTotals(frags: FragTally): String =
-    s"Enemies killed — **${number(frags.enemiesKilled.toLong)}**\n" +
-      s"Allies lost — **${number(frags.alliesKilled.toLong)}**"
-
-  /** One side's leaderboard, or None when nobody is on it.
-   *
-   *  Inline, so the two sides sit beside each other rather than one under the
-   *  other — a reader compares them. Names are plain rather than linked: ten
-   *  linked names is about 900 characters against a field's 1,024 cap, and these
-   *  two are the fields most likely to be full. */
-  private def fraggerField(fraggers: List[(String, Int)], label: String): Option[String] =
-    if (fraggers.isEmpty) None
-    else Some(fraggers.zipWithIndex.map { case ((name, count), index) =>
-      s"`${(index + 1).toString.reverse.padTo(2, ' ').reverse}.` $name — **$count**"
-    }.mkString("\n"))
-
-  /** The day's kill statistics, or None when the snapshot said nothing worth a
-   *  field.
+  /** The day's creature figures, count first.
    *
    *  A world can genuinely have a day where no creature killed a player, so each
-   *  line is dropped on its own rather than the field being all-or-nothing. PvP
-   *  deaths get a line of their own because the endpoint counts them as a race
-   *  called "players" — miscategorised rather than uninteresting, and the two
-   *  lines above deliberately exclude them. */
-  private def killLines(kills: DayKillSummary): Option[String] = {
+   *  line is dropped on its own rather than the section being all-or-nothing. */
+  private def killLines(kills: DayKillSummary): Option[List[String]] = {
     val lines = List(
-      kills.mostKilled.map { case (race, count) => s"Most killed — **$race** (${number(count.toLong)})" },
+      kills.mostKilled.map { case (race, count) => s"**${StatLines.number(count.toLong)}** $race killed" },
       kills.deadliest.map { case (race, count) =>
-        s"Deadliest — **$race** (${number(count.toLong)} ${plural(count, "player", "players")})" },
-      Option(kills.playerDeaths).filter(_ > 0)
-        .map(count => s"Killed by other players — **${number(count.toLong)}**"),
-      Option(kills.totalKilled).filter(_ > 0).map(total => s"Creatures killed in all — **${number(total)}**")
+        s"**${StatLines.number(count.toLong)}** ${plural(count, "player", "players")} killed by $race" }
     ).flatten
-    if (lines.isEmpty) None else Some(lines.mkString("\n"))
+    if (lines.isEmpty) None else Some(lines)
   }
 
   private def plural(count: Int, one: String, many: String): String = if (count == 1) one else many
-
-  /** Thousands separators, and a sign that survives them.
-   *
-   *  `%,d` on a negative number puts the minus in front of the grouping, which
-   *  is what is wanted — the loss line renders "-4,182,993" and needs no sign of
-   *  its own, while the gain line adds its own "+". */
-  private def number(value: Long): String = String.format(Locale.ENGLISH, "%,d", Long.box(value))
 }

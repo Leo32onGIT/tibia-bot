@@ -82,6 +82,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
     def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
+    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
     def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
