@@ -11,6 +11,7 @@ import java.time.LocalDate
 class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
+  private val title = "<:boss:1195770698401075281>"
   private val icon = "<:nemesis:1024708740810821662>"
 
   private def boss(name: String, min: Int = 12, max: Int = 28, spawnPoints: Int = 1) =
@@ -27,14 +28,24 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
   private def report(predictions: List[BossPrediction] = Nil, awaiting: Int = 0) =
     DailyReport("Antica", day, Nil, scala.None, scala.None, scala.None, predictions, awaiting)
 
-  private def build(r: DailyReport) = BossPredictionEmbeds.build(r, icon)
+  private def build(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon)
 
-  test("the title is Bosses Due and carries the configured boss icon") {
+  test("the title is Bosses Due and carries the boosted-boss icon") {
     build(report(List(prediction("Furyosa", 20)))).get.getDescription should
-      startWith(s"## $icon Bosses Due")
+      startWith(s"## $title Bosses Due")
   }
 
-  test("every row leads with a dot for the chance and the same boss icon") {
+  test("the rows carry the nemesis icon, not the one on the title") {
+    // Two different glyphs on purpose: the heading means "bosses" in general,
+    // a row means this named boss.
+    val description = build(report(List(prediction("Furyosa", 20)))).get.getDescription
+    description.linesIterator.drop(1).toList.foreach { row =>
+      row should include(icon)
+      row should not include title
+    }
+  }
+
+  test("every row leads with a dot for the chance and the boss icon") {
     val embed = build(report(List(prediction("Furyosa", 20)))).get
     embed.getDescription should include(s":green_circle: $icon **Furyosa**")
   }

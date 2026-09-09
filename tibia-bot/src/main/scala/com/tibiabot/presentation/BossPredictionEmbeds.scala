@@ -42,22 +42,25 @@ object BossPredictionEmbeds {
    *  explain why. A world still waiting for its first sightings gets the note
    *  instead of silence, so the feature does not look broken while it warms up.
    *
-   *  @param bossIcon the configured icon that leads every boss row
+   *  @param titleIcon the icon on the heading — the boosted-boss one, which
+   *                   reads as "bosses" in general rather than as any one of them
+   *  @param bossIcon  the icon that leads every boss row
    */
-  def build(report: DailyReport, bossIcon: String): Option[MessageEmbed] = {
+  def build(report: DailyReport, titleIcon: String, bossIcon: String): Option[MessageEmbed] = {
     val due = report.dueBosses
     if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) Option.empty
     else {
       val embed = new EmbedBuilder()
       embed.setColor(PredictionColor)
-      embed.setDescription(description(report, due, bossIcon))
+      embed.setDescription(description(report, due, titleIcon, bossIcon))
       footer(report).foreach(embed.setFooter)
       Some(embed.build())
     }
   }
 
-  private def description(report: DailyReport, due: List[BossPrediction], bossIcon: String): String = {
-    val heading = s"## $bossIcon Bosses Due"
+  private def description(report: DailyReport, due: List[BossPrediction],
+                          titleIcon: String, bossIcon: String): String = {
+    val heading = s"## $titleIcon Bosses Due"
     val rows =
       if (due.nonEmpty) {
         val shown = due.take(MaxRows).map(line(_, bossIcon))
