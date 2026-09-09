@@ -68,6 +68,14 @@ object SettingsForms {
           number(NeutralsField, "Neutrals list", "Hide neutrals below this level; 0 shows everyone.",
             only.map(_.onlineNeutralsMin), "0")))
 
+      // Off is the honest default to show a guild that has never turned this on,
+      // and the stored "0" says exactly that. On a multi-world guild the box
+      // opens empty like every other form here, and empty means unchanged.
+      case PanelIds.Statistics =>
+        Some("Daily statistics", picker :+ choice(OptionField, "Daily statistics post",
+          "A daily summary of the world, in its own channel.",
+          OnOff, only.map(w => if (w.statisticsChannel != "0" && w.statisticsChannel.nonEmpty) "on" else "off")))
+
       // No world picker: there is one command log per server, not one per world.
       // It sits on this panel anyway because that is where somebody looking for
       // "where does the bot post" goes — a command of its own would be a

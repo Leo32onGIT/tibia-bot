@@ -1222,6 +1222,74 @@ object BotApp extends App with StrictLogging {
     logger.info("Highscores advance feed enabled for this bot's guilds")
   }
 
+  if (Config.Statistics.enabled) {
+    // Every bot, for the same reason the advance feed is: this only reads the
+    // shared cache and writes to Discord, and a bot can only write to its own
+    // guilds. Nothing here reaches tibia.com, so there is no fleet-wide work to
+    // hand to the primary.
+    actorSystem.scheduler.scheduleWithFixedDelay(4.minutes, Config.Statistics.tickInterval)(() => {
+      try statisticsService.tick()
+      catch { case error: Throwable => logger.warn("Failed to post daily statistics", error) }
+    })(ex)
+    logger.info("Daily statistics post enabled for this bot's guilds")
+  }
+
+  /** The statistics channels waiting on a post, one per world per discord.
+   *
+   *  Unlike the Levels audience above this needs no per-world show flags: the
+   *  post is the same for every discord tracking the world, because everything
+   *  in it is a fact about the world rather than about anyone's hunted list. A
+   *  world whose channel is "0" has never opted in and is simply absent. */
+  private def statisticsTargets(): List[statistics.StatisticsTarget] =
+    worldsData.toList.flatMap { case (guildId, worlds) =>
+      worlds.collect {
+        case world if world.statisticsChannel != null && world.statisticsChannel != "0" &&
+                      world.statisticsChannel.nonEmpty && paywallService.isActive(guildId, world.name) =>
+          statistics.StatisticsTarget(
+            guildId = guildId,
+            guildLabel = Option(discordGateway.guildById(guildId)).map(_.getName).getOrElse(guildId),
+            world = world.name,
+            channelId = world.statisticsChannel,
+            posted = world.statisticsPosted
+          )
+      }
+    }
+
+  /** Store that a world's day has been posted, in the database and in the copy
+   *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
+   *  the same day posts again for the rest of the server-save window. */
+  private def recordStatisticsPosted(target: statistics.StatisticsTarget, day: java.time.LocalDate): Unit = {
+    worldConfigRepository.updateWorldString(target.guildId, target.world, "statistics_posted", day.toString)
+    modifyWorldsData { data =>
+      data.get(target.guildId) match {
+        case None => data
+        case Some(worlds) => data.updated(target.guildId, worlds.map { world =>
+          if (world.name.equalsIgnoreCase(target.world)) world.copy(statisticsPosted = day.toString) else world
+        })
+      }
+    }
+  }
+
+  /** The daily statistics post. Runs on every bot and fetches nothing — the
+   *  figures were already written to the shared cache by the primary's hourly
+   *  highscore sweep, so all this does is read them and post to its own guilds. */
+  private lazy val statisticsService = new statistics.StatisticsService(
+    experience = experienceRepository,
+    highscores = highscoreRepository,
+    targets = () => statisticsTargets(),
+    announce = (target, report) =>
+      Option(discordGateway.guildById(target.guildId))
+        .flatMap(guild => Option(guild.getTextChannelById(target.channelId)))
+        .filter(channel => channel.canTalk() || !Config.prod)
+        .foreach { channel =>
+          outboundSender.enqueue("statistics") { () =>
+            channel.sendMessageEmbeds(presentation.StatisticsEmbeds.build(report, presentation.SkillEmojis.icon))
+              .setSuppressedNotifications(true).queue(null, null)
+          }
+        },
+    recordPosted = recordStatisticsPosted
+  )
+
   // run the scheduler to clean cache and update dashboard every hour.
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
   // body makes blocking API calls at server save — can't pile up behind itself.

@@ -151,6 +151,41 @@ final class JdbcHighscoreRepository(connectionProvider: ConnectionProvider) exte
       rows.toList
     }
 
+  def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT category,name,display_name,vocation,char_level,previous_score,score,observed
+           |FROM highscore_events
+           |WHERE world = ? AND category <> 'experience' AND observed >= ? AND observed < ?
+           |ORDER BY score DESC, observed ASC
+           |LIMIT 1;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setTimestamp(2, Timestamp.from(from))
+      statement.setTimestamp(3, Timestamp.from(to))
+      val result = statement.executeQuery()
+
+      // Ties broken by the earlier advance: two people reaching the same skill
+      // on the same day is a real occurrence, and the one who got there first
+      // is the defensible answer.
+      val row = if (result.next()) Some(HighscoreEvent(
+        world = world,
+        category = Option(result.getString("category")).getOrElse(""),
+        name = Option(result.getString("name")).getOrElse(""),
+        displayName = Option(result.getString("display_name")).getOrElse(""),
+        vocation = Option(result.getString("vocation")).getOrElse(""),
+        level = result.getInt("char_level"),
+        previousScore = result.getLong("previous_score"),
+        score = result.getLong("score"),
+        observed = result.getTimestamp("observed").toInstant
+      )) else None
+
+      statement.close()
+      row
+    }
+
   def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(

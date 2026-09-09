@@ -136,6 +136,14 @@ object Config {
     }
   }
 
+  /** The daily statistics post — see discord.conf's statistics block. */
+  object Statistics {
+    private val statistics = discord.getConfig("statistics")
+
+    val enabled: Boolean = statistics.getBoolean("enabled")
+    val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
+  }
+
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap

@@ -76,6 +76,25 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     // the online list it showed before them. Unlike the show_ columns above,
     // there is no sensible default to opt a server into: what counts as a
     // throwaway character is a judgement about that server's enemies.
+    // "0" rather than a real id, because `/setup` never makes this channel: the
+    // statistics post is opt-in from `/settings`, so every world picks the
+    // column up empty and only gets an id once somebody asks for one.
+    val statisticsExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'statistics_channel'")
+    val statisticsExists = statisticsExistsQuery.next()
+    statisticsExistsQuery.close()
+
+    if (!statisticsExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN statistics_channel VARCHAR(255) DEFAULT '0'")
+    }
+
+    val statisticsPostedQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'statistics_posted'")
+    val statisticsPostedExists = statisticsPostedQuery.next()
+    statisticsPostedQuery.close()
+
+    if (!statisticsPostedExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN statistics_posted VARCHAR(255) DEFAULT ''")
+    }
+
     List("online_allies_min", "online_enemies_min", "online_neutrals_min").foreach { column =>
       val existsQuery = statement.executeQuery(
         s"SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = '$column'")
@@ -84,7 +103,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -118,10 +137,12 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val onlineAlliesMin = Option(result.getInt("online_allies_min")).getOrElse(0)
       val onlineEnemiesMin = Option(result.getInt("online_enemies_min")).getOrElse(0)
       val onlineNeutralsMin = Option(result.getInt("online_neutrals_min")).getOrElse(0)
+      val statisticsChannel = Option(result.getString("statistics_channel")).getOrElse("0")
+      val statisticsPosted = Option(result.getString("statistics_posted")).getOrElse("")
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted)
       }
     }
 
@@ -232,6 +253,11 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
       configMap += ("exiva_list" -> result.getString("exiva_list"))
       configMap += ("activity_channel" -> result.getString("activity_channel"))
+      // Defensive for the same reason bounty_role above is: this is a `SELECT *`,
+      // and listWorlds is what adds the column, so a guild whose database has not
+      // been read yet this run would throw here rather than simply have no
+      // statistics channel.
+      configMap += ("statistics_channel" -> Try(Option(result.getString("statistics_channel")).getOrElse("0")).getOrElse("0"))
 
       val combinedOnlineValue: String = Try(result.getString("combined_online")) match {
         case Success(value) => value

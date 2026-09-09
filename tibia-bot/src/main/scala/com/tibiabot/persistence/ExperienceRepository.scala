@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.ExperiencePoint
+import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
 import java.time.{Instant, LocalDate}
@@ -31,6 +31,23 @@ trait ExperienceRepository {
   /** One character's daily points from `from` onward, oldest first — the shape
    *  an "experience gained" series wants. */
   def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint]
+
+  /** The day's biggest experience gains on one world, largest first.
+   *
+   *  A day's gain is the difference between the rollup for `saveDay` and the one
+   *  for the day before it, so a character present in only one of them is left
+   *  out entirely: entering the world's top thousand is not a day's experience,
+   *  and neither is dropping out of it. That also means the first `saveDay` a
+   *  world was ever swept has no movers at all, which is the correct answer
+   *  rather than a gap to paper over.
+   *
+   *  Gains only — [[dailyLoss]] is the other end of the same ordering. */
+  def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
+
+  /** The single largest experience loss on one world that day, or None if
+   *  nobody ended the day down. Same join and same exclusions as
+   *  [[dailyMovers]], read from the other end. */
+  def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta]
 
   def removeExpiredReadings(before: Instant): Unit
 

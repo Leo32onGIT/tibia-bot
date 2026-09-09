@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.ExperiencePoint
+import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint}
 import com.tibiabot.highscores.HighscoreDiff
 import com.tibiabot.persistence.{ConnectionProvider, ExperienceRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
@@ -95,6 +95,63 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
 
       statement.close()
       points.toList
+    }
+
+  def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
+    movers(world, saveDay, "DESC", limit)
+
+  def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] =
+    movers(world, saveDay, "ASC", 1).find(_.gained < 0)
+
+  /** Both ends of the day's ordering, which differ only in direction.
+   *
+   *  An inner join against the previous day is what drops the characters who
+   *  have no baseline, so the exclusion is the join rather than a filter that
+   *  could be forgotten. `direction` is a literal chosen here, never user input.
+   */
+  private def movers(world: String, saveDay: LocalDate, direction: String, limit: Int): List[ExperienceDelta] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT today.name,
+           |       today.display_name,
+           |       today.vocation,
+           |       today.char_level,
+           |       today.experience,
+           |       before.char_level AS previous_level,
+           |       today.experience - before.experience AS gained
+           |FROM experience_daily today
+           |JOIN experience_daily before
+           |  ON before.world = today.world
+           | AND before.name = today.name
+           | AND before.save_day = ?
+           |WHERE today.world = ? AND today.save_day = ?
+           |ORDER BY gained $direction
+           |LIMIT ?;
+           |""".stripMargin
+      )
+      statement.setDate(1, SqlDate.valueOf(saveDay.minusDays(1)))
+      statement.setString(2, world)
+      statement.setDate(3, SqlDate.valueOf(saveDay))
+      statement.setInt(4, limit)
+      val result = statement.executeQuery()
+
+      val deltas = new ListBuffer[ExperienceDelta]()
+      while (result.next()) {
+        val key = Option(result.getString("name")).getOrElse("")
+        deltas += ExperienceDelta(
+          name = key,
+          displayName = Option(result.getString("display_name")).getOrElse(key),
+          vocation = Option(result.getString("vocation")).getOrElse(""),
+          level = result.getInt("char_level"),
+          previousLevel = result.getInt("previous_level"),
+          experience = result.getLong("experience"),
+          gained = result.getLong("gained")
+        )
+      }
+
+      statement.close()
+      deltas.toList
     }
 
   def removeExpiredReadings(before: Instant): Unit =

@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -63,6 +63,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
       upserts += ((world, category, entries, snapshotAt))
     def recordEvents(events: List[HighscoreEvent]): Unit = filed ++= events
     def events(world: String, since: Instant): List[HighscoreEvent] = filed.toList
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
     def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
     def maxEventId(): Long = 0L
     def feedCursor(botId: String): Option[Long] = None
@@ -79,6 +80,8 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit =
       dailies += ((world, entries.size, saveDay))
     def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
+    def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
     def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }

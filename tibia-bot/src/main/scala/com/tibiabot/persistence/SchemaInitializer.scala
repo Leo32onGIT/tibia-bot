@@ -319,6 +319,16 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
            |ON experience_daily (save_day);""".stripMargin
 
+      // The statistics post's movers query asks for one world's whole day, which
+      // the primary key cannot serve: it leads with world but puts name before
+      // save_day, so a lookup by (world, save_day) has to walk every day that
+      // world has retained — ninety thousand rows, once per world, inside the
+      // 45-minute window every morning. This turns that side of the join into a
+      // range seek; the other side is already a full primary-key hit.
+      val createExperienceDailyWorldDayIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_daily_world_day
+           |ON experience_daily (world, save_day);""".stripMargin
+
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
@@ -332,6 +342,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createExperienceDailyTable)
       newStatement.executeUpdate(createExperienceReadingIndex)
       newStatement.executeUpdate(createExperienceDailyIndex)
+      newStatement.executeUpdate(createExperienceDailyWorldDayIndex)
 
       newStatement.close()
     }
@@ -443,6 +454,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |online_allies_min INT NOT NULL DEFAULT 0,
               |online_enemies_min INT NOT NULL DEFAULT 0,
               |online_neutrals_min INT NOT NULL DEFAULT 0,
+              |statistics_channel VARCHAR(255) NOT NULL DEFAULT '0',
+              |statistics_posted VARCHAR(255) NOT NULL DEFAULT '',
               |PRIMARY KEY (name)
               |);""".stripMargin
 

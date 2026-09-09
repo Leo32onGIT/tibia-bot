@@ -48,6 +48,21 @@ trait HighscoreRepository {
    *  for answering "why did that not post?". */
   def events(world: String, since: Instant): List[HighscoreEvent]
 
+  /** The highest skill level anyone reached on one world between two instants,
+   *  or None if nobody advanced.
+   *
+   *  Experience is excluded, though in practice it is never in this table:
+   *  [[com.tibiabot.highscores.HighscoreDiff.advances]] yields nothing for a
+   *  list that does not post. The filter is here so the query says what it means
+   *  rather than depending on that staying true.
+   *
+   *  Ranked by the score reached, not by the size of the jump — the Statistics
+   *  channel is reporting "somebody hit magic level 131", which is a standing,
+   *  not a day's grinding. Categories are compared on their raw numbers, so fist
+   *  fighting will effectively never win this; that is a fair reflection of what
+   *  the lists look like, not a bug to normalise away. */
+  def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent]
+
   /** Advances filed after `afterId`, oldest first, at most `limit` of them.
    *
    *  How every bot in the fleet learns what to post. The sweep runs on the

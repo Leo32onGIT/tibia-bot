@@ -61,6 +61,28 @@ final case class ExperiencePoint(
     saveDay: LocalDate
 )
 
+/** What one character's experience did over a single server-save day — the
+ *  difference between two [[ExperiencePoint]]s a day apart.
+ *
+ *  `gained` is signed: a death costs experience, and the Statistics channel
+ *  reports the day's worst loss alongside its best gains. `level` and
+ *  `previousLevel` are the readings either side of the day, so a post can say
+ *  someone went from 412 to 418 without a second lookup.
+ *
+ *  Only characters present in both days' rollups can have one of these. A
+ *  character who entered the world's top thousand today has no baseline, and
+ *  "entered the list" is not a day's experience — see
+ *  [[com.tibiabot.persistence.ExperienceRepository.dailyMovers]]. */
+final case class ExperienceDelta(
+    name: String,
+    displayName: String,
+    vocation: String,
+    level: Int,
+    previousLevel: Int,
+    experience: Long,
+    gained: Long
+)
+
 /** A [[HighscoreEvent]] as the table holds it, with the identity the feed
  *  advances its cursor by.
  *

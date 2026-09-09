@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -40,6 +40,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
     def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
     def maxEventId(): Long = 0L
     def feedCursor(botId: String): Option[Long] = None
@@ -52,6 +53,8 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
     def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
+    def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
     def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
@@ -172,6 +175,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
       def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
       def recordEvents(events: List[HighscoreEvent]): Unit = filed.synchronized { filed ++= events }
       def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
       def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
       def maxEventId(): Long = 0L
       def feedCursor(botId: String): Option[Long] = None
