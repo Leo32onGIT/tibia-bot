@@ -681,3 +681,36 @@ gap, which is also what happens to an untracked character's side icon.
 **Section labels lost their emoji, titles kept theirs.** Both convention and
 code: `StatisticsEmbeds.section` and `PvpEmbeds.section` take a title and no
 icon, and a test in `StatisticsEmbedsSpec` fails if one comes back.
+
+---
+
+## 17. Spilling over, rather than trimming (10 Sep 2026)
+
+Measured after the rebuild: a maximal day — ten gainers, ten fraggers, two
+five-row lists, two top kills and every boss due — runs to about 7,700
+characters, and long names alone push the PVP description past 4,096 on its
+own. Both were hard failures. The over-long description threw out of
+`EmbedBuilder`; the over-long message was rejected by JDA. Either landed in the
+outbound queue's catch-and-log, and `markPosted` had already run, so the day was
+gone with a single warning line.
+
+The fix is `presentation.EmbedPages`. A body too long for one description is
+split at line boundaries into several embeds, and the finished embeds are packed
+into as many messages as they need. Nothing is shortened to fit: the post is the
+day's record, and a reader scrolling costs nothing next to names nobody can get
+back.
+
+- An ordinary day is unchanged — three embeds, one message, one entry in the
+  channel. Only a day that genuinely does not fit becomes two.
+- A section that spans pages keeps its colour on every page, its thumbnail on
+  the first and its footer on the last.
+- The messages are chained with `flatMap` in `BotApp.sendInOrder` rather than
+  queued separately, because two `queue()` calls are two independent requests
+  and nothing promises the first lands first.
+- `BossPredictionEmbeds.MaxRows` is gone. It stopped the list at twenty and
+  counted the rest, and its stated reason was the 6,000-character message this
+  now handles.
+
+Still open: `canTalk()` checks `VIEW_CHANNEL` and `MESSAGE_SEND` but not
+`MESSAGE_EMBED_LINKS`, so a channel the bot can talk in but not embed in passes
+the filter and fails at the API.

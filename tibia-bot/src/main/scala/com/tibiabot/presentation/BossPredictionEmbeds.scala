@@ -1,7 +1,6 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.statistics.{BossChance, BossPrediction, Chance, DailyReport}
-import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.Instant
@@ -31,42 +30,34 @@ object BossPredictionEmbeds {
   /** Deep green — a forecast rather than a record. */
   val PredictionColor: Int = 2400045
 
-  /** How many bosses the list names before it starts counting instead.
-   *
-   *  Twenty. On a mature history a busy world can have a couple of dozen inside
-   *  some window at once, and this embed shares a 6,000-character message with
-   *  the other two. */
-  val MaxRows: Int = 20
-
-  /** None when there is nothing worth posting: no boss due, and no history to
+  /** Empty when there is nothing worth posting: no boss due, and no history to
    *  explain why. A world still waiting for its first sightings gets the note
    *  instead of silence, so the feature does not look broken while it warms up.
+   *
+   *  Every due boss is listed. A mature history on a busy world can have a
+   *  couple of dozen inside some window at once, and the list used to stop at
+   *  twenty and count the rest — but that cap existed because this embed shared
+   *  one 6,000-character message with the other two, and [[EmbedPages]] means it
+   *  no longer has to. A boss somebody could go and kill today is not worth
+   *  hiding to save a reader a scroll.
    *
    *  @param titleIcon the icon on the heading — the boosted-boss one, which
    *                   reads as "bosses" in general rather than as any one of them
    *  @param bossIcon  the icon that leads every boss row
    */
-  def build(report: DailyReport, titleIcon: String, bossIcon: String): Option[MessageEmbed] = {
+  def build(report: DailyReport, titleIcon: String, bossIcon: String): List[MessageEmbed] = {
     val due = report.dueBosses
-    if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) Option.empty
-    else {
-      val embed = new EmbedBuilder()
-      embed.setColor(PredictionColor)
-      embed.setDescription(description(report, due, titleIcon, bossIcon))
-      footer(report).foreach(embed.setFooter)
-      Some(embed.build())
-    }
+    if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) Nil
+    else EmbedPages.build(
+      PredictionColor, description(report, due, titleIcon, bossIcon), footer = footer(report))
   }
 
   private def description(report: DailyReport, due: List[BossPrediction],
                           titleIcon: String, bossIcon: String): String = {
     val heading = s"## $titleIcon Bosses Due"
     val rows =
-      if (due.nonEmpty) {
-        val shown = due.take(MaxRows).map(line(_, bossIcon))
-        val hidden = due.size - shown.size
-        shown ::: (if (hidden > 0) List(s"-# …and $hidden more") else Nil)
-      } else if (report.predictions.nonEmpty)
+      if (due.nonEmpty) due.map(line(_, bossIcon))
+      else if (report.predictions.nonEmpty)
         List(s"*No boss is inside a spawn window today, out of ${report.predictions.size} being tracked.*")
       else List("*Not enough history yet to predict anything — see below.*")
     (heading :: rows).mkString("\n")

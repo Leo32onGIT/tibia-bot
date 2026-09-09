@@ -25,12 +25,20 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
    *  case. Keyed lowercase, which is what the embed is expected to look up by. */
   private val vocations: String => String = Map("bubble" -> "Master Sorcerer").withDefaultValue("")
 
-  private def build(
+  private def pages(
       frags: FragTally,
       losses: List[ExperienceDelta] = Nil,
       jump: String => Option[String] = id => if (id.isEmpty) None else Some(s"https://discord.com/x/$id"),
       vocationOf: String => String = vocations
   ) = PvpEmbeds.build("Antica", frags, losses, _ => "<:enemy:9>", vocationOf, ink, down, jump)
+
+  /** The one page an ordinary day produces. */
+  private def build(
+      frags: FragTally,
+      losses: List[ExperienceDelta] = Nil,
+      jump: String => Option[String] = id => if (id.isEmpty) None else Some(s"https://discord.com/x/$id"),
+      vocationOf: String => String = vocations
+  ) = pages(frags, losses, jump, vocationOf).head
 
   private def loss(name: String, gained: Long) =
     ExperienceDelta(name.toLowerCase, name, "Elite Knight", 402, 402, 1L, gained)
@@ -139,6 +147,20 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
 
   // --- limits --------------------------------------------------------------
 
+  test("a war too long for one description spills onto a second embed") {
+    // Long names across a full fragger list used to throw here — the embed was
+    // built straight into a 4,096-character description. Nobody is dropped now.
+    val long = "Abcdefghij Klmnopqrs Tuvwxyz"
+    val frags = tally(
+      fraggers = (1 to 60).toList.map(i => Fragger(long + i, FragSide.Ally, 20)),
+      mostWanted = (1 to 5).toList.map(i => Repeat(long + i, 400, 6)))
+    val built = pages(frags)
+    built.size should be > 1
+    built.foreach(_.getDescription.length should be <= 4096)
+    val whole = built.map(_.getDescription).mkString("\n")
+    (1 to 60).foreach(i => whole should include(long + i))
+  }
+
   test("the fullest PVP embed fits inside Discord's limits") {
     val long = "Averylongcharactername"
     val frags = tally(
@@ -148,8 +170,9 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       topEnemy = Some(TopKill(long + "Enemy", 402, FragSide.Enemy, "111")),
       topAlly = Some(TopKill(long + "Ally", 388, FragSide.Ally, "222")))
     val losses = (1 to 5).toList.map(i => loss(long + i, -20000000L + i))
-    val embed = build(frags, losses)
-    embed.getDescription.length should be < 4096
-    embed.getLength should be < 6000
+    val built = pages(frags, losses)
+    built should have size 1
+    built.head.getDescription.length should be < 4096
+    built.head.getLength should be < 6000
   }
 }

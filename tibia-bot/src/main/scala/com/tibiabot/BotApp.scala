@@ -1383,6 +1383,26 @@ object BotApp extends App with StrictLogging {
       else Some(s"https://discord.com/channels/${target.guildId}/$deathsChannel/$messageId")
   }
 
+  /** Send a day's messages to one channel, in the order they were built.
+   *
+   *  Chained rather than queued separately: two `queue()` calls are two
+   *  independent requests and nothing promises the first lands first, which on
+   *  the one day a post needs two messages would put the bosses above the
+   *  board. Chaining also keeps the whole post to a single slot in the outbound
+   *  queue, which is what the pacing there is counting.
+   */
+  private def sendInOrder(channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+                          messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]): Unit = {
+    def send(embeds: List[net.dv8tion.jda.api.entities.MessageEmbed]) =
+      channel.sendMessageEmbeds(embeds.asJava).setSuppressedNotifications(true)
+    messages match {
+      case Nil => ()
+      case first :: rest =>
+        rest.foldLeft[net.dv8tion.jda.api.requests.RestAction[net.dv8tion.jda.api.entities.Message]](
+          send(first))((sent, next) => sent.flatMap(_ => send(next))).queue(null, null)
+    }
+  }
+
   /** Store that a world's day has been posted, in the database and in the copy
    *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
    *  the same day posts again for the rest of the server-save window. */
@@ -1414,20 +1434,20 @@ object BotApp extends App with StrictLogging {
         .foreach { channel =>
           val side = statisticsSideIcon(target.guildId)
           outboundSender.enqueue("statistics") { () =>
-            // Three embeds in one message: the world, then the war, then what
-            // might happen today. One post rather than three, so a channel
-            // somebody scrolls through reads as one entry per day.
+            // The world, then the war, then what might happen today — normally
+            // three embeds on one message, so a channel somebody scrolls through
+            // reads as one entry per day. A day too big for Discord's 6,000
+            // characters spills onto a second message rather than losing rows.
             val embeds =
               presentation.StatisticsEmbeds.build(
                 report, side, presentation.SkillEmojis.icon,
                 Config.levelUpEmoji, Config.levelDownEmoji,
-                creatureImageUrl(presentation.StatisticsEmbeds.ThumbnailFile)) ::
+                creatureImageUrl(presentation.StatisticsEmbeds.ThumbnailFile)) :::
               presentation.PvpEmbeds.build(
                 target.world, frags, enemyLosses, side, statisticsVocation(target.world),
-                Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) ::
-              presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji).toList
-            channel.sendMessageEmbeds(embeds.asJava)
-              .setSuppressedNotifications(true).queue(null, null)
+                Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) :::
+              presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
+            sendInOrder(channel, presentation.EmbedPages.messages(embeds))
           }
         },
     recordPosted = recordStatisticsPosted

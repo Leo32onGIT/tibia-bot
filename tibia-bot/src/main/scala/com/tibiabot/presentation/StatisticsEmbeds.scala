@@ -3,7 +3,6 @@ package com.tibiabot.presentation
 import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
 import com.tibiabot.statistics.{DailyReport, DayKillSummary}
 import com.tibiabot.tibiadata.HighscoreCategory
-import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.format.DateTimeFormatter
@@ -17,6 +16,10 @@ import java.util.Locale
  *  heading: only a description can hold `##` and `###`, and the date has to
  *  outrank its own sections. Fields also reflow differently on a phone, which
  *  this post no longer has to think about.
+ *
+ *  Long enough to need more than one embed on a busy day, so the body goes
+ *  through [[EmbedPages]] rather than straight into a builder — a tenth gainer
+ *  is never dropped to make the post fit.
  *
  *  ==Why the icons are arguments==
  *  Config-free, so a test of this file does not need a database host set — the
@@ -54,11 +57,7 @@ object StatisticsEmbeds {
       xpUp: String,
       xpDown: String,
       thumbnail: String
-  ): MessageEmbed = {
-    val embed = new EmbedBuilder()
-    embed.setColor(WorldColor)
-    if (thumbnail.nonEmpty) embed.setThumbnail(thumbnail)
-
+  ): List[MessageEmbed] = {
     val sections = List(
       Some(s"## :bar_chart: [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
@@ -69,8 +68,7 @@ object StatisticsEmbeds {
       report.kills.flatMap(killLines).map(section("Creature Stats", _))
     ).flatten
 
-    embed.setDescription(sections.mkString("\n"))
-    embed.build()
+    EmbedPages.build(WorldColor, sections.mkString("\n"), thumbnail)
   }
 
   /** A section is its heading and its rows. Absent sections are dropped by the

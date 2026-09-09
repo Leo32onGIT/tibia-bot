@@ -1,7 +1,6 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.{ExperienceDelta, FragTally, Fragger, Repeat, TopKill}
-import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
 /** The second embed: the guild's own war.
@@ -48,10 +47,7 @@ object PvpEmbeds {
       barEmoji: ((String, String)) => String,
       xpDown: String,
       jumpUrl: String => Option[String]
-  ): MessageEmbed = {
-    val embed = new EmbedBuilder()
-    embed.setColor(PvpColor)
-
+  ): List[MessageEmbed] = {
     val sections = List(
       Some(List(
         "## :dagger: PVP",
@@ -69,8 +65,7 @@ object PvpEmbeds {
         section("Top Ally Killed", killLines(kill, sideIcon, vocationOf, jumpUrl)))
     ).flatten
 
-    embed.setDescription(sections.mkString("\n"))
-    embed.build()
+    EmbedPages.build(PvpColor, sections.mkString("\n"))
   }
 
   private def section(title: String, rows: List[String]): String =
