@@ -1425,7 +1425,7 @@ object BotApp extends App with StrictLogging {
               presentation.PvpEmbeds.build(
                 target.world, frags, enemyLosses, side, statisticsVocation(target.world),
                 Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) ::
-              presentation.BossPredictionEmbeds.build(report, Config.bossEmoji).toList
+              presentation.BossPredictionEmbeds.build(report, Config.nemesisEmoji).toList
             channel.sendMessageEmbeds(embeds.asJava)
               .setSuppressedNotifications(true).queue(null, null)
           }

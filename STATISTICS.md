@@ -577,10 +577,10 @@ each name carries its own side icon, so the columns were doing nothing.
 ### Embed 3 — Bosses Due (green `#249F2D`)
 
 ```
-## {bossEmoji} Bosses Due
-🟢 {bossEmoji} **Dharalion** · overdue since 22 days ago
-🟢 {bossEmoji} **Furyosa** · window closes in 3 days
-🟡 {bossEmoji} **White Pale** · opens in 1 day
+## {nemesisEmoji} Bosses Due
+🟢 {nemesisEmoji} **Dharalion** · overdue since 22 days ago
+🟢 {nemesisEmoji} **Furyosa** · window closes in 3 days
+🟡 {nemesisEmoji} **White Pale** · opens in 1 day
 ```
 
 One flat list, most overdue first, the chance as a dot on the row rather than as
@@ -609,7 +609,7 @@ Footer: `N boss(es) not yet predicted.`
 | --- | --- |
 | 9 bar segments | `bar_{green,red,empty}_{start,mid,end}` — generated and sent 10 Sep |
 | 2 experience icons | xp up / xp down — supplied |
-| boss icon | already exists: `Config.bossEmoji` = `<:boss:1195770698401075281>` |
+| boss icon | already exists: `Config.nemesisEmoji` = `<:nemesis:1024708740810821662>` |
 
 Nothing renders until the ids are in `discord.conf`.
 

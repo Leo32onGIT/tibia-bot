@@ -11,7 +11,7 @@ import java.time.LocalDate
 class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
-  private val icon = "<:boss:1195770698401075281>"
+  private val icon = "<:nemesis:1024708740810821662>"
 
   private def boss(name: String, min: Int = 12, max: Int = 28, spawnPoints: Int = 1) =
     Boss(name, scala.None, predict = true, min, max, spawnPoints, "Profitable")
