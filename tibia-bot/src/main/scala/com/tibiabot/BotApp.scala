@@ -751,12 +751,15 @@ object BotApp extends App with StrictLogging {
    *  serves whoever lists that player, so it is worth writing if anybody does.
    *  The per-guild checks in TibiaBot answer a different question — whether
    *  *this* discord cares — and cannot stand in for this one.
+   *
+   *  Against the flattened index rather than the lists themselves: this is asked
+   *  once per online character per world per poll, and walking every guild's
+   *  list to answer it made a miss — which is nearly all of them, since most
+   *  players online are on nobody's list — cost the entire set of listed names.
+   *  See [[com.tibiabot.state.StreamState.listedNames]].
    */
-  def isOnAnyList(name: String): Boolean = {
-    val lower = name.toLowerCase
-    huntedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower)) ||
-      alliedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower))
-  }
+  def isOnAnyList(name: String): Boolean =
+    streamState.listedNames.contains(name.toLowerCase)
 
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData

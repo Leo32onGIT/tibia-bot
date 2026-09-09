@@ -33,6 +33,11 @@ final class StreamState {
   // WorldTransferRepository.
   @volatile private var _worldTransfers: Map[String, List[WorldTransfer]] = Map.empty
 
+  // Derived from _huntedPlayers and _alliedPlayers, not state of its own: the
+  // flattened set of every listed name, lowercased. See `listedNames`.
+  @volatile private var _listedNames: Set[String] = Set.empty
+  @volatile private var _listedNamesStale: Boolean = false
+
   def activityData: Map[String, List[PlayerCache]] = _activity
   /** Announced world transfers, keyed by world. */
   def worldTransfersData: Map[String, List[WorldTransfer]] = _worldTransfers
@@ -44,6 +49,42 @@ final class StreamState {
   def discordsData: Map[String, List[Discords]] = _discords
   def worldsData: Map[String, List[Worlds]] = _worlds
   def activityCommandBlocker: Map[String, Boolean] = _activityBlocker
+
+  /** Every name on any discord's hunted or allied list, lowercased and flattened
+   *  across guilds — the index behind [[com.tibiabot.BotApp.isOnAnyList]].
+   *
+   *  Kept because the read side and the write side are nothing alike. The death
+   *  poll asks "does anybody list this player?" once per online character per
+   *  world per minute, tens of thousands of times; the lists themselves change
+   *  when somebody runs a command, or when the poll notices a rename or a guild
+   *  swap — hundreds of times a day at the very most. Answering each read by
+   *  walking every guild's list made that question cost the whole set of listed
+   *  names, and on a fleet carrying twenty-five thousand of them it was the
+   *  single largest consumer of CPU on the box.
+   *
+   *  Rebuilt on the next read after a change rather than inside the change
+   *  itself, because the writes arrive in bursts: startup loads every guild's
+   *  lists one guild at a time, so rebuilding eagerly would rebuild once per
+   *  guild and throw all but the last away. A burst of any size costs one
+   *  rebuild, on whoever reads next.
+   *
+   *  The rebuild takes the same lock the writers do, so it cannot observe a map
+   *  half-updated, and clearing the flag inside that lock means a write landing
+   *  during a rebuild leaves the flag set rather than being lost. Reads with
+   *  nothing pending never take the lock at all — the `@volatile` read is the
+   *  same lock-free path every other accessor here uses. */
+  def listedNames: Set[String] = {
+    if (_listedNamesStale) lock.synchronized {
+      if (_listedNamesStale) {
+        val builder = Set.newBuilder[String]
+        _huntedPlayers.valuesIterator.foreach(_.foreach(player => builder += player.name.toLowerCase))
+        _alliedPlayers.valuesIterator.foreach(_.foreach(player => builder += player.name.toLowerCase))
+        _listedNames = builder.result()
+        _listedNamesStale = false
+      }
+    }
+    _listedNames
+  }
 
   /** Every hunted name any discord tracking `world` has asked about, lowercased
    *  — named outright, or reached through a hunted guild.
@@ -81,10 +122,11 @@ final class StreamState {
     lock.synchronized { _activity = f(_activity) }
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
     lock.synchronized { _worldTransfers = f(_worldTransfers) }
+  // Both of these invalidate `listedNames`, which is derived from them.
   def modifyHuntedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
-    lock.synchronized { _huntedPlayers = f(_huntedPlayers) }
+    lock.synchronized { _huntedPlayers = f(_huntedPlayers); _listedNamesStale = true }
   def modifyAlliedPlayersData(f: Map[String, List[Players]] => Map[String, List[Players]]): Unit =
-    lock.synchronized { _alliedPlayers = f(_alliedPlayers) }
+    lock.synchronized { _alliedPlayers = f(_alliedPlayers); _listedNamesStale = true }
   def modifyHuntedGuildsData(f: Map[String, List[Guilds]] => Map[String, List[Guilds]]): Unit =
     lock.synchronized { _huntedGuilds = f(_huntedGuilds) }
   def modifyAlliedGuildsData(f: Map[String, List[Guilds]] => Map[String, List[Guilds]]): Unit =
