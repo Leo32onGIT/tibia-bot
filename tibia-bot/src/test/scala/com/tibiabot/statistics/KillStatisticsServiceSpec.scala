@@ -60,6 +60,8 @@ class KillStatisticsServiceSpec extends AnyFunSuite with Matchers with ScalaFutu
     def recordSummary(summary: DayKillSummary): Unit = { summaries += summary; order += "summary" }
     def hasDay(world: String, saveDay: LocalDate): Boolean = alreadyFiled.contains((world, saveDay))
     def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
+    def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = Map.empty
+    def earliestDay(world: String): Option[LocalDate] = None
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = None
     def removeExpired(before: LocalDate): Unit = ()
   }

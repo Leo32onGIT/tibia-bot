@@ -39,12 +39,17 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
-  private class StubKillStatistics(days: Map[(String, LocalDate), DayKillSummary] = Map.empty)
-      extends KillStatisticsRepository {
+  private class StubKillStatistics(
+      days: Map[(String, LocalDate), DayKillSummary] = Map.empty,
+      seen: Map[String, List[(LocalDate, Int)]] = Map.empty,
+      earliest: Option[LocalDate] = None
+  ) extends KillStatisticsRepository {
     def recordBossKills(rows: List[BossKills]): Unit = ()
     def recordSummary(summary: DayKillSummary): Unit = ()
     def hasDay(world: String, saveDay: LocalDate): Boolean = false
     def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
+    def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = seen
+    def earliestDay(world: String): Option[LocalDate] = earliest
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = days.get((world, saveDay))
     def removeExpired(before: LocalDate): Unit = ()
   }
@@ -235,6 +240,47 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       kills = new StubKillStatistics(Map(("Antica", yesterday) -> summary)))
     harness.service.tick()
     harness.posts.map(_._1) shouldBe List("a")
+  }
+
+  // --- boss predictions ----------------------------------------------------
+
+  test("a boss seen recently enough is predicted into the report") {
+    val kills = new StubKillStatistics(
+      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))),
+      earliest = Some(yesterday.minusDays(120)))
+    val harness = new Harness(List(target("a")), kills = kills)
+    harness.service.tick()
+    val report = harness.posts.head._2
+    report.predictions.map(_.boss.name) shouldBe List("Furyosa")
+    report.dueBosses.map(_.boss.name) shouldBe List("Furyosa")
+  }
+
+  test("a world with no history predicts nothing and counts every boss as waiting") {
+    val harness = new Harness(List(target("a")))
+    harness.service.tick()
+    harness.posts.head._2.predictions shouldBe empty
+    harness.posts.head._2.awaitingSighting shouldBe BossCatalogue.bosses.count(_.predict)
+  }
+
+  test("a due boss alone is worth a post") {
+    val kills = new StubKillStatistics(
+      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))),
+      earliest = Some(yesterday.minusDays(120)))
+    val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), kills = kills)
+    harness.service.tick()
+    harness.posts.map(_._1) shouldBe List("a")
+  }
+
+  test("a world whose bosses are all quiet is not posted for on that account alone") {
+    // Predictions with nothing due are not news; the report reads as empty and
+    // the other halves decide.
+    val kills = new StubKillStatistics(
+      seen = Map("furyosa" -> List((yesterday.minusDays(1), 1))),
+      earliest = Some(yesterday.minusDays(120)))
+    val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), kills = kills)
+    harness.service.tick()
+    harness.posts shouldBe empty
+    harness.marks shouldBe List(("a", yesterday))
   }
 
   test("one guild's broken channel does not stop another's post") {

@@ -265,7 +265,7 @@ yesterday.
 
 ---
 
-## 7. Phase 4 — boss predictions (deferred)
+## 7. Phase 4 — boss predictions — **BUILT**
 
 Recorded here so Phase 3 stores the right thing, not to be built yet.
 
@@ -324,8 +324,9 @@ waiting.
    section 11.
 3. ~~**Phase 2** frags.~~ **Done** — see section 12.
 4. ~~**Phase 3's embed** — creature stats.~~ **Done** — see section 12.
-5. **Phase 4** predictions, once the history is deep enough to be honest. The
-   only phase left.
+5. ~~**Phase 4** predictions.~~ **Done** — see section 13. Built ahead of the
+   history rather than after it, so each boss starts predicting the moment it is
+   first seen.
 
 ---
 
@@ -473,3 +474,47 @@ leaderboards count rows per killer.
   is deployed.
 - Frags have no history and cannot get one — the tally starts the day it deploys,
   and a guild that turns the channel on later starts counting from that moment.
+
+---
+
+## 13. What Phase 4 shipped
+
+2,021 tests pass, warning-free. All four phases are now built.
+
+**The arithmetic** is a port of `BossPredictor.getChance` from
+kik-tibia/boss-tracker (MIT), plus the spawn-point handling beside it. The
+non-obvious part is that a boss missed for a cycle counts towards a *later*
+window rather than still towards its first — which is exactly the part that would
+have been got wrong by re-deriving it. Divisors are guarded, which the original
+did not need: its data file was its own, and this one is a resource anybody can
+edit where a `windowMin` of 1 would divide by zero.
+
+**The rule that keeps it honest.** A boss with no sighting in our history is not
+predicted at all. There is no anchor for it — the last spawn could be the day
+before our first snapshot or a year before it, and nothing can tell those apart.
+Guessing from "at least N days" would make bosses look overdue purely because the
+bot is new, which is the one way this feature could actively mislead. So each
+boss becomes predictable the first time it is killed after the snapshots start,
+and the embed's footer says how many are still waiting.
+
+**The post** now carries two embeds in one message: what happened, then what might
+happen today. Only bosses that might actually be up are listed — the catalogue
+has 57 predictable ones and on an ordinary day most are a few days into a long
+window, which would be three thousand characters of "not due" burying the four
+lines somebody came for. Bands are capped at 12 high and 8 low with a "+N more"
+tail, since the two embeds share a 6,000-character message.
+
+### A property worth knowing before reading the output
+
+Wide windows tile. A 12–28 day boss has window one at 12–28 and window two at
+24–56, which overlap — so from day 12 onward *every* day is inside some window and
+the boss reads as "due" indefinitely, shown as a `12+` window with no upper bound.
+That is a real consequence of the arithmetic rather than a rounding artefact, and
+it is pinned by a test. Narrow windows (Ferumbras at 161–175) do not tile, and
+those genuinely go quiet between cycles.
+
+### What is left
+
+Nothing in the original scope. The remaining items are the two gaps already
+recorded: the frag SQL has never run against a real Postgres, and the whole
+feature has never been deployed, so no world has any history yet.

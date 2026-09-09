@@ -1346,7 +1346,12 @@ object BotApp extends App with StrictLogging {
         .filter(channel => channel.canTalk() || !Config.prod)
         .foreach { channel =>
           outboundSender.enqueue("statistics") { () =>
-            channel.sendMessageEmbeds(presentation.StatisticsEmbeds.build(report, frags, presentation.SkillEmojis.icon))
+            // Two embeds in one message: what happened, then what might happen
+            // today. One post rather than two, so a channel somebody scrolls
+            // through reads as one entry per day.
+            val embeds = presentation.StatisticsEmbeds.build(report, frags, presentation.SkillEmojis.icon) ::
+              presentation.BossPredictionEmbeds.build(report).toList
+            channel.sendMessageEmbeds(embeds.asJava)
               .setSuppressedNotifications(true).queue(null, null)
           }
         },

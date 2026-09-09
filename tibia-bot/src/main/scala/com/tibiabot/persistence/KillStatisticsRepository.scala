@@ -34,6 +34,27 @@ trait KillStatisticsRepository {
    *  the table exists. */
   def bossHistory(world: String, race: String, from: LocalDate): List[BossKills]
 
+  /** Every day each boss was seen on one world since `from`, newest first,
+   *  keyed by the lowercased race name.
+   *
+   *  One query for the whole world rather than seventy-four, since the
+   *  prediction wants all of them at once. Only days a boss was actually seen
+   *  are returned — the zero rows exist so that a day we looked is
+   *  distinguishable from a day we did not, which is what [[earliestDay]]
+   *  answers, and they would otherwise be most of the result.
+   *
+   *  The Int is that day's kill count. It matters for a boss with several spawn
+   *  points: three killed on one day is three sightings, not one. */
+  def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]]
+
+  /** The first day this world has any snapshot for, or None if it has none.
+   *
+   *  How far back the history goes, which is what decides whether "not seen
+   *  since" means anything yet. A boss never seen inside it cannot be predicted
+   *  at all — the last sighting could be a day before our first snapshot or a
+   *  year before it, and nothing here can tell those apart. */
+  def earliestDay(world: String): Option[LocalDate]
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary]
 
   def removeExpired(before: LocalDate): Unit

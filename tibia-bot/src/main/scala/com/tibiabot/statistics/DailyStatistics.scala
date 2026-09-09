@@ -24,7 +24,15 @@ final case class DailyReport(
      *  upstream 503 that outlasted the day, or simply the first day after this
      *  shipped. The rest of the post is unaffected: the two halves come from
      *  different sources and neither waits on the other. */
-    kills: Option[DayKillSummary] = None
+    kills: Option[DayKillSummary] = None,
+    /** Which bosses are due, best chance first.
+     *
+     *  Empty for a long while after this ships, and that is the honest state
+     *  rather than a fault: a boss with no sighting in our history has no anchor
+     *  to count from. `awaitingSighting` says how many are in that position, so
+     *  a short list is legible as a young history rather than a quiet world. */
+    predictions: List[BossPrediction] = Nil,
+    awaitingSighting: Int = 0
 ) {
 
   /** Nothing to say. The ordinary cause is a cold start rather than a quiet day:
@@ -32,7 +40,12 @@ final case class DailyReport(
    *  day is the second one it was swept. A world where genuinely nobody in the
    *  top thousand moved and nobody advanced a skill is possible in principle and
    *  reads the same way — silence, which is the honest answer either way. */
-  def isEmpty: Boolean = gains.isEmpty && loss.isEmpty && advance.isEmpty && kills.isEmpty
+  def isEmpty: Boolean =
+    gains.isEmpty && loss.isEmpty && advance.isEmpty && kills.isEmpty && dueBosses.isEmpty
+
+  /** The bosses worth a line: the ones that might actually be up. A boss three
+   *  days into a twelve-day window is not news. */
+  def dueBosses: List[BossPrediction] = predictions.filter(_.best != Chance.None)
 
   def nonEmpty: Boolean = !isEmpty
 }

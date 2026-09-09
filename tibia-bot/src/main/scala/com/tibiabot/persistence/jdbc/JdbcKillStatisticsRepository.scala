@@ -113,6 +113,47 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       rows.toList
     }
 
+  def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT race,save_day,killed
+           |FROM kill_statistics_boss
+           |WHERE world = ? AND save_day >= ? AND (killed > 0 OR players_killed > 0)
+           |ORDER BY race ASC, save_day DESC;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(from))
+      val result = statement.executeQuery()
+
+      // Built newest-first per race, which is the order the prediction reads
+      // them in — the query already sorts that way, so the buffers only need
+      // appending to and never reversing.
+      val byRace = scala.collection.mutable.LinkedHashMap.empty[String, ListBuffer[(LocalDate, Int)]]
+      while (result.next()) {
+        val race = Option(result.getString("race")).getOrElse("").toLowerCase
+        val day = result.getDate("save_day").toLocalDate
+        val killed = result.getInt("killed")
+        byRace.getOrElseUpdate(race, new ListBuffer[(LocalDate, Int)]()) += ((day, killed))
+      }
+
+      statement.close()
+      byRace.map { case (race, days) => race -> days.toList }.toMap
+    }
+
+  def earliestDay(world: String): Option[LocalDate] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        "SELECT MIN(save_day) AS earliest FROM kill_statistics_summary WHERE world = ?;")
+      statement.setString(1, world)
+      val result = statement.executeQuery()
+      // MIN over no rows is one row holding NULL, not no rows.
+      val day = if (result.next()) Option(result.getDate("earliest")).map(_.toLocalDate) else None
+      statement.close()
+      day
+    }
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(

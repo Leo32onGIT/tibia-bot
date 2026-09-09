@@ -111,6 +111,12 @@ final class StatisticsService(
       // quiet world. DailyStatistics.gains drops them, and asking for the extra
       // rows means dropping one does not silently shorten the list.
       val movers = experience.dailyMovers(world, day, DailyStatistics.TopGains * 2)
+      // One query for every boss on the world rather than seventy-four. `from`
+      // is the whole retained history: a world boss counts in months, so
+      // narrowing this to recent days would hide exactly the bosses worth
+      // predicting.
+      val sightings = killStatistics.sightings(world, killStatistics.earliestDay(world).getOrElse(day))
+      val predictions = BossPredictor.predictAll(sightings, day)
       Some(DailyReport(
         world = world,
         saveDay = day,
@@ -120,7 +126,9 @@ final class StatisticsService(
         // Absent where the snapshot was never taken. The post is not held back
         // for it: the two halves come from different sources, and a day with
         // experience figures and no kill figures is worth more than silence.
-        kills = killStatistics.summary(world, day)
+        kills = killStatistics.summary(world, day),
+        predictions = predictions,
+        awaitingSighting = BossPredictor.awaitingFirstSighting(sightings)
       ))
     } catch {
       case NonFatal(error) =>
